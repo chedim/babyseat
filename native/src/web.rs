@@ -1,6 +1,6 @@
 //! The browser binding: the same field engine (getters, setters, `.c1f` packs, imports) running in a page,
 //! compiled to WebAssembly (`wasm-pack build --features wasm --no-default-features`). Values cross as JSON text,
-//! like the Python binding. The page's host (membrane/ui/fieldvm.js) mounts DomNode entities as the DOM.
+//! like the Python binding. The page's host (fieldvm.js, in the app's ui/ folder) mounts DomNode entities as the DOM.
 use serde_json::{Map, Value as J};
 use wasm_bindgen::prelude::*;
 
@@ -30,7 +30,7 @@ pub struct Field { core: vm::Core, f: fields::Fields, seq: i64 }
 impl Field {
     /// A field with the built-in goal graph pack (`PACK goalgraph 1`), so page packs can import it.
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Field { Field { core: vm::Core::new(), f: fields::Fields::goalgraph(), seq: 0 } }
+    pub fn new() -> Field { let mut core = vm::Core::new(); core.queue_writes = false; Field { core, f: fields::Fields::goalgraph(), seq: 0 } }
 
     /// An entity into the mirror (a reload of a known one counts its changed fields as written).
     pub fn load(&mut self, eid: String, cls: String, props_json: &str) -> Result<(), JsValue> {

@@ -1,0 +1,56 @@
+PACK door_self 1
+IMPORT door 1
+-- SELF, THE TOYBOX, THE SEAT'S JS AND A REPLY'S FEEDBACK AS A DOOR ROUTE FAMILY (#1143, the porting brief's `self` family):
+--   GET  /membrane/self/sheet, /membrane/self/recent, /membrane/toybox/state
+--   POST /membrane/toybox/poke, /membrane/jsexec/register, /membrane/jsexec/result, /membrane/feedback
+-- (/membrane/self/card is the state family's: a getter over the presence entity.)
+-- PORTED: POST /membrane/feedback. A reply's thumbs press is a WRITE on the entity `Feedback:<message id>` ({kind, why, message,
+--   session, by, at, name, summary}); a second press replaces the first (same entity). The eid is the c1f convention
+--   (`<Class>:<key>`, like `Goal:<slug>`); the Python `membrane::Feedback:feedback:<id>` namespace is gone and nothing read it.
+--   Not carried over: the pause refusal of writes (reads the presence entity: the state family's) and the owner-only check
+--   (the door has no owner check yet, see door_models).
+-- DEGRADED (w46): GET /membrane/self/recent answers `{lines: []}`, the released answer of a seat with no self record (server.py:4577); nothing here keeps one.
+-- NOT PORTED (each answers 501 and names why; the boundary is in docs/python-to-c1f.md): the character sheet and the record's
+--   feed (self_loop's file, energy.report and the supervisor: live Python state), the toybox (toys are files with locks, clocks
+--   and a burst schedule: toybox.py, 1366 lines of domain logic), the seat's JS (jsexec.py: a registry of open tabs in the
+--   seat's memory and a run that waits for the browser's answer: a round trip with a Python waiter).
+
+Feedback.kind_of getter: this.kind
+
+Request.o_self getter: this.route in ['/membrane/self/sheet', '/membrane/self/recent', '/membrane/toybox/state', '/membrane/toybox/poke', '/membrane/jsexec/register', '/membrane/jsexec/result', '/membrane/feedback']
+Request.m_self getter: ['GET'] if this.route in ['/membrane/self/sheet', '/membrane/self/recent', '/membrane/toybox/state'] else ['POST']
+
+-- ---- the feedback press ---------------------------------------------------------------------------------------------------------
+Request.fb_msg getter: strip(str(prop(this.jbody, 'message') or ''))
+Request.fb_kind getter: lower(strip(str(prop(this.jbody, 'kind') or '')))
+Request.fb_why getter: clip(strip(str(prop(this.jbody, 'why') or '')), 500)
+Request.fb_session getter: clip(strip(str(prop(this.jbody, 'session') or '')), 200)
+Request.fb_obj getter: startswith(strip(this.body or ''), '{')
+Request.fb_eid getter: 'Feedback:' + this.fb_msg
+Request.fb_label getter: {'up': 'helpful', 'down': 'not helpful', 'clear': 'cleared'}[this.fb_kind]
+Request.fb_summary getter: 'Reply ' + this.fb_msg + ' rated ' + this.fb_label + ((': ' + this.fb_why) if this.fb_why != '' else '')
+Request.fb_err getter:
+  WHEN not this.fb_obj: 'a JSON object body is required'
+  ELSE WHEN this.fb_msg == '' or len(this.fb_msg) > 200: "message (the reply's id) required"
+  ELSE WHEN not (this.fb_kind in ['up', 'down', 'clear']): 'kind is one of up, down, clear'
+  ELSE: None
+Request.fb_go getter: this.route == '/membrane/feedback' and this.method == 'POST' and this.fb_err == None
+Request.fb_go on-setter feedback-write:
+  WHEN this.fb_go == True:
+    ('Feedback:' + this.fb_msg).name = 'feedback:' + this.fb_msg
+    ('Feedback:' + this.fb_msg).summary = this.fb_summary
+    ('Feedback:' + this.fb_msg).kind = this.fb_kind
+    ('Feedback:' + this.fb_msg).why = this.fb_why
+    ('Feedback:' + this.fb_msg).message = this.fb_msg
+    ('Feedback:' + this.fb_msg).session = this.fb_session
+    ('Feedback:' + this.fb_msg).by = this.person
+    ('Feedback:' + this.fb_msg).at = clock
+
+-- ---- the 501s ---------------------------------------------------------------------------------------------------------------------
+Request.sf_why getter: {'/membrane/self/sheet': 'the sheet is computed by the Python seat (record, energy, the supervisor)', '/membrane/self/recent': "self's record is the Python seat's file", '/membrane/toybox/state': "the toys are the Python seat's files and clocks (toybox.py)", '/membrane/toybox/poke': "a poke changes the Python seat's toy files and clocks (toybox.py)", '/membrane/jsexec/register': "the tab registry is the Python seat's live memory (jsexec.py)", '/membrane/jsexec/result': "a job's answer returns to the Python seat's waiting run (jsexec.py)"}[this.route]
+
+Request.r_self getter:
+  WHEN this.route == '/membrane/self/recent': {'status': 200, 'body': {'lines': []}}
+  ELSE WHEN this.route != '/membrane/feedback': {'status': 501, 'body': {'error': 'not ported yet: ' + this.sf_why}}
+  ELSE WHEN this.fb_err != None: {'status': 400, 'body': {'error': this.fb_err}}
+  ELSE: {'status': 200, 'body': {'ok': True, 'eid': this.fb_eid, 'kind': this.fb_kind}}

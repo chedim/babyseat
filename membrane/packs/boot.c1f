@@ -1,0 +1,21 @@
+PACK boot 1
+VIRTUAL Boot
+VIRTUAL Step
+-- THE BOOT PLAN (docs/python-to-c1f.md, piece 1): a boot step is a `Step` entity (boot.json lists them) and `blocks`
+-- is the edge to the steps after it. A step is ready when every step before it has ended (done, failed or skipped): a failed
+-- step does not hold the boot (whether it also stops the boot is its `essential` flag, read by the runner).
+Step.open getter: len([b for b in referencing(this, 'blocks') if b.state != 'done' and b.state != 'failed' and b.state != 'skipped'])
+Step.ready getter: this.state == 'pending' and this.open == 0
+
+-- the seat's start: the seat writes Boot:seat.started once, after the field engine is up; packs answer with setters on
+-- Boot.started (they IMPORT boot 1: this pack owns the class)
+Boot.up getter: this.started != None
+
+-- THE ROOT OF TRUST (docs/c1f-layers.md, "Privilege"): the host marks THIS pack privileged and nothing else. It grants the tools pack
+-- (the model's MCP door, which writes any class the model's own packs own) at the seat's start: a grant is a write, and the host records
+-- `Pack:door_tools.granted_by` from the writer (this setter), never from a pack's own text.
+Boot.started on-setter grant-door-tools:
+  ALWAYS:
+    Pack:door_tools.privileged = True
+    Pack:unload.privileged = True
+    Pack:settings.privileged = True   -- the settings pack writes the owners of a setting (the chat's `Minds:seat`, the Home allow-list `HaAllow:*`), classes of packs the barest seat does not load

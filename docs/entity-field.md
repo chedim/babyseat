@@ -188,9 +188,9 @@ conversation key, `conv` on events), derived from records with no model call:
 | `NOW` | the seat's local date, time and time zone |
 | `WORKING ON` | the person's latest earlier ask in this chat (its person-authored user events, speaker line cut) that names a focus entity, else the latest one; clipped to 160 chars |
 | `ABOUT` | up to 5 focus entities: named in the person's latest message, or in at least 2 of this chat's events (an identifier no code defines, `s:?`, only when the person names it) |
-| `DECIDED` | the newest 3 of: ledger entries said in this chat, goals and json-board intents fulfilled in it (`fulfilled_conv`), coproc `decide()` records made in it |
+| `DECIDED` | the newest 3 of: ledger entries said in this chat, goals and json-board intents fulfilled in it (`fulfilled_conv`) |
 | `OPEN` | the newest 3 goals (`convs`) or json-board intents (`conv`) planted in this chat and still open |
-| `STABLE` | up to 3 facts (coproc `remember()` values, ledger lines) seen in at least 3 chats over at least 2 days, never given another value, about a focus entity |
+| `STABLE` | up to 3 facts (ledger lines) seen in at least 3 chats over at least 2 days, about a focus entity |
 | `SINCE YOUR LAST MESSAGE` | up to 3 lines (200 chars) on focus entities moved after this chat's last delivered turn by code, packs or other chats |
 | `ALERT` | at most 2 per turn; the rest ride the next turns |
 | `MORE` | the pull pointer (`state(section=...)`, `query`, `entity_read`), only when the request carries tools |
@@ -276,7 +276,7 @@ field holds for the person's **latest message** (no model call, no new lane).
    512, 0.4 s at 128, with the same LoCoMo score). Cost: ~0.25 s per topical turn
    on the Mac's GPU and ~3.3 GB of GPU memory while loaded (fp32: fp16 and bf16 scored 173
    and saved no memory as loaded). The model loads in the background
-   at boot, right after the field is up, and stays loaded; until it is ready, or without the extra, or with
+   once the boot is done (or on the first recall before that), and stays loaded; until it is ready, or without the extra, or with
    `MEMBRANE_RERANK=0`, the order is the scorer's (`recall_rerank.py`).
    One copy per machine (#683): the seat that has the model loaded serves it to the other
    seats on the machine (`POST /membrane/rerank`); a seat that needs it asks the same-host
@@ -377,9 +377,8 @@ membrane/server.py):
   `fulfill`), room (`peer_post`, `peer_seats`, `peer_read`, `junk_cut`), the watches
   (`entity_watch`, `entity_unwatch`, `field_watch`, `attention`) and the
   entity hands (`entity_add`, `entity_edit`, `entity_remove`,
-  `entity_inherit`, `entity_write`), `pack` and the method tools (`method_define`, `method_call`,
-  `method_each`, `method_inspect`). The chat defines and calls a method
-  itself instead of planting a goal for it.
+  `entity_inherit`, `entity_write`), `pack`. (The method tools are gone, #1101: a repeated program is a
+  `Command:<name>` entity run by a write.)
 - **Event listener** (agent `watch:<eid>` — the thinking loops): the
   operator's set **minus** `intend` (a loop takes the next step, closes
   with `fulfill`, or ends BLOCKED; it never plants new goals).
@@ -649,32 +648,6 @@ made it only.
 dropped card, a fulfilled goal, a goal whose graph has nothing left moving, a watch
 escalation, the asked decisions, the re-ask), filled from the subgraph it is about.
 
-### The graph-walk lane (graphbanner, 2026-11-01)
-
-A chat turn's first round carries **WHERE WE ARE (this conversation's graph)**: lines
-walked off the conversation graph, not guessed by text similarity. Measured first, on 2,124
-of the operator's turns: the walk over the last 8 messages brought something the turn then
-used in 70% of them, the text-recall proxy in 44%, and adding text recall to the walk added
-nothing. It runs beside the recall banner, not instead of it.
-
-The lane is a set of **rules**, each an entity (class `BannerRule`), written in cliffhanger's
-own pattern language: the triggers' `WHERE` atoms (`isa`, `is`, `filter`, the same binder,
-`ch.VM._bindings`) plus the graph's facts, and a `show` line:
-
-| atom | binds |
-|---|---|
-| `edge(?a, rel, ?b)` | a relations row `a -rel-> b`; `rel` exact or ending in `*` (`asks:*`); one side bound before it |
-| `recent(?m)` | this chat's last 8 messages (the operator's window), newest first |
-| `mine(?r)` | this person's pronoun registers |
-| `filter(expr)` | cliffhanger's safe expressions; `chat` is this chat's id |
-
-`show` fills `{var.prop}` from the bound entity (a name falls back to the field id's label;
-a missing value prints nothing). The seeded rules: open decisions this chat asked, what each
-pronoun holds, what the recent messages named (with its status), the programs the recent
-turns ran (with their rc). `graphbanner.define(est, name, where, show)` adds one, refused like
-a trigger when it can't bind. The lane is the rules' lines in their order, unique, at most 12
-(the banner's size); the gate logs its cost (`[graph-banner] … lines in … ms`).
-
 ## The gate and the replay A/B
 
 `membrane/efgate.py` runs on every real turn. It finds the earlier user
@@ -703,7 +676,7 @@ serves the replay on a fraction P of eligible turns.
 
 ## Storage
 
-A seat's store is SQLite (one WAL file in the seat's `.membrane/`) by default since 0.7.5 (a Couchbase Lite seat
+The store belongs to the native engine (`membrane_vm.Db`): one SQLite per process, which the engine's `sql()` reads too (`native/src/sqlexec.rs`); Python's `sqlite3` is not used for the field (#1111). A seat's store is SQLite (one WAL file in the seat's `.membrane/`) by default since 0.7.5 (a Couchbase Lite seat
 moves to it at its first start); the collections are the same in each kind (SQLite, Couchbase Lite, or a
 cluster's scope `membrane`). Nine collections: `events`, `sentences`
 (content-addressed embeddings, shared by all origins), `terms` (seeds),

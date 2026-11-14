@@ -1,11 +1,42 @@
 PACK proc 1
+RESIDENT Command
 -- THE proc STDLIB PACK (#1044): commands as entities, run by a write. Native, no Python.
 --   Command:<name> {cmd: an argument list, or a string run by `sh -c`; cwd; env_from {VAR: ENV_VAR}}
 -- Run it with a write; the run never blocks the field, and its receipt lands when it ends:
---   Command.run = {id, args}  -> run_result {id, status, rc, head, stdout, stderr}, run_rc
+--   Command.run = {id, args}  -> run_result {id, status, rc, head, stdout, stderr, stdout_bytes, stderr_bytes, started, finished (epoch seconds), ms}, run_rc
 --   Command.stop = {id}       -> the running child is killed; stop_result
--- Secrets are named in env_from (read when the command starts), never stored. No time limit, no output cap.
+-- `output` is the whole stdout and `errors` the whole stderr of the last run (the reply of entity_write carries only the first and last 8 KB of each).
+-- Secrets are named in env_from (read when the command starts), never stored. A time limit (`timeout_s`, below), no output cap.
 -- Entity scripts and peers never run an effect.
 
-Command.ok getter: this.run_rc == 0 if this.run_rc != None else None
-Command.output getter: prop(this.run_result, 'stdout') if this.run_result else None
+-- A command that outlives its `timeout_s` is killed (the whole process group: SIGTERM, then SIGKILL after 2 s) and its receipt says `status: timeout`, `rc: 124`,
+-- `killed: true`. `timeout_s` is the model's own estimate of the longest the command may run: in the run value (`run = {id, cmd, timeout_s: 600}`) or set on the entity
+-- before the run; without it the boot fact `command_timeout_s` applies (120 s); 0 or less is refused. A timed-out run's RESULT props are Errors (`x is Error`; `why(x)` reads
+-- the remedy: start it again with a bigger timeout_s): `output`, `errors`, `ok`, `rc`; what was collected before the kill stays in `partial_output` and `partial_errors`.
+-- (`run_rc` is the raw receipt value, 124 for a timeout; read `rc` for the checked one.)
+-- the limit a run without `timeout_s` gets: the boot fact, else 120 (the same default as drivers.rs; this one is for what the pending reply shows)
+Command.timeout_default getter: ([b.command_timeout_s for b in instances('Boot') if b.command_timeout_s != None] or [120])[0]
+Command.timed_out getter: this.run_result != None and prop(this.run_result, 'status') == 'timeout'
+Command.timeout_why getter: str(this.eid) + ' timed out after ' + str(prop(this.run_result, 'timeout_s')) + ' s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}'
+Command.ok getter:
+  WHEN this.timed_out: Error(this.timeout_why)
+  ELSE: this.run_rc == 0 if this.run_rc != None else None
+Command.rc getter:
+  WHEN this.timed_out: Error(this.timeout_why)
+  ELSE: this.run_rc
+Command.output getter:
+  WHEN this.timed_out: Error(this.timeout_why)
+  ELSE: prop(this.run_result, 'stdout') if this.run_result else None
+Command.errors getter:
+  WHEN this.timed_out: Error(this.timeout_why)
+  ELSE: prop(this.run_result, 'stderr') if this.run_result else None
+Command.partial_output getter: prop(this.run_result, 'stdout') if this.timed_out else None
+Command.partial_errors getter: prop(this.run_result, 'stderr') if this.timed_out else None
+-- A run in flight is told apart from one never started (#1143): the engine notes `running` = {id, started} (the clock of the write) when it takes a `run` (the
+-- slot is consumed at once, so a pack setter cannot read the value); `status` reads `running` until a receipt of that run (finished no earlier than the write)
+-- lands, then the receipt's own status (ok or error); none before any run.
+Command.status getter:
+  WHEN this.running == None and not this.run_result: None(str(this.eid) + ' has not been run: write run = {id, cmd} (a run in flight reads status running)')
+  ELSE WHEN this.running == None: prop(this.run_result, 'status')
+  ELSE WHEN this.run_result == None or prop(this.run_result, 'finished') < prop(this.running, 'started'): 'running'
+  ELSE: prop(this.run_result, 'status')

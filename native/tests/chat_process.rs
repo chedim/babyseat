@@ -1,0 +1,1888 @@
+//! The barest agent seat as a process (#1143): the standalone binary on the shipped packs, the MCP door (`POST /mcp`, packs/door_tools.c1f)
+//! and the chat (packs/chat.c1f, packs/chat_turn.c1f). Every wait has a timeout and the child is always reaped. There is NEVER a real
+//! `claude` here: the turn's binary is a fake script the test writes (a Boot fact names it), so no model, no login, no network.
+#![cfg(feature = "bin")]
+mod common;
+use serde_json::{json, Value as J};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{channel, Receiver};
+use std::time::{Duration, Instant};
+
+const BIN: &str = env!("CARGO_BIN_EXE_cliffvm");
+
+struct Run { child: Child, _lines: Receiver<String>, dir: std::path::PathBuf }
+impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
+
+fn tmp(tag: &str) -> std::path::PathBuf {
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let d = std::env::temp_dir().join(format!("cliffvm-{tag}-{}-{n}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn shipped(names: &[&str]) -> Vec<(String, String)> {
+    let d = format!("{}/../membrane/packs", env!("CARGO_MANIFEST_DIR"));
+    names.iter().map(|n| (n.to_string(), std::fs::read_to_string(format!("{d}/{n}")).unwrap_or_else(|e| panic!("{n}: {e}")))).collect()
+}
+
+/// start the binary in a fresh seat folder on the shipped packs `names`, with the extra arguments; -> the run and the door's port.
+/// The seat folder (the store's) is where a test puts its fake `claude`: the driver refuses work in other temporary folders.
+fn start(tag: &str, names: &[&str], extra: &[&str]) -> (Run, u16) { start_env(tag, names, extra, &[]) }
+fn start_env(tag: &str, names: &[&str], extra: &[&str], env: &[(&str, &str)]) -> (Run, u16) {
+    let dir = tmp(tag);
+    let pd = dir.join("packs");
+    std::fs::create_dir_all(&pd).unwrap();
+    for (n, t) in shipped(names) { std::fs::write(pd.join(n), t).unwrap(); }
+    let mut child = Command::new(BIN).current_dir(&dir)
+        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
+        .args(extra).envs(env.iter().copied()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let out = child.stdout.take().unwrap();
+    let (tx, rx) = channel();
+    std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
+    let run = Run { child, _lines: rx, dir };
+    let line = run._lines.recv_timeout(common::DOOR_UP).expect("the door came up (a line on stdout)");
+    let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap_or_else(|_| panic!("a port in {line:?}"));
+    (run, port)
+}
+
+thread_local! {
+    /// the bearer this test thread's requests carry (a seat with a door secret: the owner token file's); none = a bare caller
+    static BEARER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// one HTTP request on its own connection; -> (status, body text)
+fn http(port: u16, method: &str, path: &str, body: &str) -> (u16, String) {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(common::IO)).unwrap();
+    let auth = BEARER.with(|b| b.borrow().as_ref().map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default());
+    let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{auth}\r\n{body}", body.len());
+    s.write_all(raw.as_bytes()).unwrap();
+    let mut out = vec![];
+    let _ = s.read_to_end(&mut out);
+    let i = out.windows(4).position(|w| w == b"\r\n\r\n").expect("an HTTP answer");
+    let head = String::from_utf8_lossy(&out[..i]).to_string();
+    let status: u16 = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, String::from_utf8_lossy(&out[i + 4..]).to_string())
+}
+
+fn rpc(port: u16, id: i64, method: &str, params: J) -> J {
+    let (st, body) = http(port, "POST", "/mcp", &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string());
+    assert_eq!(st, 200, "{body}");
+    serde_json::from_str(&body).unwrap_or_else(|e| panic!("{e}: {body}"))
+}
+
+/// a tool call's text (and whether it is an error)
+fn call(port: u16, tool: &str, args: J) -> (String, bool) {
+    let r = rpc(port, 1, "tools/call", json!({"name": tool, "arguments": args}));
+    let res = &r["result"];
+    (res["content"][0]["text"].as_str().unwrap_or_else(|| panic!("{r}")).to_string(), res["isError"].as_bool().unwrap())
+}
+
+/// poll `f` until it gives Some (a hard timeout, then a panic naming what was last seen)
+fn wait<T>(what: &str, f: impl FnMut() -> Option<T>) -> T { common::wait_for(what, common::WAIT, f) }
+
+fn terminate(run: &mut Run) -> bool {
+    unsafe { libc::kill(run.child.id() as i32, libc::SIGTERM); }
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(15) {
+        if run.child.try_wait().unwrap().is_some() { return true; }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
+const MCP_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f"];
+
+#[test]
+fn the_mcp_door_speaks_the_handshake_lists_the_field_tools_and_runs_them() {
+    let (mut run, port) = start("mcp", MCP_PACKS, &[]);
+    let r = rpc(port, 1, "initialize", json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}));
+    assert_eq!(r["result"]["serverInfo"]["name"], "membrane");
+    assert_eq!(r["result"]["protocolVersion"], "2025-06-18");
+    let (st, body) = http(port, "POST", "/mcp", &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string());
+    assert_eq!((st, body.as_str()), (202, ""));
+    let names: Vec<String> = rpc(port, 2, "tools/list", json!({}))["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, ["entity_query", "entity_read", "entity_write", "run_cliff"]);
+    assert_eq!(http(port, "GET", "/mcp", "").0, 405);
+
+    // a Command made and run by two writes; the receipt is read back by property
+    let (t, e) = call(port, "entity_write", json!({"spec": "Command:echo1", "prop": "cmd", "value": ["echo", "hi"]}));
+    assert!(!e, "{t}");
+    let (t, e) = call(port, "entity_write", json!({"spec": "Command:echo1", "prop": "run", "value": {"id": "r1", "args": ["there"]}}));
+    assert!(!e, "{t}");
+    let out = wait("the run's receipt", || { let (t, _) = call(port, "entity_read", json!({"spec": "Command:echo1", "prop": "output"})); if t.contains("hi there") { Some(t) } else { None } });
+    assert!(out.contains("hi there"), "{out}");
+    // the store's rows: a query by kind and a whole read (the host journals and stores each write)
+    let q = wait("the Command in the store", || { let (t, _) = call(port, "entity_query", json!({"q": "kind:Command"})); if t.contains("Command:echo1") { Some(t) } else { None } });
+    assert!(q.contains("Command:echo1 (Command)"), "{q}");
+    let (n, _) = call(port, "entity_query", json!({"q": "kind:Command & name~:Command:echo", "count": true}));
+    assert_eq!(n, "1 entity(ies)");
+    let (t, e) = call(port, "entity_query", json!({"q": "status:open"}));
+    assert!(e && t.contains("unsupported term status:open"), "{t}");
+    let whole = wait("the whole read", || { let (t, _) = call(port, "entity_read", json!({"spec": "Command:echo1"})); if t.contains("\"cmd\"") { Some(t) } else { None } });
+    assert!(whole.starts_with("Command:echo1 (Command) "), "{whole}");
+    let (t, _) = call(port, "entity_read", json!({"spec": "Command:nothing"}));
+    assert_eq!(t, "no such entity: Command:nothing");
+    assert!(terminate(&mut run));
+}
+
+// ---- the bare chat, end to end, with a FAKE claude ----------------------------------------------------------------------------------------
+// The fake is a python3 script the test writes into the seat's folder. It records its argv and environment (one file per prompt), prints a
+// system init line, then talks to the door's /mcp ITSELF over HTTP (tools/list, a write, a read, as the real CLI would), waits for a
+// `go.<prompt>` file (so the test can see the message `running`), and prints stream-json lines: assistant text and tool_use, the tool
+// results, a result line. It never calls a model and uses no login. FAIL_RC (a file `fail`) makes it exit 3 with a message on stderr.
+const FAKE: &str = r#"#!/usr/bin/env python3
+import json, os, sys, time, urllib.request
+here = os.path.dirname(os.path.abspath(__file__))
+argv = sys.argv[1:]
+prompt = argv[-1]
+tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
+_k = os.environ.get("ANTHROPIC_API_KEY")
+_watch = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_OAUTH_TOKEN"]
+_wp = os.path.join(here, "want_key")   # a file `want_key` holds the key the test planted: the record says only whether the child's key IS it (never the key)
+_want = open(_wp).read() if os.path.exists(_wp) else None
+json.dump({"argv": argv, "auto_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY"), "cwd": os.getcwd(), "key_is_wanted": (_k == _want) if _want is not None else None, "cred_env": [n for n in _watch if os.environ.get(n)]}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
+if os.path.exists(os.path.join(here, "echo_key")):   # a CLI that echoes its key on stderr and in its answer (a 401 page, a debug line)
+    sys.stderr.write("auth debug: key=" + (_k or "") + "\n"); sys.stderr.flush()
+errp = os.path.join(here, "err")   # a file `err`: the CLI ends with a result line that reports this text as an error
+if os.path.exists(os.path.join(here, "fail")):
+    sys.stderr.write(open(os.path.join(here, "fail")).read() or "fake: not logged in\n"); sys.exit(3)
+def out(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+out({"type": "system", "subtype": "init", "session_id": "fake-1", "tools": ["mcp__membrane__entity_read"]})
+if os.path.exists(os.path.join(here, "die")):   # killed by a signal after its init line, with something on stderr
+    sys.stderr.write("fake: about to be killed\n"); sys.stderr.flush()
+    import signal; os.kill(os.getpid(), signal.SIGKILL)
+if os.path.exists(os.path.join(here, "noresult")):   # ends cleanly with no result line and no text
+    sys.exit(0)
+padp = os.path.join(here, "pad")   # a file `pad`: ~200 KB of partial-message lines before the answer (the raw output of a long turn)
+if os.path.exists(padp):
+    for i in range(int(open(padp).read().strip() or 200)):   # the file's number is the line count (default 200)
+        out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": ("pad %d " % i) * 160}}})
+cfg = json.loads(argv[argv.index("--mcp-config") + 1])
+url = cfg["mcpServers"]["membrane"]["url"]
+def rpc(method, params, i):
+    req = urllib.request.Request(url, data=json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}).encode(), headers={"Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=20))["result"]
+rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "fake", "version": "0"}}, 1)
+names = [t["name"] for t in rpc("tools/list", {}, 2)["tools"]]
+for _ in range(300):
+    if os.path.exists(os.path.join(here, "go." + tag)): break
+    time.sleep(0.1)
+w = rpc("tools/call", {"name": "entity_write", "arguments": {"spec": "Command:probe", "prop": "cmd", "value": ["echo", "x"]}}, 3)["content"][0]["text"]
+out({"type": "assistant", "message": {"content": [{"type": "text", "text": "Listing " + ",".join(names)}, {"type": "tool_use", "id": "tu1", "name": "mcp__membrane__entity_write", "input": {"spec": "Command:probe", "prop": "cmd", "value": ["echo", "x"]}}]}})
+out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu1", "content": [{"type": "text", "text": w}]}]}})
+r = rpc("tools/call", {"name": "entity_read", "arguments": {"spec": "Command:probe", "prop": "cmd"}}, 4)["content"][0]["text"]
+out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tu2", "name": "mcp__membrane__entity_read", "input": {"spec": "Command:probe", "prop": "cmd"}}]}})
+out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu2", "content": r}]}})
+if os.path.exists(errp):
+    out({"type": "result", "subtype": "success", "is_error": True, "result": open(errp).read(), "num_turns": 1, "session_id": "fake-1"}); sys.exit(0)
+out({"type": "result", "subtype": "success", "is_error": False, "result": "Final answer to: " + prompt + ((" key=" + (_k or "")) if os.path.exists(os.path.join(here, "echo_key")) else ""), "num_turns": 3, "duration_ms": 4321, "total_cost_usd": 0.0123, "usage": {"input_tokens": 11, "cache_creation_input_tokens": 22, "cache_read_input_tokens": 33, "output_tokens": 44}, "session_id": "fake-1"})
+"#;
+
+const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f"];
+
+/// the seat's folder holds the fake; the binary is told its path as a fact
+fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) { fake_seat_with(tag, extra, &[]) }
+/// the same, with more packs (name, text) in the seat's pack folder: a model's own banner pack, for one
+fn fake_seat_with(tag: &str, extra: &[&str], packs: &[(&str, &str)]) -> (Run, u16, std::path::PathBuf) { fake_seat_script(tag, extra, packs, FAKE) }
+/// the same, with the fake's own script text
+fn fake_seat_script(tag: &str, extra: &[&str], packs: &[(&str, &str)], script: &str) -> (Run, u16, std::path::PathBuf) { fake_seat_cred(tag, extra, packs, script, &[("ANTHROPIC_API_KEY", HARNESS_KEY)]) }
+/// the same, with the seat's credential environment named (see `launch_env`)
+fn fake_seat_cred(tag: &str, extra: &[&str], packs: &[(&str, &str)], script: &str, env: &[(&str, &str)]) -> (Run, u16, std::path::PathBuf) {
+    let dir = tmp(tag);
+    let bin = dir.join("fake-claude");
+    std::fs::write(&bin, script).unwrap();
+    { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+    let pd = dir.join("packs");
+    std::fs::create_dir_all(&pd).unwrap();
+    for (n, t) in shipped(CHAT_PACKS) { std::fs::write(pd.join(n), t).unwrap(); }
+    std::fs::copy(format!("{}/../membrane/apps/barest.c1f/default_banner.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("default_banner.c1f")).unwrap();   // the barest app's default banner pack
+    for (n, t) in packs { std::fs::write(pd.join(n), t).unwrap(); }
+    let (run, port) = launch_env(&dir, &bin, extra, env);
+    (run, port, dir)
+}
+
+/// the key every harness seat is started with unless a test says otherwise (the default mode is the API key; a seat with none refuses the turn)
+const HARNESS_KEY: &str = "sk-ant-harness-default-0000";
+/// the credential variables the seat must not inherit from the developer's own shell (a test names the ones it wants)
+const CRED_VARS: [&str; 6] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_OAUTH_TOKEN"];
+
+/// start the binary in `dir` (its packs folder and store are there; a second launch in the same folder is a RESTART)
+fn launch(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str]) -> (Run, u16) { launch_env(dir, bin, extra, &[("ANTHROPIC_API_KEY", HARNESS_KEY)]) }
+/// the same with the credential environment named: ONLY these of CRED_VARS are set. The seat's stdout and stderr go to `seat.out` and `seat.err` in `dir`.
+fn launch_env(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str], env: &[(&str, &str)]) -> (Run, u16) {
+    let pd = dir.join("packs");
+    let fact = format!("chat_claude_bin={}", bin.display());
+    let mut cmd = Command::new(BIN);
+    cmd.current_dir(dir)
+        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact])
+        .args(extra);
+    for v in CRED_VARS { cmd.env_remove(v); }
+    cmd.envs(env.iter().copied());
+    let err = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("seat.err")).unwrap();
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::from(err)).spawn().unwrap();
+    let out = child.stdout.take().unwrap();
+    let (tx, rx) = channel();
+    let log = dir.join("seat.out");
+    std::thread::spawn(move || { let mut f = std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap(); for l in BufReader::new(out).lines().map_while(Result::ok) { let _ = writeln!(f, "{l}"); if tx.send(l).is_err() { break; } } });
+    let run = Run { child, _lines: rx, dir: dir.to_path_buf() };
+    let line = run._lines.recv_timeout(common::DOOR_UP).expect("the door came up");
+    let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap();
+    (run, port)
+}
+
+fn tag_of(prompt: &str) -> String { prompt.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).take(40).collect() }
+
+fn send(port: u16, text: &str) -> String {
+    let (st, body) = http(port, "POST", "/membrane/chat/message", &json!({"text": text}).to_string());
+    assert_eq!(st, 202, "{body}");
+    serde_json::from_str::<J>(&body).unwrap()["id"].as_str().unwrap().to_string()
+}
+fn view(port: u16, id: &str) -> J {
+    let (st, body) = http(port, "GET", &format!("/membrane/chat/message/{id}"), "");
+    assert_eq!(st, 200, "{body}");
+    serde_json::from_str(&body).unwrap()
+}
+
+#[test]
+fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_history_is_sent() {
+    let (mut run, port, dir) = fake_seat("chat", &["--fact", "chat_max_turns=5"]);
+    let id = send(port, "what is up");
+    // waiting for the fake: the message is running, no answer yet
+    let v = wait("the message running", || { let v = view(port, &id); if v["state"] == "running" { Some(v) } else { None } });
+    assert_eq!(v["text"], "what is up");
+    assert!(v["response"].is_null(), "{v}");
+    wait("the fake's argv file", || if dir.join(format!("argv.{}.json", tag_of("what is up"))).exists() { Some(()) } else { None });
+    std::fs::write(dir.join(format!("go.{}", tag_of("what is up"))), "").unwrap();
+    let v = wait("the answer", || { let v = view(port, &id); if v["state"] == "done" || v["state"] == "error" { Some(v) } else { None } });
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(v["response"], "Final answer to: what is up");
+    assert_eq!(v["tools"], json!(["entity_write", "entity_read"]));
+
+    // what the CLI was started with: the mode of the rung, the ceiling, the system prompt, the message alone
+    let a: J = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("what is up")))).unwrap()).unwrap();
+    let args: Vec<String> = a["argv"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+    let after = |flag: &str| -> String { let i = args.iter().position(|x| x == flag).unwrap_or_else(|| panic!("no {flag} in {args:?}")); args[i + 1].clone() };
+    assert_eq!(a["auto_memory"], "1");
+    assert!(args.contains(&"-p".to_string()) && args.contains(&"--verbose".to_string()) && args.contains(&"--include-partial-messages".to_string()), "{args:?}");
+    assert_eq!(after("--output-format"), "stream-json");
+    assert_eq!(after("--tools"), "", "the built-in tools are off");
+    assert!(args.contains(&"--strict-mcp-config".to_string()), "no other MCP config");
+    assert_eq!(after("--allowedTools"), "mcp__membrane__*");
+    assert_eq!(after("--setting-sources"), "", "no settings files");
+    assert_eq!(after("--max-turns"), "5", "the ceiling is the fact");
+    assert!(after("--system-prompt").contains("CONVERSATION: main") && !after("--system-prompt").contains("BannerLine"), "the system prompt carries the default banner");
+    assert!(after("--system-prompt").contains("Modify your banner to help you maintain continuity."), "the system prompt carries the doctrine");
+    assert!(!after("--system-prompt").to_lowercase().contains("history reaches"), "the prompt never says what the model lacks (it makes Claude panic)");
+    assert!(after("--mcp-config").contains(&format!("127.0.0.1:{port}/mcp")));
+    assert!(!after("--mcp-config").contains("headers"), "the barest seat has no secret: the MCP config names no header");
+    assert_eq!(args[args.len() - 2], "--", "the options end before the prompt");
+    assert_eq!(args[args.len() - 1], "what is up", "the prompt is the message alone");
+    assert!(!args.iter().any(|x| x == "--bare" || x == "--resume" || x == "--continue"), "{args:?}");
+
+    // the tools it ran are entities under the message, and the write it made through the door is in the field
+    let (n, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn:tool:tu1"), "prop": "name"}));
+    assert_eq!(n, "mcp__membrane__entity_write");
+    let (n, _) = wait("the tool result", || { let r = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn:tool:tu2"), "prop": "result"})); if r.0.contains("echo") { Some(r) } else { None } });
+    assert!(n.contains("echo") && n.contains("x"), "{n}");
+    let (c, _) = call(port, "entity_read", json!({"spec": "Command:probe", "prop": "cmd"}));
+    assert!(c.contains("echo"), "{c}");
+
+    // a second message: NO history, the first message's words are nowhere in its argv
+    let id2 = send(port, "second question");
+    wait("the second run", || if dir.join(format!("argv.{}.json", tag_of("second question"))).exists() { Some(()) } else { None });
+    std::fs::write(dir.join(format!("go.{}", tag_of("second question"))), "").unwrap();
+    let v2 = wait("the second answer", || { let v = view(port, &id2); if v["state"] == "done" { Some(v) } else { None } });
+    assert_eq!(v2["response"], "Final answer to: second question");
+    let raw = std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("second question")))).unwrap();
+    assert!(!raw.contains("what is up") && !raw.contains("Final answer"), "history leaked into the second run: {raw}");
+    assert_ne!(id, id2);
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_cli_that_fails_is_an_error_answer_with_its_stderr_and_a_missing_one_says_how_to_name_it() {
+    let (mut run, port, dir) = fake_seat("chatfail", &[]);
+    std::fs::write(dir.join("fail"), "").unwrap();
+    let id = send(port, "hello");
+    let v = wait("the error answer", || { let v = view(port, &id); if v["state"] == "error" || v["state"] == "done" { Some(v) } else { None } });
+    assert_eq!(v["state"], "error", "{v}");
+    assert_eq!(v["response"], "claude failed (rc 3): fake: not logged in");
+    assert!(terminate(&mut run));
+    // no binary named: nothing runs, the answer says how
+    let (mut run, port) = start("chatnobin", CHAT_PACKS, &[]);
+    let id = send(port, "hello");
+    let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    assert!(v["response"].as_str().unwrap().contains("chat_claude_bin"), "{v}");
+    assert!(terminate(&mut run));
+}
+
+/// the system prompt of the run the fake recorded for `prompt`
+fn system_prompt(dir: &std::path::Path, prompt: &str) -> String {
+    let a: J = wait("the fake's argv file", || std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of(prompt)))).ok().and_then(|t| serde_json::from_str(&t).ok()));
+    let args = a["argv"].as_array().unwrap();
+    let i = args.iter().position(|x| x == "--system-prompt").expect("a --system-prompt");
+    args[i + 1].as_str().unwrap().to_string()
+}
+/// let the fake run on and wait for the message's end state
+fn finish(port: u16, dir: &std::path::Path, id: &str, prompt: &str) -> J {
+    wait("the fake's argv file", || dir.join(format!("argv.{}.json", tag_of(prompt))).exists().then_some(()));
+    std::fs::write(dir.join(format!("go.{}", tag_of(prompt))), "").unwrap();
+    wait("the end state", || { let v = view(port, id); if v["state"] == "done" || v["state"] == "error" { Some(v) } else { None } })
+}
+
+#[test]
+fn a_failed_runs_whole_stderr_reaches_the_response_and_the_next_banner() {
+    let (mut run, port, dir) = fake_seat("chatfaillong", &[]);
+    let long = format!("start {} end-of-the-stderr", "word ".repeat(500));   // 2500+ characters
+    std::fs::write(dir.join("fail"), &long).unwrap();
+    let id1 = send(port, "first");
+    let v = wait("the error answer", || { let v = view(port, &id1); if v["state"] == "error" { Some(v) } else { None } });
+    let want = format!("claude failed (rc 3): {}", long.trim());
+    assert_eq!(v["response"], want.as_str(), "the response carries the whole stderr");
+    std::fs::remove_file(dir.join("fail")).unwrap();
+    send(port, "second");
+    let sys = system_prompt(&dir, "second");
+    assert!(sys.contains(&want), "the banner's error line carries all of it: {sys}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_banner_without_text_still_runs_the_turn_and_the_system_prompt_shows_the_banner_error() {
+    // the model's pack leaves Banner.text null (it reads an entity that is not there): the message must not sit queued
+    let pack = "PACK nulltext 1\nIMPORT default_banner 1\nBanner.text getter: prop('Missing:one', 'text')\n";
+    let (mut run, port, dir) = fake_seat_with("bannernull", &[], &[("nulltext.c1f", pack)]);
+    let id = send(port, "still there");
+    let sys = system_prompt(&dir, "still there");
+    assert!(sys.contains("BANNER ERROR:") && sys.contains("Help:banner"), "{sys}");
+    assert!(sys.contains("has no `text`"), "{sys}");
+    assert!(sys.contains("Modify your banner to help you maintain continuity."), "the doctrine is still there: {sys}");
+    assert_eq!(finish(port, &dir, &id, "still there")["state"], "done");
+    assert!(terminate(&mut run));
+    // a null with a reason of its own: the reason is in the banner error
+    let pack = "PACK nulltext 1\nIMPORT default_banner 1\nBanner.text getter: None('the model emptied it')\n";
+    let (mut run, port, dir) = fake_seat_with("bannernull2", &[], &[("nulltext.c1f", pack)]);
+    send(port, "again");
+    let sys = system_prompt(&dir, "again");
+    assert!(sys.contains("BANNER ERROR:") && sys.contains("the reason: the model emptied it"), "{sys}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_banner_shows_the_previous_errors_entity_and_its_whole_text_until_a_turn_succeeds() {
+    let (mut run, port, dir) = fake_seat("bannererr", &[]);
+    let long = format!("start {} end-of-the-error", "word ".repeat(400));   // 2000+ characters
+    std::fs::write(dir.join("err"), &long).unwrap();
+    let id1 = send(port, "first");
+    assert_eq!(finish(port, &dir, &id1, "first")["state"], "error");
+    std::fs::remove_file(dir.join("err")).unwrap();
+    let id2 = send(port, "second");
+    let sys = system_prompt(&dir, "second");
+    let line = format!("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:main:message:{id1}:turn:response - claude reported an error: {long}");
+    assert!(sys.contains(&line), "the eid, the summary, no cap: {sys}");
+    assert_eq!(finish(port, &dir, &id2, "second")["state"], "done");
+    let id3 = send(port, "third");
+    let sys = system_prompt(&dir, "third");
+    assert!(!sys.contains("ENDED WITH AN ERROR"), "a later successful turn clears the line: {sys}");
+    assert_eq!(finish(port, &dir, &id3, "third")["state"], "done");
+    assert!(terminate(&mut run));
+}
+
+// ---- the chat's event stream (#1143, the SSE slice) ---------------------------------------------------------------------------------------
+// A fake that talks in PIECES: it prints stream-json `stream_event` lines (a tool_use block start, then text deltas) one at a time, each
+// released by a file `go.<tag>.<i>` the test writes, then the finished assistant message and the result line after `go.<tag>.end`.
+const PIECES: &str = r#"#!/usr/bin/env python3
+import json, os, sys, time
+here = os.path.dirname(os.path.abspath(__file__))
+prompt = sys.argv[-1]
+tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
+json.dump({"argv": sys.argv[1:]}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
+def out(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+def gate(name):
+    for _ in range(300):
+        if os.path.exists(os.path.join(here, "go." + tag + "." + name)): return
+        time.sleep(0.05)
+out({"type": "system", "subtype": "init", "session_id": "p-1"})
+pieces = ["Hel", "lo ", "wor", "ld"]
+for i, t in enumerate(pieces):
+    gate(str(i))
+    if i == 1:
+        out({"type": "stream_event", "event": {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "tu1", "name": "mcp__membrane__entity_read", "input": {}}}})
+    out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": t}}})
+gate("end")
+out({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello world"}, {"type": "tool_use", "id": "tu1", "name": "mcp__membrane__entity_read", "input": {}}]}})
+out({"type": "result", "subtype": "success", "is_error": False, "result": "Hello world", "num_turns": 1, "duration_ms": 99, "total_cost_usd": 0.5, "usage": {"input_tokens": 1, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3, "output_tokens": 4}, "session_id": "p-1"})
+"#;
+
+/// An open event stream: the status line and headers, then the events as they arrive ((event name, json data)).
+struct Sse { r: BufReader<TcpStream>, head: String }
+impl Sse {
+    fn open(port: u16, path: &str) -> Sse {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        s.write_all(format!("GET {path} HTTP/1.1\r\nHost: t\r\nAccept: text/event-stream\r\n\r\n").as_bytes()).unwrap();
+        let mut r = BufReader::new(s);
+        let mut head = String::new();
+        loop { let mut l = String::new(); r.read_line(&mut l).unwrap(); head.push_str(&l); if l == "\r\n" || l.is_empty() { break; } }
+        Sse { r, head }
+    }
+    /// the next event, None at the end of the stream
+    fn next(&mut self) -> Option<(String, J)> {
+        let (mut name, mut data) = (String::new(), String::new());
+        loop {
+            let mut l = String::new();
+            if self.r.read_line(&mut l).unwrap() == 0 { return None; }
+            let l = l.trim_end_matches(['\r', '\n']);
+            if l.is_empty() { if data.is_empty() { continue; } return Some((name, serde_json::from_str(&data).unwrap_or_else(|e| panic!("{e}: {data}")))); }
+            if let Some(v) = l.strip_prefix("event: ") { name = v.to_string(); }
+            if let Some(v) = l.strip_prefix("data: ") { data.push_str(v); }
+        }
+    }
+}
+
+/// the Request entities of event streams the seat still holds: a Request is VIRTUAL (live in the engine, no row), so a block lists the live ones with `instances`
+fn stream_requests(port: u16) -> Vec<String> {
+    let (t, _) = call(port, "run_cliff", json!({"code": "join([r.eid for r in instances('Request') if startswith(str(r.path), '/membrane/chat/message/') and replace(str(r.path), '/events', '') != r.path], ' ')"}));
+    t.split_whitespace().filter(|e| e.starts_with("Request:")).map(String::from).collect()
+}
+
+fn release(dir: &std::path::Path, prompt: &str, name: &str) { std::fs::write(dir.join(format!("go.{}.{}", tag_of(prompt), name)), "").unwrap(); }
+
+#[test]
+fn the_event_stream_carries_the_answer_as_it_is_written_and_the_request_is_retired_after_it_closes() {
+    let (mut run, port, dir) = fake_seat_script("sse", &[], &[], PIECES);
+    let id = send(port, "stream me");
+    let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
+    let lh = sse.head.to_ascii_lowercase();
+    assert!(sse.head.starts_with("HTTP/1.1 200") && lh.contains("content-type: text/event-stream") && lh.contains("cache-control: no-store") && !lh.contains("content-length"), "{}", sse.head);
+    // the first event is the state as it is (running or still queued), the answer not yet there
+    let (name, first) = sse.next().expect("a first event");
+    assert_eq!(name, "message");
+    assert_eq!(first["id"], json!(id));
+    assert!(first["response"].is_null(), "{first}");
+    // each piece comes as an event BEFORE the turn ends: the partial answer grows, the tool name shows when its block starts
+    let mut texts: Vec<String> = vec![];
+    let mut tools_seen = false;
+    for (i, want) in ["Hel", "Hello ", "Hello wor", "Hello world"].iter().enumerate() {
+        wait("the fake's argv file", || dir.join(format!("argv.{}.json", tag_of("stream me"))).exists().then_some(()));
+        release(&dir, "stream me", &i.to_string());
+        loop {
+            let (n, e) = sse.next().expect("an event before the end");
+            assert_eq!(n, "message");
+            assert_eq!(e["state"], json!("running"), "the turn is still running while pieces arrive: {e}");
+            if e["tools"] == json!(["entity_read"]) { tools_seen = true; }
+            if e["response"].as_str() == Some(want) { texts.push(want.to_string()); break; }
+        }
+        assert_eq!(view(port, &id)["state"], "running", "the event arrived before the turn ended");
+    }
+    assert_eq!(texts, ["Hel", "Hello ", "Hello wor", "Hello world"]);
+    assert!(tools_seen, "the tool the model started shows in the events");
+    // while the stream is open its Request is HELD (a connection in flight); every other request is collected as soon as its reply is delivered
+    let held = stream_requests(port);
+    assert_eq!(held.len(), 1, "{held:?}");
+    // the end: the final event is the answer, `done`, then the connection closes
+    release(&dir, "stream me", "end");
+    let (n, last) = sse.next().expect("the final event");
+    assert_eq!((n.as_str(), last["state"].clone(), last["response"].clone()), ("message", json!("done"), json!("Hello world")));
+    assert!(sse.next().is_none(), "the stream closes after done");
+    wait("the stream's Request retired", || stream_requests(port).is_empty().then_some(()));
+    // the turn's partial chunks are collected once the turn is over (the receipt is the answer); a Chunk is VIRTUAL, so the live ones are listed with `instances`
+    wait("the chunks collected", || { let (n, _) = call(port, "run_cliff", json!({"code": "len(instances('Chunk'))"})); (n == "0").then_some(()) });
+    // the poll route is still there
+    assert_eq!(view(port, &id)["response"], "Hello world");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn an_unknown_message_has_no_stream_and_a_finished_one_streams_its_answer_and_closes() {
+    let (mut run, port, dir) = fake_seat_script("ssedone", &[], &[], PIECES);
+    let (st, body) = http(port, "GET", "/membrane/chat/message/nope/events", "");
+    assert_eq!(st, 404, "{body}");
+    let id = send(port, "already done");
+    wait("the fake's argv file", || dir.join(format!("argv.{}.json", tag_of("already done"))).exists().then_some(()));
+    for i in 0..4 { release(&dir, "already done", &i.to_string()); }
+    release(&dir, "already done", "end");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
+    let (_, e) = sse.next().expect("the snapshot");
+    assert_eq!((e["state"].clone(), e["response"].clone()), (json!("done"), json!("Hello world")));
+    assert!(sse.next().is_none(), "closed at once");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_client_that_leaves_early_leaves_nothing_stuck_and_the_turn_completes() {
+    let (mut run, port, dir) = fake_seat_script("sseleave", &[], &[], PIECES);
+    let id = send(port, "walk away");
+    let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
+    sse.next().expect("a first event");
+    wait("the fake's argv file", || dir.join(format!("argv.{}.json", tag_of("walk away"))).exists().then_some(()));
+    release(&dir, "walk away", "0");
+    let (_, e) = sse.next().expect("a piece");
+    assert_eq!(e["state"], json!("running"));
+    drop(sse);                                           // the page was closed mid-turn
+    for i in 1..4 { release(&dir, "walk away", &i.to_string()); }
+    release(&dir, "walk away", "end");
+    let v = wait("the turn's end", || { let v = view(port, &id); (v["state"] == "done").then_some(v) });
+    assert_eq!(v["response"], "Hello world", "the turn finished though nobody listened");
+    wait("no stream Request left", || stream_requests(port).is_empty().then_some(()));
+    assert!(terminate(&mut run));
+}
+
+// ---- resource hygiene (#1143): a finished turn keeps what matters, not the raw output ------------------------------------------------------
+/// the whole stored row of an entity as the door reads it (its length is the row's size)
+fn row_text(port: u16, eid: &str) -> String { call(port, "entity_read", json!({"spec": eid})).0 }
+/// the stored bodies of the seat's store file: (rows, bytes of c_field, journal lines, bytes of c_journal)
+fn store_sizes(dir: &std::path::Path) -> (i64, i64, i64, i64) {
+    let db = rusqlite::Connection::open_with_flags(dir.join("field.sqlite3"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let q = |sql: &str| -> (i64, i64) { db.query_row(sql, [], |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0)))).unwrap() };
+    let (a, b) = q("SELECT count(*), sum(length(body)) FROM c_field WHERE k NOT LIKE 'Request:%'");   // a door request is the collector's (apps/barest.c1f/collector.c1f)
+    let (c, d) = q("SELECT count(*), sum(length(body)) FROM c_journal");
+    (a, b, c, d)
+}
+/// THE BOUND (a threshold, flagged for the operator): a finished turn's Command row and message row are each under 16 KB. What stays is the
+/// command (argv: the system prompt with the banner), the answer's numbers and the small derived values; the 200 KB the CLI printed is gone.
+const ROW_BOUND: usize = 16 * 1024;
+
+#[test]
+fn a_finished_turn_keeps_its_answer_tools_and_usage_but_not_the_raw_output_and_survives_a_restart() {
+    let (mut run, port, dir) = fake_seat("hygiene", &[]);
+    std::fs::write(dir.join("pad"), "").unwrap();
+    let before = store_sizes(&dir);
+    let id = send(port, "big output");
+    let t0 = Instant::now();
+    let v = finish(port, &dir, &id, "big output");
+    eprintln!("200 KB turn, 200 chunks: released to done in {:?}", t0.elapsed());
+    assert!(t0.elapsed() < Duration::from_secs(30), "each chunk is parsed once, not again with every later chunk: {:?}", t0.elapsed());
+    assert_eq!(v["state"], "done", "{v}");
+    let (cmd, msg) = (format!("membrane::Command:chat:main:message:{id}"), format!("membrane::Chat:main:message:{id}"));
+    // the rows shrink after the turn (a later round than `done`): wait for both
+    let (c, m) = wait("the finished turn's rows are small", || {
+        let (c, m) = (row_text(port, &cmd), row_text(port, &msg));
+        (c.len() < ROW_BOUND && m.len() < ROW_BOUND).then_some((c, m))
+    });
+    assert!(!c.contains("pad 199") && !m.contains("pad 199"), "the raw stream is not kept");
+    assert!(c.contains("\"rc\":0") || c.contains("\"rc\": 0"), "the rc stays: {c}");
+    // what matters is in the view, the tool entities and the turn
+    let check = |port: u16| {
+        let v = view(port, &id);
+        assert_eq!((v["state"].clone(), v["response"].clone(), v["tools"].clone()), (json!("done"), json!("Final answer to: big output"), json!(["entity_write", "entity_read"])), "{v}");
+        let (n, _) = call(port, "entity_read", json!({"spec": format!("{msg}:turn:tool:tu1"), "prop": "name"}));
+        assert_eq!(n, "mcp__membrane__entity_write");
+        let (r, _) = call(port, "entity_read", json!({"spec": format!("{msg}:turn:tool:tu2"), "prop": "result"}));
+        assert!(r.contains("echo"), "the tool result is kept: {r}");
+    };
+    check(port);
+    // the journal: numbers for the report (the Chunk births carry the raw lines; the receipt is not journalled)
+    let after = store_sizes(&dir);
+    eprintln!("hygiene numbers: c_field rows {} -> {} ({} -> {} bytes); journal lines {} -> {} ({} -> {} bytes)", before.0, after.0, before.1, after.1, before.2, after.2, before.3, after.3);
+    assert!(after.1 - before.1 < 200 * 1024, "the field grew by a small part of the 200 KB output: {} bytes", after.1 - before.1);
+    assert!(terminate(&mut run));
+    let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &[]);
+    check(port2);
+    assert!(row_text(port2, &cmd).len() < ROW_BOUND && row_text(port2, &msg).len() < ROW_BOUND, "small after the restart too");
+    assert!(terminate(&mut run2));
+}
+
+// ---- the return entity and parallel effects (#1143) -------------------------------------------------------------------------------------------
+fn put(port: u16, spec: &str, prop: &str, v: J) -> (String, bool) { call(port, "entity_write", json!({"spec": spec, "prop": prop, "value": v})) }
+fn put_wait(port: u16, spec: &str, prop: &str, v: J, wait: f64) -> (String, bool) { call(port, "entity_write", json!({"spec": spec, "prop": prop, "value": v, "wait": wait})) }
+
+#[test]
+fn a_write_that_starts_an_effect_returns_its_receipt_when_it_waits_and_names_it_when_it_does_not() {
+    let (mut run, port) = start("ret", MCP_PACKS, &[]);
+    put(port, "Command:e1", "cmd", json!(["echo", "hi"]));
+    // wait: the reply holds until the receipt: stdout, stderr, rc, ok, and the Return entity that keeps them
+    let (t, e) = put_wait(port, "Command:e1", "run", json!({"id": "r1", "args": ["there"]}), 20.0);
+    assert!(!e, "{t}");
+    assert!(t.starts_with("wrote Command:e1.run\nreceipt: "), "{t}");
+    let line = t.lines().find(|l| l.starts_with("receipt: ")).unwrap();
+    let rc: J = serde_json::from_str(&line["receipt: ".len()..]).unwrap_or_else(|e| panic!("{e}: {line}"));
+    assert_eq!((rc["rc"].clone(), rc["ok"].clone(), reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().trim().to_string()), (json!(0), json!(true), "hi there".to_string()), "{t}");
+    assert_eq!(rc["stderr_bytes"], json!(0));
+    assert!(!t.contains("Return:"), "the Return entity is a carrier, the reply does not name it: {t}");
+    let (r, _) = call(port, "entity_read", json!({"spec": "Command:e1", "prop": "run_result"}));
+    assert!(r.contains("hi there"), "the receipt stays on the entity: {r}");
+    // no wait: a slow command answers at once, naming the receipt; the Return entity shows it when it lands
+    put(port, "Command:slow", "cmd", json!(["sh", "-c", "sleep 2; echo late"]));
+    let t0 = Instant::now();
+    let (t, _) = put(port, "Command:slow", "run", json!({"id": "s1", "args": []}));
+    assert!(t0.elapsed() < Duration::from_millis(1800), "no wait, no holding: {:?}", t0.elapsed());
+    assert!(t.contains("status: running") && t.contains("read Command:slow.run_result later"), "{t}");
+    assert!(!t.contains("Return:"), "{t}");
+    let r = wait("the late receipt on the entity", || { let (r, _) = call(port, "entity_read", json!({"spec": "Command:slow", "prop": "run_result"})); r.contains("late").then_some(r) });
+    assert!(r.contains("late"), "{r}");
+    // a wait that is too short answers pending
+    put(port, "Command:slow2", "cmd", json!(["sh", "-c", "sleep 4; echo x"]));
+    let (t, _) = put_wait(port, "Command:slow2", "run", json!({"id": "s2", "args": []}), 1.0);
+    assert!(t.contains("status: running") && t.contains("read Command:slow2.run_result later"), "{t}");
+    // a plain write has no receipt to wait for
+    let (t, _) = put_wait(port, "Note:a", "n", json!(1), 30.0);
+    assert!(t.starts_with("wrote Note:a.n\nreactions: ") && !t.contains("pending"), "{t}");
+    assert!(terminate(&mut run));
+}
+
+const BOXES: &str = "PACK boxes 1\nBox.double getter: this.n * 2\nBox.n on-setter mirror:\n  ALWAYS:\n    this.last = this.n\nBox.gone getter: None('nothing there yet') if this.n == None else this.n\n";
+
+#[test]
+fn a_write_returns_the_reactions_of_its_round_with_the_reason_of_a_null() {
+    let (mut run, port) = start("react", MCP_PACKS, &[]);
+    let (r, e) = put(port, "Pack:boxes", "text", json!(BOXES));
+    assert!(!e, "{r}");
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:boxes", "prop": "state"})).0 == "loaded").then_some(()));
+    let (t, e) = put(port, "Box:1", "n", json!(4));
+    assert!(!e, "{t}");
+    let line = t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap_or_else(|| panic!("{t}"));
+    let rs: Vec<J> = serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: {line}"));
+    let find = |p: &str| rs.iter().find(|r| r["eid"] == "Box:1" && r["prop"] == p).cloned().unwrap_or_else(|| panic!("{p} in {rs:?}"));
+    assert_eq!(find("double")["new"], json!(8), "a getter that recomputed");
+    assert_eq!(find("last")["new"], json!(4), "a setter that fired");
+    assert!(find("last")["by"].as_str().unwrap().contains("mirror"), "{rs:?}");
+    // a null carries its reason
+    let (t, _) = put(port, "Box:2", "other", json!(1));
+    let rs: Vec<J> = serde_json::from_str(t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap()).unwrap();
+    let g = rs.iter().find(|r| r["eid"] == "Box:2" && r["prop"] == "gone").unwrap_or_else(|| panic!("gone in {rs:?}"));
+    assert_eq!(g["why"], json!("nothing there yet"), "{rs:?}");
+    assert!(terminate(&mut run));
+}
+
+/// start `n` slow commands (each marks `+` when it starts and `-` when it ends in the file `ev`), in parallel tool calls
+fn slow_commands(port: u16, ev: &std::path::Path, n: usize, secs: u32, wait: f64) -> Vec<std::thread::JoinHandle<String>> {
+    for i in 0..n { put(port, &format!("Command:p{i}"), "cmd", json!(["sh", "-c", format!("echo + >> {p}; sleep {secs}; echo - >> {p}; echo done{i}", p = ev.display())])); }
+    (0..n).map(|i| std::thread::spawn(move || put_wait(port, &format!("Command:p{i}"), "run", json!({"id": format!("p{i}"), "args": []}), wait).0)).collect()
+}
+
+#[test]
+fn two_slow_commands_from_parallel_tool_calls_take_the_time_of_one_and_a_held_call_blocks_nothing() {
+    let (mut run, port) = start("par", MCP_PACKS, &[]);
+    let t0 = Instant::now();
+    let hs = slow_commands(port, &run.dir.join("ev"), 2, 3, 30.0);
+    std::thread::sleep(Duration::from_millis(700));
+    // while both are held: the door answers other calls at once, and the page's files
+    let q = Instant::now();
+    let (n, _) = call(port, "entity_query", json!({"q": "kind:Command", "count": true}));
+    assert!(n.contains("entity(ies)") && q.elapsed() < Duration::from_millis(2500), "a held call blocks nothing: {:?}", q.elapsed());
+    for h in hs { let t = h.join().unwrap(); assert!(t.contains("receipt: ") && t.contains("done"), "{t}"); }
+    let took = t0.elapsed();
+    assert!(took < Duration::from_millis(5500), "two 3 s commands in parallel took {took:?} (serial is 6 s or more)");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_effect_workers_fact_caps_the_commands_that_run_at_once() {
+    let (mut run, port) = start("cap", MCP_PACKS, &["--fact", "effect_workers=2"]);
+    let dir = run.dir.clone();
+    let hs = slow_commands(port, &dir.join("ev"), 5, 1, 60.0);
+    for h in hs { let t = h.join().unwrap(); assert!(t.contains("receipt: "), "{t}"); }
+    let ev = std::fs::read_to_string(dir.join("ev")).unwrap_or_else(|e| panic!("{e}: {:?}", std::fs::read_dir(&dir).unwrap().filter_map(Result::ok).map(|f| f.file_name()).collect::<Vec<_>>()));
+    let _ev0 = std::fs::read_to_string(dir.join("ev")).unwrap();
+    let (mut now, mut peak) = (0i32, 0i32);
+    for c in ev.lines() { now += if c == "+" { 1 } else { -1 }; peak = peak.max(now); }
+    assert_eq!(ev.lines().count(), 10, "{ev}");
+    assert_eq!(peak, 2, "five commands with the cap 2 ran at most two at once, and two did run together: {ev:?}");
+    assert!(terminate(&mut run));
+}
+
+// ---- the turn carries the usage of the result event (#1143) --------------------------------------------------------------------------------------
+#[test]
+fn the_turn_carries_usage_cost_calls_and_duration_of_the_result_event_in_the_view_and_the_streams_last_event() {
+    let (mut run, port, dir) = fake_seat("usage", &[]);
+    let id = send(port, "count me");
+    let v = finish(port, &dir, &id, "count me");
+    assert_eq!(v["state"], "done", "{v}");
+    let want = json!({"input_tokens": 11, "cache_creation_input_tokens": 22, "cache_read_input_tokens": 33, "output_tokens": 44});
+    assert_eq!(v["turn"]["usage"], want, "{v}");
+    assert_eq!((v["turn"]["cost"].clone(), v["turn"]["calls"].clone(), v["turn"]["duration"].clone()), (json!(0.0123), json!(3), json!(4321)), "{v}");
+    // the turn entity holds them as properties
+    let (u, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn"), "prop": "cost"}));
+    assert_eq!(u, "0.0123");
+    // the event stream's final event carries them too
+    let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
+    let (_, e) = sse.next().expect("the snapshot");
+    assert_eq!(e["turn"]["usage"], want, "{e}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_turn_that_was_running_when_the_seat_stopped_is_an_error_after_the_restart() {
+    let (mut run, port, dir) = fake_seat("interrupted", &[]);
+    let id = send(port, "stopped midway");
+    wait("running", || (view(port, &id)["state"] == "running").then_some(()));
+    assert!(terminate(&mut run));
+    let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &[]);
+    let v = wait("the turn marked error", || { let v = view(port2, &id); (v["state"] == "error").then_some(v) });
+    assert_eq!(v["response"], "interrupted: the seat stopped while this turn was running", "{v}");
+    // a new message is answered as usual
+    let id2 = send(port2, "after the restart");
+    assert_eq!(finish(port2, &dir, &id2, "after the restart")["state"], "done");
+    assert_eq!(view(port2, &id)["state"], "error", "the interrupted turn stays an error");
+    assert!(terminate(&mut run2));
+}
+
+#[test]
+fn an_interrupted_turn_is_found_in_the_store_not_through_what_the_warm_boot_loaded() {
+    // the turns are a LAZY class: the warm boot is off here (warm_rows=0), so the running turn is not loaded when the seat starts, and is still found
+    let (mut run, port, dir) = fake_seat("interrupted-cold", &["--fact", "warm_rows=0"]);
+    let id = send(port, "stopped midway");
+    wait("running", || (view(port, &id)["state"] == "running").then_some(()));
+    assert!(terminate(&mut run));
+    let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "warm_rows=0"]);
+    // read the STORE's rows only (a poll of the message would load it, and the load itself would make the engine look at the turn)
+    let turn = format!("membrane::Chat:main:message:{id}:turn");
+    wait("the turn marked error in the store", || { let (r, _) = call(port2, "entity_query", json!({"q": format!("name~:{turn}"), "full": true})); (r.contains("\"state\":\"error\"")).then_some(()) });
+    assert_eq!(view(port2, &id)["response"], "interrupted: the seat stopped while this turn was running");
+    assert!(terminate(&mut run2));
+}
+
+fn returns(port: u16) -> String { call(port, "entity_query", json!({"q": "kind:Return", "count": true})).0 }
+
+#[test]
+fn the_return_entity_is_retired_as_soon_as_its_reply_is_delivered() {
+    let (mut run, port) = start("retret", MCP_PACKS, &[]);
+    assert_eq!(returns(port), "0 entity(ies)");
+    for i in 0..20 { let (t, e) = put(port, &format!("Note:n{i}"), "v", json!(i)); assert!(!e && t.starts_with("wrote Note:"), "{t}"); }
+    wait("no Return left after 20 writes", || (returns(port) == "0 entity(ies)").then_some(()));
+    // a held call: while it waits its carrier is not made yet; after it answers none is left
+    put(port, "Command:w1", "cmd", json!(["sh", "-c", "sleep 1; echo w"]));
+    let (t, _) = put_wait(port, "Command:w1", "run", json!({"id": "w1", "args": []}), 20.0);
+    assert!(t.contains("receipt: "), "{t}");
+    wait("no Return left after a waiting call", || (returns(port) == "0 entity(ies)").then_some(()));
+    // the receipt is where it always lived
+    assert!(call(port, "entity_read", json!({"spec": "Command:w1", "prop": "run_result"})).0.contains("\"rc\":0"));
+    assert!(terminate(&mut run));
+}
+
+// ---- garbage collection of virtual entities (#1143): nothing retires a Request, nothing holds it once its reply is delivered ---------------------------------------
+fn live_requests(port: u16) -> usize { call(port, "run_cliff", json!({"code": "len(instances('Request'))"})).0.trim().parse().unwrap() }
+
+#[test]
+fn a_request_is_collected_right_after_its_reply_is_delivered_with_no_retire_write_and_polling_does_not_leak() {
+    let (mut run, port) = start("gcpage", MCP_PACKS, &[]);
+    let baseline = wait("a baseline", || { let n = live_requests(port); (n <= 2).then_some(n) });   // the measuring call itself is one
+    for _ in 0..200 { assert_eq!(http(port, "GET", "/global/health", "").0, 200); }
+    let after = wait("the Request entities back to the baseline", || { let n = live_requests(port); (n <= baseline).then_some(n) });
+    assert_eq!(after, baseline, "200 requests left nothing behind");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_old_collector_fact_is_accepted_and_does_nothing() {
+    let (mut run, port) = start("gckeep", MCP_PACKS, &["--fact", "request_keep_s=600"]);
+    for _ in 0..20 { assert_eq!(http(port, "GET", "/global/health", "").0, 200); }
+    wait("collected whatever request_keep_s says", || (live_requests(port) <= 2).then_some(()));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_held_wait_reply_holds_its_request_and_the_request_and_its_return_go_when_it_is_delivered() {
+    let (mut run, port) = start("gcwait", MCP_PACKS, &[]);
+    let baseline = wait("a baseline", || { let n = live_requests(port); (n <= 2).then_some(n) });
+    put(port, "Command:gw", "cmd", json!(["sh", "-c", "sleep 2; echo w"]));
+    let p2 = port;
+    let h = std::thread::spawn(move || put_wait(p2, "Command:gw", "run", json!({"id": "g1", "args": []}), 20.0).0);
+    let during = wait("the held call's Request is live", || { let n = live_requests(port); (n >= baseline + 1).then_some(n) });
+    assert!(during > baseline, "the held reply holds its Request: {during} vs {baseline}");
+    assert!(h.join().unwrap().contains("receipt: "));
+    wait("Request and Return collected after the reply", || (live_requests(port) <= baseline && call(port, "run_cliff", json!({"code": "len(instances('Return'))"})).0 == "0").then_some(()));
+    assert!(terminate(&mut run));
+}
+
+// ---- run_cliff: a clifflet in one call (#1143) ------------------------------------------------------------------------------------------------
+fn cliff(port: u16, code: &str) -> (String, bool) { call(port, "run_cliff", json!({"code": code})) }
+/// the entities that are not door requests (the collector retires those; this seat has none)
+fn count_all(port: u16) -> String { call(port, "entity_query", json!({"q": "kind!:Request", "count": true})).0 }
+
+#[test]
+fn a_clifflet_reads_and_joins_several_entities_in_one_call_and_its_errors_say_why() {
+    let (mut run, port) = start("cliff1", MCP_PACKS, &[]);
+    for (n, v) in [("a", 3), ("b", 4), ("c", 5)] { put(port, &format!("Note:{n}"), "n", json!(v)); }
+    put(port, "Tag:x", "of", json!("Note:b"));
+    let (t, e) = cliff(port, "ns = [e.n for e in instances('Note')]\nbig = [e.eid for e in instances('Note') if e.n > 3]\n{'count': len(ns), 'sum_big': len(big), 'big': big, 'tagged': [prop(prop(g.of, 'eid'), 'n') for g in instances('Tag')]}");
+    assert!(!e, "{t}");
+    let v: J = serde_json::from_str(&t).unwrap_or_else(|e| panic!("{e}: {t}"));
+    assert_eq!((v["count"].clone(), v["big"].clone()), (json!(3), json!(["Note:b", "Note:c"])), "{t}");
+    // a one-line value, a plain number, a null
+    assert_eq!(cliff(port, "1 + 2"), ("3".to_string(), false));
+    assert_eq!(cliff(port, "None"), ("null".to_string(), false), "a plain null prints null");
+    // the error shapes: a block that does not load says the loader's words, a null with a reason says it, an empty block says what is needed
+    let (t, e) = cliff(port, "[x for x in");
+    assert!(e && t.contains("the block did not load") && t.contains("not an expression"), "{t}");
+    let (t, e) = cliff(port, "None('nothing here yet')");
+    assert!(!e && t == "null: nothing here yet", "a null with a reason says it and is not an error (operator 2026-11-13): {t}");
+    let (t, e) = cliff(port, "1 / 0");
+    assert!(e && t.starts_with("Error: "), "a failure shows its kind: {t}");
+    let (t, e) = cliff(port, "  ");
+    assert!(e && t.contains("run_cliff needs code"), "{t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_clifflet_printout_shows_the_reason_of_a_null_inside_a_list_or_a_dict() {
+    let (mut run, port) = start("cliff-nested", MCP_PACKS, &[]);
+    put(port, "Note:a", "n", json!(3));
+    let (t, e) = cliff(port, "[Note:a.n, Note:a.missing, None('boom')]");
+    assert!(!e && t.contains("absent") && t.contains("Note:a.missing") && t.contains("boom"), "a list: {t}");
+    let (t, e) = cliff(port, "{'ok': Note:a.n, 'gap': Note:a.nothing}");
+    assert!(!e && t.contains("Note:a.nothing") && t.contains("\"ok\":3"), "a dict: {t}");
+    assert_eq!(cliff(port, "[1, None]"), ("[1,null]".to_string(), false), "a null with no reason stays null");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_clifflet_that_writes_lands_its_writes_and_returns_their_reactions() {
+    let (mut run, port) = start("cliff2", MCP_PACKS, &[]);
+    let (t, e) = cliff(port, "q = 5\nNote:w1.n = q\nNote:w2.n = q + 1");
+    assert!(!e && t.contains("ran the writes") && t.contains("reactions: ") && t.contains("read <entity>.<verb>_result"), "{t}");
+    assert_eq!(call(port, "entity_read", json!({"spec": "Note:w1", "prop": "n"})).0, "5");
+    assert_eq!(call(port, "entity_read", json!({"spec": "Note:w2", "prop": "n"})).0, "6");
+    assert!(t.contains("Note:w2"), "the reactions list the writes the block made: {t}");
+    // an effect: the verb runs, the receipt arrives in a later round on the entity
+    let (t, e) = cliff(port, "Command:cc.cmd = ['echo', 'from-cliff']\nCommand:cc.run = {'id': 'c1', 'args': []}");
+    assert!(!e, "{t}");
+    let r = wait("the receipt", || { let (r, _) = call(port, "entity_read", json!({"spec": "Command:cc", "prop": "run_result"})); r.contains("from-cliff").then_some(r) });
+    assert!(r.contains("from-cliff"), "{r}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accumulates() {
+    let (mut run, port) = start_env("cliff3", MCP_PACKS, &[], &[("MEMBRANE_EVAL_BUDGET", "1000")]);
+    for i in 0..40 { put(port, &format!("Note:r{i}"), "n", json!(i)); }
+    let (t, e) = cliff(port, "[e.n for e in instances('Note') if e.n > 0 and len([1 for f in instances('Note')]) > 0]");
+    assert!(e && t.contains("budget exceeded"), "{t}");
+    assert_eq!(call(port, "entity_read", json!({"spec": "Note:r3", "prop": "n"})).0, "3", "the seat is up");
+    // scratch entities and packs do not accumulate (the three Pack entities are the boot's grants: door_tools, unload and settings): the same count after 20 calls of every shape
+    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "3 entity(ies)").then_some(()));
+    cliff(port, "Note:acc.n = 0");
+    wait("settled", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)").then_some(()));
+    let before = count_all(port);
+    for i in 0..20 {
+        match i % 4 { 0 => cliff(port, "1 + 1"), 1 => cliff(port, "[x for x in"), 2 => cliff(port, "Note:acc.n = 1"), _ => cliff(port, "None('x')") };
+    }
+    let t0 = Instant::now();
+    let (mut a, mut b, mut c) = (String::new(), String::new(), String::new());
+    while t0.elapsed() < Duration::from_secs(30) {
+        (a, b, c) = (count_all(port), call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0, call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0);
+        if a == before && b == "0 entity(ies)" && c == "3 entity(ies)" { break; }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "3 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_command_run_again_with_the_same_id_runs_and_its_receipt_is_new_by_its_timestamps() {
+    let (mut run, port) = start("rerun", MCP_PACKS, &[]);
+    let log = run.dir.join("ticks");
+    put(port, "Command:tick", "cmd", json!(["sh", "-c", format!("echo x >> {}", log.display())]));
+    let n = || std::fs::read_to_string(&log).map(|t| t.lines().count()).unwrap_or(0);
+    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 20.0);
+    assert!(t.contains("receipt: "), "{t}");
+    // the same id and the same output: it runs again, and its receipt differs by `started` (the reply recognises it)
+    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t1", "args": []}), 20.0);
+    assert!(t.contains("receipt: "), "{t}");
+    assert_eq!(n(), 2);
+    // a new id: a new receipt, the reply carries it
+    let (t, _) = put_wait(port, "Command:tick", "run", json!({"id": "t2", "args": []}), 20.0);
+    assert!(t.contains("receipt: ") && t.contains("\"id\":\"t2\""), "{t}");
+    assert_eq!(n(), 3);
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_banner_change_returns_reactions_that_do_not_grow_with_the_finished_messages() {
+    let pack = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'n=' + str(prop('Note:x', 'n'))\n";
+    let (mut run, port, _dir) = fake_seat_with("reactfinished", &[], &[("mine.c1f", pack)]);
+    put(port, "Note:x", "n", json!(0));
+    let size = |port: u16, n: i64| -> (usize, String) { let (t, e) = put(port, "Note:x", "n", json!(n)); assert!(!e, "{t}"); (t.len(), t) };
+    let (small, _) = size(port, 1);
+    // 50 FINISHED messages, as the chat makes them (class Chat, kind in parents, the state on the :turn entity)
+    for i in 0..50 {
+        let (t, e) = call(port, "run_cliff", json!({"code": format!("membrane::Chat:main:message[{i}] = ChatMessage(text: 'q{i}')\nmembrane::Chat:main:message[{i}]:turn = ChatTurn(message: 'membrane::Chat:main:message:{i}')\nmembrane::Chat:main:message[{i}]:turn.state = 'done'")}));
+        assert!(!e, "{t}");
+    }
+    let (n50, t) = size(port, 2);
+    eprintln!("reactions reply: {small} bytes with no finished message, {n50} bytes with 50");
+    assert!(!t.contains("membrane::Chat:main:message:"), "no finished message is in the reactions: {}", &t[..t.len().min(600)]);
+    assert!(n50 < small + 1500, "the reply does not grow with the finished messages: {small} -> {n50}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_clifflet_reads_eid_cls_and_parents_and_lists_the_same_packs_as_entity_query() {
+    let (mut run, port) = start("cliffpacks", MCP_PACKS, &[]);
+    put(port, "Pack:boxes", "text", json!(BOXES));
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:boxes", "prop": "state"})).0 == "loaded").then_some(()));
+    put(port, "Box:1", "n", json!(4));
+    put(port, "Box:1", "parents", json!(["cls:box", "cls:thing"]));
+    // eid, cls and parents are readable on any entity (parents is the entity's class list when it has one)
+    let (t, e) = cliff(port, "b = instances('Box')[0]\n[b.eid, b.cls, b.parents]");
+    assert!(!e, "{t}");
+    let v: J = serde_json::from_str(&t).unwrap_or_else(|e| panic!("{e}: {t}"));
+    assert_eq!((v[0].clone(), v[1].clone()), (json!("Box:1"), json!("Box")), "{t}");
+    assert!(v[2].is_array() && v[2][0] == json!("cls:box"), "parents is the class list: {t}");
+    // the packs a clifflet lists are the ones entity_query lists (its own scratch packs are not among them)
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:Pack", "k": 100}));
+    let (t, e) = cliff(port, "[[p.eid, p.state] for p in instances('Pack')]");
+    assert!(!e, "{t}");
+    let listed: Vec<String> = serde_json::from_str::<Vec<J>>(&t).unwrap_or_else(|e| panic!("{e}: {t}")).iter().map(|r| r[0].as_str().unwrap().to_string()).collect();
+    assert!(listed.iter().all(|p| !p.contains("cliffg") && !p.contains("cliffs")), "the clifflet's scratch packs are listed: {listed:?}");
+    for p in &listed { assert!(q.contains(p.as_str()), "{p} is not in entity_query: {q}"); }
+    assert_eq!(listed.len(), q.matches("Pack:").count(), "the same set: {listed:?} vs {q}");
+    assert!(terminate(&mut run));
+}
+
+// ---- the reply of a write that ran a command: size, timing, noise, one write (#1143, the model's findings) -----------------------------------------
+/// the lines of a reply: `receipt: {json}`, `stdout: {json}`, `stderr: {json}` as parsed objects by their label
+fn reply_part(t: &str, label: &str) -> Option<J> {
+    t.lines().find_map(|l| l.strip_prefix(&format!("{label}: "))).map(|j| serde_json::from_str(j).unwrap_or_else(|e| panic!("{label}: {e}: {j}")))
+}
+
+#[test]
+fn a_big_output_comes_back_as_its_first_and_last_8_kb_with_its_size_and_the_full_text_stays_on_the_entity() {
+    let (mut run, port) = start("big", MCP_PACKS, &[]);
+    put(port, "Command:big", "cmd", json!(["sh", "-c", "printf HEAD; head -c 50000 /dev/zero | tr '\\0' x; printf TAIL; printf oops >&2"]));
+    let (t, e) = put_wait(port, "Command:big", "run", json!({"id": "b1", "args": []}), 20.0);
+    assert!(!e, "{t}");
+    assert!(t.len() < 20000, "the reply is small ({} bytes): the CLI refuses a tool result over its limit", t.len());
+    let rc = reply_part(&t, "receipt").unwrap_or_else(|| panic!("{t}"));
+    assert_eq!((rc["stdout_bytes"].clone(), rc["stderr_bytes"].clone()), (json!(50008), json!(4)), "{t}");
+    assert!(rc.get("head").is_none() && rc.get("stdout").is_none(), "no duplicate of the output in the receipt line: {t}");
+    let so = reply_part(&t, "stdout").unwrap_or_else(|| panic!("{t}"));
+    let (h, tl) = (so["stdout_head"].as_str().unwrap_or_else(|| panic!("{}", &t[..600.min(t.len())])), so["stdout_tail"].as_str().unwrap_or_else(|| panic!("tail {}", &t[..600.min(t.len())])));
+    assert!(h.starts_with("HEAD") && h.chars().count() == 8192 && tl.ends_with("TAIL") && tl.chars().count() == 8192, "{} {}", h.len(), tl.len());
+    assert!(so.get("stdout").is_none(), "{so}");
+    // a short stream comes whole, under its plain name
+    assert_eq!(reply_part(&t, "stderr").unwrap()["stderr"], json!("oops"), "{t}");
+    assert!(t.contains("full output: read Command:big.output"), "{t}");
+    let (full, _) = call(port, "entity_read", json!({"spec": "Command:big", "prop": "output"}));
+    assert!(full.len() >= 50008 && full.starts_with("HEAD") && full.ends_with("TAIL"), "the full text stays on the entity: {}", full.len());
+    // an output of exactly 16 KB still comes whole
+    put(port, "Command:edge", "cmd", json!(["sh", "-c", "head -c 16384 /dev/zero | tr '\\0' y"]));
+    let (t, _) = put_wait(port, "Command:edge", "run", json!({"id": "e1", "args": []}), 20.0);
+    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().len() == 16384 && !t.contains("full output"), "{}", t.len());
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_receipt_in_the_reply_echoes_the_run_id() {
+    let (mut run, port) = start("rid", MCP_PACKS, &[]);
+    put(port, "Command:i", "cmd", json!(["echo", "x"]));
+    let (t, _) = put_wait(port, "Command:i", "run", json!({"id": "my-run-7", "args": []}), 20.0);
+    assert_eq!(reply_part(&t, "receipt").unwrap()["id"], json!("my-run-7"), "{t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_receipt_carries_started_finished_and_ms_so_a_rerun_with_the_same_output_is_new() {
+    let (mut run, port) = start("tim", MCP_PACKS, &[]);
+    put(port, "Command:t", "cmd", json!(["sh", "-c", "sleep 0.4; echo same"]));
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    let t0 = now();
+    let (a, _) = put_wait(port, "Command:t", "run", json!({"id": "same", "args": []}), 20.0);
+    let t1 = now();
+    let ra = reply_part(&a, "receipt").unwrap_or_else(|| panic!("{a}"));
+    let (st, fin, ms) = (ra["started"].as_f64().unwrap_or_else(|| panic!("{a}")), ra["finished"].as_f64().unwrap(), ra["ms"].as_f64().unwrap());
+    assert!(st >= t0 - 0.01 && fin <= t1 + 0.01 && st < fin, "{st} {fin} within {t0}..{t1}");
+    assert!(ms >= 350.0 && ms < 3000.0 && ((fin - st) * 1000.0 - ms).abs() < 5.0, "ms {ms} vs {st}..{fin}");
+    // the SAME id and the same output again: still a new receipt (the timestamps differ), never `pending`
+    let (b, _) = put_wait(port, "Command:t", "run", json!({"id": "same", "args": []}), 20.0);
+    let rb = reply_part(&b, "receipt").unwrap_or_else(|| panic!("a rerun with the same id and output answers its receipt: {b}"));
+    assert!(rb["started"].as_f64().unwrap() > fin - 0.01, "{ra} {rb}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_running_command_reads_as_running_with_its_id_and_start_and_a_pending_reply_says_so() {
+    let (mut run, port) = start("runn", MCP_PACKS, &[]);
+    put(port, "Command:r", "cmd", json!(["sh", "-c", "sleep 2; echo late"]));
+    // never started: no status
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    assert!(s != "running", "a command that was never run is not running: {s}");
+    assert!(s.contains("has not been run"), "a never-started command says why its status is none: {s}");
+    let (t, _) = put(port, "Command:r", "run", json!({"id": "r9", "args": []}));
+    assert!(t.contains("pending: ") && t.contains("r9") && t.contains("status: running") && t.contains("started: "), "{t}");
+    assert!(t.contains("read Command:r.run_result"), "{t}");
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    assert_eq!(s, "running");
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "running"}));
+    assert!(s.contains("r9") && s.contains("started"), "{s}");
+    wait("the receipt", || (call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"})).0 == "ok").then_some(()));
+    // a rerun reads running again until its own receipt lands
+    let (_, _) = put(port, "Command:r", "run", json!({"id": "r9", "args": []}));
+    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    assert_eq!(s, "running", "the old receipt is not the new run's");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn reactions_list_only_real_changes_not_null_to_null_rebuilds_or_the_consumed_verb() {
+    let (mut run, port) = start("noise", MCP_PACKS, &[]);
+    let reactions = |t: &str| -> Vec<J> { serde_json::from_str(t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap_or_else(|| panic!("{t}"))).unwrap() };
+    // the live shape: a new Command's cmd, then its run
+    let (t, _) = put(port, "Command:q", "cmd", json!(["echo", "hi"]));
+    let rs = reactions(&t);
+    assert!(rs.iter().all(|r| !(r["new"].is_null() && r["by"] == "rebuild" && r["why"].is_null())), "no reasonless null-to-null rebuild reactions: {t}");
+    assert!(rs.iter().any(|r| r["prop"] == "status" && r["why"].as_str().map_or(false, |w| w.contains("has not been run"))), "a null that says why stays: {t}");
+    let (t, _) = put_wait(port, "Command:q", "run", json!({"id": "q1", "args": []}), 20.0);
+    let rs = reactions(&t);
+    assert!(rs.iter().all(|r| !r["by"].as_str().unwrap().contains("consumed")), "the consumed verb is not a reaction: {t}");
+    assert!(rs.iter().any(|r| r["prop"] == "running"), "real changes stay: {t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_run_value_may_carry_the_cmd_so_one_write_starts_a_command() {
+    let (mut run, port) = start("one", MCP_PACKS, &[]);
+    // ONE write on a Command that does not exist yet: the cmd rides in the run value
+    let (t, e) = put_wait(port, "Command:solo", "run", json!({"id": "o1", "cmd": ["echo", "one", "write"]}), 20.0);
+    assert!(!e, "{t}");
+    assert_eq!(reply_part(&t, "stdout").unwrap_or_else(|| panic!("{t}"))["stdout"].as_str().unwrap().trim(), "one write", "{t}");
+    // the cmd is written on the entity too, so a later run (no cmd in the value) uses it
+    let (c, _) = call(port, "entity_read", json!({"spec": "Command:solo", "prop": "cmd"}));
+    assert_eq!(serde_json::from_str::<J>(&c).unwrap(), json!(["echo", "one", "write"]), "{c}");
+    let (t, _) = put_wait(port, "Command:solo", "run", json!({"id": "o2", "args": ["again"]}), 20.0);
+    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().contains("one write again"), "{t}");
+    // a string cmd runs by sh -c, as before
+    let (t, _) = put_wait(port, "Command:sh1", "run", json!({"id": "s", "cmd": "echo $((1+2))"}), 20.0);
+    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().trim() == "3", "{t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_run_the_driver_refused_says_why_in_the_reply() {
+    let (mut run, port) = start("why", MCP_PACKS, &[]);
+    let (t, _) = put_wait(port, "Command:nocmd", "run", json!({"id": "n1", "args": []}), 20.0);
+    assert!(t.contains("error: a command needs `cmd`"), "the reason of a refusal is in the reply (the receipt line has no head): {t}");
+    // a command that ran and failed keeps its output lines, no duplicated error line
+    let (t, _) = put_wait(port, "Command:bad", "run", json!({"id": "n2", "cmd": ["sh", "-c", "echo boom >&2; exit 3"]}), 20.0);
+    assert!(t.contains("\"rc\":3") && t.contains("boom") && !t.contains("\nerror: "), "{t}");
+    assert!(terminate(&mut run));
+}
+
+// ---- the paginated history route (#1143): GET /membrane/chat/messages?limit=N&before=<id> ------------------------------------------------
+// A fast fake without the door round trips: a system line, one tool call with its result, the result line. A prompt that starts with `hold`
+// waits for the file `go.<tag>` first, so a message can stay running.
+const QUICK: &str = r#"#!/usr/bin/env python3
+import json, os, sys, time
+here = os.path.dirname(os.path.abspath(__file__))
+prompt = sys.argv[-1]
+tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
+def out(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+out({"type": "system", "subtype": "init", "session_id": "q-1"})
+if prompt.startswith("hold"):
+    for _ in range(600):
+        if os.path.exists(os.path.join(here, "go." + tag)): break
+        time.sleep(0.05)
+out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tq1", "name": "mcp__membrane__entity_read", "input": {"spec": "Q:" + prompt}}]}})
+out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tq1", "content": ("x" * 200000 if prompt.startswith("big") else "read " + prompt)}]}})
+out({"type": "result", "subtype": "success", "is_error": False, "result": "Answer to " + prompt, "num_turns": 1, "duration_ms": 1, "total_cost_usd": 0.0, "usage": {"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1}, "session_id": "q-1"})
+"#;
+
+fn history(port: u16, query: &str) -> J {
+    let (st, body) = http(port, "GET", &format!("/membrane/chat/messages{query}"), "");
+    assert_eq!(st, 200, "{body}");
+    serde_json::from_str(&body).unwrap_or_else(|e| panic!("{e}: {body}"))
+}
+/// a message's `tool_calls` as the page draws them: each carries an `id` (a distinct string, so two identical calls are two lines); returned without it
+fn calls_of(m: &J) -> J {
+    let tc = m["tool_calls"].as_array().unwrap_or_else(|| panic!("tool_calls: {m}"));
+    let ids: Vec<&str> = tc.iter().map(|t| t["id"].as_str().unwrap_or_else(|| panic!("a tool call without an id: {t}"))).collect();
+    let mut u = ids.clone(); u.sort(); u.dedup();
+    assert_eq!(u.len(), ids.len(), "the call ids are distinct: {ids:?}");
+    J::Array(tc.iter().map(|t| { let mut t = t.as_object().unwrap().clone(); t.remove("id"); J::Object(t) }).collect())
+}
+fn texts(h: &J) -> Vec<String> { h["messages"].as_array().unwrap().iter().map(|m| m["text"].as_str().unwrap().to_string()).collect() }
+/// the request number inside a message id `<ms>-<n>`: the Request:<n> that posted it
+fn req_n(id: &str) -> u64 { id.rsplit('-').next().unwrap().parse().unwrap() }
+/// send `n` messages `m00`.. one after the other and wait for each to be done; -> their ids
+fn fill(port: u16, n: usize) -> Vec<String> {
+    let ids: Vec<String> = (0..n).map(|i| send(port, &format!("m{i:02}"))).collect();
+    for id in &ids { wait("a message done", || (view(port, id)["state"] == "done").then_some(())); }
+    ids
+}
+
+/// a message sent with a `sid` (the shell's session switcher, #1143): the history route answers one session's turns with `?sid=<id>`, the sid-less chat with `?sid=` (empty), all of them with no `sid`
+#[test]
+fn a_message_may_name_a_session_and_the_history_route_filters_by_it() {
+    let ds = std::fs::read_to_string(format!("{}/../membrane/packs/door_session.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let (mut run, port, _dir) = fake_seat_script("histsid", &[], &[("door_session.c1f", ds.as_str())], QUICK);
+    let (st, s1) = http(port, "POST", "/session", r#"{"title":"one"}"#);
+    assert_eq!(st, 200, "{s1}");
+    let sid = serde_json::from_str::<J>(&s1).unwrap()["id"].as_str().unwrap().to_string();
+    let post = |text: &str, sid: Option<&str>| {
+        let body = match sid { Some(s) => json!({"text": text, "sid": s}), None => json!({"text": text}) };
+        let (st, b) = http(port, "POST", "/membrane/chat/message", &body.to_string());
+        assert_eq!(st, 202, "{b}");
+        serde_json::from_str::<J>(&b).unwrap()["id"].as_str().unwrap().to_string()
+    };
+    let a = post("in-session", Some(&sid));
+    let b = post("main-chat", None);
+    wait("the main message done", || (view(port, &b)["state"] == "done").then_some(()));
+    // the id is inside its chat: the session's message is read with `?sid=`; without it, it is not in the main chat
+    wait("the session message done", || { let (st, t) = http(port, "GET", &format!("/membrane/chat/message/{a}?sid={sid}"), ""); (st == 200 && serde_json::from_str::<J>(&t).unwrap()["state"] == "done").then_some(()) });
+    assert_eq!(http(port, "GET", &format!("/membrane/chat/message/{a}"), "").0, 404, "a session's message is not in the main chat");
+    assert_eq!(http(port, "GET", &format!("/membrane/chat/message/{a}?sid=x:y"), "").0, 404, "a colon in a sid names nothing");
+    assert_eq!(http(port, "POST", "/membrane/chat/message", &json!({"text": "t", "sid": "a:b"}).to_string()).0, 400, "a sid with a colon is refused");
+    assert_eq!(http(port, "GET", "/membrane/chat/messages?sid=a:b", "").0, 400);
+    assert_eq!(texts(&history(port, &format!("?sid={sid}"))), vec!["in-session"]);
+    assert_eq!(texts(&history(port, "?sid=")), vec!["main-chat"], "an empty sid is the chat with no session");
+    assert_eq!(texts(&history(port, "")).len(), 2, "no sid at all: every turn, as before");
+    // the session's turn is the session's: the opencode API's rows know it
+    let (st, rows) = http(port, "GET", &format!("/session/{sid}/message"), "");
+    assert_eq!(st, 200, "{rows}");
+    assert!(rows.contains("in-session"), "{rows}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_history_route_pages_the_newest_turns_oldest_first_with_their_tools_and_a_cursor_to_older_ones() {
+    let (mut run, port, _dir) = fake_seat_script("history", &[], &[], QUICK);
+    let ids = fill(port, 60);
+    // the newest 20 by default, oldest first inside the page, each the message view plus its tools
+    let h = history(port, "");
+    let want: Vec<String> = (40..60).map(|i| format!("m{i:02}")).collect();
+    assert_eq!(texts(&h), want, "{h}");
+    assert_eq!(h["more"], json!(true));
+    assert_eq!(h["next"], json!(ids[40]), "the cursor is the oldest id of the page");
+    let last = &h["messages"][19];
+    assert_eq!((last["id"].clone(), last["state"].clone(), last["response"].clone()), (json!(ids[59]), json!("done"), json!("Answer to m59")), "{last}");
+    assert_eq!(calls_of(last), json!([{"name": "entity_read", "input": {"spec": "Q:m59"}}]), "the page route carries an id, the name and the input only: {last}");
+    assert_eq!(last["tools"], json!(["entity_read"]), "the view's own `tools` stay the names");
+    assert_eq!(last, &view(port, &ids[59]).as_object().map(|v| { let mut v = v.clone(); v.insert("tool_calls".into(), last["tool_calls"].clone()); J::Object(v) }).unwrap(), "the per-message view plus tool_calls (name, input)");
+    // `before` pages to older turns, across the boundary, to the very first
+    let h2 = history(port, &format!("?before={}", ids[40]));
+    assert_eq!(texts(&h2), (20..40).map(|i| format!("m{i:02}")).collect::<Vec<_>>());
+    assert_eq!((h2["more"].clone(), h2["next"].clone()), (json!(true), json!(ids[20])));
+    let h3 = history(port, &format!("?before={}&limit=20", ids[20]));
+    assert_eq!(texts(&h3), (0..20).map(|i| format!("m{i:02}")).collect::<Vec<_>>());
+    assert_eq!((h3["more"].clone(), h3["next"].clone()), (json!(false), J::Null), "the end: no older turns");
+    // a limit of its own; an exact fit has no more; an unknown cursor is a 404
+    let h4 = history(port, "?limit=7");
+    assert_eq!(texts(&h4), (53..60).map(|i| format!("m{i:02}")).collect::<Vec<_>>());
+    assert_eq!(history(port, "?limit=60")["more"], json!(false));
+    assert_eq!(history(port, &format!("?limit=5&before={}", ids[5]))["messages"].as_array().unwrap().len(), 5);
+    assert_eq!(http(port, "GET", "/membrane/chat/messages?before=nope", "").0, 404);
+    assert_eq!(http(port, "POST", "/membrane/chat/messages", "{}").0, 405);
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_pages_loading_path_costs_at_most_three_requests_for_sixty_messages() {
+    let (mut run, port, _dir) = fake_seat_script("historycount", &[], &[], QUICK);
+    let ids = fill(port, 60);
+    // Request:<n> numbers the door's requests, and a message id carries the number of the POST that made it: two POSTs with nothing but the
+    // page's loading between them count exactly the requests the load made (no polling in between)
+    let a = send(port, "m60");
+    let h = history(port, "");
+    assert_eq!(h["messages"].as_array().unwrap().len(), 20);
+    let _ = history(port, &format!("?before={}", h["next"].as_str().unwrap()));   // the 'load older' click
+    let b = send(port, "m61");
+    let between = req_n(&b) - req_n(&a) - 1;
+    assert_eq!(between, 2, "the first load and one 'load older' click are the only requests between the two POSTs (the old page: ~2,000)");
+    assert!(between <= 3);
+    let _ = ids;
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn an_empty_chat_has_an_empty_history_and_a_running_message_is_in_the_newest_page_with_its_state() {
+    let (mut run, port, dir) = fake_seat_script("historyrun", &[], &[], QUICK);
+    let h = history(port, "");
+    assert_eq!((h["messages"].clone(), h["more"].clone(), h["next"].clone()), (json!([]), json!(false), J::Null), "{h}");
+    let done = fill(port, 3);
+    let id = send(port, "hold on");
+    wait("the message running", || (view(port, &id)["state"] == "running").then_some(()));
+    let h = history(port, "");
+    let m = h["messages"].as_array().unwrap();
+    assert_eq!(m.len(), 4, "{h}");
+    assert_eq!((m[3]["id"].clone(), m[3]["state"].clone(), m[3]["text"].clone()), (json!(id), json!("running"), json!("hold on")), "{h}");
+    assert_eq!(calls_of(&m[3]), json!([]));
+    assert_eq!(m[0]["id"], json!(done[0]));
+    let queued = send(port, "hold again");
+    let h = history(port, "");
+    assert!(["queued", "running"].contains(&h["messages"][4]["state"].as_str().unwrap()), "an unfinished message shows its state: {h}");
+    std::fs::write(dir.join(format!("go.{}", tag_of("hold on"))), "").unwrap();
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    std::fs::write(dir.join(format!("go.{}", tag_of("hold again"))), "").unwrap();
+    wait("done", || (view(port, &queued)["state"] == "done").then_some(()));
+    let h = history(port, "?limit=2");
+    assert_eq!(calls_of(&h["messages"][1]), json!([{"name": "entity_read", "input": {"spec": "Q:hold again"}}]));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_tool_that_read_a_large_result_gives_a_small_page_while_the_shared_view_keeps_the_result() {
+    let (mut run, port, _dir) = fake_seat_script("historybig", &[], &[], QUICK);
+    let id = send(port, "big read");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    let (st, body) = http(port, "GET", "/membrane/chat/messages", "");
+    assert_eq!(st, 200);
+    assert!(body.len() < 5000, "the page route is small ({} bytes) though the tool result is 200 KB", body.len());
+    let h: J = serde_json::from_str(&body).unwrap();
+    assert_eq!(calls_of(&h["messages"][0]), json!([{"name": "entity_read", "input": {"spec": "Q:big read"}}]));
+    // the shared view (the future opencode adapter's) still carries the result
+    let (t, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}"), "prop": "history_view"}));
+    assert!(t.len() > 200000 && t.contains("\"result\""), "history_view keeps the whole result ({} bytes)", t.len());
+    assert!(terminate(&mut run));
+}
+
+// ---- the history from the STORE, not from what is loaded; tools in call order; instances by kind (#1143, w20-storage made Chat lazy) ----------------------
+#[test]
+fn the_history_after_a_restart_with_nothing_warmed_is_still_the_full_newest_page_and_the_older_one() {
+    let (mut run, port, dir) = fake_seat_script("historycold", &["--fact", "warm_rows=0"], &[], QUICK);
+    let ids = fill(port, 25);
+    assert!(terminate(&mut run));
+    let (_run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "warm_rows=0"]);
+    // the very first request of the new run: nothing of the chat is loaded
+    let h = history(port2, "");
+    assert_eq!(texts(&h), (5..25).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h}");
+    assert_eq!((h["more"].clone(), h["next"].clone()), (json!(true), json!(ids[5])));
+    assert_eq!(h["messages"][19]["response"], json!("Answer to m24"));
+    assert_eq!(calls_of(&h["messages"][19]), json!([{"name": "entity_read", "input": {"spec": "Q:m24"}}]), "tools of an unloaded turn come with the page");
+    let h2 = history(port2, &format!("?before={}", ids[5]));
+    assert_eq!(texts(&h2), (0..5).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h2}");
+    assert_eq!((h2["more"].clone(), h2["next"].clone()), (json!(false), J::Null));
+    assert_eq!(http(port2, "GET", "/membrane/chat/messages?before=nope", "").0, 404);
+}
+
+/// the quick fake with THREE tool calls in one assistant message, ids not in alphabetical order
+fn three_tools() -> String {
+    QUICK.replace(
+        r#"out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tq1", "name": "mcp__membrane__entity_read", "input": {"spec": "Q:" + prompt}}]}})"#,
+        r#"out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tz3", "name": "mcp__membrane__entity_read", "input": {"n": 1}}, {"type": "tool_use", "id": "tz1", "name": "mcp__membrane__entity_query", "input": {"n": 2}}, {"type": "tool_use", "id": "tz2", "name": "mcp__membrane__entity_write", "input": {"n": 3}}]}})"#)
+}
+
+#[test]
+fn a_messages_tools_come_in_the_order_they_were_called_loaded_or_not() {
+    let (mut run, port, dir) = fake_seat_script("historyorder", &["--fact", "warm_rows=0"], &[], &three_tools());
+    let id = send(port, "three");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    let want = json!([{"name": "entity_read", "input": {"n": 1}}, {"name": "entity_query", "input": {"n": 2}}, {"name": "entity_write", "input": {"n": 3}}]);
+    assert_eq!(calls_of(&history(port, "")["messages"][0]), want, "by call, not by id (tz1 < tz2 < tz3)");
+    assert!(terminate(&mut run));
+    let (_run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "warm_rows=0"]);
+    assert_eq!(calls_of(&history(port2, "")["messages"][0]), want, "after a cold restart");
+}
+
+#[test]
+fn a_message_from_before_the_tool_order_list_still_lists_its_stored_tools() {
+    let (mut run, port, _dir) = fake_seat_script("historyold", &["--fact", "warm_rows=0"], &[], &three_tools());
+    let id = send(port, "three");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    // an older message has no `tool_ids`: its tools are the stored rows under its turn
+    let (t, e) = call(port, "entity_write", json!({"spec": format!("membrane::Chat:main:message:{id}"), "prop": "tool_ids", "value": null}));
+    assert!(!e, "{t}");
+    let h = history(port, "");
+    let mut names: Vec<String> = h["messages"][0]["tool_calls"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+    names.sort();
+    assert_eq!(names, ["entity_query", "entity_read", "entity_write"], "{h}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn instances_of_a_kind_lists_the_loaded_entities_that_carry_it_in_their_parents() {
+    let (mut run, port, _dir) = fake_seat_script("kinds", &[], &[], QUICK);
+    let id = send(port, "kind me");
+    wait("done", || (view(port, &id)["state"] == "done").then_some(()));
+    // messages, turns, responses and tools are eid class Chat; their kinds are in `parents`
+    let (t, e) = cliff(port, "[m.eid for m in instances('ChatMessage')]");
+    assert!(!e, "{t}");
+    assert_eq!(serde_json::from_str::<J>(&t).unwrap(), json!([format!("membrane::Chat:main:message:{id}")]), "{t}");
+    let (t, _) = cliff(port, "len([m for m in instances('ChatTool')])");
+    assert_eq!(t.trim(), "1", "{t}");
+    let (t, _) = cliff(port, "len([m for m in instances('Chat')])");
+    assert!(t.trim().parse::<i64>().unwrap() >= 4, "the eid class still lists them: {t}");
+    assert!(terminate(&mut run));
+}
+
+
+/// a CLI that streams many partial lines, a few ms apart: the driver pushes each read as a Chunk entity
+const CHATTY: &str = r#"#!/usr/bin/env python3
+import json, sys, time
+def out(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+out({"type": "system", "subtype": "init", "session_id": "f", "tools": []})
+for i in range(150):
+    out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "w%d " % i}}})
+    time.sleep(0.02)
+out({"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}})
+out({"type": "result", "subtype": "success", "is_error": False, "result": "done", "num_turns": 1, "session_id": "f"})
+"#;
+
+/// The eval accounting finds the burn the live seat showed (#1143): a Chunk's birth recomputed `chunks` and `stale_chunks` of EVERY loaded message (each scanned all the
+/// chunks), so the work per chunk grew with the number of finished messages. Now a finished message does not look at the chunks, and the work per chunk is the running ones'.
+#[test]
+fn a_chunks_birth_costs_the_running_message_not_every_finished_one() {
+    let stats = shipped(&["stats.c1f"]);
+    let (mut run, port, _dir) = fake_seat_script("chunk_cost", &["--fact", "eval_stats_window_s=1"], &[("stats.c1f", stats[0].1.as_str())], CHATTY);
+    for i in 0..6 {   // six finished messages stay loaded
+        let id = send(port, &format!("old message {i}"));
+        wait("an old turn", || { let v = view(port, &id); (v["state"] == "done" || v["state"] == "error").then_some(()) });
+    }
+    let id = send(port, "the one that counts");
+    wait("the last turn", || { let v = view(port, &id); (v["state"] == "done" || v["state"] == "error").then_some(()) });
+    let rows = wait("a published window with the chunk getters", || {
+        let (t, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "top_total"}));
+        let v: J = serde_json::from_str(&t).ok()?;
+        v.as_array()?.iter().any(|r| r["prop"] == "sevs" && r["class"] == "Chunk" && r["calls"].as_u64().unwrap_or(0) >= 150).then_some(v)
+    });
+    let calls = |class: &str, prop: &str, kind: &str| rows.as_array().unwrap().iter().filter(|r| r["class"] == class && r["prop"] == prop && r["kind"] == kind).map(|r| r["calls"].as_u64().unwrap()).sum::<u64>();
+    let births = calls("Chunk", "sevs", "getter");
+    let scans = calls("ChatMessage", "chunks", "getter");
+    assert!(births >= 150, "chunks were born: {births}");
+    // the running message reads the chunks once per birth (x2 for the two getters that look at them), the finished ones not at all: a bound well under the finished count x births
+    assert!(scans <= 4 * births + 100, "{scans} chunk-getter runs for {births} chunk births: {rows}");
+    assert!(terminate(&mut run));
+}
+/// a CLI that streams `n` partial lines, 3 ms apart (the chunk-cost test's script)
+fn chatty(n: u32) -> String { CHATTY.replace("range(150)", &format!("range({n})")).replace("time.sleep(0.02)", "time.sleep(0.003)") }
+
+/// The work a chunk's birth causes, by the eval accounting: the steps of every getter and setter of the classes ChatMessage and Chunk, per streamed line (`n` lines, one
+/// chunk each), over one whole turn. The divisor is the `n` the script streams, not the count of `Chunk.sevs` getter runs: under load the CLI's lines arrive batched into fewer,
+/// fatter reads and that getter runs a different number of times, so "per getter run" moved by 10% with the machine's load while the work per line stayed within 3%.
+fn steps_per_chunk(tag: &str, n: u32) -> f64 {
+    let stats = shipped(&["stats.c1f"]);
+    let (mut run, port, _dir) = fake_seat_script(tag, &["--fact", "eval_stats_window_s=1"], &[("stats.c1f", stats[0].1.as_str())], &chatty(n));
+    let id = send(port, "count the work");
+    wait("the turn", || { let v = view(port, &id); (v["state"] == "done" || v["state"] == "error").then_some(()) });
+    // `top_total` is the lifetime table as of the LAST PUBLISHED window (every 1 s), so a read right after the turn may hold only part of it (the end of the turn's work not yet in, and
+    // under load the cut falls anywhere). The turn is over: wait until the table is QUIET, that is two snapshots published at different times (`at`) that hold the same numbers.
+    let snap = |(): ()| -> Option<(f64, u64, u64)> {
+        let (t, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "top_total"}));
+        let rows: J = serde_json::from_str(&t).ok()?;
+        let (at, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "at"}));
+        let births = rows.as_array()?.iter().filter(|r| r["class"] == "Chunk" && r["prop"] == "sevs").map(|r| r["calls"].as_u64().unwrap_or(0)).sum::<u64>();
+        let steps = rows.as_array()?.iter().filter(|r| (r["class"] == "ChatMessage" || r["class"] == "Chunk") && r["pack"] == "chat_turn").map(|r| r["steps"].as_u64().unwrap_or(0)).sum::<u64>();
+        (births >= n as u64 * 9 / 10).then_some((at.trim().parse::<f64>().ok()?, births, steps))
+    };
+    let mut last = wait("a published window with the chunk getters", || snap(()));
+    let (births, steps) = wait("a quiet table (two windows with the same numbers)", || {
+        std::thread::sleep(Duration::from_millis(300));
+        let now = snap(())?;
+        let quiet = now.0 > last.0 && now.1 == last.1 && now.2 == last.2;
+        if now.0 > last.0 { last = now; }
+        quiet.then_some((now.1, now.2))
+    });
+    assert!(terminate(&mut run));
+    eprintln!("{tag}: {births} chunks, {steps} steps"); steps as f64 / n as f64
+}
+
+/// The work per chunk must not grow with the chunks already there (#1143, w28): the message's `chunks` getter scanned every live chunk (and built a dict and a sort of them)
+/// at each birth, so a turn of N chunks cost O(N squared) (the burst: 80% of the CPU). The partial answer is accumulated by a setter on each chunk instead.
+#[test]
+fn the_work_per_chunk_does_not_grow_with_the_chunks_already_born() {
+    let small = steps_per_chunk("chunk_flat_a", 100);
+    let big = steps_per_chunk("chunk_flat_b", 1000);
+    assert!(big < small * 1.1, "steps per chunk: {small:.0} at 100 chunks, {big:.0} at 1000: it grows with the chunks already there");
+}
+
+// ---- a command's own time limit (#1143): the model's estimate `timeout_s`, a default, a kill of the whole process group, a reasoned null --------
+/// is a process whose command line contains `marker` alive?
+fn alive(marker: &str) -> bool { Command::new("pgrep").args(["-f", marker]).stdout(Stdio::null()).status().map(|s| s.success()).unwrap_or(false) }
+fn receipt_of(t: &str) -> J { let l = t.lines().find(|l| l.starts_with("receipt: ")).unwrap_or_else(|| panic!("{t}")); serde_json::from_str(&l["receipt: ".len()..]).unwrap_or_else(|e| panic!("{e}: {l}")) }
+
+#[test]
+fn a_command_past_its_timeout_s_is_killed_with_its_whole_process_group_and_keeps_its_partial_output() {
+    let (mut run, port) = start("to1", MCP_PACKS, &[]);
+    let t0 = Instant::now();
+    let (t, e) = put_wait(port, "Command:t1", "run", json!({"id": "t1", "cmd": ["sh", "-c", "echo before; sleep 61.4271 & wait"], "timeout_s": 1}), 30.0);
+    assert!(t0.elapsed() < Duration::from_secs(12), "{:?}", t0.elapsed());
+    assert!(!e, "{t}");
+    let r = receipt_of(&t);
+    assert_eq!((r["status"].clone(), r["killed"].clone(), r["timeout_s"].clone(), r["ok"].clone()), (json!("timeout"), json!(true), json!(1), json!(false)), "{t}");
+    assert_eq!(r["rc"], json!(124), "{t}");
+    assert!(t.contains("timed out after 1 s (killed)") && t.contains("timeout_s"), "the reply says what happened and how to retry: {t}");
+    assert!(reply_part(&t, "stdout").is_some_and(|s| s["stdout"].as_str().unwrap().contains("before")), "the partial output is kept: {t}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!alive("sleep 61.4271"), "the whole process group is dead");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_timed_out_commands_result_props_are_errors_that_tell_the_remedy_and_the_partial_output_stays() {
+    let (mut run, port) = start("to2", MCP_PACKS, &[]);
+    put_wait(port, "Command:t2", "run", json!({"id": "t2", "cmd": ["sh", "-c", "echo partial-line; sleep 62.5"], "timeout_s": 1}), 30.0);
+    let want = "Command:t2 timed out after 1 s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}";
+    for p in ["output", "ok", "rc"] {
+        let (t, e) = cliff(port, &format!("prop('Command:t2', '{p}')"));
+        assert!(e && t == format!("Error: {want}"), "{p}: {t}");
+    }
+    // entity_read shows the kind too, and says it is an error
+    let (t, e) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "output"}));
+    assert!(e && t == format!("Error: {want}"), "entity_read: {t}");
+    // a model-style getter over it keeps the Error and the reason
+    let pack = "PACK shx 1\nSh.out getter: prop('Command:t2', 'output')\nSh.len getter: this.out + '!'\n";
+    put(port, "Pack:shx", "text", json!(pack));
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:shx", "prop": "state"})).0 == "loaded").then_some(()));
+    put(port, "Sh:a", "x", json!(1));
+    let (t, e) = cliff(port, "prop('Sh:a', 'len')");
+    assert!(e && t.contains(want), "the null passes through the getters: {t}");
+    let (p, _) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "partial_output"}));
+    assert!(p.contains("partial-line"), "{p}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_command_that_finishes_in_time_is_untouched_by_its_timeout() {
+    let (mut run, port) = start("to3", MCP_PACKS, &[]);
+    let (t, e) = put_wait(port, "Command:t3", "run", json!({"id": "t3", "cmd": ["sh", "-c", "echo fine; sleep 0.2"], "timeout_s": 30}), 30.0);
+    assert!(!e, "{t}");
+    let r = receipt_of(&t);
+    assert_eq!((r["status"].clone(), r["rc"].clone(), r["ok"].clone(), r["timeout_s"].clone()), (json!("ok"), json!(0), json!(true), json!(30)), "{t}");
+    assert!(r["killed"].is_null() || r["killed"] == json!(false), "{t}");
+    assert_eq!(cliff(port, "prop('Command:t3', 'output')").0.trim(), "fine");
+    assert_eq!(cliff(port, "prop('Command:t3', 'ok')").0, "True");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_timeout_s_of_zero_or_less_is_refused_and_nothing_runs() {
+    let (mut run, port) = start("to4", MCP_PACKS, &[]);
+    for (i, v) in [json!(0), json!(-5)].into_iter().enumerate() {
+        let (t, _) = put_wait(port, &format!("Command:z{i}"), "run", json!({"id": "z", "cmd": ["sh", "-c", "sleep 63.11"], "timeout_s": v}), 20.0);
+        assert!(t.contains("timeout_s") && t.contains("bigger") && t.contains("refused"), "{t}");
+    }
+    assert!(!alive("sleep 63.11"));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn without_a_timeout_s_the_boot_fact_command_timeout_s_applies_and_the_two_write_form_works() {
+    let (mut run, port) = start("to5", MCP_PACKS, &["--fact", "command_timeout_s=2"]);
+    let (t, _) = put_wait(port, "Command:d1", "run", json!({"id": "d1", "cmd": ["sleep", "64.2"]}), 30.0);
+    let r = receipt_of(&t);
+    assert_eq!((r["status"].clone(), r["timeout_s"].clone()), (json!("timeout"), json!(2)), "{t}");
+    // the two-write form: timeout_s on the entity, then run
+    put(port, "Command:d2", "cmd", json!(["sleep", "64.3"]));
+    put(port, "Command:d2", "timeout_s", json!(1));
+    let (t, _) = put_wait(port, "Command:d2", "run", json!({"id": "d2", "args": []}), 30.0);
+    assert_eq!(receipt_of(&t)["timeout_s"], json!(1), "{t}");
+    assert!(!alive("sleep 64."));
+    // the default itself is 120 and shows in the receipt of a plain run, and in the pending reply with the time left
+    let (mut run2, port2) = start("to5b", MCP_PACKS, &[]);
+    let (t, _) = put(port2, "Command:d3", "run", json!({"id": "d3", "cmd": ["sleep", "2"]}));
+    assert!(t.contains("pending") && t.contains("timeout_s: 120") && t.contains("left"), "{t}");
+    assert!(terminate(&mut run2));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_timed_out_command_frees_its_worker_slot_and_stop_kills_the_group_at_once() {
+    let (mut run, port) = start("to6", MCP_PACKS, &["--fact", "effect_workers=1"]);
+    let a = std::thread::spawn(move || put_wait(port, "Command:s1", "run", json!({"id": "s1", "cmd": ["sh", "-c", "sleep 65.3 & wait"], "timeout_s": 1}), 40.0).0);
+    std::thread::sleep(Duration::from_millis(300));
+    let t0 = Instant::now();
+    let (t, _) = put_wait(port, "Command:s2", "run", json!({"id": "s2", "cmd": ["echo", "after"]}), 40.0);
+    assert!(t.contains("after") && t0.elapsed() < Duration::from_secs(15), "{t} {:?}", t0.elapsed());
+    assert!(a.join().unwrap().contains("\"timeout\""));
+    // stop: the whole group, now
+    let b = std::thread::spawn(move || put_wait(port, "Command:s3", "run", json!({"id": "s3", "cmd": ["sh", "-c", "sleep 66.7 & wait"], "timeout_s": 300}), 40.0).0);
+    wait("running", || alive("sleep 66.7").then_some(()));
+    put(port, "Command:s3", "stop", json!({"id": "x"}));
+    b.join().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!alive("sleep 66.7") && !alive("sleep 65.3"));
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_chat_turn_is_not_killed_by_the_default_and_a_timed_out_receipt_survives_a_restart_unchanged() {
+    let (mut run, port, dir) = fake_seat("to7", &["--fact", "command_timeout_s=1"]);
+    let id = send(port, "slow turn");
+    wait("running", || (view(port, &id)["state"] == "running").then_some(()));
+    std::thread::sleep(Duration::from_millis(2500));
+    assert_eq!(finish(port, &dir, &id, "slow turn")["state"], "done", "the turn outlived the default of 1 s");
+    put_wait(port, "Command:r1", "run", json!({"id": "r1", "cmd": ["sleep", "67.9"], "timeout_s": 1}), 30.0);
+    let before = call(port, "entity_read", json!({"spec": "Command:r1", "prop": "run_result"})).0;
+    assert!(before.contains("timeout"), "{before}");
+    assert!(terminate(&mut run));
+    let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "command_timeout_s=1"]);
+    let after = wait("the receipt after the restart", || { let t = call(port2, "entity_read", json!({"spec": "Command:r1", "prop": "run_result"})).0; t.contains("timeout").then_some(t) });
+    assert_eq!(before, after, "the receipt is the journalled write; a replay runs nothing");
+    assert!(!alive("sleep 67.9"));
+    assert!(terminate(&mut run2));
+}
+
+#[test]
+fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_tool_result_is_not() {
+    let (mut run, port, dir) = fake_seat("body", &[]);
+    let text = "Dogs chase the cats near my_fn.";
+    let id = send(port, text);
+    let v = finish(port, &dir, &id, text);
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(v["text"], text, "the page's `text` keeps working");
+    let body = format!("membrane::Chat:main:message:{id}:body");
+    assert_eq!(call(port, "entity_read", json!({"spec": &body, "prop": "text"})).0, text);
+    let words = wait("the body's words", || { let t = call(port, "entity_read", json!({"spec": &body, "prop": "words"})).0; if t.contains("Dogs") { Some(t) } else { None } });
+    assert!(words.contains("chase"), "{words}");
+    // its words are entities that name the body
+    let cat = wait("Word:lemma:cat", || { let t = call(port, "entity_read", json!({"spec": "Word:lemma:cat", "prop": "mentioned_in"})).0; if t.contains(&body) { Some(t) } else { None } });
+    assert!(cat.contains("\"sentence\":0"), "{cat}");
+    wait("the identifier", || { let t = call(port, "entity_read", json!({"spec": "Identifier:name:my_fn", "prop": "mentioned_in"})).0; t.contains(&body).then_some(()) });
+    // the answer is a SemText too, under the response
+    let rbody = format!("membrane::Chat:main:message:{id}:turn:response:body");
+    assert_eq!(call(port, "entity_read", json!({"spec": &rbody, "prop": "text"})).0, format!("Final answer to: {text}"));
+    wait("the answer's words", || { let t = call(port, "entity_read", json!({"spec": "Word:lemma:answer", "prop": "mentioned_in"})).0; t.contains(&rbody).then_some(()) });
+    // recall by edges: ask the body for the sentences that mention the same things (the dial is the question), read them through the door
+    let (t, e) = call(port, "entity_write", json!({"spec": &body, "prop": "related_n", "value": 3}));
+    assert!(!e, "{t}");
+    let rel = wait("the related rows", || { let t = call(port, "entity_read", json!({"spec": &body, "prop": "related"})).0; if t.contains(&rbody) { Some(t) } else { None } });
+    assert!(rel.contains("\"shared\":6") && rel.contains("Final answer to"), "{rel}");
+    let (t, e) = call(port, "run_cliff", json!({"code": format!("[r['semtext'] for r in prop('{body}', 'related')]")}));
+    assert!(!e && t.contains(&rbody), "{t}");
+    // a tool's result is NOT tokenized: the only SemTexts of the message are the two bodies
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:SemText & name~:membrane::Chat:main:message:"}));
+    assert!(q.contains(&body) && q.contains(&rbody) && !q.contains(":tool:"), "{q}");
+    let (n, _) = call(port, "entity_query", json!({"q": "kind:SemText", "count": true}));
+    assert!(n.starts_with("2 entity"), "{n}");
+    // what one message costs in entities (the fake runs two tools): the message, its turn, its body, the response and ITS body, two tools = 7; the words are Word entities
+    let (n, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:main:message:", "count": true}));
+    assert!(n.starts_with("7 entity"), "{n}");
+    let (n, _) = call(port, "entity_query", json!({"q": "kind:Word", "count": true}));
+    println!("WORDS after one message and its answer: {n}");
+    let (n, _) = call(port, "entity_query", json!({"q": "kind:Span", "count": true}));
+    assert!(n.starts_with("0 entity"), "the spans were collected: {n}");
+    // the history route still answers with the same view
+    let (st, h) = http(port, "GET", "/membrane/chat/messages", "");
+    assert_eq!(st, 200, "{h}");
+    let hv: J = serde_json::from_str(&h).unwrap();
+    assert_eq!(hv["messages"][0]["text"], text);
+    assert_eq!(hv["messages"][0]["response"], format!("Final answer to: {text}"));
+    assert!(terminate(&mut run));
+}
+
+// ---- the chat turn on a seat with a door secret (#1143): the CLI reaches /mcp with the owner's token, never through argv ----------------------------
+/// the fake as the real CLI behaves with an MCP server's `headers`: `${VAR}` in a value is the environment's; it records the config's header text, what it sent, and its argv
+fn fake_with_headers(sent: &str) -> String {
+    FAKE.replace("url = cfg[\"mcpServers\"][\"membrane\"][\"url\"]", &format!(r#"url = cfg["mcpServers"]["membrane"]["url"]
+raw_headers = cfg["mcpServers"]["membrane"].get("headers", {{}})
+hdrs = {{k: os.path.expandvars(v) for k, v in raw_headers.items()}}
+{sent}
+json.dump({{"raw": raw_headers, "sent": hdrs, "argv": argv}}, open(os.path.join(here, "mcp_headers.json"), "w"))"#))
+        .replace("headers={\"Content-Type\": \"application/json\"}", "headers=dict({\"Content-Type\": \"application/json\"}, **hdrs)")
+}
+
+/// a seat with a door secret in its own folder (made at boot), the fake as its CLI; the test thread carries the owner's token afterwards
+fn owner_seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
+    let (run, port, dir) = fake_seat_script(tag, &["--fact", "door_secret_file=door.secret", "--fact", "seat_data_dir=."], &[], script);
+    let tok = std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string();
+    BEARER.with(|b| *b.borrow_mut() = Some(tok));
+    (run, port, dir)
+}
+
+#[test]
+fn the_turns_cli_reaches_the_mcp_door_with_the_owner_token_from_its_environment_and_never_through_argv() {
+    let (mut run, port, dir) = owner_seat("chatowner", &fake_with_headers(""));
+    let tok = std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string();
+    let id = send(port, "with a token");
+    let v = finish(port, &dir, &id, "with a token");
+    assert_eq!(v["state"], "done", "the seat accepted the token the CLI sent: {v}");
+    assert_eq!(v["tools"], json!(["entity_write", "entity_read"]));
+    let h: J = serde_json::from_str(&std::fs::read_to_string(dir.join("mcp_headers.json")).unwrap()).unwrap();
+    assert_eq!(h["raw"], json!({"Authorization": "Bearer ${MEMBRANE_OWNER_TOKEN}"}), "the config names the variable, not the token");
+    assert_eq!(h["sent"]["Authorization"], format!("Bearer {tok}"), "what the CLI sent is the owner's token");
+    assert!(!h["argv"].to_string().contains(&tok), "the token is not in argv (a process listing shows argv)");
+    assert!(!std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("with a token")))).unwrap().contains(&tok));
+    // the token is in no row of the field either: not in the message's view, not in the command entity
+    assert!(!v.to_string().contains(&tok));
+    let (c, _) = call(port, "entity_read", json!({"spec": format!("membrane::Command:chat:main:message:{id}")}));
+    assert!(!c.contains(&tok), "{c}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_turn_whose_cli_sends_a_wrong_token_fails_visibly() {
+    let (mut run, port, dir) = owner_seat("chatwrongtoken", &fake_with_headers("hdrs = {'Authorization': 'Bearer not-the-owners-token'}"));
+    let id = send(port, "wrong token");
+    let v = finish(port, &dir, &id, "wrong token");
+    assert_eq!(v["state"], "error", "{v}");
+    let r = v["response"].as_str().unwrap();
+    assert!(r.contains("claude failed") && r.contains("401"), "the 401 reaches the answer: {r}");
+    assert!(terminate(&mut run));
+}
+
+// ---- a turn that finished with an answer but whose output was too big to read in one evaluation (#1143, the live "error with no cause") ------
+// The live finding: a 115 s turn, rc 0, a result line, 1 MB of stream-json: `ChatMessage.evs` parsed every line in ONE getter and passed the 10 ms self-time
+// allowance (it was a `Trip:...#evs` entity and an Error; time no longer decides a value, #1143), the Error flowed into `finals`/`failed`, and the turn ended `error` with no response
+// (the response write carried an Error, which setters refuse) and no cause. The fake pads its stream with N lines to make the same size.
+#[test]
+fn a_turn_with_a_final_answer_is_done_even_when_its_output_is_too_big_to_read_in_one_evaluation() {
+    let (mut run, port, dir) = fake_seat("bigdone", &[]);
+    std::fs::write(dir.join("pad"), "800").unwrap();
+    let id = send(port, "huge output");
+    let v = finish(port, &dir, &id, "huge output");
+    assert_eq!(v["state"], "done", "the stream gave a final answer: {v}");
+    assert_eq!(v["response"], "Final answer to: huge output", "{v}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_turn_the_cli_died_in_stores_its_cause_on_the_turn_the_response_and_the_next_banner() {
+    let (mut run, port, dir) = fake_seat("diedturn", &[]);
+    std::fs::write(dir.join("die"), "").unwrap();
+    let id = send(port, "dies");
+    let v = wait("the error", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    let r = v["response"].as_str().unwrap_or("").to_string();
+    assert!(r.contains("rc") && r.contains("about to be killed"), "the response names how it ended and the stderr: {v}");
+    assert!(r.contains("signal"), "a death by signal says so, not a bare rc: {v}");
+    let (e, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn"), "prop": "error"}));
+    assert!(e.contains("about to be killed"), "the turn itself carries the cause: {e}");
+    std::fs::remove_file(dir.join("die")).unwrap();
+    send(port, "after");
+    let sys = system_prompt(&dir, "after");
+    assert!(sys.contains("THE PREVIOUS TURN ENDED WITH AN ERROR") && sys.contains("about to be killed"), "{sys}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_run_that_ends_with_no_answer_at_all_is_an_error_that_says_so() {
+    let (mut run, port, dir) = fake_seat("noresultturn", &[]);
+    std::fs::write(dir.join("noresult"), "").unwrap();
+    let id = send(port, "silent");
+    let v = wait("the end", || { let v = view(port, &id); if v["state"] == "error" || v["state"] == "done" { Some(v) } else { None } });
+    assert_eq!(v["state"], "error", "{v}");
+    assert!(v["response"].as_str().unwrap_or("").contains("no answer"), "{v}");
+    assert!(terminate(&mut run));
+}
+
+// ---- THE CLAUDE RUNG'S AUTH (#1143, the release gate: an Anthropic API key by default, the CLI's login only by opt-in) -----------------------
+const PLANTED: &str = "sk-ant-api03-PLANTED-0123456789-abcdefghij";
+/// every file the seat left in its folder (the store and its journal, the log, the packs) EXCEPT the fake's own records: nothing in them may hold `needle`
+fn assert_nowhere_on_disk(dir: &std::path::Path, needle: &str) {
+    fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { walk(&p, out) } else { out.push(p) } } }
+    let mut files = vec![];
+    walk(dir, &mut files);
+    let mut seen_store = false;
+    for f in files {
+        let name = f.file_name().unwrap().to_string_lossy().to_string();
+        if name == "fake-claude" || name == "want_key" || name == "fail" || name == "echo_key" || name.starts_with("argv.") || name.starts_with("go.") { continue; }
+        if name.starts_with("field.sqlite3") { seen_store = true; }
+        let bytes = std::fs::read(&f).unwrap_or_default();
+        assert!(!bytes.windows(needle.len()).any(|w| w == needle.as_bytes()), "the key is in {}", f.display());
+    }
+    assert!(seen_store, "the store file was looked at");
+}
+/// the replies of the routes a model or a person can read, after a turn: none may hold `needle`
+fn assert_nowhere_in_routes(port: u16, id: &str, needle: &str) {
+    let mut seen: Vec<(String, String)> = vec![];
+    for p in [format!("/membrane/chat/message/{id}"), "/membrane/chat".to_string(), "/global/health".to_string(), "/membrane/options".to_string(), "/v1/models".to_string(), "/session".to_string(), "/session/status".to_string()] {
+        let (_, b) = http(port, "GET", &p, "");
+        seen.push((p, b));
+    }
+    for spec in [format!("membrane::Command:chat:main:message:{id}"), format!("membrane::Chat:main:message:{id}:turn"), format!("membrane::Chat:main:message:{id}:turn:response"), "Boot:seat".to_string(), format!("membrane::Chat:main:message:{id}")] {
+        seen.push((spec.clone(), call(port, "entity_read", json!({"spec": spec})).0));
+    }
+    for q in ["kind:Command", "kind:Boot", "kind:ChatMessage", "kind:ChatTool", "kind:Chat"] { seen.push((q.to_string(), call(port, "entity_query", json!({"q": q})).0)); }
+    for (what, body) in seen { assert!(!body.contains(needle), "the key is in the reply of {what}: {body}"); }
+}
+fn argv_record(dir: &std::path::Path, prompt: &str) -> J {
+    wait("the fake's record", || std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of(prompt)))).ok().and_then(|t| serde_json::from_str(&t).ok()))
+}
+
+#[test]
+fn by_default_the_cli_gets_the_key_from_the_seats_environment_and_it_is_written_nowhere() {
+    let (mut run, port, dir) = fake_seat_cred("authkey", &[], &[], FAKE, &[("ANTHROPIC_API_KEY", PLANTED)]);
+    std::fs::write(dir.join("echo_key"), "").unwrap();   // the worst case: the CLI itself prints its key on stderr and in its answer
+    std::fs::write(dir.join("want_key"), PLANTED).unwrap();
+    let id = send(port, "with a key");
+    let v = finish(port, &dir, &id, "with a key");
+    assert_eq!(v["state"], "done", "{v}");
+    let rec = argv_record(&dir, "with a key");
+    assert_eq!(rec["key_is_wanted"], json!(true), "the child got the key, in its environment");
+    assert!(!rec["argv"].to_string().contains(PLANTED), "the key is not in argv (a process listing shows it)");
+    assert!(!v.to_string().contains(PLANTED), "{v}");
+    assert!(v["response"].as_str().unwrap().contains("key="), "the answer is still the CLI's");
+    assert_nowhere_in_routes(port, &id, PLANTED);
+    assert!(terminate(&mut run));
+    assert_nowhere_on_disk(&dir, PLANTED);
+}
+
+#[test]
+fn a_failing_cli_that_echoes_the_key_on_stderr_does_not_put_it_in_the_answer_the_rows_or_the_disk() {
+    let (mut run, port, dir) = fake_seat_cred("authkeyfail", &[], &[], FAKE, &[("ANTHROPIC_API_KEY", PLANTED)]);
+    std::fs::write(dir.join("fail"), format!("401 invalid x-api-key: {PLANTED}\n")).unwrap();
+    let id = send(port, "failing");
+    let v = wait("the error answer", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    assert!(v["response"].as_str().unwrap().contains("401 invalid x-api-key"), "the CLI's words stay: {v}");
+    assert_nowhere_in_routes(port, &id, PLANTED);
+    assert!(terminate(&mut run));
+    assert_nowhere_on_disk(&dir, PLANTED);
+}
+
+#[test]
+fn with_no_key_the_turn_is_refused_how_to_set_it_and_how_to_opt_into_the_login_and_no_cli_starts() {
+    let (mut run, port, dir) = fake_seat_cred("authnokey", &[], &[], FAKE, &[]);
+    let id = send(port, "no key");
+    let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    let t = v["response"].as_str().unwrap();
+    assert!(t.contains("ANTHROPIC_API_KEY") && t.contains("chat_auth=login"), "the refusal says how to set the key AND how to switch the login on: {t}");
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!dir.join(format!("argv.{}.json", tag_of("no key"))).exists(), "no claude process started");
+    assert!(terminate(&mut run));
+    // an EMPTY variable is no key
+    let (mut run, port, dir) = fake_seat_cred("authemptykey", &[], &[], FAKE, &[("ANTHROPIC_API_KEY", "")]);
+    let id = send(port, "empty key");
+    let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    assert!(v["response"].as_str().unwrap().contains("ANTHROPIC_API_KEY"), "{v}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!dir.join(format!("argv.{}.json", tag_of("empty key"))).exists());
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_login_is_an_opt_in_fact_the_key_is_then_not_handed_to_the_cli_and_no_key_is_needed() {
+    // login + a key in the seat's environment: the key is NOT passed (the login answers)
+    let (mut run, port, dir) = fake_seat_cred("authlogin", &["--fact", "chat_auth=login"], &[], FAKE, &[("ANTHROPIC_API_KEY", PLANTED)]);
+    let id = send(port, "login mode");
+    let v = finish(port, &dir, &id, "login mode");
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(argv_record(&dir, "login mode")["cred_env"], json!([]), "no credential variable reaches the CLI: its own login answers");
+    assert!(terminate(&mut run));
+    // login + no key at all: it runs
+    let (mut run, port, dir) = fake_seat_cred("authlogin2", &["--fact", "chat_auth=login"], &[], FAKE, &[]);
+    let id = send(port, "login no key");
+    assert_eq!(finish(port, &dir, &id, "login no key")["state"], "done");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn in_login_mode_the_credentials_that_would_win_over_the_login_are_removed_and_the_logins_own_token_stays() {
+    // the released rung (claude_agent.py v0.7.53 `credential_env`, login mode) blanked the key and OVERRIDING_ENV; CLAUDE_CODE_OAUTH_TOKEN is a LOGIN token, which the login legitimately uses
+    let env = [("ANTHROPIC_API_KEY", PLANTED), ("ANTHROPIC_AUTH_TOKEN", "t1"), ("CLAUDE_CODE_USE_BEDROCK", "1"), ("CLAUDE_CODE_USE_VERTEX", "1"), ("CLAUDE_CODE_USE_FOUNDRY", "1"), ("CLAUDE_CODE_OAUTH_TOKEN", "o1")];
+    let (mut run, port, dir) = fake_seat_cred("authloginwins", &["--fact", "chat_auth=login"], &[], FAKE, &env);
+    let id = send(port, "login wins");
+    assert_eq!(finish(port, &dir, &id, "login wins")["state"], "done");
+    assert_eq!(argv_record(&dir, "login wins")["cred_env"], json!(["CLAUDE_CODE_OAUTH_TOKEN"]), "nothing that outranks the stored login reaches the CLI; only the login's own token");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn in_key_mode_the_credentials_that_would_win_over_the_key_or_stand_in_for_it_are_removed_from_the_cli() {
+    let env = [("ANTHROPIC_API_KEY", PLANTED), ("ANTHROPIC_AUTH_TOKEN", "t1"), ("CLAUDE_CODE_USE_BEDROCK", "1"), ("CLAUDE_CODE_USE_VERTEX", "1"), ("CLAUDE_CODE_USE_FOUNDRY", "1"), ("CLAUDE_CODE_OAUTH_TOKEN", "o1")];
+    let (mut run, port, dir) = fake_seat_cred("authwins", &[], &[], FAKE, &env);
+    let id = send(port, "key wins");
+    assert_eq!(finish(port, &dir, &id, "key wins")["state"], "done");
+    assert_eq!(argv_record(&dir, "key wins")["cred_env"], json!(["ANTHROPIC_API_KEY"]), "only the key is in the CLI's environment");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn an_unknown_chat_auth_is_refused_with_the_two_values_and_runs_nothing() {
+    let (mut run, port, dir) = fake_seat_cred("authbad", &["--fact", "chat_auth=oauth"], &[], FAKE, &[("ANTHROPIC_API_KEY", PLANTED)]);
+    let id = send(port, "bad auth");
+    let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    let t = v["response"].as_str().unwrap();
+    assert!(t.contains("chat_auth") && t.contains("api_key") && t.contains("login") && t.contains("oauth"), "{t}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!dir.join(format!("argv.{}.json", tag_of("bad auth"))).exists());
+    assert!(terminate(&mut run));
+}
+
+// ---- the size of an entity_write reply, design B2 of docs/reply-size.md (#1143, operator 2026-11-14) ---------------------------------------
+// The byte bounds below are TEST-ONLY generous bounds from the measured B2 numbers of the doc (Keep with 10 running turns about 1.2 KB, mention about 2.3-2.7 KB);
+// they are not a budget the product enforces.
+const KEEP_PACK: &str = "PACK mine 1\nIMPORT default_banner 1\nKeep.summary getter: 'keep: ' + head(str(this.line), 40)\nKeep.chars getter: len(str(this.line))\nBanner.keeps getter: [prop('Keep:x', 'line')]\nBanner.text getter: 'keeps: ' + str(prop('Keep:x', 'line'))\nBanner.alert getter: None('no alert for ' + head(str(prop('Keep:x', 'line')), 6))\n";
+
+/// the reply of one write on the lines it has: -> (reactions array, the `other changes` line, the whole text)
+fn rx_lines(t: &str) -> (Vec<J>, Option<String>) {
+    let rs: Vec<J> = serde_json::from_str(t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap_or_else(|| panic!("{t}"))).unwrap();
+    (rs, t.lines().find_map(|l| l.strip_prefix("other changes: ")).map(String::from))
+}
+
+#[test]
+fn a_keep_write_with_running_turns_answers_small_the_written_in_full_the_rest_as_counts() {
+    let (mut run, port, dir) = fake_seat_with("b2keep", &[], &[("mine.c1f", KEEP_PACK)]);
+    put(port, "Keep:x", "line", json!("first"));
+    let prompts: Vec<String> = (0..10).map(|i| format!("running question {i}")).collect();
+    for p in &prompts { send(port, p); }
+    std::thread::sleep(Duration::from_millis(1500));   // the turns are running (the fakes wait for their go file)
+    let long = "a keep line of some length. ".repeat(100);   // 2.8 KB, as the banner text carries it
+    let (t, e) = put(port, "Keep:x", "line", json!(long));
+    assert!(!e, "{t}");
+    eprintln!("B2 keep write with 10 running turns: {} bytes", t.len());
+    assert!(t.len() < 4096, "test-only bound 4 KB (measured B2 ~1.2 KB, was 264 KB): {} bytes: {}", t.len(), &t[..t.len().min(1500)]);
+    assert!(t.starts_with("wrote Keep:x.line\n"), "{t}");
+    let (rs, other) = rx_lines(&t);
+    let own = |p: &str| rs.iter().find(|r| r["eid"] == "Keep:x" && r["prop"] == p).cloned().unwrap_or_else(|| panic!("the written entity's {p} in full: {t}"));
+    assert_eq!(own("chars")["new"], json!(long.len()), "{t}");
+    assert!(own("summary")["new"].as_str().unwrap().starts_with("keep: a keep line"), "{t}");
+    assert_eq!(own("summary")["cls"], "Keep", "the host's class field: {t}");
+    let other = other.unwrap_or_else(|| panic!("the rest as counts: {t}"));
+    assert!(other.contains("Banner.text x1") && other.contains("Chat.argv x"), "grouped as <Class>.<prop> xN: {other}");
+    assert!(!rs.iter().any(|r| r["eid"].as_str().unwrap().contains("Chat:main:message")), "no Chat value is listed: {t}");
+    // a reasoned null on an entity that was not written still surfaces its reason
+    assert!(t.contains("no alert for a keep"), "the reason of a null on another entity stays: {t}");
+    for p in &prompts { std::fs::write(dir.join(format!("go.{}", tag_of(p))), "").unwrap(); }
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_mention_write_answers_small_the_words_and_spans_as_counts() {
+    let (mut run, port) = start("b2mention", &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f"], &[]);
+    // earlier texts that hold the same words: the shared Word entities' lists have grown
+    for i in 0..6 {
+        let (t, e) = cliff(port, &format!("Note:body:o{i} = SemText(text: 'The dogs chase the cats near the old barn number {i}. The rain falls on the house.')\nNote:body:o{i}.mention = True"));
+        assert!(!e, "{t}");
+    }
+    let (t, e) = cliff(port, "Note:body:n2 = SemText(text: 'The dogs chase the cats near the barn. The old rain falls on the house and the cats run home. Dogs bark at the rain.')");
+    assert!(!e, "{t}");
+    let (t, e) = put(port, "Note:body:n2", "mention", json!(true));
+    assert!(!e, "{t}");
+    eprintln!("B2 mention write: {} bytes", t.len());
+    assert!(t.len() < 8192, "test-only bound 8 KB (measured B2 ~2.3-2.7 KB, was 62-97 KB): {} bytes: {}", t.len(), &t[..t.len().min(1500)]);
+    assert!(t.starts_with("wrote Note:body:n2.mention\n"), "{t}");
+    let (rs, other) = rx_lines(&t);
+    assert!(rs.iter().all(|r| { let e = r["eid"].as_str().unwrap(); e == "Note:body:n2" || e.starts_with("Note:body:n2:") || !r["why"].is_null() }), "only the written entity, its children and reasoned ones in full: {t}");
+    assert!(rs.iter().any(|r| r["eid"] == "Note:body:n2"), "the written entity's own props: {t}");
+    assert!(other.unwrap_or_else(|| panic!("{t}")).contains("Word."), "the words as counts: {t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_command_run_a_pack_text_and_a_lone_write_keep_their_small_replies_and_errors_surface() {
+    let (mut run, port) = start("b2small", MCP_PACKS, &[]);
+    let (t, e) = put_wait(port, "Command:x", "run", json!({"id": "e1", "cmd": ["echo", "hi"]}), 20.0);
+    assert!(!e && t.len() < 4096 && t.contains("receipt: ") && t.contains("hi"), "test-only bound 4 KB (measured 1.5 KB): {} {t}", t.len());
+    let (rs, _) = rx_lines(&t);
+    assert!(rs.iter().all(|r| r["eid"] == "Command:x" || !r["why"].is_null()), "{t}");
+    let (t, _) = put(port, "Pack:b2p", "text", json!("PACK b2p 1\nBoxz.double getter: this.n * 2\n"));
+    assert!(t.len() < 200 && t.starts_with("wrote Pack:b2p.text"), "{t}");
+    let (t, _) = put(port, "Scratch:lone", "n", json!(1));
+    assert!(t.len() < 400, "{t}");
+    // a null with a reason and an Error, on an entity that was NOT written, still say why
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:b2p", "prop": "state"})).0 == "loaded").then_some(()));
+    let pack = "PACK b2e 1\nSrc.go on-setter fan:\n  ALWAYS:\n    Other:o.n = this.go\nOther.nothing getter: None('nothing for ' + str(this.n))\nOther.boom getter: Error('boom ' + str(this.n))\n";
+    put(port, "Pack:b2e", "text", json!(pack));
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:b2e", "prop": "state"})).0 == "loaded").then_some(()));
+    let (t, e) = put(port, "Src:s", "go", json!(7));
+    assert!(!e, "{t}");
+    assert!(t.contains("nothing for 7") && t.contains("boom 7"), "reasons of a null and an Error on another entity: {t}");
+    assert!(terminate(&mut run));
+}
+
+// ---- the history route's cost must not grow with the store (#1143, 2026-11-14) ---------------------------------------------------------------
+// On the operator's imported store (5,539 messages) the route answered `{"messages": null}` for every limit: the getter that listed ALL the messages (a comprehension over every row)
+// spent more than the step budget (100,000), and an evaluation past the budget is an Error. The test restarts a seat that holds 60 messages with a SMALL budget (the work, not the time:
+// a listing of the whole store cannot fit in it, a page of 5 can): the page is the newest rows only, `more`/`next` page older ones, a running message is there, an unknown cursor is a 404.
+#[test]
+fn the_history_route_does_work_for_the_page_only_not_for_the_whole_store() {
+    let (mut run, port, dir) = fake_seat_script("history-budget", &[], &[], QUICK);
+    let ids = fill(port, 60);
+    assert!(terminate(&mut run));
+    let (mut run2, port) = launch_env(&dir, &dir.join("fake-claude"), &[], &[("ANTHROPIC_API_KEY", HARNESS_KEY), ("MEMBRANE_EVAL_BUDGET", "1000")]);
+    let h = history(port, "?limit=5");
+    assert_eq!(texts(&h), (55..60).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h}");
+    assert_eq!((h["more"].clone(), h["next"].clone()), (json!(true), json!(ids[55])), "{h}");
+    let h2 = history(port, &format!("?limit=5&before={}", ids[55]));
+    assert_eq!(texts(&h2), (50..55).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h2}");
+    let h3 = history(port, &format!("?limit=5&before={}", ids[5]));
+    assert_eq!((texts(&h3), h3["more"].clone(), h3["next"].clone()), ((0..5).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), json!(false), J::Null), "{h3}");
+    assert_eq!(http(port, "GET", "/membrane/chat/messages?before=nope", "").0, 404);
+    assert!(terminate(&mut run2));
+}

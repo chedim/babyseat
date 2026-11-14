@@ -1,0 +1,142 @@
+PACK settings 1
+IMPORT boot 1
+IMPORT door 1
+RESIDENT Setting
+-- THE SETTINGS (#1143, docs/settings-groups.md, "Built: the server side"): one entity per setting, `Setting:<group>.<key>`, listed whole by a window that groups them by `group` and sorts by `order`.
+-- A row is DATA (written once at start, again only when this pack changes it): group, key, label, help, kind, live, order, and for a number `min`, `max`, `whole`, `unit`; `default`; `how` (what a launch-only row says
+-- about changing it); `fact` (the launch fact the value comes from); `owner` + `owner_prop` (the entity a write goes to, when the value belongs to another entity).
+--   kind   text | number | list | allowlist (editable)        readonly (shown, never written here)
+--   live   `live` (a write is in force at once: the next message, the next feed read)        `restart` (shown with its launch line; a change needs a restart)
+-- `current` is a GETTER over the one owner of the value, so nothing drifts: the chat's model reads `Minds:seat.loops` (the entity every other reader already uses), a live number or list is the row's own `value`
+-- (the setting IS the owner; the pack's readers (chat_turn.c1f, door_fieldvm.c1f) read `current` first), and a row that was never written reads its launch fact, then its default.
+-- THE ONE WRITE DOOR: `Setting:<g>.<k>.set = <value>`. The setter checks the value (each arm refuses with its reason); a good value is written to its owner, `applied` says when and `refused` is cleared; a bad one writes
+-- `refused = <reason>` and NOTHING else. A number outside its range is refused with the reason, never clamped. A row that is read-only says so and how to change it. The page writes `set` with one `entity_write` of
+-- `POST /mcp` (door_tools.c1f): the owner's route, journalled, the 403 of a person who is not the owner is the door's own text.
+-- NO SECRET is a setting: a key or a token appears only as the NAME of an environment variable or as a path, never its value (`model.cloud` shows `api_key_env`, never a base url or a key).
+-- The window shows no setting that nothing reads (cortex, workers, the sign-in picks of the minds, think, self_cpu_share, code_runs_keep) and not the page's own constants (chat_page_size ... chat_tool_chars).
+
+-- ---- reading ------------------------------------------------------------------------------------------------------------------------------
+-- (the providers' fact holds base urls: it is never copied into a getter; its row reads three names of each provider and nothing else)
+Setting.boot_val getter: ([v for v in [prop(b, this.fact) for b in instances('Boot')] if v != None] or [None])[0] if this.fact != None and this.eid != 'Setting:model.cloud' else None
+-- a list fact is a JSON list or comma-separated text
+Setting.fact_val getter:
+  WHEN this.boot_val != None and this.kind == 'list': [strip(x) for x in this.boot_val] if this.boot_val is List else words(replace(str(this.boot_val), ',', ' '))
+  ELSE: this.boot_val
+-- the rows whose value is computed from other entities (they are read-only, except the chat's model and the allow-list, whose write goes to their owner)
+Setting.current getter:
+  WHEN this.eid == 'Setting:model.chat': prop('Minds:seat', 'loops') or prop('Minds:seat', 'seat_default') or this.default
+  ELSE WHEN this.eid == 'Setting:model.default': prop('Minds:seat', 'seat_default') or this.default
+  ELSE WHEN this.eid == 'Setting:model.list': [m.name for m in instances('Model') if m.listed == True or m.rung == True]
+  ELSE WHEN this.eid == 'Setting:model.cloud': [{'name': prop(c, 'name'), 'backend': prop(c, 'backend'), 'api_key_env': prop(c, 'api_key_env')} for c in (([prop(b, 'cloud_models') for b in instances('Boot') if prop(b, 'cloud_models') != None] or [[]])[0])]
+  ELSE WHEN this.eid == 'Setting:home.allow': [{'name': replace(replace(a.eid, 'membrane::', ''), 'HaAllow:', ''), 'services': a.services or [], 'entities': a.entities or []} for a in instances('HaAllow')]
+  ELSE WHEN this.eid == 'Setting:import.sources': [{'name': replace(replace(s.eid, 'membrane::', ''), 'SqlSource:', ''), 'path': s.path, 'mode': s.mode or 'ro'} for s in instances('SqlSource')]
+  ELSE WHEN this.eid == 'Setting:import.history': prop('membrane::Legacy:cutover', 'history')
+  ELSE WHEN this.eid == 'Setting:access.mode': 'tokens required' if this.boot_val != None else 'open'
+  ELSE WHEN this.eid == 'Setting:access.people': [{'sub': prop(p, 'sub'), 'name': prop(p, 'name'), 'first_seen': prop(p, 'first_seen'), 'last_seen': prop(p, 'last_seen')} for p in instances('Person')]
+  ELSE WHEN this.eid == 'Setting:access.port': ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [this.boot_val])[0]
+  ELSE WHEN this.value != None: this.value
+  ELSE WHEN this.fact_val != None: this.fact_val
+  ELSE: this.default
+
+-- ---- writing: the one door -------------------------------------------------------------------------------------------------------------------
+-- The checks are IN the setter, in order, each arm refusing with its reason and writing nothing else (a getter that read `set` would be stale inside its own setter: the loader refuses it).
+-- A model name is letters, digits and _.:/@~+- (1..120); `plain` keeps letters, digits and _#./:- and turns the rest to spaces (the rule of the old window, door_models.c1f).
+Setting.set on-setter setting-set:
+  WHEN this.set == None:
+    this.refused = str(this.label) + ': a value is needed'
+  ELSE WHEN this.kind == 'readonly':
+    this.refused = 'read-only: ' + str(this.label) + ' is not set here (' + str(this.how or 'it is set when the seat starts') + '); a change needs a restart'
+  ELSE WHEN this.kind == 'number' and not (this.set is Int or this.set is Float):
+    this.refused = str(this.label) + ' must be a number, not ' + str(this.set)
+  ELSE WHEN this.kind == 'number' and this.whole == True and not (this.set is Int):
+    this.refused = str(this.label) + ' must be a whole number, not ' + str(this.set)
+  ELSE WHEN this.kind == 'number' and this.min != None and this.set < this.min:
+    this.refused = str(this.label) + ' must be at least ' + str(this.min) + ' (' + str(this.set) + ' is below it)'
+  ELSE WHEN this.kind == 'number' and this.max != None and this.set > this.max:
+    this.refused = str(this.label) + ' must be at most ' + str(this.max) + ' (' + str(this.set) + ' is above it)'
+  ELSE WHEN this.kind == 'text' and not (this.set is Text):
+    this.refused = str(this.label) + ' must be text (a model name), not ' + str(this.set)
+  ELSE WHEN this.kind == 'text' and this.set != '' and (plain(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) != lower(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) or '#' in this.set or ' ' in this.set or len(this.set) > 120):
+    this.refused = str(this.label) + ' is not a model name: ' + this.set + ' (1 to 120 characters: letters, digits and _.:/@~+-)'
+  ELSE WHEN this.kind == 'list' and not (this.set is List):
+    this.refused = str(this.label) + ' must be a list of names'
+  ELSE WHEN this.kind == 'list' and len([x for x in this.set if not (x is Text) or strip(x) == '']) > 0:
+    this.refused = str(this.label) + ' must not hold an empty or non-text name (an empty name matches everything)'
+  ELSE WHEN this.kind == 'allowlist' and not (this.set is List):
+    this.refused = str(this.label) + ' must be a list of {name, services, entities}'
+  ELSE WHEN this.kind == 'allowlist' and len([x for x in this.set if not (x is Dict) or not (prop(x, 'name') is Text) or strip(prop(x, 'name')) == '' or not (prop(x, 'services') is List) or not (prop(x, 'entities') is List) or len([y for y in concat(prop(x, 'services'), prop(x, 'entities')) if not (y is Text)]) > 0]) > 0:
+    this.refused = str(this.label) + ' must be a list of {name: text, services: [text], entities: [text]}'
+  ELSE WHEN this.owner != None:
+    (this.owner).[this.owner_prop] = this.set
+    this.refused = ''
+    this.applied = clock
+  ELSE WHEN this.kind == 'allowlist':
+    FOR a IN this.set:
+      ('HaAllow:' + strip(prop(a, 'name'))).services = prop(a, 'services')
+      ('HaAllow:' + strip(prop(a, 'name'))).entities = prop(a, 'entities')
+    FOR old IN [x for x in instances('HaAllow') if not (replace(replace(x.eid, 'membrane::', ''), 'HaAllow:', '') in [strip(prop(a, 'name')) for a in this.set])]:
+      (old.eid).retire = True
+    this.refused = ''
+    this.applied = clock
+  ELSE:
+    this.value = this.set
+    this.refused = ''
+    this.applied = clock
+
+-- ---- the rows ------------------------------------------------------------------------------------------------------------------------------
+-- A row with `hidden: True` is a row the settings window does not list (operator 2026-11-14: the Map group, while the field view is DISABLED in the first release: its readers in door_fieldvm.c1f still read the rows).
+-- (an id is `<group>.<key>`; the order is the window's: Model, Chat, Map, Home, Import, Access, Limits)
+Boot.setting_keys getter: ['label', 'help', 'kind', 'live', 'order', 'default', 'min', 'max', 'whole', 'unit', 'fact', 'owner', 'owner_prop', 'how', 'hidden']
+Boot.setting_rows getter:
+  [{'id': 'model.chat', 'order': 1, 'label': 'Model', 'help': 'The model that answers your messages. Empty means the seat falls back to its own default.', 'kind': 'text', 'live': 'live', 'default': 'claude', 'owner': 'Minds:seat', 'owner_prop': 'loops'},
+   {'id': 'model.default', 'order': 2, 'label': 'Fallback model', 'help': 'The model used when none is picked.', 'kind': 'readonly', 'live': 'restart', 'default': 'claude', 'how': 'the launcher sets it with the minds fact'},
+   {'id': 'model.list', 'order': 3, 'label': 'Available models', 'help': 'The models the seat can run, as it last saw them.', 'kind': 'readonly', 'live': 'restart', 'how': 'the backend and the cloud_models fact decide it'},
+   {'id': 'model.cloud', 'order': 4, 'label': 'Other providers', 'help': 'Providers added at launch: name, backend and the NAME of the environment variable that holds the key. The key itself is never shown.', 'kind': 'readonly', 'live': 'restart', 'fact': 'cloud_models', 'how': 'start the seat with --fact cloud_models=<list>'},
+   {'id': 'model.signin', 'order': 5, 'label': 'Sign-in', 'help': 'How the answering program signs in: api_key (the key of the environment variable ANTHROPIC_API_KEY) or login (the own login of the program).', 'kind': 'readonly', 'live': 'restart', 'fact': 'chat_auth', 'default': 'api_key', 'how': 'start the seat with --fact chat_auth=login'},
+   {'id': 'model.cli', 'order': 6, 'label': 'Answering program', 'help': 'The path of the program that answers a message.', 'kind': 'readonly', 'live': 'restart', 'fact': 'chat_claude_bin', 'how': 'start the seat with --fact chat_claude_bin=<path>'},
+   {'id': 'chat.max_steps', 'order': 7, 'label': 'Most steps per answer', 'help': 'How many tool steps one answer may take. Takes effect with the next message.', 'kind': 'number', 'live': 'live', 'default': 2048, 'min': 1, 'max': 100000, 'whole': True, 'unit': 'steps', 'fact': 'chat_max_turns'},
+   {'id': 'chat.timeout', 'order': 8, 'label': 'Answer time limit', 'help': 'How long one answer may run before it is stopped. Takes effect with the next message.', 'kind': 'number', 'live': 'live', 'default': 21600, 'min': 1, 'max': 604800, 'unit': 'seconds', 'fact': 'chat_turn_timeout_s'},
+   {'id': 'map.hidden', 'order': 9, 'label': 'Hidden kinds', 'help': 'Kinds of things the map leaves out.', 'kind': 'list', 'live': 'live', 'default': ['Message', 'SemText', 'Span', 'Request', 'DomNode', 'View', 'Fetch', 'Setting'], 'fact': 'map_hidden', 'hidden': True},
+   {'id': 'map.hidden_prefix', 'order': 10, 'label': 'Hidden name starts', 'help': 'Things whose name starts with one of these are left out of the map.', 'kind': 'list', 'live': 'live', 'default': ['Chat:message:', 'Chat:session:', 'Chat:main'], 'fact': 'map_hidden_prefix', 'hidden': True},
+   {'id': 'map.window', 'order': 11, 'label': 'Things shown', 'help': 'How many of the most recently active things the map shows.', 'kind': 'number', 'live': 'live', 'default': 150, 'min': 1, 'max': 10000, 'whole': True, 'unit': 'things', 'fact': 'field_window', 'hidden': True},
+   {'id': 'map.poll_ms', 'order': 12, 'label': 'Refresh every', 'help': 'How often the map asks for news.', 'kind': 'number', 'live': 'live', 'default': 2000, 'min': 200, 'max': 600000, 'whole': True, 'unit': 'ms', 'fact': 'field_poll_ms', 'hidden': True},
+   {'id': 'map.fade_s', 'order': 14, 'label': 'Recent activity fades over', 'help': 'How long a recent write stays bright on the map.', 'kind': 'readonly', 'live': 'restart', 'fact': 'field_tau_s', 'default': 180.0, 'unit': 'seconds', 'how': 'start the seat with --fact field_tau_s=<seconds>', 'hidden': True},
+   {'id': 'home.allow', 'order': 15, 'label': 'Allowed actions', 'help': 'What the model may do in the house. Each entry has a name, the services it allows (light.turn_on, light.*, states.read) and the entities it covers (light.kitchen, light.*). With no entry nothing is allowed.', 'kind': 'allowlist', 'live': 'live'},
+   {'id': 'import.sources', 'order': 16, 'label': 'Other databases', 'help': 'Databases the model may query: name, path and access (ro reads only; rw lets the model change the file, so it is not set here).', 'kind': 'readonly', 'live': 'restart', 'how': 'a source is set with the sql_sources fact or by the owner writing its entity'},
+   {'id': 'import.history', 'order': 17, 'label': 'Earlier conversations', 'help': 'The history of the seat this one replaced, imported in the background (newest first) the first time this seat starts. Read-only.', 'kind': 'readonly', 'live': 'restart', 'fact': 'legacy_path', 'how': 'start the seat with --fact legacy_path=<the old store or its .membrane folder> when it is not found by itself'},
+   {'id': 'import.page', 'order': 18, 'label': 'Old turns read per query', 'help': 'How many turns of old history one query reads. Unset means opening a chat imports nothing.', 'kind': 'readonly', 'live': 'restart', 'fact': 'legacy_page', 'how': 'start the seat with --fact legacy_page=<number>'},
+   {'id': 'access.owner', 'order': 19, 'label': 'Owner', 'help': 'The person whose key is the owner key. Everyone with access is the owner.', 'kind': 'readonly', 'live': 'restart', 'fact': 'operator', 'default': 'owner', 'how': 'start the seat with --fact operator=<name>'},
+   {'id': 'access.token_life', 'order': 20, 'label': 'Owner key lasts', 'help': 'How long the owner key made at each start stays good.', 'kind': 'readonly', 'live': 'restart', 'fact': 'owner_token_ttl_s', 'default': 2592000, 'unit': 'seconds', 'how': 'start the seat with --fact owner_token_ttl_s=<seconds>'},
+   {'id': 'access.token_file', 'order': 21, 'label': 'Owner key file', 'help': 'Where the owner key is written (the path only, never the key).', 'kind': 'readonly', 'live': 'restart', 'fact': 'owner_token_file', 'how': 'start the seat with --fact owner_token_file=<path>'},
+   {'id': 'access.mode', 'order': 22, 'label': 'Access', 'help': 'tokens required when the seat has a secret, open when it has none.', 'kind': 'readonly', 'live': 'restart', 'fact': 'door_secret_file', 'how': 'start the seat with --fact door_secret_file=<path>'},
+   {'id': 'access.people', 'order': 23, 'label': 'People', 'help': 'People who have used the seat with a key.', 'kind': 'readonly', 'live': 'restart', 'how': 'a person is added by their first request'},
+   {'id': 'access.port', 'order': 24, 'label': 'Port', 'help': 'The port the seat listens on.', 'kind': 'readonly', 'live': 'restart', 'fact': 'door_port', 'how': 'start the seat with --port <number>'},
+   {'id': 'limits.command_timeout_s', 'order': 25, 'label': 'Command time limit', 'help': 'How long a command the model runs may take when it names no limit of its own.', 'kind': 'readonly', 'live': 'restart', 'fact': 'command_timeout_s', 'default': 120, 'unit': 'seconds', 'how': 'start the seat with --fact command_timeout_s=<seconds>'},
+   {'id': 'limits.effect_workers', 'order': 26, 'label': 'Parallel effects', 'help': 'How many commands, file writes and fetches run at once.', 'kind': 'readonly', 'live': 'restart', 'fact': 'effect_workers', 'default': 4, 'how': 'start the seat with --fact effect_workers=<number>'},
+   {'id': 'limits.warm_rows', 'order': 27, 'label': 'Rows warmed at start', 'help': 'How many stored rows the start loads in the background.', 'kind': 'readonly', 'live': 'restart', 'fact': 'warm_rows', 'default': 1000, 'how': 'start the seat with --fact warm_rows=<number>'},
+   {'id': 'limits.memory_budget_mb', 'order': 28, 'label': 'Memory budget', 'help': 'The memory the seat aims to stay under. Unset means no budget.', 'kind': 'readonly', 'live': 'restart', 'fact': 'memory_budget_mb', 'unit': 'MB', 'how': 'start the seat with --fact memory_budget_mb=<number>'},
+   {'id': 'limits.unload_soft', 'order': 29, 'label': 'Soft unload mark', 'help': 'The share of the budget at which the seat starts to unload.', 'kind': 'readonly', 'live': 'restart', 'fact': 'unload_soft', 'how': 'start the seat with --fact unload_soft=<fraction>'},
+   {'id': 'limits.unload_hard', 'order': 30, 'label': 'Hard unload mark', 'help': 'The share of the budget at which the seat unloads at once.', 'kind': 'readonly', 'live': 'restart', 'fact': 'unload_hard', 'how': 'start the seat with --fact unload_hard=<fraction>'},
+   {'id': 'limits.unload_batch', 'order': 31, 'label': 'Unload batch', 'help': 'How many rows one unload takes. Unset means no unloading.', 'kind': 'readonly', 'live': 'restart', 'fact': 'unload_batch', 'how': 'start the seat with --fact unload_batch=<number>'},
+   {'id': 'limits.eval_stats', 'order': 32, 'label': 'Evaluation accounting', 'help': 'Whether the seat counts what its code costs.', 'kind': 'readonly', 'live': 'restart', 'fact': 'eval_stats', 'default': True, 'how': 'start the seat with --fact eval_stats=false'},
+   {'id': 'limits.eval_stats_window_s', 'order': 33, 'label': 'Accounting window', 'help': 'How often the accounting is told.', 'kind': 'readonly', 'live': 'restart', 'fact': 'eval_stats_window_s', 'default': 10, 'unit': 'seconds', 'how': 'start the seat with --fact eval_stats_window_s=<seconds>'}]
+-- the rows are written when the seat starts, and only what differs (a restart on the same store writes nothing; a changed row of this pack is refreshed)
+Boot.started on-setter settings-seed:
+  ALWAYS:
+    FOR d IN this.setting_rows:
+      id = prop(d, 'id')
+      g = before(id, '.')
+      pairs = concat([['group', g], ['key', tail(id, len(id) - len(g) - 1)]], [[k, prop(d, k)] for k in this.setting_keys if prop(d, k) != None])
+      FOR kv IN [x for x in pairs if prop('Setting:' + id, x[0]) != x[1]]:
+        ('Setting:' + id).[kv[0]] = kv[1]
+
+-- ---- the page's read feed: GET /ui/settings (#1143, the settings view apps/barest.c1f/settings_view.c1f) ------------------------------------------
+-- The browser VM cannot read entities by itself, so the seat tells it: `{settings: [row, ...]}`, every row in the window's order (`order` runs through the groups: Model, Chat, Map, Home, Import, Access, Limits), each
+-- row its descriptor (id, group, key, label, help, kind, live, order, default, min, max, whole, unit, how, hidden) and what is true now (`current`, `refused` as text, `applied` as a time). A row with `hidden` is listed so
+-- the view can say it leaves it out. `choices` (the chat model row only) is the seat's list of models, when it has one. Nothing here is a secret: a row's `current` is the owner's own value (the key rows hold only an
+-- environment variable's NAME). A person who is not the owner reads it too; a write is the owner's door (POST /mcp entity_write).
+Request.o_settings getter: this.route == '/ui/settings'
+Request.m_settings getter: ['GET']
+-- (the rows are built here, not as a getter of the row: a getter of a Setting would be one more property on every stored row)
+Request.st_rows getter: sort_by([{'id': replace(s.eid, 'Setting:', ''), 'group': s.group, 'key': s.key, 'label': s.label, 'help': s.help, 'kind': s.kind, 'live': s.live, 'order': s.order, 'default': s.default, 'min': s.min, 'max': s.max, 'whole': s.whole == True, 'unit': s.unit, 'how': s.how, 'hidden': s.hidden == True, 'current': s.current, 'refused': s.refused or '', 'applied': s.applied, 'choices': (prop('Setting:model.list', 'current') if s.eid == 'Setting:model.chat' else None)} for s in instances('Setting') if s.group != None], 'order')
+Request.r_settings getter: {'status': 200, 'body': {'settings': this.st_rows}}

@@ -1,0 +1,2452 @@
+[
+ {
+  "name": "the board lists the cards by status then title, without the merged, with their edges",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:b",
+    "class": "Decision",
+    "props": {
+     "name": "B ask",
+     "summary": "s",
+     "status": "decided",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5,
+     "value": 3,
+     "blocks": [
+      "Task:x"
+     ]
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "A ask",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5,
+     "led_to": [
+      "d:b"
+     ]
+    }
+   },
+   {
+    "eid": "d:z",
+    "class": "Decision",
+    "props": {
+     "name": "Z ask",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "d:m",
+    "class": "Decision",
+    "props": {
+     "name": "d:m",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5,
+     "merged_into": "d:a"
+    }
+   },
+   {
+    "eid": "d:legacy",
+    "class": "Decision",
+    "props": {
+     "name": "L",
+     "summary": "s",
+     "status": null,
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decisions"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.0.eid",
+    "equals": "d:a"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.1.eid",
+    "equals": "d:z"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.2.eid",
+    "equals": "d:b"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.3.eid",
+    "equals": "d:legacy"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.4",
+    "none": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.2.status",
+    "equals": "decided"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.3.status",
+    "equals": "decided"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.0.title",
+    "equals": "A ask"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.0.description",
+    "equals": "s"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.0.pick",
+    "equals": 5
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.0.var.type",
+    "equals": "int"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.cards.2.value",
+    "equals": 3
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.1.rel",
+    "equals": "blocks"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.1.from",
+    "equals": "d:b"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.1.to",
+    "equals": "Task:x"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.0.rel",
+    "equals": "led_to"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.0.from",
+    "equals": "d:a"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.0.to",
+    "equals": "d:b"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.2",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "the board is read, not written",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decisions"
+    }
+   },
+   {
+    "eid": "Request:2",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "10.0.0.2:5",
+     "authed": false,
+     "sub": null,
+     "auth_error": "no token",
+     "path": "/membrane/decisions"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:2",
+    "prop": "reply.status",
+    "equals": 401
+   }
+  ]
+ },
+ {
+  "name": "the goals: the open ones, the seat's active set first in its rank order, the rest newest first",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "Goal:old",
+    "class": "Goal",
+    "props": {
+     "name": "old",
+     "status": "open",
+     "born": 100.0
+    }
+   },
+   {
+    "eid": "Goal:new",
+    "class": "Goal",
+    "props": {
+     "name": "new",
+     "summary": "n",
+     "status": "open",
+     "born": 300.0
+    }
+   },
+   {
+    "eid": "Goal:act2",
+    "class": "Goal",
+    "props": {
+     "name": "act2",
+     "status": "open",
+     "born": 1.0
+    }
+   },
+   {
+    "eid": "Goal:act1",
+    "class": "Goal",
+    "props": {
+     "name": "act1",
+     "status": "open",
+     "born": 2.0
+    }
+   },
+   {
+    "eid": "Goal:done",
+    "class": "Goal",
+    "props": {
+     "name": "done",
+     "status": "fulfilled",
+     "born": 999.0
+    }
+   },
+   {
+    "eid": "Goal:gone",
+    "class": "Goal",
+    "props": {
+     "name": "gone",
+     "status": "open",
+     "merged_into": "Goal:new"
+    }
+   },
+   {
+    "eid": "Intent:board",
+    "class": "Intent",
+    "props": {
+     "active": [
+      "Goal:act1",
+      "Goal:act2"
+     ]
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/goals"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.0.eid",
+    "equals": "Goal:act1"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.0.active",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.1.eid",
+    "equals": "Goal:act2"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.2.eid",
+    "equals": "Goal:new"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.2.active",
+    "equals": false
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.2.summary",
+    "equals": "n"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.2.born",
+    "equals": 300.0
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.3.eid",
+    "equals": "Goal:old"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.4",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "the goals with no active set are the open ones, newest first, ties by title",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "Goal:b",
+    "class": "Goal",
+    "props": {
+     "name": "b",
+     "born": 5.0
+    }
+   },
+   {
+    "eid": "Goal:a",
+    "class": "Goal",
+    "props": {
+     "name": "a",
+     "born": 5.0
+    }
+   },
+   {
+    "eid": "Goal:c",
+    "class": "Goal",
+    "props": {
+     "name": "c",
+     "born": 9.0
+    }
+   },
+   {
+    "eid": "Goal:nb",
+    "class": "Goal",
+    "props": {
+     "name": "nb"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/goals"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.0.eid",
+    "equals": "Goal:c"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.1.eid",
+    "equals": "Goal:a"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.2.eid",
+    "equals": "Goal:b"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.3.eid",
+    "equals": "Goal:nb"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.goals.3.active",
+    "equals": false
+   }
+  ]
+ },
+ {
+  "name": "the work graph: goals, tasks, unfinished waits and cards with blocks and of edges, and what each waits on",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "Goal:g",
+    "class": "Goal",
+    "props": {
+     "name": "the goal",
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:t1",
+    "class": "Task",
+    "props": {
+     "title": "build",
+     "status": "open",
+     "goal": "Goal:g",
+     "blocks": [
+      "Task:t2"
+     ]
+    }
+   },
+   {
+    "eid": "Task:t2",
+    "class": "Task",
+    "props": {
+     "title": "ship",
+     "status": "open",
+     "goal": "Goal:g"
+    }
+   },
+   {
+    "eid": "Task:t3",
+    "class": "Task",
+    "props": {
+     "title": "broke",
+     "status": "stuck",
+     "goal": "Goal:g"
+    }
+   },
+   {
+    "eid": "Wait:w",
+    "class": "Wait",
+    "props": {
+     "title": "soak",
+     "status": "armed",
+     "goal": "Goal:g",
+     "blocks": [
+      "Task:t2"
+     ]
+    }
+   },
+   {
+    "eid": "Wait:wd",
+    "class": "Wait",
+    "props": {
+     "title": "done wait",
+     "status": "done"
+    }
+   },
+   {
+    "eid": "d:q",
+    "class": "Decision",
+    "props": {
+     "name": "which",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5,
+     "goal": "Goal:g",
+     "blocks": [
+      "Task:t2"
+     ]
+    }
+   },
+   {
+    "eid": "d:ans",
+    "class": "Decision",
+    "props": {
+     "name": "answered",
+     "summary": "s",
+     "status": "decided",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5,
+     "goal": "Goal:g",
+     "blocks": [
+      "Task:t2"
+     ]
+    }
+   },
+   {
+    "eid": "Task:gone",
+    "class": "Task",
+    "props": {
+     "title": "merged",
+     "merged_into": "Task:t1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/work-graph"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.rocket",
+    "equals": false
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.runs.0",
+    "none": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.id",
+    "equals": "Goal:g"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.kind",
+    "equals": "goal"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.title",
+    "equals": "the goal"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.waiting_on.1.id",
+    "equals": "Task:t3"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.waiting_on.1.reason",
+    "equals": "stuck task"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.waiting_on.0.id",
+    "equals": "Task:t1"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.waiting_on.0.reason",
+    "equals": "unfinished blocker task"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.waiting_on.2.id",
+    "equals": "Wait:w"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.waiting_on.2.reason",
+    "equals": "unfinished wait"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.waiting_on.3.id",
+    "equals": "d:q"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.waiting_on.3.reason",
+    "equals": "open decision"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.0.waiting_on.4",
+    "none": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.1.id",
+    "equals": "Task:t3"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.1.title",
+    "equals": "broke"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.1.status",
+    "equals": "stuck"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.1.goal",
+    "equals": "Goal:g"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.2.id",
+    "equals": "Task:t1"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.3.id",
+    "equals": "Task:t2"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.3.waiting_on.0.id",
+    "equals": "Task:t1"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.3.waiting_on.0.reason",
+    "equals": "unfinished blocker task"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.3.waiting_on.1.id",
+    "equals": "Wait:w"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.3.waiting_on.1.reason",
+    "equals": "unfinished wait"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.3.waiting_on.2.id",
+    "equals": "d:q"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.3.waiting_on.2.kind",
+    "equals": "decision"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.3.waiting_on.2.reason",
+    "equals": "unfinished decision"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.3.waiting_on.3",
+    "none": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.4.id",
+    "equals": "Wait:w"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.4.kind",
+    "equals": "wait"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.5.id",
+    "equals": "d:ans"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.5.kind",
+    "equals": "decision"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.5.status",
+    "equals": "decided"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.6.id",
+    "equals": "d:q"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.nodes.7",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "the work graph edges are blocks and of, between drawn nodes only",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "Goal:g",
+    "class": "Goal",
+    "props": {
+     "name": "g"
+    }
+   },
+   {
+    "eid": "Task:a",
+    "class": "Task",
+    "props": {
+     "title": "a",
+     "goal": "Goal:g",
+     "blocks": [
+      "Task:b",
+      "Task:nowhere"
+     ]
+    }
+   },
+   {
+    "eid": "Task:b",
+    "class": "Task",
+    "props": {
+     "title": "b"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/work-graph"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.0.from",
+    "equals": "Task:a"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.0.to",
+    "equals": "Task:b"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.0.rel",
+    "equals": "blocks"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.1.from",
+    "equals": "Task:a"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.1.to",
+    "equals": "Goal:g"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.1.rel",
+    "equals": "of"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.edges.2",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "an answer is a write of Decision.answer by the person; the receipt and the card come back",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "how many",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"value\": 12}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.ok",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.value",
+    "equals": 12
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.status",
+    "equals": "decided"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.value",
+    "equals": 12
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.set_by",
+    "equals": "operator"
+   },
+   {
+    "eid": "d:a",
+    "prop": "value",
+    "equals": 12
+   },
+   {
+    "eid": "d:a",
+    "prop": "answer.by",
+    "equals": "owner"
+   },
+   {
+    "eid": "d:a",
+    "prop": "status",
+    "equals": "decided"
+   }
+  ]
+ },
+ {
+  "name": "the answer carries work, conv and message through to the card",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "bool"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"value\": \"yes\", \"work\": false, \"conv\": \"ses_1\", \"message\": \"m1\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.value",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.status",
+    "equals": "closed"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.chat",
+    "equals": "ses_1"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.message",
+    "equals": "m1"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.work_needed",
+    "equals": false
+   }
+  ]
+ },
+ {
+  "name": "a caller with no token cannot answer, and nothing is written",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": false,
+     "sub": null,
+     "auth_error": "no token",
+     "path": "/membrane/decision/answer"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"value\": 12}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 401
+   },
+   {
+    "eid": "d:a",
+    "prop": "answer",
+    "none": true
+   },
+   {
+    "eid": "d:a",
+    "prop": "status",
+    "equals": "open"
+   }
+  ]
+ },
+ {
+  "name": "an answer to a decided card is a conflict (409) and leaves the card",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "decided",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5,
+     "value": 3
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"value\": 12}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 409
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "this card is already decided (changing a past decision comes with timelines, #470 step 3)"
+   },
+   {
+    "eid": "d:a",
+    "prop": "value",
+    "equals": 3
+   }
+  ]
+ },
+ {
+  "name": "a value the card cannot take is a 400 with the reason",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"value\": \"lots\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "lots is not a number"
+   },
+   {
+    "eid": "d:a",
+    "prop": "status",
+    "equals": "open"
+   }
+  ]
+ },
+ {
+  "name": "no such card, no object body, no card: 400 each",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   },
+   {
+    "eid": "Request:2",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   },
+   {
+    "eid": "Request:3",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:nope\", \"value\": 1}"
+   },
+   {
+    "eid": "Request:2",
+    "prop": "body",
+    "value": "[1]"
+   },
+   {
+    "eid": "Request:3",
+    "prop": "body",
+    "value": "{\"value\": 1}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "no Decision card 'd:nope'"
+   },
+   {
+    "eid": "Request:2",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:2",
+    "prop": "reply.body.error",
+    "equals": "a JSON object body is required"
+   },
+   {
+    "eid": "Request:3",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:3",
+    "prop": "reply.body.error",
+    "equals": "no Decision card ''"
+   }
+  ]
+ },
+ {
+  "name": "answering by GET is a 405",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   }
+  ]
+ },
+ {
+  "name": "a second request on the same card reads its own receipt, not the first's",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   },
+   {
+    "eid": "Request:2",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"value\": 7}"
+   },
+   {
+    "eid": "Request:2",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"value\": 8}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.value",
+    "equals": 7
+   },
+   {
+    "eid": "Request:2",
+    "prop": "reply.status",
+    "equals": 409
+   },
+   {
+    "eid": "d:a",
+    "prop": "value",
+    "equals": 7
+   }
+  ]
+ },
+ {
+  "name": "a message without its chat is not kept",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/answer"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"value\": 4, \"message\": \"m9\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.message",
+    "none": true
+   },
+   {
+    "eid": "d:a",
+    "prop": "message",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "the person drops an open card",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/drop"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.ok",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.status",
+    "equals": "dropped"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.set_by",
+    "equals": "operator"
+   },
+   {
+    "eid": "d:a",
+    "prop": "dropped_by",
+    "equals": "operator"
+   },
+   {
+    "eid": "d:a",
+    "prop": "status",
+    "equals": "dropped"
+   }
+  ]
+ },
+ {
+  "name": "only an open card drops (409)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "decided",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5,
+     "value": 2
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/drop"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 409
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "only an open card can be dropped"
+   },
+   {
+    "eid": "d:a",
+    "prop": "status",
+    "equals": "decided"
+   }
+  ]
+ },
+ {
+  "name": "a caller with no token cannot drop",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": false,
+     "sub": null,
+     "auth_error": "no token",
+     "path": "/membrane/decision/drop"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 401
+   },
+   {
+    "eid": "d:a",
+    "prop": "status",
+    "equals": "open"
+   }
+  ]
+ },
+ {
+  "name": "dropping a card that is not there is a 400",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/drop"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:none\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "no Decision card 'd:none'"
+   }
+  ]
+ },
+ {
+  "name": "the board's click records the card's chat",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/chat"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"chat\": \" ses_abc \"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.ok",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.chat",
+    "equals": "ses_abc"
+   },
+   {
+    "eid": "d:a",
+    "prop": "chat",
+    "equals": "ses_abc"
+   }
+  ]
+ },
+ {
+  "name": "a card keeps the chat it already has",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5,
+     "chat": "ses_first"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/chat"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"chat\": \"ses_new\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.card.chat",
+    "equals": "ses_first"
+   },
+   {
+    "eid": "d:a",
+    "prop": "chat",
+    "equals": "ses_first"
+   }
+  ]
+ },
+ {
+  "name": "an empty chat is refused; no token is refused",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/chat"
+    }
+   },
+   {
+    "eid": "Request:2",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": false,
+     "sub": null,
+     "auth_error": "no token",
+     "path": "/membrane/decision/chat"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"chat\": \"\"}"
+   },
+   {
+    "eid": "Request:2",
+    "prop": "body",
+    "value": "{\"card\": \"d:a\", \"chat\": \"x\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "chat required"
+   },
+   {
+    "eid": "Request:2",
+    "prop": "reply.status",
+    "equals": 401
+   },
+   {
+    "eid": "d:a",
+    "prop": "chat",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "a request for another family is not this family's",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/elsewhere"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 404
+   }
+  ]
+ },
+ {
+  "name": "a write route allows POST only (allow header)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/decision/drop",
+     "body": ""
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "a read route allows GET only (allow header)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/intents.c1f",
+   "membrane/packs/decisions.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_decisions.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1"
+    }
+   },
+   {
+    "eid": "d:a",
+    "class": "Decision",
+    "props": {
+     "name": "d:a",
+     "summary": "s",
+     "status": "open",
+     "var": {
+      "type": "int"
+     },
+     "pick": 5
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "query": "",
+     "headers": {},
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "owner",
+     "auth_error": null,
+     "path": "/membrane/goals",
+     "body": ""
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "GET"
+   }
+  ]
+ }
+]

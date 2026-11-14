@@ -1,0 +1,225 @@
+{
+ "_doc": "The Boot facts packs read (docs/c1f-stdlib.md). wired=true: the launcher writes it today; wired=false: a pack reads it and the launcher does not tell it yet (the to-do list for the door's cutover).",
+ "facts": {
+  "anthropic_key_set": {
+   "wired": false,
+   "why": "told by `cliffvm run` (the Python seat has no such fact): whether the seat's environment holds a non-empty ANTHROPIC_API_KEY (told by `cliffvm run`: only the yes or no, never the key); the claude turn is refused without it unless chat_auth is login"
+  },
+  "chat_auth": {
+   "wired": false,
+   "why": "how the claude turn authenticates and what options.background.chat_auth shows (--fact chat_auth=...): api_key (the DEFAULT: the key of the seat's ANTHROPIC_API_KEY) or login (the claude CLI's own login, an explicit opt-in; it was the released constant)"
+  },
+  "agent_writes": {
+   "wired": false,
+   "why": "whether the model may write memory (--no-agent-writes)"
+  },
+  "nerve_pause_off": {
+   "wired": false,
+   "why": "MEMBRANE_NERVE_PAUSE=0: the kill switch for the pause route"
+  },
+  "ledger": {
+   "wired": false,
+   "why": "the operator's ledger file path (the decisions pack writes it)"
+  },
+  "door_port": {
+   "wired": true,
+   "why": "the port the Rust door listens on; absent = no door (set from MEMBRANE_DOOR_PORT at the cutover)"
+  },
+  "door_secret_file": {
+   "wired": true,
+   "why": "the JWT secret file the door verifies tokens with"
+  },
+  "app_dirs": {
+   "wired": false,
+   "why": "told by `cliffvm run` (the Python seat has no apps yet): the folders of the apps given to it, the upper layer first; the door serves an app's `ui/` files, an upper layer's file shadowing a lower one's (docs/c1f-layers.md)"
+  },
+  "ui_dir": {
+   "wired": true,
+   "why": "the folder of the UI's files: the lowest layer under each app's own ui/ folder (--ui-dir; none by default)"
+  },
+  "build_id": {
+   "wired": true,
+   "why": "the build the page shows"
+  },
+  "seat_version": {
+   "wired": true,
+   "why": "the seat's version, for /global/health"
+  },
+  "seat_cwd": {
+   "wired": true,
+   "why": "the seat's working folder (opencode /path and /project)"
+  },
+  "seat_home": {
+   "wired": true,
+   "why": "the person's home folder (opencode /path)"
+  },
+  "seat_project": {
+   "wired": false,
+   "why": "the project id (opencode /project)"
+  },
+  "seat_name": {
+   "wired": true,
+   "why": "the seat's name for /ui/conf"
+  },
+  "seat_named": {
+   "wired": true,
+   "why": "whether the person named the seat"
+  },
+  "seat_aliases": {
+   "wired": true,
+   "why": "the seat's other names, for /ui/conf"
+  },
+  "seat_stt": {
+   "wired": false,
+   "why": "the speech-to-text server url, else the browser listens"
+  },
+  "seat_voice_out": {
+   "wired": true,
+   "why": "whether voice output is on"
+  },
+  "seat_language": {
+   "wired": true,
+   "why": "the page's language"
+  },
+  "seat_blurp": {
+   "wired": true,
+   "why": "whether Blurp is on (MEMBRANE_BLURP=1)"
+  },
+  "seat_backend": {
+   "wired": true,
+   "why": "the model backend's url (ollama), for the model list"
+  },
+  "router_on": {
+   "wired": true,
+   "why": "whether the router exists (the autoselect lanes are offered)"
+  },
+  "cloud_models": {
+   "wired": true,
+   "why": "the router's cloud candidates, as rows"
+  },
+  "minds": {
+   "wired": true,
+   "why": "the minds' model picks"
+  },
+  "started": {
+   "wired": true,
+   "why": "the seat says it has started (Boot:seat.started = now): the packs build their nodes in setters on it (fields_live.boot_started)"
+  },
+  "chat_claude_bin": {
+   "wired": false,
+   "why": "the claude CLI's path for the bare chat's turn (packs/chat_turn.c1f); told by `cliffvm run ... --fact chat_claude_bin=<path>`; no default: unset = the message is answered with an error and nothing runs"
+  },
+  "chat_max_turns": {
+   "wired": false,
+   "why": "the bare chat's ceiling: the CLI's --max-turns for one answer (chat_turn.c1f; default 2048 in the pack, a threshold the operator approves); told by `--fact chat_max_turns=<n>`"
+  },
+  "request_keep_s": {
+   "wired": false,
+   "why": "ACCEPTED AND IGNORED since the garbage collection of virtual entities (docs/cliffvm.md): a door request is collected by the engine as soon as nothing holds it, nothing is kept for a while; the fact stays so a launch line that passes it does not break"
+  },
+  "memory_budget_mb": {
+   "wired": false,
+   "why": "the memory budget of the seat in MB (native/src/host.rs `sense_memory`; NO default): the host's sensor writes Mem:host {rss, budget, level} at every tick; unset = the level is always ok and nothing is unloaded; told by `--fact memory_budget_mb=<n>`"
+  },
+  "unload_soft": {
+   "wired": false,
+   "why": "the soft line as a fraction of memory_budget_mb (NO default): the level is `soft` from this fraction; unset = there is no soft level (below the hard line is ok); told by `--fact unload_soft=<f>`"
+  },
+  "unload_hard": {
+   "wired": false,
+   "why": "the hard line as a fraction of memory_budget_mb (NO number of its own): the level is `hard` from this fraction; unset = the budget itself (1.0); told by `--fact unload_hard=<f>`"
+  },
+  "unload_batch": {
+   "wired": false,
+   "why": "how many of the coldest entities one unload pass asks to leave the engine (membrane/apps/barest.c1f/unload.c1f; NO default): unset = no unloading; a pass runs at every tick while the level is not ok; told by `--fact unload_batch=<n>`"
+  },
+  "command_timeout_s": {
+   "wired": false,
+   "why": "the time limit in seconds of a Command run that states no `timeout_s` (native/src/drivers.rs; default 120, the operator-delegated sensible default 2026-11-13): past it the process group gets SIGTERM, 2 s later SIGKILL, and the receipt is status timeout; told by `--fact command_timeout_s=<n>`"
+  },
+  "chat_turn_timeout_s": {
+   "wired": false,
+   "why": "the time limit in seconds of one chat turn's `claude` run (chat_turn.c1f; default 21600 = 6 h in the pack, a threshold flagged for the operator): the turn is exempt from `command_timeout_s`; told by `--fact chat_turn_timeout_s=<n>`"
+  },
+  "sql_sources": {
+   "wired": false,
+   "why": "second SQLite files to open as entities (membrane/packs/sql.c1f, native/src/sqldrv.rs): a LIST of {name, path, mode} (mode ro, the default, opens the file read-only and immutable; rw may write); each entry SEEDS `SqlSource:<name>` as if it were written by hand, and a source that already has a path is left alone; the seat's own store is refused; told by `--fact sql_sources='[{\"name\": \"lex\", \"path\": \"/data/words.sqlite\"}]'`"
+  },
+  "legacy_page": {
+   "wired": false,
+   "why": "the lazy history import (membrane/packs/legacy_import.c1f, door_session.c1f; #1143): how many old user rows one query reads when a session imported as a header only is opened for the first time (GET /session/<sid>/message imports its messages, once, and answers). NO default: unset, an open imports nothing (the eager `Legacy:seat.import` stays); told by `--fact legacy_page=<n>`"
+  },
+  "legacy_path": {
+   "wired": false,
+   "why": "the earlier (Python, 0.7.x) seat's store, for the automatic history cutover (membrane/packs/legacy_cutover.c1f; #1143): a file (its field.sqlite3), or a folder that holds it (its `.membrane` folder, its `field.sqlite` folder, or the folder of field.sqlite3). Told, it is the ONLY place looked at (a path that holds no store is an error shown as text, never a fallback); unset, the seat looks in `<seat_data_dir>`, `<seat_data_dir>/.membrane`, `<seat_cwd>/.membrane`, `<seat_home>/membrane/.membrane` and `/config/membrane/.membrane` (each `field.sqlite/field.sqlite3`), the first that has a store wins, and when none has one nothing happens; told by `--fact legacy_path=<path>` (the launcher's `--legacy <path>`)"
+  },
+  "legacy_batch": {
+   "wired": false,
+   "why": "the automatic history cutover's page (membrane/packs/legacy_cutover.c1f; #1143): how many old user rows one query reads, and so how many questions one background step imports and then leaves out of memory; default 5 (measured on the real store: 20 stalled the seat up to 3.5 s a page, 5 up to 0.9 s; a number flagged for the operator); told by `--fact legacy_batch=<n>`"
+  },
+  "effect_workers": {
+   "wired": false,
+   "why": "the cap on Command / File / Fetch / SqlQuery effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"
+  },
+  "eval_stats": {
+   "wired": false,
+   "why": "the eval accounting (native/src/stats.rs): default ON; `--fact eval_stats=false` turns it off (no counting, no `Stats:eval` entity). On, `Stats:eval` holds the top 20 getters/setters by self time of the last window and of the lifetime"
+  },
+  "eval_stats_window_s": {
+   "wired": false,
+   "why": "the seconds between two publications of `Stats:eval` (default 10, a threshold flagged for the operator); told by `--fact eval_stats_window_s=<s>`"
+  },
+  "operator": {
+   "wired": false,
+   "why": "the person the page's owner cookie is minted for (door_auth.c1f; the released MEMBRANE_OPERATOR); default `owner`; told by `--fact operator=<name>`"
+  },
+  "owner_token_file": {
+   "wired": false,
+   "why": "where `cliffvm run` wrote the owner's token (<seat_data_dir>/owner.token, mode 0600) when the seat has a door secret; chat_turn.c1f adds the Authorization header and the run's env_from only when it is set; absent on the barest seat"
+  },
+  "owner_token_ttl_s": {
+   "wired": false,
+   "why": "how long the owner token minted at every boot lives, in seconds (native/src/owner.rs); default 2592000 (30 days), a threshold flagged for the operator; told by `--fact owner_token_ttl_s=<n>`"
+  },
+  "quota_probe_s": {
+   "wired": false,
+   "why": "the quota probe interval the page shows, seconds (released PROBE_S 600); a `--fact` setting, default 600"
+  },
+  "field_tau_s": {
+   "wired": false,
+   "why": "the field current's fade `tau_s` / options `current_tau_s`, seconds (released 180.0); a `--fact` setting, default 180.0"
+  },
+  "self_cpu_share_default": {
+   "wired": false,
+   "why": "the `self_cpu_share` option's default (released 0.5); a `--fact` setting, default 0.5"
+  },
+  "code_runs_keep_default": {
+   "wired": false,
+   "why": "the `code_runs_keep` option's default (released 30); a `--fact` setting, default 30"
+  },
+  "chat_page_size": {
+   "wired": false,
+   "why": "the chat view's first load and each \"Load older turns\": how many turns the history route is asked for (default 20, the legacy chat.js PAGE)"
+  },
+  "chat_poll_size": {
+   "wired": false,
+   "why": "the chat view's polls: how many of the newest turns are read again (default 10, the legacy POLL)"
+  },
+  "chat_list_poll_ms": {
+   "wired": false,
+   "why": "the chat view's poll period once every turn is finished, ms after the last answer (default 3000, the legacy LIST_MS)"
+  },
+  "chat_active_poll_ms": {
+   "wired": false,
+   "why": "the chat view's poll period while a turn is not finished, ms; also the period the page ticks the clock (default 700, the legacy ACTIVE_MS)"
+  },
+  "chat_stick_px": {
+   "wired": false,
+   "why": "the chat view: the log counts as \"at the bottom\" within this many px (default 80, the legacy stick-to-bottom distance; kept as state, the page has no scroll write yet)"
+  },
+  "chat_tool_chars": {
+   "wired": false,
+   "why": "the chat view: a tool's input is shown cut to this many characters, with an ellipsis (default 90, the legacy short())"
+  }
+ }
+}

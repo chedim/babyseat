@@ -1,0 +1,256 @@
+PACK chat_turn 1
+IMPORT chat 1
+IMPORT semtext 1
+IMPORT proc 1
+IMPORT boot 1
+VIRTUAL Chunk
+-- THE BARE CHAT'S TURN (#1143, operator 2026-11-12): a message is answered by ONE run of the model's CLI, in the mode the Python rung
+-- used (membrane/claude_agent.py): Claude's built-in tools OFF, no user MCP config, no settings files, the allowed tools exactly the
+-- membrane MCP set (the door's `POST /mcp`, packs/door_tools.c1f), one continuous run per answer with a ceiling, the system prompt is the
+-- barest doctrine (docs/doctrine-barest-draft.md) plus the chat's banner, the prompt is the message ALONE: no chat history reaches the model (map mode). What must outlive
+-- the turn goes into the field; the banner shows it.
+-- THE RUN is a Command entity (`membrane::Command:chat:<id>`) the turn writes; the stream-json lines of its stdout are read here by
+-- `json()` (the receipt lands when the process ends: the answer is not streamed, see docs/cliffvm.md); the result line is the answer,
+-- else the assistant's text in order. The run is the message's TURN entity (`...:turn`, packs/chat.c1f: state, started, ended); each tool the model ran and the answer are entities under the turn (ChatTool: name, input, result).
+-- Boot facts (cliffvm run ... --fact name=value):
+--   chat_claude_bin   the CLI's path. NO DEFAULT: without it a message is answered with an error that says so, and nothing is run.
+--   chat_auth         how the CLI authenticates: `api_key` (the DEFAULT: the key of the seat's environment variable ANTHROPIC_API_KEY, handed to the CLI in ITS environment) or `login` (the
+--                     CLI's own login: an explicit opt-in, never chosen silently). Anything else is refused. The key is never read by a pack: the launcher tells only `anthropic_key_set`
+--                     (a yes or no), and the run's `env_from` hands the value to the child (the driver masks it in whatever the child prints), so it is in no property, argv, row or reply.
+--   (LIVE since the settings pack: `Setting:chat.max_steps` and `Setting:chat.timeout` (packs/settings.c1f) are the owners of the two values below: their `current` is read first, then the fact, then the default here, which a seat without that pack still uses)
+--   chat_turn_timeout_s the turn's time limit in seconds (a Command's timeout_s); default 21600 here (a threshold: flagged for the operator).
+--   chat_max_turns    the ceiling (the CLI's --max-turns); default 2048 here (a threshold: flagged for the operator).
+-- `env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is the CLI's own switch the Python rung set (no auto-memory keyed to the folder).
+-- (the two setters are on the class Chat, not on the kind ChatMessage: a setter reaches a kind only through an ISA parent ENTITY, `cls:chatmessage`,
+-- and a getter only needs the `parents` stamp; only a message has `plan` and `answer`.)
+-- `--` ends the options (the CLI's --allowedTools and --mcp-config take lists: without it they would swallow the prompt).
+-- The login is the CLI's own and only by opt-in (chat_auth=login); --bare is NOT used: it never reads the login (OAuth/keychain), only an API key.
+-- KEY MODE (the default): the credentials the CLI ranks above the key or that stand in for it (ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY, CLAUDE_CODE_OAUTH_TOKEN) are
+-- REMOVED from the child's environment (`env -u`), the list of the Python rung (claude_agent.py OVERRIDING_ENV and LOGIN_ENV, v0.7.53), so the key is what answers even where a login is stored.
+-- LOGIN MODE: ANTHROPIC_API_KEY AND the credentials that outrank the stored login (ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY: OVERRIDING_ENV of the Python rung's
+-- `credential_env`, login branch) are removed, so the login answers; CLAUDE_CODE_OAUTH_TOKEN stays: it is a LOGIN token, which the login legitimately uses (the oracle blanks it only in key mode).
+
+ChatMessage.bin getter:
+  WHEN this.over: None
+  ELSE: ([b.chat_claude_bin for b in instances('Boot') if b.chat_claude_bin != None] or [''])[0]
+ChatMessage.auth getter:
+  WHEN this.over: None
+  ELSE: ([b.chat_auth for b in instances('Boot') if b.chat_auth != None] or ['api_key'])[0]
+ChatMessage.key_set getter:
+  WHEN this.over: None
+  ELSE: ([b.anthropic_key_set for b in instances('Boot') if b.anthropic_key_set != None] or [False])[0] == True
+ChatMessage.auth_env getter:
+  WHEN this.over: None
+  ELSE: ['env', '-u', 'ANTHROPIC_API_KEY', '-u', 'ANTHROPIC_AUTH_TOKEN', '-u', 'CLAUDE_CODE_USE_BEDROCK', '-u', 'CLAUDE_CODE_USE_VERTEX', '-u', 'CLAUDE_CODE_USE_FOUNDRY'] if this.auth == 'login' else ['env', '-u', 'ANTHROPIC_AUTH_TOKEN', '-u', 'CLAUDE_CODE_USE_BEDROCK', '-u', 'CLAUDE_CODE_USE_VERTEX', '-u', 'CLAUDE_CODE_USE_FOUNDRY', '-u', 'CLAUDE_CODE_OAUTH_TOKEN']
+ChatMessage.max_turns getter:
+  WHEN this.over: None
+  ELSE: prop('Setting:chat.max_steps', 'current') or ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
+-- THE TURN HAS ITS OWN LIMIT (#1143): the default of a Command run (`command_timeout_s`, 120 s) is for a model's shell commands, not for a chat turn (its ceiling is
+-- `chat_max_turns`); the turn's run states `timeout_s` = the boot fact `chat_turn_timeout_s`, default 21600 (6 h; a threshold flagged for the operator).
+ChatMessage.turn_timeout_s getter:
+  WHEN this.over: None
+  ELSE: prop('Setting:chat.timeout', 'current') or ([b.chat_turn_timeout_s for b in instances('Boot') if b.chat_turn_timeout_s != None] or [21600])[0]
+ChatMessage.port getter:
+  WHEN this.over: None
+  ELSE: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
+-- THE OWNER'S TOKEN (docs/auth.md): a seat with a door secret refuses a caller with no token, loopback too, so the turn's CLI carries the owner's token
+-- (the file `Boot:seat.owner_token_file` names, written by the launcher at every boot). The token is NOT here: the config names the variable
+-- `${MEMBRANE_OWNER_TOKEN}` as the CLI's MCP `headers` take it, and the run's `env_from` hands the launcher's own value to the child's environment,
+-- so the value is in no property, no argv and no row. The barest seat has no such file: no header, no variable.
+ChatMessage.owner_file getter:
+  WHEN this.over: None
+  ELSE: ([b.owner_token_file for b in instances('Boot') if b.owner_token_file != None] or [None])[0]
+-- THE DOOR'S ADDRESS (#1143): the CLI is always a child of the seat on the same machine, so its MCP url names the address the door actually listens on: the host of
+-- `Http:door.listen_result` when it is a specific address (`--bind <lan-ip>` has no listener on loopback), loopback when the bind is the wildcard (0.0.0.0, ::) or unstated.
+-- A specific IPv6 address is written in brackets.
+ChatMessage.mcp_host getter:
+  WHEN this.over: None
+  ELSE: ([prop(h.listen_result, 'host') for h in instances('Http') if prop(h.listen_result, 'host') != None] or ['127.0.0.1'])[0]
+ChatMessage.mcp_url getter:
+  WHEN this.over or this.port == None: None
+  ELSE WHEN this.mcp_host == '' or this.mcp_host == '0.0.0.0' or this.mcp_host == '::': 'http://127.0.0.1:' + str(this.port) + '/mcp'
+  ELSE WHEN ':' in this.mcp_host: 'http://[' + this.mcp_host + ']:' + str(this.port) + '/mcp'
+  ELSE: 'http://' + this.mcp_host + ':' + str(this.port) + '/mcp'
+ChatMessage.mcp_server getter:
+  WHEN this.over or this.port == None: None
+  ELSE WHEN this.owner_file != None: {'type': 'http', 'url': this.mcp_url, 'headers': {'Authorization': 'Bearer ${MEMBRANE_OWNER_TOKEN}'}}
+  ELSE: {'type': 'http', 'url': this.mcp_url}
+-- what the run's `env_from` hands the child: the owner's token (a seat with a secret) and, in key mode, the API key (both named, never valued here). ONE key check: the key is named
+-- only when `key_set` (the launcher's fact: set AND non-empty) is true, the same test `plan` refuses on, so the driver's "environment variable ... is not set" can never be reached in key mode.
+ChatMessage.owner_env getter:
+  WHEN this.over: None
+  ELSE WHEN this.owner_file != None and this.auth == 'api_key' and this.key_set: {'MEMBRANE_OWNER_TOKEN': 'MEMBRANE_OWNER_TOKEN', 'ANTHROPIC_API_KEY': 'ANTHROPIC_API_KEY'}
+  ELSE WHEN this.owner_file != None: {'MEMBRANE_OWNER_TOKEN': 'MEMBRANE_OWNER_TOKEN'}
+  ELSE WHEN this.auth == 'api_key' and this.key_set: {'ANTHROPIC_API_KEY': 'ANTHROPIC_API_KEY'}
+  ELSE: None
+ChatMessage.mcp_json getter:
+  WHEN this.over: None
+  ELSE: str({'mcpServers': {'membrane': this.mcp_server}}) if this.mcp_server != None else None
+ChatMessage.banner_text getter:
+  WHEN this.over: None
+  ELSE: prop('membrane::Banner:owner:main', 'text')
+ChatMessage.note getter:
+  WHEN this.over: None
+  ELSE: 'Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.'
+-- THE PROMPT PROPS END WITH THE TURN (#1143): bin, max_turns, port, owner_file, mcp_server, owner_env, mcp_json, banner_text, banner_slot, sys, argv and note are none once the turn is over (done/error): a finished message
+-- no longer reads the banner, so a banner change recomputes only unfinished messages (not every message ever sent), the reply of a write carries none of them and the
+-- stored rows hold no copy of the system prompt. The view, the text, the response and the tools are not among them.
+-- A banner with no `text` (the model's pack left it null) is SHOWN, not skipped: the turn runs with the banner error in the banner's slot, so the model can repair it (Help:banner).
+ChatMessage.banner_slot getter:
+  WHEN this.over: None
+  ELSE: this.banner_text if this.banner_text != None and not (this.banner_text is Error) else 'BANNER ERROR: your banner `Banner:owner:main` has no `text` (the reason: ' + (why(this.banner_text) or 'it has no text property') + '). Give `Banner.text` a value again, in a pack that defines it; Help:banner shows how.'
+ChatMessage.sys getter:
+  WHEN this.over: None
+  ELSE: join([this.note, this.banner_slot], '\n\n')
+-- THE MODEL (#1143): the model that answers is the message's `pick` (the session's pick, packs/door_session.c1f; none on the bare chat), else the seat's default (`seat_model`). A name in the
+-- `claude-agent:` namespace the Python seat gave its rungs runs the CLI with `--model <the bare alias>` (the CLI knows `sonnet`, not `claude-agent:sonnet`); the seat's own default
+-- under any other name (`claude`: the CLI's own default) runs with no flag; another claude-agent rung runs under its own name; any other pick (a local model, an unknown name)
+-- is refused in the turn with the reason, the CLI never starts.
+ChatMessage.pick_default getter: (this.pick or '') in ['', 'membrane']
+ChatMessage.model_eff getter: this.seat_model if this.pick_default else this.pick
+ChatMessage.pick_ok getter: this.model_eff == this.seat_base or prop('Model:' + this.model_eff, 'backend') == 'claude-agent' or this.oai_cfg != None
+ChatMessage.sdk_model getter: tail(this.model_eff, len(this.model_eff) - len('claude-agent:')) if startswith(this.model_eff, 'claude-agent:') else ('' if this.model_eff == this.seat_base else this.model_eff)
+ChatMessage.model_args getter: ['--model', this.sdk_model] if this.sdk_model != '' else []
+ChatMessage.argv getter:
+  WHEN this.over: None
+  ELSE WHEN this.bin == '' or this.mcp_json == None or this.sys == None or this.text == None: None
+  ELSE: concat(concat(concat(this.auth_env, ['CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence']), this.model_args), ['--max-turns', str(this.max_turns), '--system-prompt', this.sys, '--', this.text])
+
+-- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------
+ChatMessage.plan getter:
+  WHEN this.queued != True or this.tstate != 'queued' or this.text == None: None
+  -- a model that is not a claude rung is answered over an OpenAI-compatible endpoint (packs/chat_oai.c1f): its own plan, none of the claude CLI's checks apply
+  ELSE WHEN this.oai_cfg != None: this.oai_plan
+  ELSE WHEN this.bin == '': {'refuse': 'The chat answers through the claude CLI, and its path is not named yet (chat_claude_bin). Name it with CLAUDE_BIN=<path to claude> when you start scripts/seat, or start cliffvm with --fact chat_claude_bin=<path>, then send the message again.'}
+  ELSE WHEN this.auth not in ['api_key', 'login']: {'refuse': 'The chat_auth fact says ' + str(this.auth) + ', which is not a way the claude CLI is run here. Use chat_auth=api_key (the default: the key of ANTHROPIC_API_KEY) or chat_auth=login (the login of the claude CLI itself), then send the message again.'}
+  ELSE WHEN this.auth == 'api_key' and not this.key_set: {'refuse': 'No Anthropic API key: the chat answers through the claude CLI with an API key by default. Set ANTHROPIC_API_KEY in the environment the seat is started from, restart the seat, then send the message again. To use the login of the claude CLI itself instead, start the seat with --fact chat_auth=login (a deliberate choice).'}
+  ELSE WHEN not this.pick_ok: {'refuse': 'This seat answers through the claude CLI only: ' + str(this.pick) + ' is not one of its claude models (GET /v1/models lists them). Pick one of those, or the seat default.'}
+  ELSE WHEN this.argv != None: {'argv': this.argv}
+  ELSE: None
+Chat.plan on-setter turn-start:
+  WHEN prop(this.plan, 'refuse') != None:
+    membrane::Chat[this.cp]:turn.state = 'error'
+    membrane::Chat[this.cp]:turn.ended = clock
+    membrane::Chat[this.cp]:turn.error = prop(this.plan, 'refuse')
+    membrane::Chat[this.cp]:turn:response = ChatResponse(text: prop(this.plan, 'refuse'), error: True)
+  ELSE WHEN prop(this.plan, 'argv') != None:
+    membrane::Chat[this.cp]:turn.state = 'running'
+    membrane::Chat[this.cp]:turn.started = clock
+    membrane::Command:chat[this.cp] = Command(cmd: prop(this.plan, 'argv'), env_from: this.owner_env)
+    membrane::Command:chat[this.cp].run = {'id': this.cp, 'args': [], 'partial': True, 'timeout_s': this.turn_timeout_s}
+
+-- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------
+-- `partial: True` makes the Command driver push what each read of stdout brings (whole lines) as an entity `Chunk:<command>:<n>` ({cmd, id, n, data});
+-- they are outside births of a VIRTUAL class (never stored, never journalled). The partial answer is the text deltas of the `stream_event` lines, the partial
+-- tools the tool_use blocks they start. The finished turn replaces them (the receipt below is the answer), and nothing retires the chunks: the engine collects
+-- them (docs/cliffvm.md, "Garbage collection"): while the command runs its in-flight effect holds them, and when its receipt is taken they are held by nothing.
+ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.cp
+-- each chunk parses its OWN lines once (getters cached on the chunk) and hands what it said to the accumulator below, so a new chunk costs one parse, not a re-parse of everything before it
+Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if e is not Error and prop(e, 'type') == 'stream_event']
+Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
+Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
+ChatMessage.oai_acc getter: 'Chunk:Fetch:oai:' + this.cp + ':' + str(prop(this.turn_eid, 'round') or 0) + ':acc'
+ChatMessage.partial_text getter: '' if this.over else (str(prop('Chunk:' + this.cmd_eid + ':acc', 'text') or '') or str(prop(this.oai_acc, 'text') or ''))
+ChatMessage.partial_tools getter: [] if this.over else (words(str(prop('Chunk:' + this.cmd_eid + ':acc', 'tools') or '')) or words(str(prop(this.oai_acc, 'tools') or '')))
+-- THE PARTIAL ANSWER IS ACCUMULATED, NOT RE-JOINED (w28): the message used to list every live chunk at every birth (a scan of all the chunks, a dict and a sort per chunk, a join of all
+-- their text), so a turn of N chunks cost N squared (the burst: 80% of the CPU). Now each chunk, when it has parsed its own lines, appends what it said and the tools it started to ONE
+-- accumulator, `Chunk:<command>:acc` (a chunk of the same command, so it lives and is collected with the others: the running effect holds it); a birth costs the same however many came before.
+Chunk.part getter: {'said': this.said, 'started': this.started} if this.cmd != None else None
+Chunk.part on-setter partial-in:
+  WHEN this.part != None and this.n != None:
+    ('Chunk:' + this.cmd + ':acc').text = str(prop('Chunk:' + this.cmd + ':acc', 'text') or '') + str(prop(this.part, 'said') or '')
+    ('Chunk:' + this.cmd + ':acc').tools = (str(prop('Chunk:' + this.cmd + ':acc', 'tools') or '') + ' ' + str(prop(this.part, 'started') or '')) if prop(this.part, 'started') != '' else str(prop('Chunk:' + this.cmd + ':acc', 'tools') or '')
+
+-- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
+ChatMessage.rr getter: prop('membrane::Command:chat:' + this.cp, 'run_result')
+ChatMessage.rc getter: prop(this.rr, 'rc')
+-- THE STREAM IS READ IN SMALL EVALUATIONS (#1143, a live turn that ended `error` with no cause): a long turn's stdout is a megabyte of lines, and one getter that parsed them all
+-- cost 11 ms against the old 10 ms self-time allowance (a Trip: its Error flowed on into `fail_why`; time no longer decides a value, but the stream is still read in small steps). The result line is read on its own (`rlines`, `finals`: one line parsed), and `evs` skips the
+-- `stream_event` partials (the bulk, 90% of the bytes: they were the live text, the finished messages say the same). `evl` is `evs` or an empty list: a stream that could not be read costs
+-- the tools and the spoken text, never the answer the result line gave.
+ChatMessage.rlines getter: [l for l in lines(str(prop(this.rr, 'stdout') or '')) if '"result"' in l]
+ChatMessage.evs getter: [e for e in [json(l) for l in lines(str(prop(this.rr, 'stdout') or '')) if not (startswith(l, '{"type":"stream_event"') or startswith(l, '{"type": "stream_event"'))] if e is not Error and prop(e, 'type') != None]
+ChatMessage.evl getter: this.evs if this.evs is List else []
+ChatMessage.finals getter: [e for e in [json(l) for l in this.rlines] if e is not Error and prop(e, 'type') == 'result']
+ChatMessage.final getter: this.finals[-1]
+ChatMessage.texts getter: [join([prop(b, 'text') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'text'], '') for e in this.evl if prop(e, 'type') == 'assistant']
+ChatMessage.spoken getter: strip(join([t for t in this.texts if t != ''], '\n\n'))
+ChatMessage.capped getter: str(prop(this.final, 'subtype') or '') == 'error_max_turns'
+ChatMessage.fail_why getter:
+  WHEN this.rr == None: None
+  ELSE WHEN this.final == None and this.rc == -1: 'claude ended without an exit code (killed by a signal, or it never started) (rc -1): ' + strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or ''))
+  ELSE WHEN this.final == None and this.rc != 0: 'claude failed (rc ' + str(this.rc) + '): ' + strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or ''))
+  ELSE WHEN this.final == None and this.evs is Error: 'claude ended with no result line and its output could not be read (' + (why(this.evs) or 'unreadable') + ')'
+  ELSE WHEN this.final == None and this.spoken == '': 'claude ended with no answer at all (rc ' + str(this.rc) + ': no result line, no text)'
+  ELSE WHEN prop(this.final, 'is_error') == True: 'claude reported an error: ' + str(prop(this.final, 'result'))
+  ELSE: None
+ChatMessage.answer getter:
+  WHEN this.rr == None: None
+  ELSE WHEN this.fail_why != None: this.fail_why
+  ELSE WHEN this.capped: this.spoken + '\n\n(stopped at the ceiling of ' + str(this.max_turns) + ' turns)'
+  ELSE WHEN strip(str(prop(this.final, 'result') or '')) != '': str(prop(this.final, 'result'))
+  ELSE: this.spoken
+-- the numbers of the result line, kept on the turn (the receipt is slimmed after the turn): `usage` {input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens}, `cost` (USD), `calls` (the CLI's num_turns) and `duration` (ms)
+ChatMessage.tokens getter: prop(this.final, 'usage')
+ChatMessage.cost getter: prop(this.final, 'total_cost_usd')
+ChatMessage.calls getter: prop(this.final, 'num_turns')
+ChatMessage.took getter: prop(this.final, 'duration_ms')
+ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evl if prop(e, 'type') == 'assistant'], ' '))
+-- the ids of the tools in the order they were called (the stream's order): the page reads each tool entity by `...:turn:tool:<id>` in this order
+ChatMessage.tools_idlist getter: join([join([str(prop(b, 'id')) for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evl if prop(e, 'type') == 'assistant'], ' ')
+-- the turn is over once its state is done or error. The finish below runs only while it is not: the answer is derived from the receipt, and the slimming
+-- below changes the receipt, so a finished turn keeps the response it wrote.
+ChatMessage.over getter: this.tstate == 'done' or this.tstate == 'error'
+Chat.answer on-setter turn-finish:
+  WHEN this.answer != None and not this.over:
+    membrane::Chat[this.cp]:turn.state = 'error' if this.fail_why != None else 'done'
+    membrane::Chat[this.cp]:turn.ended = clock
+    membrane::Chat[this.cp]:turn.error = this.fail_why
+    membrane::Chat[this.cp]:turn.usage = this.tokens
+    membrane::Chat[this.cp]:turn.cost = this.cost
+    membrane::Chat[this.cp]:turn.calls = this.calls
+    membrane::Chat[this.cp]:turn.duration = this.took
+    this.tools_run = this.tools_names
+    this.tool_ids = this.tools_idlist
+    membrane::Chat[this.cp]:turn:response = ChatResponse(text: this.answer, error: this.fail_why != None, rc: this.rc)
+    FOR t IN ([this.answer] if this.fail_why == None else []):
+      membrane::Chat[this.cp]:turn:response:body = SemText(text: t)
+      membrane::Chat[this.cp]:turn:response:body.mention = True
+    FOR e IN [x for x in this.evl if prop(x, 'type') == 'assistant']:
+      FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:
+        membrane::Chat[this.cp]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
+    FOR e IN [x for x in this.evl if prop(x, 'type') == 'user']:
+      FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_result']:
+        body = prop(b, 'content')
+        membrane::Chat[this.cp]:turn:tool[prop(b, 'tool_use_id')].result = body if body is Text else join([prop(c, 'text') for c in (body if body is List else [])], '\n')
+
+
+-- ---- after the answer: the raw output is dropped ----------------------------------------------------------------------------------------------
+-- The receipt holds the CLI's whole stdout (and `head`, its twin), and the getters above cached parses of it on the message: a long turn is
+-- hundreds of KB, stored again and again. Once the turn is over and its answer, tools and numbers are entities, the receipt is replaced by what
+-- is useful: the id, the status, the rc and the stderr (the same replay-safe derived clearing the request collector does). The journal keeps
+-- the partial chunks it was given (docs/cliffvm.md, "Resource hygiene").
+ChatMessage.spent getter: this.over and this.rr != None and prop(this.rr, 'stdout') != None and this.said != None
+Chat.spent on-setter slim-run:
+  WHEN this.spent == True:
+    membrane::Command:chat[this.cp].run_result = {'id': prop(this.rr, 'id'), 'status': prop(this.rr, 'status'), 'rc': this.rc, 'stderr': prop(this.rr, 'stderr')}
+
+-- ---- the chat names its last finished turn -----------------------------------------------------------------------------------------------
+-- Any turn that ends (done or error: the answer, a refusal, an interruption) writes its eid to `last_turn` of its chat (`membrane::Chat:main`): the banner's
+-- previous-turn error line reads it (apps/barest.c1f/default_banner.c1f) with one reference, because the turns are a lazy class and cannot be listed.
+Chat.state on-setter last-turn:
+  WHEN this.kind == 'turn' and (this.state == 'done' or this.state == 'error'):
+    membrane::Chat:main.last_turn = this.eid
+
+-- ---- at start: a turn the last run left running ----------------------------------------------------------------------------------------------
+-- A turn whose state is `running` and that started before this run's start (`Boot.started`) lost its CLI with the old process (its Command never got a
+-- receipt, and a restore runs no setter): it becomes an error with a response that says so. A turn of this run started after `started`, so it is never listed.
+-- (the turns are a LAZY class: the store is asked, not the engine's `instances`, which lists only what is loaded.)
+Boot.interrupted getter: [head(replace(prop(r, 'k'), 'membrane::Chat:', ''), len(replace(prop(r, 'k'), 'membrane::Chat:', '')) - 5) for r in sql('SELECT k, json_extract(body, \'$.props.started\') AS started FROM c_field WHERE cls = \'Chat\' AND k LIKE \'membrane::Chat:%:message:%:turn\' AND json_extract(body, \'$.props.state\') = \'running\'') if prop(r, 'started') != None and prop(r, 'started') < this.started] if this.started != None else []
+Boot.interrupted on-setter turn-interrupted:
+  WHEN len(this.interrupted) > 0:
+    FOR i IN this.interrupted:
+      membrane::Chat[i]:turn.state = 'error'
+      membrane::Chat[i]:turn.ended = clock
+      membrane::Chat[i]:turn.error = 'interrupted: the seat stopped while this turn was running'
+      membrane::Chat[i]:turn:response = ChatResponse(text: 'interrupted: the seat stopped while this turn was running', error: True)

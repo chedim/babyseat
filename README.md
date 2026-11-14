@@ -196,36 +196,24 @@ open; writes need the seat token, which the container prints at boot
 only on a network you trust. [JWT mode](docs/auth.md) is on by default (a token on every request); turn it off with `MEMBRANE_JWT=0`. Details:
 [docs/docker.md](docs/docker.md).
 
-### Inside Home Assistant (HACS)
+### Home Assistant (HACS)
 
 1. HACS → ⋮ → Custom repositories → `https://github.com/chedim/membrane`,
    category *Integration*.
-2. Install **Membrane**, restart Home Assistant.
-3. Settings → Devices & services → Add integration → **Membrane** →
-   *Inside Home Assistant*. If Home Assistant already has the Ollama
-   integration, it is used; otherwise give Ollama's address. Pick the models.
+2. Install **babyseat (membrane)**, restart Home Assistant.
+3. Run a seat, mint a token for Home Assistant (`cliffvm token mint --sub owner`), then
+   Settings → Devices & services → Add integration → the seat's URL and the token.
 
-Home Assistant then runs the seat as its own child process (started and
-stopped with HA, restarted if it dies; its data in `<config>/membrane/`),
-opens on membrane home for everyone (HA's sidebar folds away; ☰ leads to HA's
-own pages — switch it off in the integration's options), adds the seat as an
-Assist conversation agent, and its field's readings as sensors.
-
-**What it can do in your house:** by default the seat may use Home Assistant
-through a hidden, non-admin, local-only user ("Membrane") — read any state,
-call any service, and mirror the entities it chooses (they update live). It
-acts on what people ask, but its commands are written by a model: turn *Let
-the seat use Home Assistant* off in the integration's options if you'd rather
-it only talks. It can't change Home Assistant's configuration or users.
-
-*Connect to a seat running elsewhere* is for a seat on another machine (the
-integration is then only its UI and agent).
-
-**Several seats, one house (the 🦠 zoo):** *Configure* → **Add a seat** (host,
-ports 4096 / 11500, its `membrane token seat`) adds a laptop or a phone; the
-house talks to one at a time — switch it from membrane home's 🦠 button (a
-card per seat; its Blurp's level and rung only when Blurp is on) or the `select.membrane_seat`
-entity ([docs/home-assistant.md](docs/home-assistant.md#the-zoo-several-seats)).
+Since 0.7.60 the integration is a thin client of a seat you run: it adds the seat
+as an Assist conversation agent, asks for a new token when one runs out, lets the
+model read states and call services through Home Assistant (an allow-list you write,
+default deny; only what you exposed to Assist), shows a few entities for the seat
+(reachable, busy, model, turns today, last answer, last error; a select for its
+model) and adds the services `membrane.send_message` and `membrane.ask`. The seat's
+use of the house, the entities and the select need the owner's token. It does
+not start a seat; the panels, the per-user relay, speech input and the several-seats
+list are a later slice (see
+[docs/home-assistant.md](docs/home-assistant.md), [docs/hass-plan.md](docs/hass-plan.md)).
 
 ### The daily work: typed tools, guarded writes
 
@@ -234,13 +222,13 @@ the things it names. On later turns it sees only what changed since the last
 message: which entities moved, and whether the change came from the
 conversation, the code, another seat or a script.
 
-**The conversation block** (the default since #429's measurement; since 0.7.5 made by the `banner` pack, `Banner:<owner>:<chat>`, which each model can tune or replace for its own chats;
+**The conversation block** (the default since #429's measurement; since 0.7.5 made by the `banner` pack, `Banner:<owner>:<chat>`, which each model can tune or replace for its own chats (on a map-mode seat the banner is the whole state message: a class of the model's own with a `text` getter replaces it completely, 3 s for its reads, the default shows headed by the error if it fails: help('map'));
 `MEMBRANE_INJECTION=banner` restores the WHERE WE ARE banner) replaces that state with one small block about *this*
 chat, built from records only (no model call), at most 900 chars, sent every
 turn while it has content: `NOW`, `WORKING ON` (the person's latest earlier
 ask), `ABOUT` (the chat's focus entities), `DECIDED` (the ledger, goals
-fulfilled and coproc decisions made in this chat), `OPEN` (goals planted in
-it), `STABLE` (facts seen in 3 chats over 2 days, never contradicted),
+fulfilled in this chat), `OPEN` (goals planted in
+it), `STABLE` (ledger facts seen in 3 chats over 2 days),
 `SINCE YOUR LAST MESSAGE` (focus entities moved from outside the chat),
 alerts and a pointer to `state(section=...)`. Each record line says its
 source and age, e.g. `(person · 2h ago)` ([details](docs/entity-field.md#this-conversation)).
@@ -253,7 +241,7 @@ tracks, commands, interfaces, classes, loops, timelines, frame, digest, or
 changes since the last message), `learn` to keep a lesson (with the same guards as any turn),
 `forget` to clean up its mistakes, and the entity tools
 (`entity_add/edit/remove/inherit`, `entity_write` -- set one property, the way it acts: an adapter's effect runs and its receipt lands as `<prop>_result` --, `entity_query`, `entity_tracks`,
-`entities_related`, …), `pack` (list / show / load a `.c1f` pack: an entity's behaviour, its load error in the reply; [the language](docs/cliffhanger-fields.md)), `code_run` and Cliffhanger's method tools (`method_define/call/each/inspect`) for shell commands. Code the model runs becomes a tree of entities in the field, linked to its executor, and each run ends on its own result entity ([the executor](docs/entity-field.md#the-executor-code-is-a-tree-in-the-field-614)); what it will do again it defines as a method on an entity, then calls ([program the field first](docs/cliffhanger.md#program-the-field-first-576-part-f)). Commands compose in **Cliffhanger**, membrane's command
+`entities_related`, …), `pack` (list / show / load a `.c1f` pack: an entity's behaviour, its load error in the reply; [the language](docs/cliffhanger-fields.md)), `code_run` for shell commands. Code the model runs becomes a tree of entities in the field, linked to its executor, and each run ends on its own result entity ([the executor](docs/entity-field.md#the-executor-code-is-a-tree-in-the-field-614)); what it will do again it makes a `Command:<name>` entity and runs by writing `Command:<name>.run = {args}` (entity methods are retired, #1101: [program the field first](docs/cliffhanger.md#program-the-field-first-576-part-f)). Commands compose in **Cliffhanger**, membrane's command
 language ([its spec](https://github.com/chedim/cliffhanger),
 [how membrane uses it](docs/cliffhanger.md)). Every write is audited with
 where it came from. The VM's surface (writes, store, triggers, effects) and the replay test a
@@ -378,7 +366,7 @@ pass through to Ollama unchanged.
 
 | Command | What it does |
 |---|---|
-| `membrane opencode` | the daily driver: proxy on :11500 + membrane's own serve surface (loopback) with the opencode TUI **attached as a thin client** (`MEMBRANE_TUI_DIRECT=1` restores the old direct-provider lane) |
+| `membrane opencode` | the daily driver: proxy on :11500 + membrane's own serve surface (loopback) with the opencode TUI **attached as a thin client** |
 | `membrane serve` | the same seat, headless: membrane's OWN opencode-compatible REST/SSE server (opencode replaced, no child process) |
 | `membrane standalone` | the seat with its own web UI — membrane home (the field in 3D), chat, voice; see [docs/standalone.md](docs/standalone.md) |
 | `membrane backfill` | rebuild the field from history (code first, then the audit log; idempotent, resumable) |
@@ -662,7 +650,7 @@ of the top 8.
 - **Update check at boot** (opt out `MEMBRANE_NO_UPDATE_CHECK=1`): the CLI
   compares against its install source (git or PyPI), prints the CHANGELOG
   delta, and asks before pulling (`--ff-only`; a dirty tree is refused).
-  Inside Home Assistant, updates come through HACS.
+  In Home Assistant, the integration updates through HACS (the seat is yours to update).
 - **Restart only from the shell** (`membrane reset` / `./run.sh restart`).
   Membrane never restarts itself while running, and a restart loses nothing:
   the field re-hydrates from its backend. The one way a restart CAN change
@@ -682,11 +670,14 @@ of the top 8.
 | [docs/claude-agent.md](docs/claude-agent.md) | **The claude-agent rung**: Claude through the Agent SDK on your Anthropic API key; enabling it, opt-in routing, membrane's tools in Claude's loop (built-ins off, no check-ins, a 2048-call ceiling per answer with a person's Continue, an idle guard instead of the wall clock), learned like any model with a `madeBy` provenance mark |
 | [docs/docker.md](docs/docker.md) | **babyseat in Docker**: the public image `chedim/babyseat`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
 | [docs/auth.md](docs/auth.md) | **JWT mode (on by default; `MEMBRANE_JWT=0` turns it off).** Turning it off, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
-| [docs/home-assistant.md](docs/home-assistant.md) | **babyseat in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
+| [docs/home-assistant.md](docs/home-assistant.md) | **babyseat in Home Assistant** (HACS): connect to a seat with a token, the Assist agent, the seat's use of the house (calls, allow-list), entities and services, reauth, what works and what is a later slice |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
 | [doctrine.md](doctrine.md) + [membrane/help/](membrane/help/) | **What the model is told.** The doctrine is the short core every turn carries; the long forms (packs, exec, cliffhanger, goals, watches, browser, the in-page field engine, clock, voice, restarts, consequences) are help topics shipped as field entities `membrane::help:<topic>` (the `help` seed pack: a release updates them, a seat's edits are kept as overlays), read by `help(topic)` |
+| [docs/cliffvm.md](docs/cliffvm.md) | **`cliffvm`: the field VM as a standalone app, no Python.** The binary, how to run a packs folder, the host loop and its journal, and what it does not do yet (the list of what `fields_live.py` still does). |
+| `scripts/seat` | **Run a seat**: starts `cliffvm` on the barest app (`membrane/apps/barest.c1f`): a graph viewer and one chat in the browser; see [Run a seat](docs/cliffvm.md). |
+| [docs/python-to-c1f.md](docs/python-to-c1f.md) | **The migration plan:** what stays Python (the package, VM initialization), what becomes native, what becomes `.c1f`, in order. |
 | [docs/cliffhanger-fields.md](docs/cliffhanger-fields.md) | **The field engine and `.c1f` packs.** Getters, setters, arms, FOR, built-ins, the store/fs/proc drivers, the banner and MCP as packs, the engine in the browser |
-| [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — the pointer to its own spec repo, and the LLM as a coprocessor (`MEMBRANE_COPROC=1`: decide / remember / intend parsed from a model's reply, person-traced or held as proposals) |
+| [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — the pointer to its own spec repo |
 | [docs/seat-first-2-tier.md](docs/seat-first-2-tier.md) | The seat-first two-tier field: local authoritative store, a published global tier on your terms |
 | [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup (publish, or the merged field with `MEMBRANE_FIELD_CLOUD=1`), the async loop, watches, operator rules, go-live checklist |
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The opt-in merged field: the origin axis, disjoint writers / merged reads, divergence conflicts, the commons |
@@ -726,7 +717,7 @@ python experiments/variety_toy.py        # the variety toy: the gate's calibrati
 
 A working lab, used every day to build itself: this repo's own field holds
 about 14,000 entities, and its background mind digests, dreams and talks
-about its own work. Version **0.7.53**; API and flag surfaces may still
+about its own work. Version **0.7.60**; API and flag surfaces may still
 move. Licensing: **MIT** from 0.7.3 (see [LICENSE](LICENSE)); releases up to
 0.7.2 stay under PolyForm Noncommercial 1.0.0.
 

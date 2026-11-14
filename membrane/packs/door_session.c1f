@@ -1,0 +1,346 @@
+PACK door_session 1
+IMPORT door 1
+IMPORT chat 1
+IMPORT chat_turn 1
+IMPORT semtext 1
+IMPORT proc 1
+VIRTUAL SesBus
+-- THE SESSION FAMILY: the opencode session API the page and the TUI speak (#1143, swap step 2; docs/cliffvm.md "The session API"). The routes:
+--   GET  /session                          the sessions, oldest first            POST /session {title?}              a new session (200, the session)
+--   GET  /session/status                   {<session id>: {type: idle|busy}}
+--   GET  /session/<sid>                    the session                           PATCH /session/<sid> {title}        rename          DELETE /session/<sid>
+--   GET  /session/<sid>/message[?limit&before]   the rows [{info, parts}], oldest first
+--   GET  /session/<sid>/message/<mid>      one row
+--   POST /session/<sid>/prompt_async {parts, model?}  start a turn (204)                 POST /session/<sid>/message {parts}   the same, answered when the turn ends
+--   POST /session/<sid>/abort              stop the turn (true)
+--   GET  /session/<sid>/voice, /predict, /todo, /children, /diff   []: the released answers of a seat with no voice lines of its own, no predictor and nothing to list for
+--                                          the TUI's stubs (the chat view asks the first two beside the messages; the POST of /voice, the vote / rewrite teaching, is not here: 405)
+--   GET  /event, GET /global/event         the event streams (text/event-stream)
+-- A SESSION IS A CHAT: `membrane::Chat:session:<sid>` (the kind ChatSession: stitle, born, upd = epoch ms). A MESSAGE of the page is a ChatMessage (packs/chat.c1f) with
+-- `sid` naming its session, and the model's answer to it is its turn (chat_turn.c1f). One message = TWO rows of the opencode API: the user row (the text) and the assistant row
+-- (the turn's text and tool parts). The ids follow the Python seat's: `<prefix>_` and 24 digits, derived from the message (its milliseconds, its request number padded to 8 digits,
+-- three digits for what it is): a session `ses_<ms><n>000`; a message's user row `msg_<ms><n>001`, its assistant row `...002`, the user's text part `prt_...010`, text part k of the answer
+-- `prt_...1kk`, tool part j `prt_...2jj` (k, j < 100). The id of a message is its entity's: `membrane::Chat:session:<sid>:message:<ms>-<n>` (n padded to 8 digits; docs/chat-keys.md), so the reverse needs no table.
+-- No security (the barest seat): one operator, no `owner`, no per-person chat. What is not here is listed in docs/release-parity.md section 1.2.
+
+-- ---- which route ----------------------------------------------------------------------------------------------------------------------------
+Request.ss_on getter: this.route == '/session' or startswith(this.route, '/session/') or this.route == '/event' or this.route == '/global/event'
+Request.ss_segs getter: words(replace(this.route, '/', ' '))
+Request.ss_n getter: len(this.ss_segs)
+Request.ss_sid getter: this.ss_segs[1] if this.ss_n >= 2 and this.ss_segs[0] == 'session' else None
+Request.ss_route getter:
+  WHEN this.route == '/event' or this.route == '/global/event': 'event'
+  ELSE WHEN this.route == '/session': 'root'
+  ELSE WHEN this.ss_n == 2 and this.ss_segs[1] == 'status': 'status'
+  ELSE WHEN this.ss_n == 2: 'one'
+  ELSE WHEN this.ss_n == 3 and this.ss_segs[2] in ['message', 'prompt_async', 'abort']: this.ss_segs[2]
+  ELSE WHEN this.ss_n == 3 and this.ss_segs[2] in ['voice', 'predict', 'todo', 'children', 'diff']: 'empty'
+  ELSE WHEN this.ss_n == 4 and this.ss_segs[2] == 'message': 'msg1'
+  ELSE: 'other'
+Request.ss_allowed getter: {'event': ['GET'], 'root': ['GET', 'POST'], 'status': ['GET'], 'one': ['GET', 'PATCH', 'DELETE'], 'message': ['GET', 'POST'], 'prompt_async': ['POST'], 'abort': ['POST'], 'msg1': ['GET'], 'empty': ['GET']}[this.ss_route]
+Request.o_session getter:
+  WHEN this.ss_on: True
+Request.m_session getter:
+  WHEN this.ss_on: this.ss_allowed
+Request.r_session getter:
+  WHEN this.ss_on: this.ss_reply
+Request.ss_missing getter: {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}
+Request.ss_reply getter:
+  WHEN this.ss_route == 'root' and this.method == 'GET': this.ss_list_reply
+  ELSE WHEN this.ss_route == 'root': this.ss_create_reply
+  ELSE WHEN this.ss_route == 'status': this.ss_status_reply
+  ELSE WHEN this.ss_route == 'one' and this.method == 'GET': this.ss_get_reply
+  ELSE WHEN this.ss_route == 'one' and this.method == 'PATCH': this.ss_patch_reply
+  ELSE WHEN this.ss_route == 'one': this.ss_delete_reply
+  ELSE WHEN this.ss_route == 'message' and this.method == 'GET': this.ml_reply
+  ELSE WHEN this.ss_route == 'message' or this.ss_route == 'prompt_async': this.sm_reply
+  ELSE WHEN this.ss_route == 'msg1': this.m1_reply
+  ELSE WHEN this.ss_route == 'event': {'status': 200, 'stream': True}
+  ELSE WHEN this.ss_route == 'abort': this.ab_reply
+  ELSE WHEN this.ss_route == 'empty': {'status': 200, 'body': []}
+  ELSE: this.ss_missing
+
+-- ---- the session --------------------------------------------------------------------------------------------------------------------------
+ChatSession.sid getter: replace(this.eid, 'membrane::Chat:session:', '')
+ChatSession.fact_cwd getter: ([b.seat_cwd for b in instances('Boot') if b.seat_cwd != None] or [''])[0]
+ChatSession.fact_project getter: ([b.seat_project for b in instances('Boot') if b.seat_project != None] or [''])[0]
+ChatSession.fact_version getter: ([b.seat_version for b in instances('Boot') if b.seat_version != None] or [''])[0]
+ChatSession.view getter: {'id': this.sid, 'projectID': this.fact_project, 'directory': this.fact_cwd, 'path': tail(this.fact_cwd, max(0, len(this.fact_cwd) - 1)), 'slug': 'session', 'title': this.stitle, 'version': this.fact_version, 'agent': 'build', 'model': {'id': this.smodel or this.seat_model, 'providerID': 'membrane', 'variant': 'default'}, 'cost': 0, 'tokens': {'total': 0, 'input': 0, 'output': 0, 'reasoning': 0, 'cache': {'read': 0, 'write': 0}}, 'summary': {'additions': 0, 'deletions': 0, 'files': 0}, 'time': {'created': this.born, 'updated': this.upd}}
+
+-- the sessions are lazy (a store row, loaded when read): the list asks the store for the keys, then reads each by eid
+Request.ss_rows getter: sql('SELECT k, json_extract(body, \'$.props.born\') AS born FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ?', 'membrane::Chat:session:%', 'membrane::Chat:session:%:%') if this.ss_route == 'root' and this.method == 'GET' else []
+Request.ss_list_reply getter:
+  WHEN this.ss_rows == None: None
+  ELSE WHEN len([r for r in this.ss_rows if prop(r['k'], 'view') == None]) > 0: None
+  ELSE: {'status': 200, 'body': [prop(r['k'], 'view') for r in sort_by(this.ss_rows, 'born')]}
+
+-- GET /session/<sid>: the session or a 404
+-- a sid with a colon is no session (it would name a message's key): not found
+Request.ss_eid getter: 'membrane::Chat:session:' + this.ss_sid if this.ss_sid != None and replace(this.ss_sid, ':', '') == this.ss_sid else None
+Request.ss_view getter: prop(this.ss_eid, 'view') if this.ss_eid != None else None
+Request.ss_get_reply getter: {'status': 200, 'body': this.ss_view} if this.ss_view != None else this.ss_missing
+
+-- POST /session {title?}: the id is the time and the request's number (the clock is read in the setter, so it is the moment of the write)
+Request.ss_make getter: this.entrant and this.ss_route == 'root' and this.method == 'POST'
+Request.ms_txt getter: words(replace(str(clock * 1000), '.', ' '))[0]
+Request.ss_title getter: strip(str(prop(this.jbody, 'title') or '')) or 'New session'
+Request.ss_make on-setter session-make:
+  WHEN this.ss_make:
+    sid = 'ses_' + this.ms_txt + tail('00000000' + replace(this.eid, 'Request:', ''), 8) + '000'
+    membrane::Chat:session[sid] = ChatSession(stitle: this.ss_title, born: this.ms, upd: this.ms)
+    this.ss_made = sid
+Request.ss_create_reply getter:
+  WHEN this.ss_made == None: None
+  ELSE WHEN prop('membrane::Chat:session:' + this.ss_made, 'view') == None: None
+  ELSE: {'status': 200, 'body': prop('membrane::Chat:session:' + this.ss_made, 'view')}
+
+-- PATCH /session/<sid> {title}: the reply is the session once the new title is in it
+Request.ss_new_title getter: strip(str(prop(this.jbody, 'title') or '')) if this.entrant and this.ss_route == 'one' and this.method == 'PATCH' else ''
+Request.ss_rename getter: this.ss_new_title != '' and this.ss_view != None and prop(this.ss_view, 'title') != this.ss_new_title
+Request.ss_rename on-setter session-rename:
+  WHEN this.ss_rename:
+    membrane::Chat:session[this.ss_sid].stitle = this.ss_new_title
+    membrane::Chat:session[this.ss_sid].upd = this.ms
+-- PATCH {model: {modelID, providerID}}: the session's model (the released handler's "THE MODEL'S PATCH"); the provider is always `membrane` here, an empty name changes nothing
+Request.ss_new_model getter: strip(str(prop(prop(this.jbody, 'model'), 'modelID') or prop(prop(this.jbody, 'model'), 'id') or '')) if this.entrant and this.ss_route == 'one' and this.method == 'PATCH' else ''
+Request.ss_remodel getter: this.ss_new_model != '' and this.ss_view != None and prop(prop(this.ss_view, 'model'), 'id') != this.ss_new_model
+Request.ss_remodel on-setter session-remodel:
+  WHEN this.ss_remodel:
+    membrane::Chat:session[this.ss_sid].smodel = this.ss_new_model
+    membrane::Chat:session[this.ss_sid].upd = this.ms
+Request.ss_patch_reply getter:
+  WHEN this.ss_view == None: this.ss_missing
+  ELSE WHEN this.ss_new_title != '' and prop(this.ss_view, 'title') != this.ss_new_title: None
+  ELSE WHEN this.ss_remodel: None
+  ELSE: {'status': 200, 'body': this.ss_view}
+
+-- DELETE /session/<sid>: the session and its messages (with their turns, answers and tools, which their paths own) are retired
+Request.ss_gone getter: this.entrant and this.ss_route == 'one' and this.method == 'DELETE' and this.ss_view != None
+-- a session owns its messages by the colon path (`Chat:session:<sid>:message:...`): retiring the header retires them, their turns, answers and tools. The time rows (`Chat:main:time:<id>:session:<sid>`) are not below it: found by the key's tail (no body read)
+Request.ss_gone_rows getter: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 AND substr(k, -length(?3)) = ?3', 'membrane::Chat:main:time:', 'membrane::Chat:main:time;', ':session:' + this.ss_sid) if this.ss_gone else None
+Request.ss_gone_rows on-setter session-delete:
+  WHEN this.ss_gone_rows != None:
+    FOR r IN this.ss_gone_rows:
+      (prop(r, 'k')).retire = True
+    membrane::Chat:session[this.ss_sid].retire = True
+    this.ss_deleted = True
+Request.ss_delete_reply getter:
+  WHEN this.ss_view == None and this.ss_deleted != True: this.ss_missing
+  ELSE WHEN this.ss_deleted == True: {'status': 200, 'body': True}
+  ELSE: None
+
+-- ---- GET /session/status: the truth per session, from the store: a session is busy while one of its turns runs (the running turns are listed ONCE, not once per session: native/tests/status_work_1143.rs) ----------------------------------------
+-- (one SQL answer: an object keyed by session id, which a pack cannot build from rows)
+Request.ss_stat getter: sql('SELECT json_group_object(replace(s.k, \'membrane::Chat:session:\', \'\'), json(CASE WHEN replace(s.k, \'membrane::Chat:session:\', \'\') IN (SELECT substr(t.k, 24, instr(substr(t.k, 24), \':message:\') - 1) FROM c_field t WHERE t.cls = \'Chat\' AND t.k LIKE \'membrane::Chat:session:%:message:%:turn\' AND json_extract(t.body, \'$.props.state\') = \'running\') THEN \'{"type":"busy"}\' ELSE \'{"type":"idle"}\' END)) AS status FROM c_field s WHERE s.cls = \'Chat\' AND s.k LIKE \'membrane::Chat:session:%\' AND s.k NOT LIKE \'membrane::Chat:session:%:%\'') if this.ss_route == 'status' else None
+Request.ss_status_reply getter:
+  WHEN this.ss_stat == None: None
+  ELSE:
+    sj = json(prop(this.ss_stat[0], 'status')) if len(this.ss_stat) > 0 and prop(this.ss_stat[0], 'status') != None else {}
+    {'status': 200, 'body': (None if sj is Error else sj)}
+
+-- ---- the message the page sends ---------------------------------------------------------------------------------------------------------------
+-- POST /session/<sid>/prompt_async (204 at once) or /message (200 {info, parts} when the turn is over): the text parts are joined by newlines, the message is the chat's
+-- (packs/chat.c1f: ChatMessage, its body, its turn; `queued` starts the turn, chat_turn.c1f) with `sid` naming the session. The session id is in the message's key (the status reads it there).
+Request.sm_text getter: strip(join([str(prop(p, 'text') or '') for p in (prop(this.jbody, 'parts') or []) if prop(p, 'type') == 'text'], '\n'))
+Request.sm_post getter: this.entrant and (this.ss_route == 'prompt_async' or this.ss_route == 'message') and this.method == 'POST'
+-- a streamed partial of the person's speech (`stream` named, `final: false`) is no turn: 204 at once, nothing stored; the final transcript carries the whole utterance and is the turn
+-- (the released seat coalesces the partials in its speaker lane for display; the answered text is the final one's)
+Request.sm_interim getter: str(prop(this.jbody, 'stream') or '') != '' and prop(this.jbody, 'final') == False
+Request.sm_go getter: this.sm_post and this.ss_view != None and this.sm_text != '' and not this.sm_interim
+-- the body's `model` ({providerID, modelID}, as the page sends it) is the session's from now on (the released handler: "THE MESSAGE'S PICK STICKS"); a message with none runs on the session's
+Request.sm_pick getter: strip(str(prop(prop(this.jbody, 'model'), 'modelID') or prop(prop(this.jbody, 'model'), 'id') or ''))
+Request.sm_pick_now getter: this.sm_pick or str(prop('membrane::Chat:session:' + str(this.ss_sid), 'smodel') or '')
+Request.sm_go on-setter session-message:
+  WHEN this.sm_go:
+    id = this.ms_txt + '-' + tail('00000000' + replace(this.eid, 'Request:', ''), 8)
+    membrane::Chat:main = Chat(name: 'main')
+    membrane::Chat:session[this.ss_sid]:message[id] = ChatMessage(text: this.sm_text, at: clock, pick: this.sm_pick_now)
+    membrane::Chat:session[this.ss_sid]:message[id]:body = SemText(text: this.sm_text)
+    membrane::Chat:session[this.ss_sid]:message[id]:body.mention = True
+    membrane::Chat:session[this.ss_sid]:message[id]:turn = ChatTurn(message: 'membrane::Chat:session:' + this.ss_sid + ':message:' + id, queued_at: clock)
+    membrane::Chat:main:time[id]:session[this.ss_sid] = ChatLine(chat: 'session:' + this.ss_sid)
+    membrane::Chat:session[this.ss_sid]:message[id].queued = True
+    membrane::Chat:session[this.ss_sid].upd = this.ms
+    this.sm_id = id
+Request.sm_go on-setter session-pick:
+  WHEN this.sm_go and this.sm_pick != '':
+    membrane::Chat:session[this.ss_sid].smodel = this.sm_pick
+Request.sm_meid getter: 'membrane::Chat:session:' + this.ss_sid + ':message:' + this.sm_id if this.sm_id != None else None
+Request.sm_reply getter:
+  WHEN this.ss_view == None: this.ss_missing
+  ELSE WHEN this.sm_text == '': {'status': 400, 'body': {'type': 'error', 'error': {'message': 'message needs a text part'}}}
+  ELSE WHEN this.sm_post and this.sm_interim: {'status': 204}
+  ELSE WHEN this.sm_id == None: None
+  ELSE WHEN this.ss_route == 'prompt_async': {'status': 204}
+  ELSE WHEN prop(this.sm_meid, 'over') != True: None
+  ELSE: {'status': 200, 'body': {'info': prop(this.sm_meid, 'oc_assist_info'), 'parts': prop(this.sm_meid, 'oc_parts')}}
+
+-- ---- the rows ---------------------------------------------------------------------------------------------------------------------------------
+-- one message = a user row and (once its turn has started) an assistant row. The parts of the assistant row are the tools the model ran, in call order, then its answer text; while the turn
+-- runs they are what the stream has shown so far (the answer's words, the tools by name). The ids are derived (see the head of this pack); `oc_idx` numbers the tools (at most 100 a turn).
+ChatMessage.oc_idx getter: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
+ChatMessage.oc_ms getter: head(this.mid, 13)
+ChatMessage.oc_n getter: after(this.mid, '-')
+ChatMessage.oc_b getter: this.oc_ms + tail('00000000' + this.oc_n, 8)
+ChatMessage.oc_uid getter: 'msg_' + this.oc_b + '001'
+ChatMessage.oc_aid getter: 'msg_' + this.oc_b + '002'
+ChatMessage.oc_cwd getter: ([b.seat_cwd for b in instances('Boot') if b.seat_cwd != None] or [''])[0]
+ChatMessage.oc_created getter: num(words(replace(str(this.at * 1000), '.', ' '))[0])
+ChatMessage.oc_t0 getter: num(words(replace(str(prop(this.turn_eid, 'started') * 1000), '.', ' '))[0]) if prop(this.turn_eid, 'started') != None else this.oc_created
+ChatMessage.oc_t1 getter: num(words(replace(str(prop(this.turn_eid, 'ended') * 1000), '.', ' '))[0]) if prop(this.turn_eid, 'ended') != None else None
+-- the model that answers (or answered) this message: its own pick, else the seat's
+ChatMessage.model_shown getter: this.pick if (this.pick or '') != '' else this.seat_model
+ChatMessage.oc_user_info getter: {'id': this.oc_uid, 'sessionID': this.sid, 'role': 'user', 'agent': 'build', 'model': {'providerID': 'membrane', 'modelID': this.model_shown}, 'time': {'created': this.oc_created}, 'summary': {'diffs': []}}
+ChatMessage.oc_user_part getter: {'id': 'prt_' + this.oc_b + '010', 'sessionID': this.sid, 'messageID': this.oc_uid, 'type': 'text', 'text': this.text}
+ChatMessage.oc_usage getter: prop(this.turn_eid, 'usage') or {}
+ChatMessage.oc_tokens getter: {'total': (prop(this.oc_usage, 'input_tokens') or 0) + (prop(this.oc_usage, 'output_tokens') or 0) + (prop(this.oc_usage, 'cache_creation_input_tokens') or 0) + (prop(this.oc_usage, 'cache_read_input_tokens') or 0), 'input': prop(this.oc_usage, 'input_tokens') or 0, 'output': prop(this.oc_usage, 'output_tokens') or 0, 'reasoning': 0, 'cache': {'read': prop(this.oc_usage, 'cache_read_input_tokens') or 0, 'write': prop(this.oc_usage, 'cache_creation_input_tokens') or 0}}
+ChatMessage.oc_error getter: str(this.said or 'the turn failed') if this.tstate == 'error' else None
+ChatMessage.oc_assist_info getter: {'id': this.oc_aid, 'sessionID': this.sid, 'role': 'assistant', 'parentID': this.oc_uid, 'modelID': this.model_shown, 'providerID': 'membrane', 'mode': 'build', 'agent': 'build', 'path': {'cwd': this.oc_cwd, 'root': this.oc_cwd}, 'cost': prop(this.turn_eid, 'cost') or 0.0, 'tokens': this.oc_tokens, 'time': {'created': this.oc_t0, 'completed': this.oc_t1}, 'madeBy': 'claude-agent', 'finish': 'stop' if this.tstate == 'done' else None, 'error': ({'name': ('MessageAbortedError' if this.aborted == True else 'Error'), 'data': {'message': this.oc_error}} if this.oc_error != None else None)}
+ChatMessage.oc_tids getter: [replace(k, this.turn_eid + ':tool:', '') for k in this.tool_keys]
+ChatMessage.oc_tool_parts getter: [{'id': 'prt_' + this.oc_b + '2' + tail('0' + str(i), 2), 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'tool', 'callID': this.oc_tids[i], 'tool': this.tool_rows[i]['name'], 'madeBy': 'claude-agent', 'state': {'status': 'completed', 'input': this.tool_rows[i]['input'] or {}, 'title': this.tool_rows[i]['name'], 'time': {'start': this.oc_t0, 'end': this.oc_t1}, 'output': str(this.tool_rows[i]['result'] or '')}, 'time': {'start': this.oc_t0, 'end': this.oc_t1}} for i in this.oc_idx if i < len(this.tool_rows)]
+ChatMessage.oc_text_part getter: [{'id': 'prt_' + this.oc_b + '100', 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'text', 'text': t, 'time': {'start': this.oc_t0, 'end': this.oc_t1}} for t in [this.said] if t != None and t != '']
+-- while the turn runs: the accumulator (chat_turn.c1f `Chunk:<command>:acc`) holds the words, the tool names (`tools`) and, written by the stream's setter below, the tool ids (`tids`)
+ChatMessage.oc_acc getter: 'Chunk:' + this.cmd_eid + ':acc'
+ChatMessage.oc_live_text getter: [{'id': 'prt_' + this.oc_b + '100', 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'text', 'text': t, 'time': {'start': this.oc_t0}} for t in [this.partial_text] if t != None and t != '']
+ChatMessage.oc_live_ids getter: words(str(prop(this.oc_acc, 'tids') or ''))
+ChatMessage.oc_live_tools getter: [{'id': 'prt_' + this.oc_b + '2' + tail('0' + str(i), 2), 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'tool', 'callID': (this.oc_live_ids[i] if i < len(this.oc_live_ids) else ''), 'tool': this.partial_tools[i], 'madeBy': 'claude-agent', 'state': {'status': 'running', 'input': {}, 'title': this.partial_tools[i], 'time': {'start': this.oc_t0}}, 'time': {'start': this.oc_t0}} for i in this.oc_idx if i < len(this.partial_tools)]
+ChatMessage.oc_parts getter:
+  WHEN this.over: concat(this.oc_tool_parts, this.oc_text_part)
+  ELSE: concat(this.oc_live_text, this.oc_live_tools)
+ChatMessage.oc_urow getter: {'info': this.oc_user_info, 'parts': [this.oc_user_part]}
+ChatMessage.oc_arow getter: {'info': this.oc_assist_info, 'parts': this.oc_parts} if this.tstate in ['running', 'done', 'error'] else None
+ChatMessage.oc_rows getter: concat([this.oc_urow], [this.oc_arow] if this.oc_arow != None else [])
+
+-- GET /session/<sid>/message[?limit=N&before=<message id>]: the rows oldest first; `limit` the newest N rows, `before` only the messages older than the one that row belongs to
+Request.ml_on getter: this.ss_route == 'message' and this.method == 'GET' and this.ss_view != None
+-- THE PAGE IS CHOSEN BY THE STORE (docs/chat-keys.md): the session's message keys are the range `membrane::Chat:session:<sid>:message:` of the `(cls, k)` index, newest first, no body read; the newest `limit` MESSAGES
+-- are enough for the newest `limit` ROWS (a message is at least one row). `before` cuts the range at that message's key. No `limit`: the whole session (LIMIT -1). Only the page's messages are ever turned into rows.
+Request.ml_prefix getter: 'membrane::Chat:session:' + this.ss_sid + ':message:'
+Request.ml_hi getter: this.ml_prefix + this.ml_cut_id if this.ml_before != '' and this.ml_cut_id != '' else head(this.ml_prefix, len(this.ml_prefix) - 1) + ';'
+Request.ml_sql getter: 'SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 AND instr(substr(k, length(?1) + 1), \':\') = 0 ORDER BY k DESC LIMIT ?3'
+Request.ml_rows getter: sql(this.ml_sql, this.ml_prefix, this.ml_hi, this.ml_limit if this.ml_limit > 0 else -1) if this.ml_on and not this.ml_lazy else []
+Request.ml_all getter: sort_by([{'eid': prop(r, 'k'), 'id': replace(prop(r, 'k'), this.ml_prefix, '')} for r in this.ml_rows], 'id') if this.ml_rows != None else None
+Request.ml_limit getter: num(([q[1] for q in this.qpairs if q[0] == 'limit'] or ['0'])[0]) or 0
+Request.ml_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [''])[0]
+-- a row id -> its message's id: `msg_` + 21 digits (13 of time, 8 of the request number) + 3
+Request.ml_cut_id getter: head(tail(this.ml_before, 24), 13) + '-' + head(tail(tail(this.ml_before, 24), 11), 8) if len(this.ml_before) == 28 else ''
+-- the cursor message must exist: one key lookup
+Request.ml_cut getter: sql('SELECT k FROM c_field WHERE k = ?1', this.ml_prefix + this.ml_cut_id) if this.ml_on and this.ml_before != '' and this.ml_cut_id != '' else []
+Request.ml_take getter: this.ml_all
+-- (no nested comprehension: the user rows and the assistant rows are two lists, merged by (id = time and number, which half))
+Request.ml_users getter: [{'id': r['id'], 'h': 0, 'row': prop(r['eid'], 'oc_urow')} for r in this.ml_take]
+Request.ml_assts getter: [{'id': r['id'], 'h': 1, 'row': prop(r['eid'], 'oc_arow')} for r in this.ml_take if prop(r['eid'], 'oc_arow') != None]
+Request.ml_flat getter: [x['row'] for x in sort_by(sort_by(concat(this.ml_users, this.ml_assts), 'h'), 'id')]
+-- THE LAZY HISTORY (#1143): a session imported as a header only (packs/legacy_import.c1f: its ledger `Legacy:session:<sid>` is pending or importing) gets its messages the first time it is opened:
+-- `ml_ask` is true for an authed list request where the launch fact `legacy_page` (user rows per query, no default) is told; legacy_import's setter on it writes the ledger's `open` (and the reply waits (`ml_lazy`) until the ledger says done or error. A session with no ledger is native: nothing is written, nothing waits.
+Request.ml_ask getter: this.entrant and this.ml_on and len([b for b in instances('Boot') if b.legacy_page != None]) > 0 and prop('membrane::Legacy:session:' + this.ss_sid, 'state') != None
+Request.ml_lazy getter: this.ml_ask and prop('membrane::Legacy:session:' + this.ss_sid, 'state') in ['pending', 'importing']
+Request.ml_reply getter:
+  WHEN this.ss_view == None: this.ss_missing
+  ELSE WHEN this.ml_lazy: None
+  ELSE WHEN this.ml_all == None: None
+  ELSE WHEN len([x for x in this.ml_users if x['row'] == None]) > 0: None
+  ELSE WHEN this.ml_before != '' and (this.ml_cut == None or len(this.ml_cut) == 0): {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}
+  ELSE: {'status': 200, 'body': tail(this.ml_flat, this.ml_limit) if this.ml_limit > 0 else this.ml_flat}
+
+-- GET /session/<sid>/message/<mid>: one row, the user's or the assistant's
+Request.m1_id getter: this.ss_segs[3] if this.ss_n == 4 else ''
+Request.m1_mid getter: head(tail(this.m1_id, 24), 13) + '-' + head(tail(tail(this.m1_id, 24), 11), 8) if len(this.m1_id) == 28 else None
+Request.m1_rows getter: prop(this.ml_prefix + this.m1_mid, 'oc_rows') if this.m1_mid != None and this.ss_view != None and prop(this.ml_prefix + this.m1_mid, 'sid') == this.ss_sid else []
+Request.m1_reply getter:
+  WHEN this.m1_rows == None: None
+  ELSE: ({'status': 200, 'body': [r for r in this.m1_rows if r['info']['id'] == this.m1_id][0]} if len([r for r in this.m1_rows if r['info']['id'] == this.m1_id]) > 0 else this.ss_missing)
+
+-- ---- the event streams --------------------------------------------------------------------------------------------------------------------------
+-- GET /event is the bare stream, GET /global/event wraps each event as {directory, project, payload}. An open stream is its Request (held by its connection, see "The event stream"
+-- in docs/cliffvm.md); `ev_on` is true once the head is out. THE FAN-OUT: a producer (the three below) writes the frames it has to say, in order, to ITS OWN bus entity `SesBus:<kind>-<id>.out`
+-- (a list of {type, id, properties}; the id is the message's, a chunk's also its number), and the bus's setter writes them, in ONE `send`, to every open stream. Nothing is queued or kept: a
+-- stream that opens later sees only what comes after (the page loads the rows once it is connected, then follows). A chunk of the CLI's output and the turn's end receipt CAN land in one round
+-- (the host takes every receipt that is ready at the start of any round), and two turns can end in one: so no two producers share a write that the engine refuses, and a stream's `send` (a
+-- driver verb: a command, one effect per write, run in write order) is not refused for a second write in the cascade. No keep-alive comment is sent (`send` writes events only).
+Request.ev_kind getter: 'global' if this.route == '/global/event' else 'bare'
+Request.ev_on getter: this.ss_route == 'event' and this.method == 'GET' and this.stream_rc == 0
+Request.ev_cwd getter: ([b.seat_cwd for b in instances('Boot') if b.seat_cwd != None] or [''])[0]
+Request.ev_on on-setter hello:
+  WHEN this.ev_on:
+    id = 'evt_' + this.ms_txt + tail('00000000' + replace(this.eid, 'Request:', ''), 8) + '000'
+    this.send = {'id': 'hello', 'frames': [{'event': 'server.connected', 'data': ({'id': id, 'type': 'server.connected', 'properties': {}} if this.ev_kind == 'bare' else {'directory': this.ev_cwd, 'project': 'global', 'payload': {'id': id, 'type': 'server.connected', 'properties': {}}})}]}
+SesBus.cwd getter: ([b.seat_cwd for b in instances('Boot') if b.seat_cwd != None] or [''])[0]
+SesBus.out on-setter fan-out:
+  WHEN this.out != None and len(this.out) > 0:
+    FOR s IN [r for r in instances('Request') if r.ev_on]:
+      s.send = {'id': 'fan', 'frames': [{'event': f['type'], 'data': ({'id': f['id'], 'type': f['type'], 'properties': f['properties']} if s.ev_kind == 'bare' else {'directory': this.cwd, 'project': 'global', 'payload': {'id': f['id'], 'type': f['type'], 'properties': f['properties']}})} for f in this.out]}
+
+-- THE ONE RULE OF THE ENGINE THAT SHAPES THIS: inside one cascade (one outside write and everything it sets off) a (entity, property) is written ONCE; a second write is refused
+-- ("loop: ... already written this round"). That is why each producer instance has its own bus entity (one shared `SesBus:main.out` lost the end of a turn when a chunk's write came first in
+-- the round), and why a driver verb (`send`) is exempt in the engine. The send of a turn's start is ONE cascade (the message is born, `queued` is written, the turn starts: all in it), so the
+-- start's producer says everything the start says, the assistant's message too; and the end of a turn says everything the end says. Order inside a round: the chunk, then the end (the
+-- chunk's getter is computed first). A chunk that is taken AFTER its turn is over (the receipt came with an earlier chunk's round) says nothing: the end's final parts carry every word, and a
+-- late delta would reopen the text part empty. Not covered: a turn REFUSED at its start (no `chat_claude_bin`) ends in the start's own cascade; its end is not on the stream (the rows have it, and
+-- /session/status says idle: the page reconciles).
+
+-- PRODUCER 1, the message is sent (`queued` is written when the message and its turn are born): the user's message and part, the session, busy, the assistant's message (not completed), the session
+Chat.queued on-setter oc-start:
+  WHEN this.queued == True and this.sid != None:
+    ('SesBus:start-' + this.oc_b).out = [{'type': 'message.updated', 'id': 'evt_' + this.oc_b + '000', 'properties': {'sessionID': this.sid, 'info': this.oc_user_info}}, {'type': 'message.part.updated', 'id': 'evt_' + this.oc_b + '001', 'properties': {'part': this.oc_user_part, 'time': this.oc_created, 'sessionID': this.sid}}, {'type': 'session.updated', 'id': 'evt_' + this.oc_b + '002', 'properties': {'sessionID': this.sid, 'info': prop('membrane::Chat:session:' + this.sid, 'view')}}, {'type': 'session.status', 'id': 'evt_' + this.oc_b + '003', 'properties': {'status': {'type': 'busy'}, 'sessionID': this.sid}}, {'type': 'message.updated', 'id': 'evt_' + this.oc_b + '004', 'properties': {'sessionID': this.sid, 'info': this.oc_assist_info}}, {'type': 'session.updated', 'id': 'evt_' + this.oc_b + '005', 'properties': {'sessionID': this.sid, 'info': prop('membrane::Chat:session:' + this.sid, 'view')}}]
+
+-- PRODUCER 2, the turn ends (done or error: the answer, an interruption, an abort): the final parts (the same ids the live ones had, so the page's rows are replaced, not
+-- doubled), the message completed, idle (the status and the idle event), the session. `oc_fin` is a getter, so the setter on it sees the message as it is NOW (a setter on the turn's
+-- `state` would see the message's getters as they were before the write); it is none until the turn is over and its answer is there, and none for a turn refused before it started.
+ChatMessage.oc_fin_parts getter: [{'type': 'message.part.updated', 'id': 'evt_' + replace(p['id'], 'prt_', ''), 'properties': {'part': p, 'time': this.oc_t1, 'sessionID': this.sid}} for p in this.oc_parts]
+ChatMessage.oc_fin_ends getter: [{'type': 'message.updated', 'id': 'evt_' + this.oc_b + '020', 'properties': {'sessionID': this.sid, 'info': this.oc_assist_info}}, {'type': 'session.status', 'id': 'evt_' + this.oc_b + '021', 'properties': {'status': {'type': 'idle'}, 'sessionID': this.sid}}, {'type': 'session.idle', 'id': 'evt_' + this.oc_b + '022', 'properties': {'sessionID': this.sid}}, {'type': 'session.updated', 'id': 'evt_' + this.oc_b + '023', 'properties': {'sessionID': this.sid, 'info': prop('membrane::Chat:session:' + this.sid, 'view')}}]
+ChatMessage.oc_fin getter:
+  WHEN this.sid != None and this.over and this.said != None and prop(this.turn_eid, 'started') != None: concat(this.oc_fin_parts, this.oc_fin_ends)
+ChatMessage.oc_fin on-setter oc-turn:
+  WHEN this.oc_fin != None:
+    ('SesBus:end-' + this.oc_b).out = this.oc_fin
+    membrane::Chat:session[this.sid].upd = this.oc_t1
+
+-- PRODUCER 3, a chunk of the CLI's output (chat_turn.c1f: `Chunk`, one read of its stdout). What it says: the words (a delta; the text part opens, EMPTY, with the first), the tools it starts
+-- (a running part each), the results it brings (the part completed). Inside one read the words come before the tools (the order of two lines of one read is not kept), only the first 8
+-- tool starts, 8 result lines and 8 blocks in each are followed live (the final parts, at the end of the turn, are all of them), and a result shows no input (the final part has it). The state
+-- is on the turn's accumulator `Chunk:<command>:acc`: `tids` and `tnames` (the tools started so far, in order), `eo` (the text part is open).
+Chunk.starts getter: [{'id': prop(prop(v, 'content_block'), 'id'), 'name': replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '')} for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use']
+Chunk.uevs getter: [e for e in [json(l) for l in lines(str(this.data or ''))] if e is not Error and prop(e, 'type') == 'user']
+Chunk.ublocks getter: [{'b': (prop(prop(this.uevs[p[0]], 'message'), 'content') or [])[p[1]]} for p in [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [1, 0], [1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [2, 0], [2, 1], [2, 2], [2, 3], [2, 4], [2, 5], [2, 6], [2, 7], [3, 0], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [4, 0], [4, 1], [4, 2], [4, 3], [4, 4], [4, 5], [4, 6], [4, 7], [5, 0], [5, 1], [5, 2], [5, 3], [5, 4], [5, 5], [5, 6], [5, 7], [6, 0], [6, 1], [6, 2], [6, 3], [6, 4], [6, 5], [6, 6], [6, 7], [7, 0], [7, 1], [7, 2], [7, 3], [7, 4], [7, 5], [7, 6], [7, 7]] if p[0] < len(this.uevs) and p[1] < len(prop(prop(this.uevs[p[0]], 'message'), 'content') or [])]
+Chunk.results getter: [{'id': prop(x['b'], 'tool_use_id'), 'output': (prop(x['b'], 'content') if prop(x['b'], 'content') is Text else join([prop(c, 'text') for c in (prop(x['b'], 'content') if prop(x['b'], 'content') is List else [])], '\n'))} for x in this.ublocks if prop(x['b'], 'type') == 'tool_result']
+Chunk.oc_me getter: 'membrane::Chat:' + replace(str(this.cmd), 'membrane::Command:chat:', '')
+Chunk.oc_sid getter: prop(this.oc_me, 'sid') if this.cmd != None else None
+Chunk.oc_go getter: this.part != None and this.n != None and this.oc_sid != None
+Chunk.oc_go on-setter oc-chunk:
+  WHEN this.oc_go and prop(this.oc_me, 'over') != True:
+    acc = 'Chunk:' + this.cmd + ':acc'
+    b = prop(this.oc_me, 'oc_b')
+    aid = prop(this.oc_me, 'oc_aid')
+    t0 = prop(this.oc_me, 'oc_t0')
+    now = num(words(replace(str(clock * 1000), '.', ' '))[0])
+    old_ids = words(str(prop(acc, 'tids') or ''))
+    all_ids = concat(old_ids, [s['id'] for s in this.starts])
+    all_names = concat(words(str(prop(acc, 'tnames') or '')), [s['name'] for s in this.starts])
+    rj = [{'r': r, 'j': ([k for k in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99] if k < len(all_ids) and all_ids[k] == r['id']] or [None])[0]} for r in this.results]
+    texts = [{'type': 'message.part.updated', 'id': 'evt_' + b + '100', 'properties': {'part': {'id': 'prt_' + b + '100', 'sessionID': this.oc_sid, 'messageID': aid, 'type': 'text', 'text': '', 'time': {'start': t0}}, 'time': t0, 'sessionID': this.oc_sid}} for x in [1] if this.said != '' and prop(acc, 'eo') != True]
+    deltas = [{'type': 'message.part.delta', 'id': 'evt_' + b + tail('000' + str(this.n), 3), 'properties': {'sessionID': this.oc_sid, 'messageID': aid, 'partID': 'prt_' + b + '100', 'field': 'text', 'delta': this.said}} for x in [1] if this.said != '']
+    begun = [{'type': 'message.part.updated', 'id': 'evt_' + b + '2' + tail('0' + str(len(old_ids) + i), 2), 'properties': {'part': {'id': 'prt_' + b + '2' + tail('0' + str(len(old_ids) + i), 2), 'sessionID': this.oc_sid, 'messageID': aid, 'type': 'tool', 'callID': this.starts[i]['id'], 'tool': this.starts[i]['name'], 'madeBy': 'claude-agent', 'state': {'status': 'running', 'input': {}, 'title': this.starts[i]['name'], 'time': {'start': now}}, 'time': {'start': now}}, 'time': now, 'sessionID': this.oc_sid}} for i in [0, 1, 2, 3, 4, 5, 6, 7] if i < len(this.starts)]
+    ended = [{'type': 'message.part.updated', 'id': 'evt_' + b + '3' + tail('0' + str(x['j']), 2), 'properties': {'part': {'id': 'prt_' + b + '2' + tail('0' + str(x['j']), 2), 'sessionID': this.oc_sid, 'messageID': aid, 'type': 'tool', 'callID': x['r']['id'], 'tool': (all_names[x['j']] if x['j'] < len(all_names) else ''), 'madeBy': 'claude-agent', 'state': {'status': 'completed', 'input': {}, 'title': (all_names[x['j']] if x['j'] < len(all_names) else ''), 'time': {'start': now, 'end': now}, 'output': x['r']['output']}, 'time': {'start': now, 'end': now}}, 'time': now, 'sessionID': this.oc_sid}} for x in rj if x['j'] != None]
+    ('SesBus:chunk-' + b + '-' + str(this.n)).out = concat(texts, deltas, begun, ended)
+    (acc).tids = join(all_ids, ' ')
+    (acc).tnames = join(all_names, ' ')
+    (acc).eo = (prop(acc, 'eo') == True or this.said != '')
+
+-- ---- POST /session/<sid>/abort ----------------------------------------------------------------------------------------------------------------
+-- the session's running turns are its messages' CLI runs that have no receipt yet (the `Command` entities of the chat, which are resident: a turn's row in the store may lag a start) and are marked `aborted` and their CLI is stopped (`Command.stop`); the receipt
+-- that follows ends each turn as the chat always ends one, with the text below as its error (`fail_why`). The reply is `true` (the Python seat's) at once; a session with nothing running is `true` too.
+ChatMessage.fail_why getter:
+  WHEN this.aborted == True and this.rr != None: 'aborted: the turn was stopped from the page'
+Request.ab_on getter: this.entrant and this.ss_route == 'abort' and this.method == 'POST' and this.ss_view != None
+Request.ab_turns getter: [replace(c.eid, 'membrane::Command:chat:', '') for c in instances('Command') if startswith(c.eid, 'membrane::Command:chat:') and c.run_result == None and prop('membrane::Chat:' + replace(c.eid, 'membrane::Command:chat:', ''), 'sid') == this.ss_sid] if this.ab_on else None
+Request.ab_turns on-setter abort-stop:
+  WHEN this.ab_turns != None:
+    FOR mid IN this.ab_turns:
+      membrane::Chat[mid].aborted = True
+      membrane::Command:chat[mid].stop = {'id': 'abort'}
+    this.ab_done = True
+Request.ab_reply getter:
+  WHEN this.ss_view == None: this.ss_missing
+  ELSE WHEN this.ab_done == True: {'status': 200, 'body': True}
+  ELSE: None

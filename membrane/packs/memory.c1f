@@ -1,0 +1,87 @@
+PACK memory 1
+IMPORT boot 1
+RESIDENT Memory
+-- THE SEAT'S MEMORY AS A NODE (operator, 2026-11-12: everything moves to cliffhanger). You teach it by WRITING:
+--   Memory:seat.learn = {lesson: '<one durable lesson, in prose>'}
+-- This pack is the policy: the agent-writes switch, an empty lesson, fenced code, the length of a note. A refusal is
+-- answered in `learn_result` ({written: false, reason}) and nothing is written. A fine lesson goes to the node's driver
+-- (`note`): the memory store writes it as a note event, and `note_result` says which note (or that the field's own guards,
+-- dedup and the variety gate, declined it).
+
+Memory.sent getter: this.note_rc == 0 if this.note_rc != None else None
+
+Memory.learn on-setter learn:
+  WHEN this.agent_writes == False:
+    this.learn_result = {'written': False, 'reason': 'agent writes are off (--no-agent-writes)'}
+  ELSE WHEN strip(str(prop(this.learn, 'lesson') or '')) == '':
+    this.learn_result = {'written': False, 'reason': 'nothing to learn (the payload was empty)'}
+  ELSE WHEN '```' in str(prop(this.learn, 'lesson')):
+    this.learn_result = {'written': False, 'reason': 'fenced code blocks are not memory material -- state the LESSON in prose'}
+  ELSE WHEN len(strip(str(prop(this.learn, 'lesson')))) > 2000:
+    this.learn_result = {'written': False, 'reason': 'payload too long (more than 2000 chars) -- a lesson is a note, not a transcript'}
+  ELSE:
+    this.learn_result = {'written': True}
+    this.note = {'lesson': strip(str(prop(this.learn, 'lesson')))}
+
+-- ---- forget: `Memory:seat.forget = {spec}` --------------------------------------------------------------------------
+-- '#12', '12', '3-7', '3-7, 9' are INDEXES (at most 12 events): the pack hands the driver `cut = {nums}` and it deletes them.
+-- Anything wordier only asks for the nearest events (`near = {spec}`) -- nothing wordy ever deletes. A refusal is answered in
+-- `forget_result` ({removed: None, reason}); the cut's report lands in `cut_result`, the nearest events in `near_result`.
+-- (an on-setter sees the getters as they were before the write in the same round: forget -> forget_id -> forget_plan -> act)
+Memory.forget on-setter forget-stamp:
+  ALWAYS:
+    this.forget_id = clock
+
+Memory.fg_spec getter: strip(str(prop(this.forget, 'spec') or ''))
+Memory.fg_toks getter: words(replace(replace(this.fg_spec, ',', ' '), '#', ''))
+-- every token with its numbers: '12' -> [12], '3-7' -> [3, 7], 'pump' -> [None]
+Memory.fg_ends getter: [{'t': t, 'p': [num(p) for p in words(replace(t, '-', ' '))]} for t in this.fg_toks]
+-- a token is an index when every part is a whole number and a dash only ever joins two of them
+Memory.fg_nan getter: len([e for e in this.fg_ends if None in prop(e, 'p') or len(prop(e, 'p')) > 2])
+Memory.fg_dec getter: len([e for e in this.fg_ends if '.' in prop(e, 't')])
+Memory.fg_dash getter: len([e for e in this.fg_ends if len(prop(e, 't')) - len(replace(prop(e, 't'), '-', '')) != len(prop(e, 'p')) - 1])
+Memory.fg_bad getter: this.fg_nan + this.fg_dec + this.fg_dash
+Memory.fg_spans getter: [[min(prop(e, 'p')), max(prop(e, 'p'))] for e in this.fg_ends]
+Memory.fg_wide getter: len([s for s in this.fg_spans if s[1] - s[0] >= 12])
+-- a span's numbers: lo, lo+1, ... lo+11 while they stay within hi (no range primitive: the offsets are written out)
+Memory.fg_o0 getter: concat([s[0] + 0 for s in this.fg_spans if s[0] + 0 <= s[1]], [s[0] + 1 for s in this.fg_spans if s[0] + 1 <= s[1]])
+Memory.fg_o1 getter: concat([s[0] + 2 for s in this.fg_spans if s[0] + 2 <= s[1]], [s[0] + 3 for s in this.fg_spans if s[0] + 3 <= s[1]])
+Memory.fg_o2 getter: concat([s[0] + 4 for s in this.fg_spans if s[0] + 4 <= s[1]], [s[0] + 5 for s in this.fg_spans if s[0] + 5 <= s[1]])
+Memory.fg_o3 getter: concat([s[0] + 6 for s in this.fg_spans if s[0] + 6 <= s[1]], [s[0] + 7 for s in this.fg_spans if s[0] + 7 <= s[1]])
+Memory.fg_o4 getter: concat([s[0] + 8 for s in this.fg_spans if s[0] + 8 <= s[1]], [s[0] + 9 for s in this.fg_spans if s[0] + 9 <= s[1]])
+Memory.fg_o5 getter: concat([s[0] + 10 for s in this.fg_spans if s[0] + 10 <= s[1]], [s[0] + 11 for s in this.fg_spans if s[0] + 11 <= s[1]])
+Memory.fg_nums getter: distinct(concat(this.fg_o0, this.fg_o1, this.fg_o2, this.fg_o3, this.fg_o4, this.fg_o5))
+
+Memory.forget_plan getter:
+  WHEN this.forget == None or this.forget_id == None: None
+  ELSE WHEN this.fg_spec == '': {'id': this.forget_id, 'error': 'spec required'}
+  ELSE WHEN this.fg_bad > 0: {'id': this.forget_id, 'near': this.fg_spec}
+  ELSE WHEN this.fg_wide > 0 or len(this.fg_nums) > 12: {'id': this.forget_id, 'error': 'that is more events than the agent cap (12) allows: ask the operator for a larger delete'}
+  ELSE: {'id': this.forget_id, 'cut': this.fg_nums, 'spec': this.fg_spec}
+
+Memory.forget_plan on-setter forget-act:
+  WHEN prop(this.forget_plan, 'error') != None and prop(this.forget_result, 'id') != prop(this.forget_plan, 'id'):
+    this.forget_result = {'id': prop(this.forget_plan, 'id'), 'removed': None, 'reason': prop(this.forget_plan, 'error')}
+  ELSE WHEN prop(this.forget_plan, 'cut') != None and prop(this.forget_result, 'id') != prop(this.forget_plan, 'id'):
+    this.forget_result = {'id': prop(this.forget_plan, 'id'), 'removed': None, 'reason': 'cut sent'}
+    this.cut = {'nums': prop(this.forget_plan, 'cut'), 'spec': prop(this.forget_plan, 'spec')}
+  ELSE WHEN prop(this.forget_plan, 'near') != None and prop(this.forget_result, 'id') != prop(this.forget_plan, 'id'):
+    this.forget_result = {'id': prop(this.forget_plan, 'id'), 'removed': None, 'reason': 'nearest events asked'}
+    this.near = {'spec': prop(this.forget_plan, 'near')}
+
+-- the reports, worded here from the driver's raw rows
+Memory.cut_what getter: [[r, 'no such event' if prop(r, 'missing') else ('failed (' + str(prop(r, 'error')) + ')' if prop(r, 'error') else ('already forgotten' if prop(r, 'already') else 'forgotten'))] for r in (this.cut_rows or [])]
+Memory.cut_said getter: [[x[0], x[1] + ('; ' + str(len(prop(x[0], 'entities') or [])) + ' entities recomputed' if 'forgotten' in x[1] else '')] for x in this.cut_what]
+Memory.cut_line getter: ['- #' + str(prop(x[0], 'n')) + ': ' + x[1] for x in this.cut_said]
+Memory.cut_gone getter: len([r for r in (this.cut_rows or []) if prop(r, 'key') and not prop(r, 'already')])
+Memory.cut_report getter: None if this.cut_rows == None else join(concat(['Forgot ' + str(this.cut_gone) + ' event(s) (the entity field):'], this.cut_line), '\n')
+Memory.near_report getter:
+  WHEN this.near_rows == None: None
+  ELSE WHEN len(this.near_rows) == 0: 'Wordy forgets propose, never delete: nothing matched (the nearest past events only). Nothing removed.'
+  ELSE: 'Wordy asks never delete from tool calls. Nearest events: ' + join(['#' + str(prop(r, 'n')) + ' (sim ' + str(prop(r, 'sim')) + ')' for r in head(this.near_rows, 8)], ', ') + '. To remove, write forget again with explicit indexes. Nothing removed.'
+
+Boot.started on-setter memory-node:
+  ALWAYS:
+    ('Memory:seat').name = 'the seat memory'
+    ('Memory:seat').summary = 'Teach the seat one durable lesson: write learn = {lesson}. A refusal is in learn_result; the note is in note_result. A lesson is a note in prose, not a transcript (no fenced code, at most 2000 characters).'
+    ('Memory:seat').agent_writes = this.agent_writes

@@ -1,0 +1,22 @@
+PACK help 1
+IMPORT boot 1
+RESIDENT Help
+-- HELP AS ENTITIES (#1143). `Help:<topic>` is an entity whose `text` is the markdown file `help/<topic>.md` of this app: read it with
+-- entity_read (`Help:c1f` first), list the topics with entity_query `kind:Help`. The files are data of the app; every code block in
+-- them is loaded and run by `native/tests/help_1143.rs`. The app folder is the first of the Boot fact `app_dirs` (upper layer first).
+Boot.help_dir getter: ([d[0] for d in [b.app_dirs for b in instances('Boot') if b.app_dirs != None] if len(d) > 0] or ['.'])[0]
+Help.text getter: read(this.file) if this.file != None else None
+
+Boot.started on-setter seed-help:
+  ALWAYS:
+    dir = this.help_dir
+    Help:c1f.file = dir + '/help/c1f.md'
+    Help:packs.file = dir + '/help/packs.md'
+    Help:upgrade.file = dir + '/help/upgrade.md'
+    Help:banner.file = dir + '/help/banner.md'
+    Help:cliff.file = dir + '/help/cliff.md'
+    Help:semtext.file = dir + '/help/semtext.md'
+    Help:sql.file = dir + '/help/sql.md'
+    Help:legacy.file = dir + '/help/legacy.md'
+    Help:ha.file = dir + '/help/ha.md'
+    Help:settings.file = dir + '/help/settings.md'

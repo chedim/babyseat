@@ -1,5 +1,6 @@
 PACK uifeedback 1
 IMPORT goalgraph 1
+IMPORT door_self 1
 -- The UI pack (docs/ui-pack-design.md, #994, #1027): fields only, no page logic. First release covers the chat
 -- and the decision cards; the old UI is replaced (cards: which-surfaces..., keep-the-old-ui...).
 -- The pack owns Reply, Feedback and Prefs. Decision comes through the goalgraph import.

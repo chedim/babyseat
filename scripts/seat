@@ -1,0 +1,86 @@
+#!/bin/sh
+# Start the release seat: the standalone cliffvm on the barest packs (membrane/apps/barest.packs) and the barest app (a graph viewer and one chat), the claude CLI the only model.
+# Builds nothing: build the binary once with `cargo build --release --no-default-features --features bin` in native/.
+#   scripts/seat [--data-dir <dir>] [--store <sqlite>] [--port <n>] [--open] [--fact name=value ...]
+# --data-dir is where the seat keeps its store (<dir>/seat.sqlite unless --store names another), its door secret and its owner token (default: the folder of --store, else ./.cliffvm);
+# the door listens on 127.0.0.1 and is STRICT: `cliffvm run` makes <dir>/door.secret at the first run (64 hex characters, mode 0600) and writes a fresh owner token to
+# <dir>/owner.token at every boot (mode 0600). `cliffvm token mint --sub <id> --ttl 30d --secret-file <dir>/door.secret` mints more. A localhost peer is NOT the owner: every
+# call but the page's shell needs a token; the page fetched from this machine is given its owner cookie. The seat prints a curl example with the owner token (docs/auth.md).
+# --fact is repeatable: each one is passed on to `cliffvm run` as a Boot fact AFTER the defaults, so it wins (e.g. --fact warm_rows=0, --fact operator=ann).
+# CLIFFVM names the binary, CLAUDE_BIN the claude CLI (else the one on PATH). Run it from anywhere; it works from the repo root.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+data=''
+store=''
+port=4096
+open_page=0
+facts=''   # the --fact arguments, one per line (a fact has no newline)
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --data-dir) data=${2:?--data-dir needs a folder}; shift 2 ;;
+    --store) store=${2:?--store needs a path}; shift 2 ;;
+    --port) port=${2:?--port needs a number}; shift 2 ;;
+    --open) open_page=1; shift ;;
+    --fact) facts="$facts${facts:+
+}${2:?--fact needs name=value}"; shift 2 ;;
+    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+    *) echo "scripts/seat: unknown option $1 (--data-dir <dir> --store <sqlite> --port <n> --open --fact name=value)" >&2; exit 2 ;;
+  esac
+done
+bin=${CLIFFVM:-}
+[ -n "$bin" ] || { [ -x "$root/native/target/release/cliffvm" ] && bin=$root/native/target/release/cliffvm; } || true
+[ -n "$bin" ] || bin=$(command -v cliffvm || true)
+if [ -z "$bin" ]; then
+  echo "scripts/seat: cliffvm is not built yet. Build it once:" >&2
+  echo "  (cd $root/native && cargo build --release --no-default-features --features bin)" >&2
+  echo "or point CLIFFVM at the binary." >&2
+  exit 1
+fi
+claude=${CLAUDE_BIN:-$(command -v claude || true)}
+# the data folder: --data-dir, else the folder of --store, else ./.cliffvm
+[ -n "$data" ] || { if [ -n "$store" ]; then data=$(dirname "$store"); else data=./.cliffvm; fi; }
+mkdir -p "$data"
+data=$(cd "$data" && pwd)
+[ -n "$store" ] || store=$data/seat.sqlite
+mkdir -p "$(dirname "$store")"
+cd "$root"
+# the packs are the barest seat's own, named one per line in membrane/apps/barest.packs (in load order; the first is the root of trust), then the app folder
+set --
+while read -r name; do
+  case "$name" in ''|'#'*) continue ;; esac
+  set -- "$@" "membrane/packs/$name.c1f"
+done < membrane/apps/barest.packs
+set -- "$@" membrane/apps/barest.c1f --store "$store" --port "$port"
+# the strict door (the door's secret and the owner's token live in the data folder), and claude as the only model (a rung of the router's registry, picked for every mind; the router off;
+# the local backend is the default Ollama address: nothing needs to run there, a refused connection is an empty tag list)
+minds='{"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude","loops_auth":"chat","cortex_auth":"chat","workers_auth":"chat","think":"auto"}'
+cloud='[{"name":"claude","backend":"claude-agent"}]'
+set -- "$@" --fact "door_secret_file=$data/door.secret" --fact "seat_data_dir=$data" --fact "minds=$minds" --fact "seat_backend=http://127.0.0.1:11434" --fact "router_on=false" --fact "cloud_models=$cloud"
+# the operator's facts, then the claude CLI's
+if [ -n "$facts" ]; then
+  oldifs=$IFS; IFS='
+'
+  for f in $facts; do set -- "$@" --fact "$f"; done
+  IFS=$oldifs
+fi
+# THE CLAUDE AUTH (the release gate): the chat answers with an Anthropic API key by default: the seat reads ANTHROPIC_API_KEY from THIS environment and hands it to the claude CLI.
+# The CLI's own login is a deliberate opt-in: CLAUDE_AUTH=login scripts/seat (it passes --fact chat_auth=login). With neither, a message is answered with an error that says how.
+case "${CLAUDE_AUTH:-}" in
+  '') ;;
+  login) set -- "$@" --fact "chat_auth=login" ;;
+  *) echo "scripts/seat: CLAUDE_AUTH=${CLAUDE_AUTH} is not known (it is: login)." >&2; exit 2 ;;
+esac
+if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ "${CLAUDE_AUTH:-}" != login ]; then
+  echo "scripts/seat: no ANTHROPIC_API_KEY in the environment: the chat will refuse a message until you set it (or opt into the claude CLI's login: CLAUDE_AUTH=login scripts/seat)." >&2
+fi
+if [ -n "$claude" ]; then
+  set -- "$@" --fact "chat_claude_bin=$claude"
+else
+  echo "scripts/seat: the chat answers through the claude CLI. Name it with CLAUDE_BIN=/path/to/claude scripts/seat (the page says the same)." >&2
+fi
+url="http://127.0.0.1:$port/"
+echo "seat: $url  (store $store, data $data)"
+echo "seat: a localhost peer is not the owner: local tools send the owner token, written (mode 600, new at every boot) to $data/owner.token"
+echo "seat: curl -H \"Authorization: Bearer \$(cat $data/owner.token)\" ${url}global/health"
+if [ "$open_page" = 1 ] && [ "$(uname)" = Darwin ]; then (sleep 2; open "$url") & fi
+exec "$bin" run "$@"

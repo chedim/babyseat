@@ -99,11 +99,11 @@ fn unspeak_group_by_distinct_before() {
 }
 
 #[test]
-fn a_long_string_literal_does_not_count_toward_the_character_cap() {
+fn a_long_string_literal_and_long_logic_both_evaluate() {
     let q = "x".repeat(900);
     assert_eq!(ev(&format!("len('{}')", q), json!({})), json!(900));
-    let long_logic = vec!["a"; 220].join(" + ");                      // ~880 characters of logic: still refused
-    assert!(membrane_vm::evaluate_json(&long_logic, "{\"a\": 1}").unwrap_err().contains("at most"));
+    let long_logic = vec!["a"; 220].join(" + ");                      // ~880 characters of logic: no cap any more (the step budget holds)
+    assert_eq!(ev(&long_logic, json!({"a": 1})), json!(220));
 }
 
 #[test]
@@ -125,4 +125,37 @@ fn replace_swaps_every_occurrence() {
     assert_eq!(ev("replace('- **Code** is a **tree**', '**', '')", json!({})), json!("- Code is a tree"));
     assert_eq!(ev("replace('a-b-c', '-', ' ')", json!({})), json!("a b c"));
     assert_eq!(ev("replace('abc', '', 'x')", json!({})), json!("abc"));       // an empty pattern changes nothing
+}
+
+#[test]
+fn json_of_text_that_is_not_json_is_an_error_so_a_default_is_chosen_by_is_error() {
+    // a body that is not JSON must not abort the getter: it is an Error (a null to every old route), and `{} if j is Error else j` is the idiom
+    // (`json(x) or {}` no longer defaults: `or` never hides an Error; operator 2026-11-13)
+    assert_eq!(ev("json(body)", json!({"body": "nope"})), json!(null));
+    assert_eq!(ev("{} if json(body) is Error else json(body)", json!({"body": "nope"})), json!({}));
+    assert_eq!(ev("json(body) is Error", json!({"body": "nope"})), json!(true));
+    assert_eq!(ev("json(body) or {}", json!({"body": "nope"})), json!(null), "`or` does not hide the Error");
+    assert_eq!(ev("json(body)", json!({"body": "{\"a\": 1}"})), json!({"a": 1}));
+    assert_eq!(ev("json(body) is Error", json!({"body": ""})), json!(true));
+    assert_eq!(ev("json(body)", json!({"body": null})), json!(null));
+}
+
+#[test]
+fn tail_is_the_mirror_of_head() {
+    let e = json!({});
+    assert_eq!(ev("tail('abcdef', 3)", e.clone()), json!("def"));
+    assert_eq!(ev("tail('ab', 3)", e.clone()), json!("ab"));
+    assert_eq!(ev("tail('héllo', 2)", e.clone()), json!("lo"));
+    assert_eq!(ev("tail([1, 2, 3], 2)", e), json!([2, 3]));
+}
+
+// #1143 (w36): group_by finds a text key's group through a hash; every other key still groups by Python equality (1 == 1.0, a text never equals a number), first-seen order.
+#[test]
+fn group_by_keeps_first_seen_order_and_python_equality_with_text_and_number_keys() {
+    let rows = json!([{"k": "1", "v": 1}, {"k": 1, "v": 2}, {"k": "1", "v": 3}, {"k": 1.0, "v": 4}, {"k": null, "v": 5}, {"k": "", "v": 6}, {"k": null, "v": 7}]);
+    let g = ev("group_by(r, 'k')", json!({"r": rows}));
+    let keys: Vec<serde_json::Value> = g.as_array().unwrap().iter().map(|x| x["key"].clone()).collect();
+    assert_eq!(keys, vec![json!("1"), json!(1), json!(null), json!("")]);
+    let vs: Vec<Vec<i64>> = g.as_array().unwrap().iter().map(|x| x["rows"].as_array().unwrap().iter().map(|r| r["v"].as_i64().unwrap()).collect()).collect();
+    assert_eq!(vs, vec![vec![1, 3], vec![2, 4], vec![5, 7], vec![6]]);
 }

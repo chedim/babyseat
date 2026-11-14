@@ -1,0 +1,496 @@
+[
+ {
+  "name": "health says healthy and the version",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0",
+     "seat_cwd": "/seat",
+     "seat_home": "/home/u",
+     "seat_project": "proj-1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/global/health",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.healthy",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.version",
+    "equals": "1.0"
+   }
+  ]
+ },
+ {
+  "name": "health needs a token like the rest",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0",
+     "seat_cwd": "/seat",
+     "seat_home": "/home/u",
+     "seat_project": "proj-1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/global/health",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": false,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": "no token"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 401
+   }
+  ]
+ },
+ {
+  "name": "the command list is empty",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0",
+     "seat_cwd": "/seat",
+     "seat_home": "/home/u",
+     "seat_project": "proj-1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/command",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body",
+    "equals": []
+   }
+  ]
+ },
+ {
+  "name": "vcs has no branch",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0",
+     "seat_cwd": "/seat",
+     "seat_home": "/home/u",
+     "seat_project": "proj-1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/vcs",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.branch",
+    "equals": null
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.default_branch",
+    "equals": null
+   }
+  ]
+ },
+ {
+  "name": "path tells the seat's folders",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0",
+     "seat_cwd": "/seat",
+     "seat_home": "/home/u",
+     "seat_project": "proj-1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/path",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.home",
+    "equals": "/home/u"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.state",
+    "equals": "/home/u/.local/state/opencode"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.config",
+    "equals": "/home/u/.config/opencode"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.worktree",
+    "equals": "/seat"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.directory",
+    "equals": "/seat"
+   }
+  ]
+ },
+ {
+  "name": "the current project",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0",
+     "seat_cwd": "/seat",
+     "seat_home": "/home/u",
+     "seat_project": "proj-1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/project/current",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.id",
+    "equals": "proj-1"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.worktree",
+    "equals": "/seat"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.vcs",
+    "equals": "git"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.sandboxes",
+    "equals": []
+   }
+  ]
+ },
+ {
+  "name": "the project list is the same project",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0",
+     "seat_cwd": "/seat",
+     "seat_home": "/home/u",
+     "seat_project": "proj-1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/project",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.id",
+    "equals": "proj-1"
+   }
+  ]
+ },
+ {
+  "name": "a project's directories are empty",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0",
+     "seat_cwd": "/seat",
+     "seat_home": "/home/u",
+     "seat_project": "proj-1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/project/proj-1/directories",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body",
+    "equals": []
+   }
+  ]
+ },
+ {
+  "name": "a probe is a read",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_version": "1.0",
+     "seat_cwd": "/seat",
+     "seat_home": "/home/u",
+     "seat_project": "proj-1"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/command",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner"
+     },
+     "auth_error": null
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   }
+  ]
+ }
+]

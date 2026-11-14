@@ -1,38 +1,51 @@
-"""The field metrics as sensors (one per metrics.METRICS sensor spec)."""
+"""The seat's rows as sensors (slice 2): the seat's own `GET /membrane/ha/metrics` says which rows exist (membrane/packs/ha.c1f); a row of platform `sensor` is one sensor."""
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from datetime import datetime, timezone
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .metrics import METRICS
+from .const import STATE_MAX
+from .entity import device_info
 
 
-def device_info(entry) -> dict:
-    return {"identifiers": {(DOMAIN, entry.entry_id)}, "name": "Membrane seat",
-            "manufacturer": "membrane", "model": "field seat"}
+def row_of(coordinator, key: str) -> dict | None:
+    return next((r for r in (coordinator.data or {}).get("rows") or [] if r.get("key") == key), None)
 
 
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
-    coord = hass.data[DOMAIN]["coordinator"]
-    async_add_entities(MembraneMetric(coord, entry, s) for s in METRICS
-                       if s["platform"] == "sensor")
+    coord = entry.runtime_data.health
+    async_add_entities([SeatSensor(coord, entry, r) for r in (coord.data or {}).get("rows") or [] if r.get("platform") == "sensor"])
 
 
-class MembraneMetric(CoordinatorEntity, SensorEntity):
+class SeatSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coord, entry, spec: dict) -> None:
+    def __init__(self, coord, entry, row: dict) -> None:
         super().__init__(coord)
-        self._key = spec["key"]
-        self._attr_name = spec["name"]
-        self._attr_unique_id = f"{entry.entry_id}_{spec['key']}"
-        self._attr_icon = spec.get("icon")
-        self._attr_native_unit_of_measurement = spec.get("unit")
-        if spec.get("state_class"):
-            self._attr_state_class = SensorStateClass(spec["state_class"])
+        self._key = row["key"]
+        self._attr_name = row.get("name") or row["key"]
+        self._attr_unique_id = f"{entry.entry_id}_{row['key']}"
+        self._attr_icon = row.get("icon")
+        self._attr_native_unit_of_measurement = row.get("unit")
+        if row.get("device_class") == "timestamp":
+            self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_device_info = device_info(entry)
 
     @property
+    def available(self) -> bool:
+        return bool(self.coordinator.last_update_success) and row_of(self.coordinator, self._key) is not None
+
+    @property
     def native_value(self):
-        return (self.coordinator.data or {}).get(self._key)
+        v = (row_of(self.coordinator, self._key) or {}).get("value")
+        if v is None:
+            return None
+        if getattr(self, "_attr_device_class", None) == SensorDeviceClass.TIMESTAMP:
+            return datetime.fromtimestamp(float(v), tz=timezone.utc)
+        return v[:STATE_MAX] if isinstance(v, str) else v
+
+    @property
+    def extra_state_attributes(self):
+        return (row_of(self.coordinator, self._key) or {}).get("attributes") or None

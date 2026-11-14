@@ -1,10 +1,10 @@
-// The field engine compiled to WebAssembly (membrane/ui/fieldvm_core*), run in Node: the same build the browser loads.
+// The field engine compiled to WebAssembly (membrane/apps/barest.c1f/ui/fieldvm_core*), run in Node: the same build the browser loads.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { initSync, Field } from '../../membrane/ui/fieldvm_core.js';
+import { initSync, Field } from '../../membrane/apps/barest.c1f/ui/fieldvm_core.js';
 
-const ui = new URL('../../membrane/ui/', import.meta.url);
+const ui = new URL('../../membrane/apps/barest.c1f/ui/', import.meta.url);
 initSync({ module: readFileSync(fileURLToPath(new URL('fieldvm_core_bg.wasm', ui))) });
 
 const DOM = "PACK dom 1\nDomNode.tag getter: this.tag or 'div'\n";
@@ -30,7 +30,9 @@ f.load('t1', 'Task', '{}');
 for (const [k, v] of [['goal', 'g1'], ['name', 'ship it'], ['status', 'open']]) f.write('t1', k, JSON.stringify(v), now);
 let out = JSON.parse(f.drain());
 assert.ok(out.writes.some(w => w.born === 'DomNode' && w.eid === 'DomNode:demo:t1'), 'the row was created');
-assert.equal(JSON.parse(f.get('DomNode:demo:t1')).text, 'ship it: owed', 'no blockers: the goal graph made it owed');
+assert.equal(JSON.parse(f.get('t1')).status, 'owed', 'no blockers: the goal graph made it owed');
+// a setter's own write (open -> owed) does not re-fire the row setter in the same round: the page's text keeps the written status
+assert.equal(JSON.parse(f.get('DomNode:demo:t1')).text, 'ship it: open');
 assert.equal(JSON.parse(f.get('DomNode:demo:t1')).tag, 'div', "dom's getter ran on the new node");
 
 // a click is a write; the view's setter finishes the task through the goal graph

@@ -1,0 +1,438 @@
+PACK settings_view 1
+IMPORT dom 1
+IMPORT fetch 1
+IMPORT shell_view 1
+-- THE SETTINGS VIEW, A VIEW PACK (#1143, operator 2026-11-14: "settings panel is empty? build it as c1f"). It runs in the PAGE's field engine (it imports `dom`; the seat sends it with `GET /ui/fieldvm`,
+-- door_fieldvm.c1f, and does not run it) and fills the Settings slot of the shell through the view-pack contract (docs/ui-rebuild-plan.md): it registers `Nav:settings`, draws into
+-- `DomNode:shell:slot:settings` when the tab is first shown (lazy) and writes `Nav:settings.filled`, so the shell's placeholder goes away. No JavaScript: every control, every refusal and every
+-- refresh is a rule of this pack.
+--   SettingsView:main   the view: `open`, `want` (a read of the rows is wanted: bumped on open, on re-showing the tab, after a write, on "Try again"), `note` (why the read failed), `groups`
+--   SetRow:<id>         one setting (`<group>.<key>`): `raw` is the seat's row (GET /ui/settings: descriptor + `current` + `refused` + `applied`), `draft` what the person is typing (text for a text or a number,
+--                       a list of {u, a, b, c} for a list or an allow-list), `busy`, `asked`, `note` / `note_kind` (the result of the last Save, shown next to the row)
+--   Fetch:settings      the read of the rows (GET /ui/settings, settings.c1f)        Fetch:setw:<id>   the write of one row (ONE POST /mcp, entity_write of `Setting:<id>.set`)
+-- EVERYONE WHO REACHES THE PAGE IS THE OWNER: no person or permission is known here. The seat's own owner check stays (a write it refuses comes back as text, 403 `for the owner`) and a refusal of a
+-- value (a number out of range, a name that is not a model name) is the seat's own reason, shown in place next to the row; nothing is hidden, nothing is clamped.
+-- Rows the seat marks `hidden` (the Map group, while the field view is disabled in this release) are left out. A restart row is shown with its value and the launch line that changes it: no control.
+-- SECRETS never reach this page: the feed carries the NAME of an environment variable and never its value; this pack only shows what the feed holds.
+-- DOM ids: `DomNode:setv:*` the view's own parts, `DomNode:setg:<group>*` a group, `DomNode:set:<id>:<part>` a row (`in` the control, `form`, `save`, `add`, `e<u>:a|b|c|x` an entry's fields and its Remove).
+
+Shell.open on-setter settings-register:
+  WHEN this.open:
+    ('Nav:settings').title = 'Settings'
+    ('Nav:settings').order = 90
+
+-- the tab is shown: the first time the view is drawn, afterwards the rows are read again (what changed meanwhile shows; a draft that was typed stays: only a changed `current` replaces it)
+Nav.active on-setter settings-activate:
+  WHEN this.eid == 'Nav:settings' and this.active == True and not prop('SettingsView:main', 'open'):
+    ('SettingsView:main').open = True
+  ELSE WHEN this.eid == 'Nav:settings' and this.active == True:
+    ('SettingsView:main').want = (prop('SettingsView:main', 'want') or 0) + 1
+
+-- the group titles, as the operator named them; a group the seat adds shows under its own id
+SettingsView.titles getter: {'model': 'Model', 'chat': 'Chat', 'home': 'Home', 'import': 'Import', 'access': 'Access', 'limits': 'Limits'}
+SettingsView.subs getter: {'model': 'Which model answers your messages.', 'chat': 'How far and how long one answer may go.', 'home': 'What the model may do in the house.', 'import': 'Other data the seat can read.', 'access': 'Read-only. Everyone with access is the owner.', 'limits': 'Read-only. These are set when the seat starts; a change needs a restart.'}
+-- what the line at the top says: a failed read (text, with the seat's reason), or that the first read is on its way
+SettingsView.msg getter: this.note if this.note else ('' if this.loaded == True else 'Loading the settings…')
+
+-- ---- the view: the skeleton ----
+SettingsView.open on-setter settings-draw:
+  WHEN this.open:
+    ('DomNode:setv:root').tag = 'div'
+    ('DomNode:setv:root').class = 'setview'
+    ('DomNode:setv:root').parent = 'DomNode:shell:slot:settings'
+    ('DomNode:setv:head').parent = 'DomNode:setv:root'
+    ('DomNode:setv:head').tag = 'header'
+    ('DomNode:setv:head').class = 'sethead'
+    ('DomNode:setv:title').parent = 'DomNode:setv:head'
+    ('DomNode:setv:title').tag = 'h2'
+    ('DomNode:setv:title').text = 'Settings'
+    ('DomNode:setv:lead').parent = 'DomNode:setv:head'
+    ('DomNode:setv:lead').tag = 'p'
+    ('DomNode:setv:lead').class = 'setlead'
+    ('DomNode:setv:lead').text = 'Everyone with access is the owner. Each setting says whether a change applies now or needs a restart; a change the seat refuses is shown next to it with its reason.'
+    ('DomNode:setv:note').parent = 'DomNode:setv:root'
+    ('DomNode:setv:note').tag = 'div'
+    ('DomNode:setv:note').class = 'setnote'
+    ('DomNode:setv:note').hidden = this.msg == ''
+    ('DomNode:setv:note').role = 'alert' if this.note else 'status'
+    ('DomNode:setv:notetext').parent = 'DomNode:setv:note'
+    ('DomNode:setv:notetext').tag = 'span'
+    ('DomNode:setv:notetext').text = this.msg
+    ('DomNode:setv:retry').parent = 'DomNode:setv:note'
+    ('DomNode:setv:retry').tag = 'button'
+    ('DomNode:setv:retry').type = 'button'
+    ('DomNode:setv:retry').text = 'Try again'
+    ('DomNode:setv:retry').hidden = not this.note
+    ('DomNode:setv:groups').parent = 'DomNode:setv:root'
+    ('DomNode:setv:groups').tag = 'div'
+    ('DomNode:setv:groups').class = 'setgroups'
+    ('Nav:settings').filled = True
+    this.want = (this.want or 0) + 1
+
+SettingsView.msg on-setter settings-msg:
+  ALWAYS:
+    ('DomNode:setv:note').hidden = this.msg == ''
+    ('DomNode:setv:note').role = 'alert' if this.note else 'status'
+    ('DomNode:setv:notetext').text = this.msg
+    ('DomNode:setv:retry').hidden = not this.note
+
+DomNode.clicked on-setter settings-retry:
+  WHEN this.eid == 'DomNode:setv:retry':
+    ('SettingsView:main').want = (prop('SettingsView:main', 'want') or 0) + 1
+
+-- ---- the read: GET /ui/settings ----
+SettingsView.want on-setter settings-load:
+  WHEN this.want != None:
+    n = (this.seq or 0) + 1
+    this.seq = n
+    ('Fetch:settings').request = {'timeout_s': 10, 'id': 'feed-' + str(n), 'url': '/ui/settings'}
+
+-- the receipts of the read and of a write, read once: ok = the seat answered 2xx (and, for the write, the call has no `error`); `why` = the seat's own message, else the status, else the network's reason
+Fetch.gv getter:
+  rq = this.request_result
+  bd = json(str(prop(rq, 'body') or ''))
+  jb = {} if bd is Error else bd
+  jd = jb if jb is Dict else {}
+  hs = prop(rq, 'http_status')
+  er = prop(jd, 'error')
+  msg = prop(er, 'message') if er is Dict else er
+  good = prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not prop(prop(jd, 'result'), 'isError')
+  {'rid': prop(rq, 'id'), 'ok': good, 'rows': prop(jd, 'settings'), 'why': (str(msg) if msg else ('the seat answered ' + str(hs))) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+
+-- the rows: each one that is not hidden is a SetRow; the answer of an older read (a newer one was asked for meanwhile) is dropped
+Fetch.gv on-setter settings-feed:
+  WHEN this.eid == 'Fetch:settings' and prop(this.gv, 'rid') == prop(prop('Fetch:settings', 'request'), 'id') and prop(this.gv, 'ok') and prop(this.gv, 'rows') is List:
+    rows = [r for r in prop(this.gv, 'rows') if prop(r, 'hidden') != True and prop(r, 'id') != None]
+    ('SettingsView:main').note = ''
+    ('SettingsView:main').loaded = True
+    ('SettingsView:main').groups = [{'g': g, 'next': ([str(prop(x, 'group')) for x in rows if prop(x, 'order') > max([prop(y, 'order') for y in rows if str(prop(y, 'group')) == g])] or [None])[0]} for g in distinct([str(prop(r, 'group')) for r in rows])]
+    FOR r IN rows:
+      ('SetRow:' + str(prop(r, 'id'))).born = True
+      ('SetRow:' + str(prop(r, 'id'))).raw = r
+    -- the result of a Save: the row the write answered is read back, and says what the seat did (the refusal's reason, or applied); a value the person typed stays in its box
+    FOR r IN [r for r in rows if prop('SetRow:' + str(prop(r, 'id')), 'asked') == 'read']:
+      ('SetRow:' + str(prop(r, 'id'))).asked = False
+      ('SetRow:' + str(prop(r, 'id'))).note = ('Refused: ' + str(prop(r, 'refused'))) if prop(r, 'refused') else 'Applied.'
+      ('SetRow:' + str(prop(r, 'id'))).note_kind = 'bad' if prop(r, 'refused') else 'ok'
+  ELSE WHEN this.eid == 'Fetch:settings' and prop(this.gv, 'rid') == prop(prop('Fetch:settings', 'request'), 'id'):
+    ('SettingsView:main').note = 'The settings could not be read: ' + str(prop(this.gv, 'why')) + '.'
+
+-- ---- a group: a title, one line, its rows ----
+SettingsView.groups on-setter settings-groups:
+  WHEN this.groups != None:
+    FOR gr IN this.groups:
+      g = prop(gr, 'g')
+      ('DomNode:setg:' + g).parent = 'DomNode:setv:groups'
+      ('DomNode:setg:' + g).tag = 'section'
+      ('DomNode:setg:' + g).class = 'setgroup'
+      ('DomNode:setg:' + g).aria-label = str(prop(this.titles, g) or g)
+      ('DomNode:setg:' + g).before = ('DomNode:setg:' + prop(gr, 'next')) if prop(gr, 'next') != None else None
+      ('DomNode:setg:' + g + ':h').parent = 'DomNode:setg:' + g
+      ('DomNode:setg:' + g + ':h').tag = 'h3'
+      ('DomNode:setg:' + g + ':h').text = str(prop(this.titles, g) or g)
+      ('DomNode:setg:' + g + ':sub').parent = 'DomNode:setg:' + g
+      ('DomNode:setg:' + g + ':sub').tag = 'p'
+      ('DomNode:setg:' + g + ':sub').class = 'setsub'
+      ('DomNode:setg:' + g + ':sub').text = str(prop(this.subs, g) or '')
+      ('DomNode:setg:' + g + ':sub').hidden = not prop(this.subs, g)
+      ('DomNode:setg:' + g + ':rows').parent = 'DomNode:setg:' + g
+      ('DomNode:setg:' + g + ':rows').tag = 'div'
+      ('DomNode:setg:' + g + ':rows').class = 'setrows'
+
+-- ---- one setting: everything shown is a getter of the seat's row and of the row's own state ----
+SetRow.rid getter: replace(this.eid, 'SetRow:', '')
+SetRow.kind getter: prop(this.raw, 'kind')
+SetRow.cur getter: prop(this.raw, 'current')
+-- the row after this one in its group (the seat's `order`): a row is drawn when ITS answer lands, and the engine runs the rows' rules in the order of their ids, so the DOM order is not the feed's;
+-- each row says which row it sits above (`before`), as the shell's nav does
+SetRow.next_id getter: ([prop(x, 'rid') for x in sort_by([{'rid': r.rid, 'order': prop(r.raw, 'order'), 'g': prop(r.raw, 'group')} for r in instances('SetRow') if r.raw != None], 'order') if prop(x, 'g') == prop(this.raw, 'group') and prop(x, 'order') > prop(this.raw, 'order')] or [None])[0]
+SetRow.edit getter: this.raw != None and this.kind != 'readonly'
+-- the seat's model list, when it has one (the chat model row): a choice; with none the row is a text input
+SetRow.choices getter: [str(c) for c in (prop(this.raw, 'choices') or [])]
+SetRow.unit_txt getter: (' ' + str(prop(this.raw, 'unit'))) if prop(this.raw, 'unit') else ''
+-- the value in force, as a line (an editable row)
+SetRow.now getter:
+  WHEN this.raw == None: None
+  ELSE WHEN this.kind == 'text': str(this.cur) if this.cur else 'empty (the seat uses its own default)'
+  ELSE WHEN this.kind == 'number': str(this.cur) + this.unit_txt
+  ELSE WHEN this.kind == 'list': join(this.cur, ', ') if len(this.cur or []) > 0 else 'empty'
+  ELSE WHEN this.kind == 'allowlist': (str(len(this.cur)) + (' entry: ' if len(this.cur) == 1 else ' entries: ') + join([str(prop(e, 'name')) for e in this.cur], ', ')) if len(this.cur or []) > 0 else 'no entry: nothing is allowed'
+  ELSE: ''
+-- the value of a restart row, as lines (a list of things is one line each; a thing is its name and what is known of it)
+SetRow.shown getter:
+  WHEN this.raw == None: None
+  ELSE WHEN this.cur == None: 'not set'
+  ELSE WHEN this.cur is List: join([x if x is Text else join([str(v) for v in [prop(x, 'name') or prop(x, 'sub'), prop(x, 'backend'), ('key in ' + str(prop(x, 'api_key_env'))) if prop(x, 'api_key_env') else None, prop(x, 'path'), prop(x, 'mode')] if v != None], ' · ') for x in this.cur], '\n') if len(this.cur) > 0 else 'none'
+  ELSE WHEN this.cur is Bool: 'yes' if this.cur else 'no'
+  ELSE: str(this.cur) + this.unit_txt
+-- what a number may be, and what a text starts from
+SetRow.limits getter:
+  WHEN this.raw == None: None
+  ELSE WHEN this.kind == 'number': 'Allowed: ' + (str(prop(this.raw, 'min')) if prop(this.raw, 'min') != None else 'any') + ' to ' + (str(prop(this.raw, 'max')) if prop(this.raw, 'max') != None else 'any') + this.unit_txt + (', whole numbers' if prop(this.raw, 'whole') == True else '') + ('. Default: ' + str(prop(this.raw, 'default')) if prop(this.raw, 'default') != None else '.')
+  ELSE WHEN this.kind == 'text': ('Default: ' + str(prop(this.raw, 'default'))) if prop(this.raw, 'default') != None else ''
+  ELSE WHEN this.kind == 'list': 'One value per line; an empty line is left out.'
+  ELSE WHEN this.kind == 'allowlist': 'Services and entities are separated by commas, for example light.turn_on, light.*. An entry with no name is refused.'
+  ELSE: ''
+SetRow.how_txt getter: ('How to change it: ' + str(prop(this.raw, 'how')) + '.') if prop(this.raw, 'how') else 'It is set when the seat starts; a change needs a restart.'
+SetRow.view getter: {'id': this.rid, 'group': str(prop(this.raw, 'group')), 'label': str(prop(this.raw, 'label') or this.rid), 'help': str(prop(this.raw, 'help') or ''), 'kind': this.kind, 'live': prop(this.raw, 'live'), 'badge': 'Applies now' if prop(this.raw, 'live') == 'live' else 'Needs a restart', 'edit': this.edit, 'now': this.now, 'shown': this.shown, 'limits': this.limits, 'how': this.how_txt, 'choices': this.choices, 'next': this.next_id, 'cur': str(this.cur or ''), 'unit': prop(this.raw, 'unit'), 'note': this.note or '', 'note_kind': this.note_kind or '', 'busy': this.busy == True} if this.raw != None else None
+
+-- the row, common part: label, badge, help; the state line
+SetRow.view on-setter set-draw-row:
+  WHEN this.view != None:
+    b = 'DomNode:set:' + prop(this.view, 'id')
+    (b).parent = 'DomNode:setg:' + prop(this.view, 'group') + ':rows'
+    (b).tag = 'div'
+    (b).class = 'setrow'
+    (b).data-kind = prop(this.view, 'kind')
+    (b).data-live = prop(this.view, 'live')
+    (b).data-state = prop(this.view, 'note_kind') or None
+    (b).before = ('DomNode:set:' + prop(this.view, 'next')) if prop(this.view, 'next') != None else None
+    -- the order of a row's parts: the rules below run one after the other, not in this order, so each part says which one it sits above:
+    -- label line, help, limits, [now, form | value, how], state
+    (b + ':top').before = b + ':help'
+    (b + ':help').before = b + ':limits'
+    (b + ':top').parent = b
+    (b + ':top').tag = 'div'
+    (b + ':top').class = 'settop'
+    (b + ':label').parent = b + ':top'
+    (b + ':label').tag = 'h4'
+    (b + ':label').class = 'setlabel'
+    (b + ':label').text = prop(this.view, 'label')
+    (b + ':badge').parent = b + ':top'
+    (b + ':badge').tag = 'span'
+    (b + ':badge').class = 'setbadge'
+    (b + ':badge').data-live = prop(this.view, 'live')
+    (b + ':badge').text = prop(this.view, 'badge')
+    (b + ':help').parent = b
+    (b + ':help').tag = 'p'
+    (b + ':help').class = 'sethelp'
+    (b + ':help').text = prop(this.view, 'help')
+    (b + ':limits').parent = b
+    (b + ':limits').tag = 'p'
+    (b + ':limits').class = 'setlimits'
+    (b + ':limits').text = prop(this.view, 'limits')
+    (b + ':limits').hidden = not prop(this.view, 'limits')
+    (b + ':state').parent = b
+    (b + ':state').tag = 'p'
+    (b + ':state').class = 'setstate'
+    (b + ':state').role = 'status'
+    (b + ':state').data-kind = prop(this.view, 'note_kind') or None
+    (b + ':state').text = prop(this.view, 'note')
+    (b + ':state').hidden = not prop(this.view, 'note')
+
+-- a restart row: the value, and the launch line that changes it. NO control is made.
+SetRow.view on-setter set-draw-readonly:
+  WHEN this.view != None and not prop(this.view, 'edit'):
+    b = 'DomNode:set:' + prop(this.view, 'id')
+    (b + ':limits').before = b + ':value'
+    (b + ':value').before = b + ':how'
+    (b + ':how').before = b + ':state'
+    (b + ':value').parent = b
+    (b + ':value').tag = 'pre'
+    (b + ':value').class = 'setvalue'
+    (b + ':value').text = prop(this.view, 'shown')
+    (b + ':how').parent = b
+    (b + ':how').tag = 'p'
+    (b + ':how').class = 'sethow'
+    (b + ':how').text = prop(this.view, 'how')
+
+-- an editable row: what is in force, then a form: the control, its Save
+SetRow.view on-setter set-draw-edit:
+  WHEN this.view != None and prop(this.view, 'edit'):
+    b = 'DomNode:set:' + prop(this.view, 'id')
+    (b + ':limits').before = b + ':now'
+    (b + ':now').before = b + ':form'
+    (b + ':form').before = b + ':state'
+    (b + ':now').parent = b
+    (b + ':now').tag = 'p'
+    (b + ':now').class = 'setnow'
+    (b + ':now').text = 'In force: ' + str(prop(this.view, 'now'))
+    (b + ':form').parent = b
+    (b + ':form').tag = 'form'
+    (b + ':form').class = 'setform'
+    (b + ':form').aria-label = prop(this.view, 'label')
+    (b + ':save').parent = b + ':form'
+    (b + ':save').tag = 'button'
+    (b + ':save').type = 'submit'
+    (b + ':save').class = 'setsave'
+    (b + ':save').text = 'Saving…' if prop(this.view, 'busy') else 'Save'
+    (b + ':save').disabled = prop(this.view, 'busy')
+
+-- a text or a number: ONE input (a select when the seat gave a model list), the unit after it
+SetRow.view on-setter set-draw-field:
+  WHEN this.view != None and prop(this.view, 'edit') and (prop(this.view, 'kind') == 'text' or prop(this.view, 'kind') == 'number'):
+    b = 'DomNode:set:' + prop(this.view, 'id')
+    (b + ':in').parent = b + ':form'
+    (b + ':in').tag = 'input'
+    -- (a number is typed in a TEXT input: a number input would hold back a 2.5 or a 0 with the browser's own bubble, before the seat could say why; the seat's reason is the only refusal)
+    (b + ':in').type = 'text'
+    (b + ':in').class = 'setinput'
+    (b + ':in').aria-label = prop(this.view, 'label')
+    (b + ':in').before = b + ':unit'
+    (b + ':unit').parent = b + ':form'
+    (b + ':unit').tag = 'span'
+    (b + ':unit').class = 'setunit'
+    (b + ':unit').text = str(prop(this.view, 'unit') or '')
+    (b + ':unit').hidden = not prop(this.view, 'unit')
+    (b + ':unit').before = (b + ':choices') if len(prop(this.view, 'choices')) > 0 else (b + ':save')
+-- the seat's model list: a button each, under the box; a click puts that name in the box (nothing is saved by it). The box stays a TEXT input: a model name outside the list can be typed
+-- (a select would take that away), and the list is only a help.
+SetRow.view on-setter set-draw-choices:
+  WHEN this.view != None and prop(this.view, 'edit') and len(prop(this.view, 'choices')) > 0:
+    b = 'DomNode:set:' + prop(this.view, 'id')
+    (b + ':choices').parent = b + ':form'
+    (b + ':choices').tag = 'div'
+    (b + ':choices').class = 'setchoices'
+    (b + ':choices').before = b + ':save'
+    FOR o IN prop(this.view, 'choices'):
+      (b + ':c:' + o).parent = b + ':choices'
+      (b + ':c:' + o).tag = 'button'
+      (b + ':c:' + o).type = 'button'
+      (b + ':c:' + o).class = 'setchoice'
+      (b + ':c:' + o).text = o
+
+-- a list or an allow-list: the entries (below), an Add button
+SetRow.view on-setter set-draw-lines:
+  WHEN this.view != None and prop(this.view, 'edit') and (prop(this.view, 'kind') == 'list' or prop(this.view, 'kind') == 'allowlist'):
+    b = 'DomNode:set:' + prop(this.view, 'id')
+    (b + ':lines').parent = b + ':form'
+    (b + ':lines').tag = 'div'
+    (b + ':lines').class = 'setentries'
+    (b + ':lines').before = b + ':add'
+    (b + ':add').parent = b + ':form'
+    (b + ':add').tag = 'button'
+    (b + ':add').type = 'button'
+    (b + ':add').class = 'setadd'
+    (b + ':add').text = 'Add a line' if prop(this.view, 'kind') == 'list' else 'Add an entry'
+    (b + ':add').before = b + ':save'
+
+-- ---- the draft: what the person is typing. It follows `current`: a changed value in force replaces it (an applied Save, or a change made elsewhere); an unsaved edit stays otherwise ----
+-- (an entry's key `u` is `i<its text>` for one that was read, `n<counter>` for one that was added; a colon in it is turned into `_`, so a node id parses)
+SetRow.cur on-setter set-sync-text:
+  WHEN this.raw != None and (this.kind == 'text' or this.kind == 'number'):
+    this.draft = '' if this.cur == None else str(this.cur)
+    ('DomNode:set:' + this.rid + ':in').value = '' if this.cur == None else str(this.cur)
+SetRow.cur on-setter set-sync-list:
+  WHEN this.raw != None and this.kind == 'list':
+    this.draft = [{'u': 'i' + replace(str(x), ':', '_'), 'a': str(x), 'b': '', 'c': ''} for x in distinct(this.cur or [])]
+SetRow.cur on-setter set-sync-allow:
+  WHEN this.raw != None and this.kind == 'allowlist':
+    this.draft = [{'u': 'i' + replace(str(prop(e, 'name')), ':', '_'), 'a': str(prop(e, 'name')), 'b': join(prop(e, 'services') or [], ', '), 'c': join(prop(e, 'entities') or [], ', ')} for e in (this.cur or [])]
+
+-- the entries' keys (an entry's nodes are `:e<key>...`; the container of them is `:lines`, which a prefix test must never meet): the entries are redrawn when one is added or removed, not when one is typed in
+SetRow.uids getter: [prop(e, 'u') for e in this.draft] if this.draft is List else None
+SetRow.uids on-setter set-draw-entries:
+  WHEN this.uids != None and (this.kind == 'list' or this.kind == 'allowlist'):
+    b = 'DomNode:set:' + this.rid
+    FOR e IN this.draft:
+      eb = b + ':e' + str(prop(e, 'u'))
+      (eb).parent = b + ':lines'
+      (eb).tag = 'div'
+      (eb).class = 'setentry'
+      (eb + ':fa').parent = eb
+      (eb + ':fa').tag = 'div'
+      (eb + ':fa').class = 'setfield'
+      (eb + ':la').parent = eb + ':fa'
+      (eb + ':la').tag = 'label'
+      (eb + ':la').text = 'Line' if this.kind == 'list' else 'Name'
+      (eb + ':a').parent = eb + ':fa'
+      (eb + ':a').tag = 'input'
+      (eb + ':a').type = 'text'
+      (eb + ':a').aria-label = ('Line' if this.kind == 'list' else 'Name') + ' of ' + str(prop(this.raw, 'label'))
+      (eb + ':a').value = prop(e, 'a')
+      (eb + ':fb').parent = eb
+      (eb + ':fb').tag = 'div'
+      (eb + ':fb').class = 'setfield'
+      (eb + ':fb').hidden = this.kind == 'list'
+      (eb + ':lb').parent = eb + ':fb'
+      (eb + ':lb').tag = 'label'
+      (eb + ':lb').text = 'Services'
+      (eb + ':b').parent = eb + ':fb'
+      (eb + ':b').tag = 'input'
+      (eb + ':b').type = 'text'
+      (eb + ':b').placeholder = 'light.turn_on, light.*'
+      (eb + ':b').aria-label = 'Services of ' + str(prop(this.raw, 'label'))
+      (eb + ':b').value = prop(e, 'b')
+      (eb + ':fc').parent = eb
+      (eb + ':fc').tag = 'div'
+      (eb + ':fc').class = 'setfield'
+      (eb + ':fc').hidden = this.kind == 'list'
+      (eb + ':lc').parent = eb + ':fc'
+      (eb + ':lc').tag = 'label'
+      (eb + ':lc').text = 'Entities'
+      (eb + ':c').parent = eb + ':fc'
+      (eb + ':c').tag = 'input'
+      (eb + ':c').type = 'text'
+      (eb + ':c').placeholder = 'light.kitchen, light.*'
+      (eb + ':c').aria-label = 'Entities of ' + str(prop(this.raw, 'label'))
+      (eb + ':c').value = prop(e, 'c')
+      (eb + ':x').parent = eb
+      (eb + ':x').tag = 'button'
+      (eb + ':x').type = 'button'
+      (eb + ':x').class = 'setremove'
+      (eb + ':x').text = 'Remove'
+      (eb + ':x').aria-label = 'Remove this ' + ('line' if this.kind == 'list' else 'entry')
+    -- the nodes of an entry that is gone leave (an entry's nodes all start with `:e<u>` and then end or go on with a colon)
+    keep = [b + ':e' + str(u) for u in this.uids]
+    FOR x IN [x for x in instances('DomNode') if startswith(x.eid, b + ':e') and len([k for k in keep if x.eid == k or startswith(x.eid, k + ':')]) == 0]:
+      (x.eid).retire = True
+
+-- ---- the person types: the DOM event is a write of `value`; the draft follows ----
+DomNode.value on-setter set-typed:
+  WHEN startswith(this.eid, 'DomNode:set:') and after(replace(this.eid, 'DomNode:set:', ''), ':') == 'in':
+    ('SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')).draft = this.value
+  ELSE WHEN startswith(this.eid, 'DomNode:set:') and startswith(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e') and tail(this.eid, 2) in [':a', ':b', ':c']:
+    r = 'SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')
+    u = head(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e'), len(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e')) - 2)
+    f = tail(this.eid, 1)
+    (r).draft = [{'u': prop(e, 'u'), 'a': this.value if (f == 'a' and prop(e, 'u') == u) else prop(e, 'a'), 'b': this.value if (f == 'b' and prop(e, 'u') == u) else prop(e, 'b'), 'c': this.value if (f == 'c' and prop(e, 'u') == u) else prop(e, 'c')} for e in prop(r, 'draft')]
+
+-- Add: one more empty line or entry at the end; Remove: that entry is gone (nothing is written to the seat until Save)
+DomNode.clicked on-setter set-clicked:
+  WHEN startswith(this.eid, 'DomNode:set:') and after(replace(this.eid, 'DomNode:set:', ''), ':') == 'add':
+    r = 'SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')
+    n = (prop(r, 'nu') or 0) + 1
+    (r).nu = n
+    (r).draft = concat(prop(r, 'draft') or [], [{'u': 'n' + str(n), 'a': '', 'b': '', 'c': ''}])
+  ELSE WHEN startswith(this.eid, 'DomNode:set:') and startswith(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'c:'):
+    r = 'SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')
+    (r).draft = after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'c:')
+    ('DomNode:set:' + before(replace(this.eid, 'DomNode:set:', ''), ':') + ':in').value = after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'c:')
+  ELSE WHEN startswith(this.eid, 'DomNode:set:') and startswith(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e') and tail(this.eid, 2) == ':x':
+    r = 'SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')
+    u = head(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e'), len(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e')) - 2)
+    (r).draft = [e for e in prop(r, 'draft') if prop(e, 'u') != u]
+
+-- ---- Save: ONE write through the owner-checked door (POST /mcp, entity_write of `Setting:<id>.set`); Enter in a box and the Save button are the form's submit ----
+DomNode.submitted on-setter set-submit:
+  WHEN startswith(this.eid, 'DomNode:set:') and tail(this.eid, 5) == ':form':
+    ('SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')).go = (prop('SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':'), 'go') or 0) + 1
+
+-- the value to write, as the kind says: a text is stripped; a number is what was typed read as a number (text that is no number goes as typed, so the seat's refusal names it); a list is its
+-- non-empty lines; an allow-list is its entries (a name, the services and the entities as lists)
+SetRow.out getter:
+  WHEN this.kind == 'number': num(strip(str(this.draft or ''))) if num(strip(str(this.draft or ''))) != None else strip(str(this.draft or ''))
+  ELSE WHEN this.kind == 'list': [strip(prop(e, 'a')) for e in (this.draft or []) if strip(prop(e, 'a')) != '']
+  ELSE WHEN this.kind == 'allowlist': [{'name': strip(prop(e, 'a')), 'services': words(replace(prop(e, 'b'), ',', ' ')), 'entities': words(replace(prop(e, 'c'), ',', ' '))} for e in (this.draft or [])]
+  ELSE: strip(str(this.draft or ''))
+-- ONE write at a time per row (the double-submit guard); the answer is read back with the rows
+SetRow.go on-setter set-save:
+  WHEN not this.busy and this.edit:
+    n = (prop('SettingsView:main', 'seq') or 0) + 1
+    ('SettingsView:main').seq = n
+    this.busy = True
+    this.asked = True
+    this.note = 'Saving…'
+    this.note_kind = 'wait'
+    ('Fetch:setw:' + this.rid).request = {'timeout_s': 10, 'id': 'write-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': 'Setting:' + this.rid, 'prop': 'set', 'value': this.out}}})}
+-- the call is answered: a 2xx (the seat took the write; whether it applied or refused the VALUE is read back with the rows) or a refusal of the call itself (403 `for the owner`, a failure): the reason is text
+Fetch.gv on-setter set-write-done:
+  WHEN startswith(this.eid, 'Fetch:setw:') and this.gv != None and prop(this.gv, 'ok'):
+    ('SetRow:' + replace(this.eid, 'Fetch:setw:', '')).busy = False
+    ('SetRow:' + replace(this.eid, 'Fetch:setw:', '')).asked = 'read'
+    ('SettingsView:main').want = (prop('SettingsView:main', 'want') or 0) + 1
+  ELSE WHEN startswith(this.eid, 'Fetch:setw:') and this.gv != None:
+    ('SetRow:' + replace(this.eid, 'Fetch:setw:', '')).busy = False
+    ('SetRow:' + replace(this.eid, 'Fetch:setw:', '')).asked = False
+    ('SetRow:' + replace(this.eid, 'Fetch:setw:', '')).note = 'Not saved: the seat answered: ' + str(prop(this.gv, 'why'))
+    ('SetRow:' + replace(this.eid, 'Fetch:setw:', '')).note_kind = 'bad'

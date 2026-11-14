@@ -45,6 +45,73 @@ pub struct Ent {
     pub cls: String,
     pub props: Map<String, J>,
     pub pos: Option<Vec<f64>>,
+    /// the touch clock: the value of `Core::clock` at the entity's last read, write or load (RAM only, never stored; `.touched`)
+    pub touched: std::cell::Cell<u64>,
+}
+
+/// How a class is stored (docs/cliffvm.md, "Storage modes"): its OWN class (the eid's), declared by the pack that owns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Storage { Lazy, Virtual, Resident }
+/// class -> storage mode, ONE table: `Fields::compose` writes it, the core reads it (`.pinned`).
+pub type StorageMap = std::sync::Arc<std::sync::RwLock<HashMap<String, Storage>>>;
+
+/// The class names of a `parents` value (`cls:<name>` entries, the name after the last colon): a list, or one entry.
+pub fn parent_names(parents: &J) -> Vec<String> {
+    let name = |p: &J| p.as_str().filter(|s| !s.is_empty()).map(|s| s.rsplit(':').next().unwrap_or("").to_string());
+    match parents { J::Array(a) => a.iter().filter_map(name).collect(), p => name(p).into_iter().collect() }
+}
+
+/// A BIRTH with its own `parents`: the eid class is the birth default, so it goes first unless the list names it (#1143). No `parents`: nothing
+/// is stored, the list is [the eid class]. After the birth the eid class has no standing: a `parents` write is the whole list.
+pub fn birth_props(cls: &str, mut props: Map<String, J>) -> Map<String, J> {
+    if let Some(ps) = props.get("parents") {
+        let names = parent_names(ps);
+        if !names.is_empty() && !cls.is_empty() && !names.iter().any(|n| n.eq_ignore_ascii_case(cls)) {
+            let mut l = vec![J::String(format!("cls:{}", cls.to_lowercase()))];
+            match ps { J::Array(a) => l.extend(a.iter().cloned()), p => l.push(p.clone()) }
+            props.insert("parents".into(), J::Array(l));
+        }
+    }
+    props
+}
+
+/// The class a failed entity carries (docs/c1f-error.md): the root pack declares it, the VM writes it on top of the class list while `failed` is not empty.
+pub const ERROR_CLASS: &str = "Error";
+
+impl Ent {
+    /// The reason property `prop` failed with (the entity's `failed` dict), if it did.
+    pub fn failure(&self, prop: &str) -> Option<&str> { self.props.get("failed").and_then(|f| f.as_object()).and_then(|f| f.get(prop)).and_then(|r| r.as_str()) }
+    /// THE CLASS LIST (#1143): the entity's `parents`, nearest first; the eid class (`cls`) only when it has none (the birth default).
+    /// The root `Entity` is implicitly last and is not in the list.
+    pub fn class_names(&self) -> Vec<String> {
+        let l = self.props.get("parents").map(parent_names).unwrap_or_default();
+        if l.is_empty() { vec![self.cls.clone()] } else { l }
+    }
+    /// Is `cls` in the class list (`class_names`)? The same answer, without building the list: `instances(...)` asks it of EVERY loaded entity, and a list of Strings per entity cost
+    /// about 5 ms a pass at 30,000 entities (measured 2026-11-14, #1143).
+    pub fn in_classes(&self, cls: &str) -> bool { classes_hit(&self.cls, self.props.get("parents"), cls) }
+}
+
+/// `Ent::in_classes` on its two inputs, so the `instances` cache can ask it of an entity that is not (or no longer) in `docs`.
+fn classes_hit(ent_cls: &str, parents: Option<&J>, cls: &str) -> bool {
+    // an entry's name is what follows its last colon: it is `cls` when the entry ENDS with it, after a colon or as the whole entry (no scan for the colon: an entry can be long)
+    fn named(p: &J, cls: &str) -> Option<bool> {
+        let s = p.as_str().filter(|s| !s.is_empty())?;
+        let (n, c) = (s.len(), cls.len());
+        Some(n >= c && s.as_bytes()[n - c..].eq_ignore_ascii_case(cls.as_bytes()) && (n == c || s.as_bytes()[n - c - 1] == b':'))
+    }
+    if cls.contains(':') {
+        let l = parents.map(parent_names).unwrap_or_default();
+        let l = if l.is_empty() { vec![ent_cls.to_string()] } else { l };
+        return l.iter().any(|c| c.eq_ignore_ascii_case(cls));
+    }
+    let (mut any, mut hit) = (false, false);
+    match parents {
+        Some(J::Array(a)) => for p in a { if let Some(h) = named(p, cls) { any = true; hit |= h; } },
+        Some(p) => if let Some(h) = named(p, cls) { any = true; hit = h; },
+        None => {}
+    }
+    if any { hit } else { ent_cls.eq_ignore_ascii_case(cls) }
 }
 
 #[derive(Clone)]
@@ -107,8 +174,64 @@ struct Cur {
     memo: Memo,
 }
 
+/// The VM-provided, read-only property of every entity: the epoch time of its last write (the host stamps it with the write, in the same row; `Core::updated`).
+pub const UPDATED: &str = "updated";
+/// The VM-provided, read-only property of every loaded entity: its place in the TOUCH CLOCK (a counter the core bumps at every read, write and load; RAM only,
+/// never stored). The smaller it is, the colder the entity. Reading it (or `updated`, `eid`, `cls`, `pinned`) is no touch. EXCEPTION: an entity that STORES a property
+/// named `touched` (the Python-era `Turn.touched`) reads its own: the clock does not shadow a stored value.
+pub const TOUCHED: &str = "touched";
+/// The VM-provided, read-only property that says why an entity cannot be unloaded: False when it can, else the reason (text, truthy).
+pub const PINNED: &str = "pinned";
+/// What a read of a collected virtual entity is: a null with this reason.
+pub const COLLECTED: &str = "collected: nothing held it";
+/// How many collected ids are remembered for that null (a threshold, flagged): older ones read as a plain missing entity.
+pub const COLLECTED_KEPT: usize = 4096;
+
+/// A stored row as the restore brings it back: its own class, the properties the engine takes back (a getter's value is computed again), its `updated`.
+/// How many times one evaluation is done again after it loaded stored entities it looked for (a chain of references loads one link a time).
+const FAULT_RETRIES: usize = 8;
+
+pub struct StoredRow { pub cls: String, pub props: Map<String, J>, pub updated: f64 }
+/// Reads one stored row by eid (the host's, from the store): how a LAZY entity loads when a setter writes it (docs/cliffvm.md, "Lazy load").
+pub type Loader = Box<dyn Fn(&str) -> Option<StoredRow> + Send>;
+
 pub struct Core {
     pub docs: HashMap<String, Ent>,
+    /// the stored entities that are NOT loaded (a lazy class): eid -> its class. Loaded on first reference: a write loads the row at once (`Fields::ensure`), a read that
+    /// finds nothing notes the eid in `wanted` and the host loads it between rounds (`Host::fault_wanted`); `instances` lists only `docs`.
+    pub unloaded: HashMap<String, String>,
+    pub wanted: std::cell::RefCell<std::collections::BTreeSet<String>>,
+    pub loader: Option<Loader>,
+    /// stored entities a read loaded in the middle of an evaluation (`fault_now`): in `docs` already, still to be registered with the field (`Fields::complete_arrivals`)
+    pub arrived: Vec<String>,
+    /// the time of the engine's last round: what a lazy load stamps as its `seen`
+    pub last_now: f64,
+    /// eid -> the time of its last write: what `<entity>.updated` reads (0 when it has none). Set by the host with each write; writing it is no write (no reaction, no recompute)
+    pub updated: HashMap<String, f64>,
+    /// the touch clock's counter (see `Ent::touched`) and the classes' storage modes (shared with `Fields`)
+    pub clock: std::cell::Cell<u64>,
+    pub storage: StorageMap,
+    /// GARBAGE COLLECTION of VIRTUAL entities (docs/cliffvm.md): the reverse index of `{"$ref": id}` values (target -> holder -> how many), what each (holder, prop)
+    /// holds, the live virtual entities, the ones to look at when the round ends (born, or just released), the owners whose in-flight work ended, the ones the host holds
+    /// itself, and the recently collected (a read of one is a null with a reason)
+    ref_in: HashMap<String, HashMap<String, u32>>,
+    ref_of: HashMap<(String, String), Vec<String>>,
+    ref_holders: HashMap<String, u32>,
+    virt_live: std::collections::BTreeSet<String>,
+    pub gc_candidates: std::cell::RefCell<std::collections::BTreeSet<String>>,
+    pub gc_owners: std::cell::RefCell<std::collections::BTreeSet<String>>,
+    pub host_held: HashSet<String>,
+    collected: VecDeque<String>,
+    collected_set: HashSet<String>,
+    /// why a null getter value is null: (eid, prop) -> reason. The value itself is stored as a plain JSON null; reading it back through
+    /// an expression gives `V::Nil(reason)` so the reason travels (fields.rs writes it, `why_chain` reads it)
+    pub why: std::collections::BTreeMap<(String, String), String>,
+    /// (entity, property) a getter computed as a plain null (no reason): that null is held, not absent (`View::attr`)
+    pub nulled: std::collections::BTreeSet<(String, String)>,
+    /// the reasoned nulls inside the list or dict the last `eval_traced` returned (`expr::nested_nulls`), for the getter that stores it
+    pub nested_last: Vec<(String, String)>,
+    /// the locals a getter's block bound in its last evaluation: (eid, prop) -> name -> value (a null shows its reason). `Why` prints them.
+    pub locals: std::collections::BTreeMap<(String, String), serde_json::Map<String, J>>,
     order: Vec<Option<String>>,
     at: HashMap<String, usize>,
     pub triggers: Vec<Trig>,
@@ -117,21 +240,38 @@ pub struct Core {
     seen: HashMap<String, f64>,
     state: HashMap<String, HashMap<String, St>>,
     q: VecDeque<Write>,
+    /// whether `hear` keeps each write in `q` for the trigger engine (`step`, read by the Python binding). A field host (host.rs) never reads it: it sets this false, or the ring
+    /// would hold the last QUEUE_MAX writes with their whole `old` and `new` values for nothing (w28: ~1.6 GB live in a chunk burst).
+    pub queue_writes: bool,
     pub dropped: u64,
     pub fired: HashMap<String, u64>,
     pub refused: HashMap<String, u64>,
     /// the store driver (`sql(...)`): the seat's SQLite store, read-only, this engine's own connection
-    #[cfg(feature = "python")]
+    #[cfg(feature = "store")]
     pub store: Option<crate::store::Store>,
     pub errors: HashMap<String, String>,
     /// `referencing(x, prop)`'s reverse index: prop -> target eid -> the entities whose prop holds it. Built per prop
     /// the first time it is asked for, then kept current on every write, load and removal.
     ref_ix: std::cell::RefCell<HashMap<String, HashMap<String, std::collections::BTreeSet<String>>>>,
+    /// The walks `instances(<class>)` made over every loaded entity (the cache misses; `inst_scans()`).
+    inst_scans: std::cell::Cell<u64>,
+    /// `instances(<class>)`'s answer (the sorted eids) per class, lower-cased. An entity that arrives, leaves, changes its class or its `parents` / `scratch` forgets only the answers it can
+    /// be in (`inst_touch`): a request that is born (`Request`) leaves `instances('Boot')` alone, so the ten reads of it in a request cost no walk (measured 2026-11-14: 10 ms a walk at 27,000 entities, #1143).
+    inst_cache: std::cell::RefCell<HashMap<String, std::sync::Arc<Vec<String>>>>,
     seq: u64,
     pub learner: bool,
     pub trace: Option<Vec<String>>,
     cur: Option<Cur>,
     cache: expr::Cache,
+}
+
+/// The ids a value holds as `{"$ref": id}` (anywhere in it): the reference form of an entity stored as a value (`V::Ent` is written that way).
+pub fn collect_refs(v: &J, out: &mut Vec<String>) {
+    match v {
+        J::Object(m) => { if let Some(J::String(r)) = m.get("$ref") { out.push(r.clone()); } for x in m.values() { collect_refs(x, out); } }
+        J::Array(a) => for x in a { collect_refs(x, out); },
+        _ => {}
+    }
 }
 
 fn s(j: &J) -> String {
@@ -165,20 +305,45 @@ fn bget<'a>(b: &'a Binding, v: &str) -> Option<&'a String> {
     b.iter().find(|(k, _)| k == v).map(|(_, e)| e)
 }
 
+/// What a getter's null value says: a null's note (`absent`, `pending`, `None('why')`) or a FAILURE (`Error`, docs/c1f-error.md). Both are stored as a plain
+/// JSON null; a null's reason lives in `Core.why`, an Error's in the entity's own `failed` property (the class `Error`, `Fields::set_failure`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Note { Null(String), Error(String) }
+impl Note { pub fn reason(&self) -> &str { match self { Note::Null(r) | Note::Error(r) => r } } pub fn is_error(&self) -> bool { matches!(self, Note::Error(_)) } }
+
 struct View<'a> { core: &'a Core }
 
 impl<'a> expr::World for View<'a> {
     fn attr(&self, eid: &str, attr: &str) -> V {
-        let Some(e) = self.core.docs.get(eid) else { return V::None };
+        let Some(e) = self.core.docs.get(eid) else {
+            if self.core.unloaded.contains_key(eid) { self.core.wanted.borrow_mut().insert(eid.to_string()); return V::None; }   // stored, not loaded: asked for (the host loads it between rounds), not absent
+            if self.core.collected_set.contains(eid) { return V::Nil(COLLECTED.to_string()); }   // a virtual entity nothing held any more: a null that says so
+            return V::Nil(format!("absent: {eid} does not exist"));   // an entity that is not there: a null that says so
+        };
         match attr {
             "eid" => V::Str(eid.to_string()),
-            "cls" => V::Str(e.cls.clone()),
+            // the first class of the list (the eid class when it is the first, as written there otherwise)
+            "cls" => V::Str(match e.class_names().into_iter().find(|c| !c.eq_ignore_ascii_case(ERROR_CLASS)) { Some(c) if !c.eq_ignore_ascii_case(&e.cls) => c, _ => e.cls.clone() }),
             "position" => e.pos.as_ref().map(|p| V::List(p.iter().map(|x| V::Float(*x)).collect())).unwrap_or(V::None),
-            _ => e.props.get(attr).map(expr::from_json).unwrap_or(V::None),
+            UPDATED => V::Float(self.core.updated.get(eid).copied().unwrap_or(0.0)),   // provided by the VM: shadows a stored property of that name
+            TOUCHED if !e.props.contains_key(TOUCHED) => V::Int(e.touched.get() as i64),   // likewise (reading it is no touch), unless the entity stores a property of that name (the Python-era `Turn.touched`): its own wins
+            PINNED => match self.core.pinned_reason(eid) { Some(r) => V::Str(r), None => V::Bool(false) },
+            _ => { e.touched.set(self.core.bump());
+              // the class `Error` overlay: a property listed in the entity's `failed` reads as the Error, whatever it stores (the getter still recomputes under it)
+              if let Some(r) = e.failure(attr) { return V::Error(r.to_string()); }
+              match e.props.get(attr) {
+                Some(j) if !j.is_null() => { let mut v = expr::from_json(j); if matches!(v, V::List(_) | V::Dict(_)) { self.core.overlay_nested(eid, attr, &mut v); } v }
+                // a getter that computed None (`nulled`) is a plain null; a property the entity never had says `absent`, naming both
+                _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| V::Nil(r.clone())).unwrap_or_else(|| if self.core.nulled.contains(&(eid.to_string(), attr.to_string())) { V::None } else { V::Nil(format!("absent: {eid}.{attr}")) }),
+            } },
         }
     }
     fn refs(&self, eid: &str, prop: &str) -> Vec<String> { self.core.refs(eid, prop) }
     fn host(&self, f: &str, a: &[V]) -> Option<Result<V, String>> { self.core.native_call(f, a) }
+    fn is_class(&self, eid: &str, cls: &str) -> bool {
+        if !self.core.docs.contains_key(eid) && self.core.unloaded.contains_key(eid) { self.core.wanted.borrow_mut().insert(eid.to_string()); }
+        crate::fields::entity_is(self.core, eid, cls)
+    }
 }
 
 /// A view that records what an evaluation read: (eid, field) for every attribute, and (REFS, prop) for every
@@ -199,6 +364,11 @@ impl<'a> expr::World for Traced<'a> {
     fn refs(&self, eid: &str, prop: &str) -> Vec<String> {
         self.reads.borrow_mut().push((REFS.to_string(), format!("{}\u{0}{}", prop, eid)));   // per (prop, target)
         self.inner.refs(eid, prop)
+    }
+    /// `x is Class` reads the entity's `parents`: the getter that asked is dirty when they change
+    fn is_class(&self, eid: &str, cls: &str) -> bool {
+        self.reads.borrow_mut().push((eid.to_string(), "parents".to_string()));
+        self.inner.is_class(eid, cls)
     }
     /// The host's functions run on live rounds only: a silent compute (rebuild, birth) never calls out, its value
     /// is None until the next live round reads its inputs again.
@@ -226,7 +396,7 @@ impl<'a> expr::World for Traced<'a> {
             if let Some(k) = r.1 { self.reads.borrow_mut().push((SQL.to_string(), k)); }
             return Some(r.0);
         }
-        match h.call(f, &args_s)? {
+        match expr::waiting(|| h.call(f, &args_s))? {
             Ok(s) => Some(serde_json::from_str::<serde_json::Value>(&s).map(|j| expr::from_json(&j)).map_err(|e| format!("{}: {}", f, e))),
             Err(e) => Some(Err(format!("{}: {}", f, e))),
         }
@@ -245,11 +415,12 @@ pub enum Step {
 impl Core {
     pub fn new() -> Self {
         Core {
-            docs: HashMap::new(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
+            why: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
+            inst_scans: Default::default(), inst_cache: Default::default(), docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
-            q: VecDeque::new(), dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
+            q: VecDeque::new(), queue_writes: true, dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
-            #[cfg(feature = "python")]
+            #[cfg(feature = "store")]
             store: None,
         }
     }
@@ -294,7 +465,13 @@ impl Core {
         self.seen.insert(eid.clone(), now);
         let old = self.docs.get(&eid).map(|e| e.props.clone());
         self.reindex_entity(&eid, old.as_ref(), Some(&props));
-        self.docs.insert(eid, Ent { cls, props, pos });
+        if let Some(o) = &old { for k in o.keys() { self.set_refs(&eid, k, None); } }
+        for (k, v) in &props { self.set_refs(&eid, k, Some(v)); }
+        if self.is_virtual_class(&cls) { self.virt_live.insert(eid.clone()); self.gc_candidates.borrow_mut().insert(eid.clone()); self.forget_collected(&eid); }
+        let touched = std::cell::Cell::new(self.bump());
+        if let Some(o) = self.docs.get(&eid) { self.inst_touch(&o.cls, o.props.get("parents")); }
+        self.inst_touch(&cls, props.get("parents"));
+        self.docs.insert(eid, Ent { cls, props, pos, touched });
     }
 
     /// The live store's content for an entity, with no write behind it (a sweep re-reads what was
@@ -306,10 +483,13 @@ impl Core {
         }
         // a position of one NaN: keep the mirror's (a sweep with no geometric trigger doesn't copy them)
         let keep_pos = matches!(&pos, Some(v) if v.len() == 1 && v[0].is_nan());
+        if let Some(o) = self.docs.get(&eid) { self.inst_touch(&o.cls, o.props.get("parents")); }
+        self.inst_touch(&cls, props.as_ref().and_then(|p| p.get("parents")).or_else(|| self.docs.get(&eid).and_then(|o| o.props.get("parents"))));
         match (self.docs.get_mut(&eid), props) {
             (Some(e), None) => { e.cls = cls; if !keep_pos { e.pos = pos; } }   // positions only (an `around` sweep)
             (Some(e), Some(props)) if keep_pos => { e.cls = cls; e.props = props; }
-            (_, props) => { self.docs.insert(eid, Ent { cls, props: props.unwrap_or_default(), pos: if keep_pos { None } else { pos } }); }
+            (_, props) => { let touched = std::cell::Cell::new(self.bump());
+                self.docs.insert(eid, Ent { cls, props: props.unwrap_or_default(), pos: if keep_pos { None } else { pos }, touched }); }
         }
     }
 
@@ -351,7 +531,154 @@ impl Core {
 
     fn remove(&mut self, eid: &str) {
         if let Some(i) = self.at.remove(eid) { self.order[i] = None; }
-        if let Some(e) = self.docs.remove(eid) { self.reindex_entity(eid, Some(&e.props), None); }
+        self.updated.remove(eid);
+        if let Some(o) = self.docs.get(eid) { self.inst_touch(&o.cls, o.props.get("parents")); }
+        if let Some(e) = self.docs.remove(eid) {
+            self.reindex_entity(eid, Some(&e.props), None);
+            for k in e.props.keys() { self.set_refs(eid, k, None); }
+        }
+        self.virt_live.remove(eid);
+        // the load order keeps a hole per removed entity: closed when they are more than the live ones, so load/unload cycles do not grow it (amortised O(1))
+        if self.order.len() > 64 && self.order.len() > 2 * self.at.len() {
+            self.order.retain(|o| o.is_some());
+            for (i, o) in self.order.iter().enumerate() { if let Some(e) = o { self.at.insert(e.clone(), i); } }
+        }
+    }
+
+    /// The next place in the touch clock.
+    pub fn bump(&self) -> u64 { let t = self.clock.get() + 1; self.clock.set(t); t }
+
+    // ---- garbage collection of virtual entities (docs/cliffvm.md, "Garbage collection") --------------------------------------------------------------------
+    fn is_virtual_class(&self, cls: &str) -> bool { self.storage.read().unwrap_or_else(|x| x.into_inner()).get(cls).copied() == Some(Storage::Virtual) }
+
+    /// Keep the reverse index of `$ref` values current for one (holder, prop): what it held is dropped (a virtual target that lost a holder is a candidate), what it
+    /// holds now is added. Cheap when neither side has a reference (one lookup and a walk of the new value).
+    fn set_refs(&mut self, holder: &str, prop: &str, new: Option<&J>) {
+        let mut ts: Vec<String> = vec![];
+        if let Some(n) = new { collect_refs(n, &mut ts); }
+        if ts.is_empty() && !self.ref_holders.contains_key(holder) { return; }
+        if let Some(old) = self.ref_of.remove(&(holder.to_string(), prop.to_string())) {
+            if let Some(c) = self.ref_holders.get_mut(holder) { *c -= 1; if *c == 0 { self.ref_holders.remove(holder); } }
+            for t in old {
+                let Some(m) = self.ref_in.get_mut(&t) else { continue };
+                if let Some(c) = m.get_mut(holder) { *c -= 1; if *c == 0 { m.remove(holder); } }
+                if m.is_empty() { self.ref_in.remove(&t); }
+                self.gc_candidates.borrow_mut().insert(t);   // whoever still holds it may be a loop nothing else supports: look again
+            }
+        }
+        if ts.is_empty() { return; }
+        for t in &ts { *self.ref_in.entry(t.clone()).or_default().entry(holder.to_string()).or_insert(0) += 1; }
+        *self.ref_holders.entry(holder.to_string()).or_insert(0) += 1;
+        self.ref_of.insert((holder.to_string(), prop.to_string()), ts);
+    }
+
+    fn forget_collected(&mut self, eid: &str) { self.collected_set.remove(eid); }
+
+    /// Remember a collected entity: a read of it is a null with a reason (`COLLECTED`).
+    pub fn note_collected(&mut self, eid: &str) {
+        if self.collected_set.insert(eid.to_string()) { self.collected.push_back(eid.to_string()); }
+        while self.collected.len() > COLLECTED_KEPT { if let Some(o) = self.collected.pop_front() { self.collected_set.remove(&o); } }
+    }
+
+    /// The owner an entity's id names when it is `<Class>:<owner id>:<n>` (a command's chunk: `Chunk:<command>:<n>`): what an in-flight effect on the owner holds.
+    fn embedded_owner<'a>(&self, eid: &'a str, cls: &str) -> Option<&'a str> {
+        let rest = eid.strip_prefix(cls)?.strip_prefix(':')?;
+        rest.rsplit_once(':').map(|(o, _)| o).filter(|o| !o.is_empty())
+    }
+
+    /// Does an in-flight driver hold this virtual entity? A connection still open (a request not answered, a stream not closed), an effect on it whose receipt the
+    /// engine has not taken, the listener it opened, an effect on its embedded owner (a running command's chunks), or the host itself (`host_held`).
+    fn in_flight(&self, eid: &str, e: &Ent) -> bool {
+        if self.host_held.contains(eid) { return true; }
+        #[cfg(feature = "store")]
+        if let Some(st) = &self.store {
+            if st.holds(eid) { return true; }
+            if let Some(n) = e.props.get("conn").and_then(|c| c.as_u64()) { if st.conn_held(n) { return true; } }
+            if let Some(o) = self.embedded_owner(eid, &e.cls) { if st.holds(o) { return true; } }
+        }
+        #[cfg(not(feature = "store"))]
+        { let _ = e; }
+        false
+    }
+
+    /// Is this entity held? A stored (non-virtual) entity is a root. A virtual one is held by an in-flight driver, by its parent (a colon-path child lives while the
+    /// parent entity does), or by a holder of its id that is held itself (`seen` ends a cycle: a loop of virtual entities that nothing else holds supports nobody).
+    fn held(&self, v: &str, dead: &HashSet<String>, seen: &mut HashSet<String>) -> bool {
+        if !seen.insert(v.to_string()) { return false; }
+        let Some(e) = self.docs.get(v) else { return false };
+        if !self.virt_live.contains(v) { return true; }
+        if self.in_flight(v, e) { return true; }
+        if let Some((p, _)) = v.rsplit_once(':') { if self.docs.contains_key(p) && !dead.contains(p) { return true; } }
+        if let Some(m) = self.ref_in.get(v) {
+            for h in m.keys() { if h != v && !dead.contains(h) && self.held(h, dead, seen) { return true; } }
+        }
+        false
+    }
+
+    /// THE COLLECTOR, at the end of a round: the virtual entities that nothing holds, found from the CANDIDATES only (born this round, or released: a holder gave
+    /// the reference up, a holder was collected, an effect's receipt was taken). A dead entity releases what it held, so the pass runs on until nothing new dies.
+    /// No scan of the field: the cost is the candidates times the length of the chains of holders they walk (usually one), plus one pass over the LIVE virtual
+    /// entities when an effect ended (to find the entities that name it as their owner). -> the dead, in the order found; the caller removes them.
+    pub fn gc_dead(&self) -> Vec<String> {
+        let mut work: Vec<String> = std::mem::take(&mut *self.gc_candidates.borrow_mut()).into_iter().collect();
+        let owners = std::mem::take(&mut *self.gc_owners.borrow_mut());
+        if !owners.is_empty() {
+            for v in &self.virt_live { if let Some(e) = self.docs.get(v) { if self.embedded_owner(v, &e.cls).map_or(false, |o| owners.contains(o)) { work.push(v.clone()); } } }
+        }
+        let (mut dead, mut order): (HashSet<String>, Vec<String>) = (HashSet::new(), vec![]);
+        while let Some(v) = work.pop() {
+            if dead.contains(&v) || !self.virt_live.contains(&v) { continue; }
+            if self.held(&v, &dead, &mut HashSet::new()) { continue; }
+            dead.insert(v.clone());
+            order.push(v.clone());
+            let mut ts = vec![];
+            if let Some(e) = self.docs.get(&v) { for x in e.props.values() { collect_refs(x, &mut ts); } }
+            work.extend(ts);                                                                         // what it held may be free now
+            let below = format!("{v}:");
+            work.extend(self.virt_live.range(below.clone()..).take_while(|c| c.starts_with(&below)).cloned());   // and so may its children
+        }
+        order
+    }
+
+    /// Does this entity hold a live VIRTUAL entity by a `$ref` value? (Unloading it would drop the reference, and the virtual entity would be collected.)
+    pub fn holds_virtual(&self, eid: &str) -> bool {
+        if !self.ref_holders.contains_key(eid) { return false; }
+        let Some(e) = self.docs.get(eid) else { return false };
+        e.props.keys().any(|k| self.ref_of.get(&(eid.to_string(), k.clone())).map_or(false, |ts| ts.iter().any(|t| self.virt_live.contains(t))))
+    }
+
+    /// Why this loaded entity cannot be unloaded, or None when it can: a VIRTUAL class (RAM only: no row to come back to), a RESIDENT class (always loaded: packs,
+    /// drivers, whatever a pack lists whole), a running effect (`running` is set while a Command is in flight). What a LIVE virtual entity holds by `$ref` is the host's
+    /// check (`Host::unload_entity`): it reads the virtual entities, which the core's table does not index.
+    pub fn pinned_reason(&self, eid: &str) -> Option<String> {
+        let e = self.docs.get(eid)?;
+        match self.storage.read().unwrap_or_else(|x| x.into_inner()).get(&e.cls).copied().unwrap_or(Storage::Lazy) {
+            Storage::Virtual => return Some(format!("pinned: class {} is virtual (RAM only, no stored row to load it back from)", e.cls)),
+            Storage::Resident => return Some(format!("pinned: class {} is resident (always loaded)", e.cls)),
+            Storage::Lazy => {}
+        }
+        if e.props.get("running").map_or(false, |v| !v.is_null()) { return Some("pinned: running (an effect is in flight)".into()); }
+        if self.holds_virtual(eid) { return Some("pinned: holds a live virtual entity by a $ref".into()); }
+        None
+    }
+
+    /// UNLOAD a loaded entity: it leaves the engine (its properties, its place in the load order, what the engine remembers about its last evaluations) and is noted in
+    /// `unloaded` with its class, so the next reference loads it from its stored row. No value changes and nothing is written (the host's store is written through, so
+    /// the row is already what the entity was). -> whether it was loaded.
+    pub fn unload(&mut self, eid: &str) -> bool {
+        let Some(cls) = self.docs.get(eid).map(|e| e.cls.clone()) else { return false };
+        self.remove(eid);
+        self.seen.remove(eid);
+        self.state.remove(eid);
+        let lo = (eid.to_string(), String::new());
+        let keys: Vec<(String, String)> = self.why.range(lo.clone()..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
+        for k in keys { self.why.remove(&k); }
+        let keys: Vec<(String, String)> = self.nulled.range(lo.clone()..).take_while(|(e, _)| e == eid).cloned().collect();
+        for k in keys { self.nulled.remove(&k); }
+        let keys: Vec<(String, String)> = self.locals.range(lo..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
+        for k in keys { self.locals.remove(&k); }
+        self.unloaded.insert(eid.to_string(), cls);
+        true
     }
 
     fn eids(&self) -> Vec<String> {
@@ -370,9 +697,14 @@ impl Core {
                 self.load(w.eid.clone(), cls, props, pos, now);
             }
         } else if self.docs.contains_key(&w.eid) {
+            if let Some(e) = self.docs.get(&w.eid) { e.touched.set(self.bump()); }   // a write is a touch
+            if w.prop != "position" { self.set_refs(&w.eid, &w.prop, if w.new.is_null() { None } else { Some(&w.new) }); }
             if w.prop != "position" {
                 let old = self.docs.get(&w.eid).and_then(|e| e.props.get(&w.prop).cloned());
                 self.reindex(&w.eid, &w.prop, old.as_ref(), if w.new.is_null() { None } else { Some(&w.new) });
+            }
+            if w.prop == "parents" || w.prop == "scratch" {
+                if let Some(o) = self.docs.get(&w.eid) { self.inst_touch(&o.cls, o.props.get("parents")); self.inst_touch(&o.cls, if w.prop == "parents" { Some(&w.new) } else { o.props.get("parents") }); }
             }
             let e = self.docs.get_mut(&w.eid).unwrap();
             if w.prop == "position" {
@@ -386,6 +718,7 @@ impl Core {
         if !(w.prop.is_empty() && w.new.is_null()) && !w.writer.starts_with("trigger:") {
             self.seen.insert(w.eid.clone(), now);
         }
+        if !self.queue_writes { return; }
         if self.q.len() >= QUEUE_MAX {
             self.q.pop_front();
             self.dropped += 1;
@@ -393,8 +726,22 @@ impl Core {
         self.q.push_back(w);
     }
 
+    /// Drop an entity's mirror only (the learner's candidates): the class answers are made again.
+    pub fn drop_doc(&mut self, eid: &str) { if let Some(o) = self.docs.get(eid) { self.inst_touch(&o.cls, o.props.get("parents")); } self.docs.remove(eid); }
+
     pub fn set_cls(&mut self, eid: &str, cls: String) {
+        if let Some(o) = self.docs.get(eid) { self.inst_touch(&o.cls, o.props.get("parents")); self.inst_touch(&cls, o.props.get("parents")); }
         if let Some(e) = self.docs.get_mut(eid) { e.cls = cls; }
+    }
+
+    /// How many times `instances(<class>)` walked every loaded entity (the cache misses): a count of work, for the tests (no clock).
+    pub fn inst_scans(&self) -> u64 { self.inst_scans.get() }
+
+    /// An entity of this class list arrived, left or changed: forget the cached `instances(...)` answers it can be in (the root `entity`, its eid class, or any class it names), and only those.
+    fn inst_touch(&self, ent_cls: &str, parents: Option<&J>) {
+        let mut c = self.inst_cache.borrow_mut();
+        if c.is_empty() { return; }
+        c.retain(|k, _| !(k == "entity" || ent_cls.eq_ignore_ascii_case(k) || classes_hit(ent_cls, parents, k)));
     }
 
     pub fn queued(&self) -> usize { self.q.len() }
@@ -441,7 +788,7 @@ impl Core {
         let key = (eid.to_string(), c.clone());
         if let Some(v) = memo.isa.get(&key) { return *v; }
         let Some(e) = self.docs.get(eid) else { return false };
-        let mut ok = e.cls.to_lowercase() == c;
+        let mut ok = e.in_classes(&c);   // the class list: a kind named there binds with no ISA parent entity
         if !ok {
             let suffix = format!(":{}", c);
             let mut seen: HashSet<String> = HashSet::from([eid.to_string()]);
@@ -497,18 +844,50 @@ impl Core {
     pub fn eval_json(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<J, String> {
         let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
         for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
-        let v = self.eval(src, &env)?;
-        expr::to_json(&v)
+        match self.eval(src, &env)? { V::Error(r) => Err(r), v => expr::to_json(&v) }
+    }
+
+    /// The value of an expression as the evaluator holds it: an Error stays one (the caller decides: a write of it is refused).
+    pub fn eval_value(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<V, String> {
+        let env = Self::env_of(vars, extra);
+        self.eval(src, &env)
+    }
+
+    /// Record why a getter's value is null (or that it is not). A null's note is kept in `why`; a failure is NOT (it lives in the entity's `failed`,
+    /// `Fields::set_failure`). Nested notes are the caller's.
+    pub fn note_why(&mut self, key: &(String, String), note: Option<&Note>) {
+        match note {
+            Some(Note::Null(r)) => { self.why.insert(key.clone(), r.clone()); }
+            _ => { self.why.remove(key); }
+        }
+    }
+
+    /// Why (entity, property) is null: a failure's reason (the entity's `failed`) or a null's note.
+    pub fn reason_of(&self, key: &(String, String)) -> Option<String> {
+        self.docs.get(&key.0).and_then(|e| e.failure(&key.1)).map(String::from).or_else(|| self.why.get(key).cloned())
     }
 
     /// The engine's own built-ins that need the Core: `sql(query, args...)` (the store driver, store.rs). None: not one.
     pub fn native_call(&self, f: &str, a: &[V]) -> Option<Result<V, String>> {
         if f == "instances" {
-            // every entity of a class (its own class, not its ancestors'), in id order, as entities
+            // every entity of a class (its eid class, or a kind in its `parents` list; not its ancestors'), in id order, as entities; an entity with `scratch = true` (the scaffolding of
+            // one door call, e.g. the clifflet's own packs) is not listed: a block sees the field as it was, not its own scaffolding
             let Some(V::Str(c)) = a.first() else { return Some(Err("instances(class): a class name".into())) };
-            let mut ids: Vec<&String> = self.docs.iter().filter(|(_, e)| e.cls == *c).map(|(k, _)| k).collect();
-            ids.sort();
-            return Some(Ok(V::List(ids.into_iter().map(|k| V::Ent(k.clone())).collect())));
+            // `Entity` is the root every entity has: every LOADED entity (what the unload policy picks its coldest from)
+            let key = c.to_ascii_lowercase();
+            let hit = self.inst_cache.borrow().get(&key).cloned();
+            let ids = match hit {
+                Some(v) => v,
+                None => {
+                    let mut ids: Vec<String> = self.docs.iter().filter(|(_, e)| (c.eq_ignore_ascii_case("Entity") || e.cls == *c || e.in_classes(c)) && e.props.get("scratch") != Some(&serde_json::Value::Bool(true))).map(|(k, _)| k.clone()).collect();
+                    ids.sort();
+                    let v = std::sync::Arc::new(ids);
+                    self.inst_scans.set(self.inst_scans.get() + 1);
+                    self.inst_cache.borrow_mut().insert(key, v.clone());
+                    v
+                }
+            };
+            return Some(Ok(V::List(ids.iter().map(|k| V::Ent(k.clone())).collect())));
         }
         if f != "sql" && f != "jsonl" && f != "read" && f != "listdir" && f != "stat" { return None; }
         // a setter runs once, when something is written: it can't wait for a query's rows. A getter reads sql(...)
@@ -521,16 +900,16 @@ impl Core {
     pub fn sql_request(&self, asker: &str, a: &[V]) -> (Result<V, String>, Option<String>) {
         let Some(V::Str(q)) = a.first() else { return (Err("sql(query, args...): the query is a string".into()), None) };
         let args = match a[1..].iter().map(expr::to_json).collect::<Result<Vec<_>, _>>() { Ok(v) => v, Err(e) => return (Err(e), None) };
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         {
             let Some(st) = &self.store else { return (Err("sql: no store attached to this field".into()), None) };
             let k = crate::store::scoped(asker, &crate::store::key(q, &args));
             match st.request(asker, q, &args) {
                 crate::store::Poll::Ready(r) => (r.map(|rows| V::List(rows.iter().map(expr::from_json).collect())), Some(k)),
-                crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+                crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: sql({})", q.chars().take(48).collect::<String>()))), Some(k)),
             }
         }
-        #[cfg(not(feature = "python"))]
+        #[cfg(not(feature = "store"))]
         { let _ = (asker, q, args); (Err("sql: this build has no store driver".into()), None) }
     }
 
@@ -540,7 +919,7 @@ impl Core {
     pub fn host_request(&self, asker: &str, f: &str, args_json: &str, job: HostJob) -> (Result<V, String>, Option<String>) {
         let fname = f.to_string();
         let parse = move |s: String| serde_json::from_str::<J>(&s).map_err(|e| format!("{}: {}", fname, e));
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         {
             if let Some(st) = &self.store {
                 let slot = format!("{}\u{0}{}", asker, f);
@@ -552,7 +931,7 @@ impl Core {
                 });
                 return match st.request_job(&slot, key, true, run) {
                     crate::store::Poll::Ready(r) => (r.map(|mut rows| rows.pop().map(|j| expr::from_json(&j)).unwrap_or(V::None)), Some(k)),
-                    crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+                    crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: {}(...)", f))), Some(k)),
                 };
             }
         }
@@ -563,16 +942,16 @@ impl Core {
     /// A getter's `jsonl(name)`: the seat's JSON-lines file, asked like a query.
     pub fn jsonl_request(&self, asker: &str, a: &[V]) -> (Result<V, String>, Option<String>) {
         let Some(V::Str(name)) = a.first() else { return (Err("jsonl(name): a file name".into()), None) };
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         {
             let Some(st) = &self.store else { return (Err("jsonl: no store attached to this field".into()), None) };
             let k = crate::store::scoped(asker, &crate::store::jsonl_key(name));
             match st.request_jsonl(asker, name) {
                 crate::store::Poll::Ready(r) => (r.map(|rows| V::List(rows.iter().map(expr::from_json).collect())), Some(k)),
-                crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+                crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: jsonl({name})"))), Some(k)),
             }
         }
-        #[cfg(not(feature = "python"))]
+        #[cfg(not(feature = "store"))]
         { let _ = (asker, name); (Err("jsonl: this build has no store driver".into()), None) }
     }
 
@@ -580,29 +959,41 @@ impl Core {
     /// read.
     pub fn fs_request(&self, asker: &str, f: &str, a: &[V]) -> (Result<V, String>, Option<String>) {
         let Some(V::Str(path)) = a.first() else { return (Err(format!("{}(path): a path", f)), None) };
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         {
             let Some(st) = &self.store else { return (Err(format!("{}: no drivers attached to this field", f)), None) };
             let k = crate::store::scoped(asker, &crate::drivers::key(st, f, path));
             match crate::drivers::request(st, asker, f, path) {
                 crate::store::Poll::Ready(r) => (r.map(|mut rows| rows.pop().map(|j| expr::from_json(&j)).unwrap_or(V::None)), Some(k)),
-                crate::store::Poll::Pending => (Ok(V::None), Some(k)),
+                crate::store::Poll::Pending => (Ok(V::Nil(format!("pending: {}({})", f, path))), Some(k)),
             }
         }
-        #[cfg(not(feature = "python"))]
+        #[cfg(not(feature = "store"))]
         { let _ = (asker, path); (Err(format!("{}: this build has no drivers", f)), None) }
     }
 
     /// The drivers' effects' receipts since the last round: (entity, verb, receipt).
     pub fn effect_receipts(&self) -> Vec<(String, String, J)> {
-        #[cfg(feature = "python")]
-        { if let Some(st) = &self.store { return st.take_receipts(); } }
+        #[cfg(feature = "store")]
+        { if let Some(st) = &self.store {
+            let r = st.take_receipts();
+            // an effect's work on an entity is over: it may be garbage now, and so may what only it held (a command's chunks)
+            for (eid, _, _) in &r { self.gc_candidates.borrow_mut().insert(eid.clone()); self.gc_owners.borrow_mut().insert(eid.clone()); }
+            return r;
+        } }
+        vec![]
+    }
+
+    /// The entities the HTTP door pushed since the last round: (eid, class, properties).
+    pub fn inbound(&self) -> Vec<(String, String, Map<String, J>)> {
+        #[cfg(feature = "store")]
+        { if let Some(st) = &self.store { return st.take_inbound(); } }
         vec![]
     }
 
     /// The queries whose rows arrived since the last round (their getters are dirty).
     pub fn sql_ready(&self) -> Vec<String> {
-        #[cfg(feature = "python")]
+        #[cfg(feature = "store")]
         { if let Some(st) = &self.store { return st.take_ready(); } }
         vec![]
     }
@@ -613,20 +1004,68 @@ impl Core {
         env
     }
 
+    /// The key a nested reasoned null of (eid, prop) is remembered under in `why`: the property, a NUL, the path.
+    fn nested_key(prop: &str, path: &str) -> String { format!("{prop}\u{0}{path}") }
+    /// A getter stored a list or a dict: remember the reasoned nulls inside it (JSON keeps them plain), replacing what the last value had.
+    pub fn set_nested(&mut self, eid: &str, prop: &str, nulls: Vec<(String, String)>) {
+        let lo = (eid.to_string(), Self::nested_key(prop, ""));
+        let old: Vec<(String, String)> = self.why.range(lo..).take_while(|(k, _)| k.0 == eid && k.1.starts_with(&format!("{prop}\u{0}"))).map(|(k, _)| k.clone()).collect();
+        for k in old { self.why.remove(&k); }
+        for (path, r) in nulls { self.why.insert((eid.to_string(), Self::nested_key(prop, &path)), r); }
+    }
+    /// A read of a stored list or dict: the reasoned nulls inside it come back.
+    fn overlay_nested(&self, eid: &str, prop: &str, v: &mut V) {
+        let pre = format!("{prop}\u{0}");
+        let lo = (eid.to_string(), pre.clone());
+        let nulls: Vec<(String, String)> = self.why.range(lo..).take_while(|(k, _)| k.0 == eid && k.1.starts_with(&pre)).map(|(k, r)| (k.1[pre.len()..].to_string(), r.clone())).collect();
+        if !nulls.is_empty() { expr::overlay_nulls(v, &nulls); }
+    }
+
     /// A FOR's list (#994): each item an entity (bound as one) or a value; None is the empty list.
     pub fn eval_items(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<Vec<Item>, String> {
         let env = Self::env_of(vars, extra);
         match self.eval(src, &env)? {
             V::List(l) => l.into_iter().map(|v| match v { V::Ent(e) => Ok(Item::Ent(e)), v => expr::to_json(&v).map(Item::Val) }).collect(),
-            V::None => Ok(vec![]),
+            V::None | V::Nil(_) => Ok(vec![]),
+            V::Error(r) => Err(r),
             other => Err(format!("not a list ({})", expr::to_json(&other).map(|j| j.to_string()).unwrap_or_else(|_| "an entity".into()))),
         }
     }
 
+    /// A setter local's value: an entity (bound as one) or a value (a null stays null).
+    pub fn eval_item(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<Item, String> {
+        let env = Self::env_of(vars, extra);
+        match self.eval(src, &env)? { V::Ent(e) => Ok(Item::Ent(e)), V::Error(r) => Err(r), v => expr::to_json(&v).map(Item::Val) }
+    }
+
     /// A write's target: an entity, or the id of one (a string).
     pub fn eval_ref(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Option<String> {
+        self.eval_target(src, vars, extra).ok()
+    }
+
+    /// `eval_ref`, with the reason when there is no entity (a null key's own reason, an error).
+    pub fn eval_target(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<String, String> {
         let env = Self::env_of(vars, extra);
-        match self.eval(src, &env) { Ok(V::Ent(e)) | Ok(V::Str(e)) => Some(e), _ => None }
+        match self.eval(src, &env) {
+            Ok(V::Ent(e)) | Ok(V::Str(e)) => Ok(e),
+            Ok(V::Nil(r)) | Ok(V::Error(r)) => Err(r),
+            Ok(V::None) => Err("error: the target is null".into()),
+            Ok(_) => Err("error: the target of a write is an entity or the id of one".into()),
+            Err(e) => Err(format!("error: {}", e)),
+        }
+    }
+
+    /// A constructor `Class(name: value, ...)`: its class and its arguments' values (a null argument is `null`).
+    pub fn eval_ctor(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<(String, Vec<(String, J)>), String> {
+        let env = Self::env_of(vars, extra);
+        let (cls, args) = expr::parse_ctor(src)?;
+        let mut out = vec![];
+        for (name, node) in &args {
+            let v = expr::eval(node, &env, &View { core: self }).map_err(|e| format!("{}({}: ...): {}", cls, name, e))?;
+            if let V::Error(r) = &v { return Err(format!("refused: {}({}: ...) is an Error ({}); an Error is never stored", cls, name, r)); }
+            out.push((name.clone(), expr::to_json(&v).map_err(|e| format!("{}({}: ...): {}", cls, name, e))?));
+        }
+        Ok((cls, out))
     }
 
     /// Is the entity of this class (its own, or an ancestor's)?
@@ -639,26 +1078,69 @@ impl Core {
     }
 
     fn eval(&mut self, src: &str, env: &HashMap<String, V>) -> Result<V, String> {
-        let parsed = self.cache.get(src);
-        match &*parsed {
-            Ok(node) => { let n: &Node = node; expr::eval(n, env, &View { core: self }) }
-            Err(e) => Err(e.clone()),
+        for _ in 0..FAULT_RETRIES {
+            let r = {
+                let parsed = self.cache.get(src);
+                match &*parsed {
+                    Ok(node) => { let n: &Node = node; expr::eval(n, env, &View { core: self }) }
+                    Err(e) => Err(e.clone()),
+                }
+            };
+            if !self.fault_now() { return r; }   // the read found nothing but the store has it: it is loaded now, and the evaluation is done again on it
         }
+        Err("a read keeps asking for stored entities that are not loaded".into())
+    }
+
+    /// Entities an evaluation looked for and did not find, though the store has them (`wanted`): load them NOW (a lazy class loads on first reference), as the store holds
+    /// them (a getter's stored value too: the read is right away, and the getters of the entity recompute once it is registered, `Fields::complete_arrivals`). -> whether any loaded.
+    pub fn fault_now(&mut self) -> bool {
+        if self.wanted.borrow().is_empty() { return false; }
+        let wanted: Vec<String> = std::mem::take(&mut *self.wanted.borrow_mut()).into_iter().collect();
+        let mut any = false;
+        for e in wanted { any |= self.fault_one(&e); }
+        any
+    }
+
+    /// Load one stored entity that is not loaded: its row into `docs`, noted in `arrived` for the field to register. -> whether it loaded.
+    pub fn fault_one(&mut self, eid: &str) -> bool {
+        if self.unloaded.remove(eid).is_none() { return false; }
+        let Some(r) = self.loader.as_ref().and_then(|l| l(eid)) else { return false };
+        self.updated.insert(eid.to_string(), r.updated);
+        let now = self.last_now;
+        self.load(eid.to_string(), r.cls, r.props, None, now);
+        self.arrived.push(eid.to_string());
+        true
     }
 
     /// Evaluate and return what it read (#994 getters). `vars` bind names to entities, `extra` to values.
-    pub fn eval_traced(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, serde_json::Value)], host: Option<&dyn Host>, asker: &str, scale: usize)
-        -> (Result<serde_json::Value, String>, Vec<(String, String)>) {
+    pub fn eval_traced(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, serde_json::Value)], host: Option<&dyn Host>, asker: &str)
+        -> (Result<serde_json::Value, String>, Vec<(String, String)>, Option<Note>, Vec<(String, V)>) {
         let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
         for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
-        let parsed = self.cache.get_scaled(src, scale);
-        let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]), host, asker };
-        let r = match &*parsed {
-            Ok(node) => { let n: &Node = node; expr::eval(n, &env, &tv).and_then(|v| expr::to_json(&v)) }
-            Err(e) => Err(e.clone()),
-        };
-        let reads = tv.reads.into_inner();
-        (r, reads)
+        let mut tries = 0;
+        loop {
+            let (r, reads, nil, locals) = {
+                let parsed = self.cache.get(src);
+                let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]), host, asker };
+                let mut nil: Option<Note> = None;
+                let mut nested = vec![];
+                let mut locals = vec![];
+                let r = match &*parsed {
+                    Ok(node) => {
+                        let n: &Node = node;
+                        let (r, l) = expr::eval_locals(n, &env, &tv);
+                        locals = l;
+                        r.and_then(|v| { match &v { V::Nil(why) => nil = Some(Note::Null(why.clone())), V::Error(why) => nil = Some(Note::Error(why.clone())), _ => {} } nested = expr::nested_nulls(&v); expr::to_json(&v) })
+                    }
+                    Err(e) => Err(e.clone()),
+                };
+                let reads = tv.reads.into_inner();
+                self.nested_last = nested;
+                (r, reads, nil, locals)
+            };
+            tries += 1;
+            if tries >= FAULT_RETRIES || !self.fault_now() { return (r, reads, nil, locals); }   // loaded what it looked for: once more, on it
+        }
     }
 
     fn bindings(&mut self, host: &dyn Host, sp: &Spec, memo: &mut Memo, fixed: Binding) -> Vec<Binding> {
@@ -965,4 +1447,33 @@ impl Core {
 
     pub fn fired_ok(&mut self, teid: &str) { *self.fired.entry(teid.to_string()).or_insert(0) += 1; }
     pub fn error(&mut self, teid: &str, msg: String) { self.errors.insert(teid.to_string(), msg); }
+}
+
+#[cfg(feature = "alloc-stats")]
+impl Core {
+    /// The memory breakdown (alloc-stats): the entities' properties in total and by class, and the sizes of the engine's side tables.
+    pub fn mem_sizes(&self) -> Vec<crate::alloc_stats::Size> {
+        use crate::alloc_stats::{jsize, Size};
+        let mut v: Vec<Size> = vec![];
+        let mut by: HashMap<String, (u64, u64)> = HashMap::new();
+        let (mut n, mut bytes) = (0u64, 0u64);
+        for e in self.docs.values() {
+            let b: u64 = e.props.iter().map(|(k, x)| k.len() as u64 + 56 + jsize(x)).sum::<u64>() + e.cls.len() as u64 + 120;
+            n += 1; bytes += b;
+            let t = by.entry(e.cls.clone()).or_default(); t.0 += 1; t.1 += b;
+        }
+        v.push(("core.docs".into(), n, bytes));
+        let mut top: Vec<_> = by.into_iter().collect();
+        top.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
+        for (c, (n, b)) in top.into_iter().take(6) { v.push((format!("core.docs[{c}]"), n, b)); }
+        v.push(("core.unloaded".into(), self.unloaded.len() as u64, self.unloaded.iter().map(|(k, c)| (k.len() + c.len() + 64) as u64).sum()));
+        v.push(("core.why".into(), self.why.len() as u64, self.why.iter().map(|((a, b), r)| (a.len() + b.len() + r.len() + 96) as u64).sum()));
+        v.push(("core.locals".into(), self.locals.len() as u64, self.locals.iter().map(|((a, b), m)| (a.len() + b.len() + 96) as u64 + m.iter().map(|(k, x)| k.len() as u64 + 56 + jsize(x)).sum::<u64>()).sum()));
+        v.push(("core.ref_in".into(), self.ref_in.len() as u64, self.ref_in.iter().map(|(k, m)| k.len() as u64 + 64 + m.iter().map(|(h, _)| h.len() as u64 + 40).sum::<u64>()).sum()));
+        v.push(("core.ref_of".into(), self.ref_of.len() as u64, self.ref_of.iter().map(|((a, b), l)| (a.len() + b.len() + 64) as u64 + l.iter().map(|s| s.len() as u64 + 24).sum::<u64>()).sum()));
+        v.push(("core.ref_ix(referencing)".into(), self.ref_ix.borrow().len() as u64, self.ref_ix.borrow().values().map(|m| m.iter().map(|(k, s)| k.len() as u64 + 64 + s.iter().map(|x| x.len() as u64 + 48).sum::<u64>()).sum::<u64>()).sum()));
+        v.push(("core.virt_live".into(), self.virt_live.len() as u64, self.virt_live.iter().map(|s| s.len() as u64 + 48).sum()));
+        v.push(("core.expr_cache".into(), self.cache.len() as u64, 0));
+        v
+    }
 }

@@ -12,8 +12,8 @@ use crate::vm::{Core, Host, Write};
 
 const BLOCKER_CLASSES: [&str; 3] = ["Task", "Decision", "Wait"];
 
-/// finished(b): Task/Wait -> status 'done'; Decision -> status 'closed' (doc section 5).
-const OPEN_BLOCKERS_FILTER: &str = "t.eid in (b.blocks or []) and not ((b.cls == 'Decision' and b.status == 'closed') or (b.cls != 'Decision' and b.status == 'done'))";
+/// finished(b): Task/Wait -> status 'done'; Decision -> answered: decided, in_flight, closed or dropped (#1139; doc section 5).
+const OPEN_BLOCKERS_FILTER: &str = "t.eid in (b.blocks or []) and not ((b.cls == 'Decision' and b.status in ['decided', 'in_flight', 'closed', 'dropped']) or (b.cls != 'Decision' and b.status == 'done'))";
 
 /// `this` is the entity written (`x` is the old name, still bound for migrated scripts); `clock` the time.
 /// Each write: (target entity expr, prop, value expr). The first branch is `WHEN when: writes`; `els` are the
@@ -50,7 +50,29 @@ pub const LLM_CALL: &str = "membrane::llm.call";
 
 /// The entities a getter of `cls` applies to: that class, or an entity with it among its ISA parents.
 fn of_kind(core: &Core, cls: &str) -> Vec<String> {
-    core.docs.iter().filter(|(k, e)| e.cls == cls || has_kind(core, k, &e.props, cls)).map(|(k, _)| k.clone()).collect()
+    core.docs.iter().filter(|(k, e)| cls == ROOT_CLASS || e.in_classes(cls) || has_kind(core, k, &e.props, cls)).map(|(k, _)| k.clone()).collect()
+}
+
+/// The implicit root class: every entity's chain of classes ends in it (docs/c1f-layers.md, "One rule").
+pub const ROOT_CLASS: &str = "Entity";
+
+/// How near a getter's class `gcls` is to an entity: its place in the class list (`parents`, nearest first; the eid class when there is none),
+/// FAR a kind found up the ISA chain, ROOT the root `Entity`; None when the class does not apply. The nearest class's arms are tried first.
+const FAR: usize = 1_000_000;
+const ROOT: usize = usize::MAX;
+fn class_rank(core: &Core, eid: &str, e: &crate::vm::Ent, gcls: &str) -> Option<usize> {
+    class_rank_in(core, eid, e, &e.class_names(), gcls)
+}
+fn class_rank_in(core: &Core, eid: &str, e: &crate::vm::Ent, names: &[String], gcls: &str) -> Option<usize> {
+    if let Some(i) = names.iter().position(|n| n.eq_ignore_ascii_case(gcls)) { return Some(i); }
+    if gcls == ROOT_CLASS { return Some(ROOT); }
+    if has_kind(core, eid, &e.props, gcls) { return Some(FAR); }
+    None
+}
+
+/// `x is <cls>` (#1143): the class list (`parents`, nearest first), an ancestor up the ISA chain, or the root `Entity`; false for an entity that is not loaded.
+pub(crate) fn entity_is(core: &Core, eid: &str, cls: &str) -> bool {
+    core.docs.get(eid).map_or(false, |e| cls == ROOT_CLASS || e.in_classes(cls) || has_kind(core, eid, &e.props, cls))
 }
 
 /// A kind among an entity's ISA parents: named by the parent's id (`cls:chatthing` is ChatThing, mirrored or not),
@@ -83,22 +105,107 @@ pub fn on_setters() -> Vec<OnSet> { crate::translate::goalgraph_setters() }
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Getter {
     pub cls: String, pub prop: String, pub expr: String,
-    /// how many written arms were folded into `expr` (the size caps hold per arm: the fold may be that many times longer)
+    /// how many written arms were folded into `expr` (informational)
     pub arms: usize,
+    /// the arms as written, in order: (WHEN or None for the default, expression). Only a parsed pack carries them, for `compose` to stack
+    /// the arms of several layers; the composed getter has none.
+    pub parts: Vec<(Option<String>, String)>,
+    /// the pack that supplied the getter (set by `compose`)
+    pub pack: String,
+    /// a getter defined by SEVERAL layers: every arm of every layer, the top layer's first, as (pack, WHEN or None, expression). The first
+    /// arm whose WHEN holds is evaluated, so the layer that supplied the value is known (`Why`); `expr` is the same list folded into one
+    /// expression (for the levels and the type inference).
+    pub layers: Vec<(String, Option<String>, String)>,
 }
 
 /// The input key of a getter that reads `clock`.
 const CLOCK: &str = "\u{0}clock";
 
-/// Getter levels: a getter that reads another getter's field (by name) sits above it, so a round computes
-/// lower levels first. A cycle keeps the level it reached (its closing edge reads the previous value, rule 8).
-fn levels(gs: &[Getter]) -> Vec<usize> {
+/// Getter levels: a getter that reads another getter's field sits above it, so a round computes lower levels first. A cycle
+/// keeps the level it reached (its closing edge reads the previous value, rule 8).
+///
+/// Which getters a read lands on is class-aware (the same expression types `infer.rs` uses): `this.n` reads `n` of THIS getter's
+/// class; `x.n` / `g.n` / `prop(x, 'n')` read `n` of x's class when it is known (`this`, a loop variable over `instances('X')`
+/// or over a getter of known element type, a constructor, an entity literal). Where the class is unknown the read is
+/// conservative (every getter of that name), but such an edge is dropped when it would close a cycle that the known edges do
+/// not: a name collision between unrelated classes can never order a getter after what depends on it. Strings in dict
+/// literals and list elements are data, not reads.
+pub fn levels(gs: &[Getter]) -> Vec<usize> {
+    let n = gs.len();
+    let mut by_key: std::collections::HashMap<(&str, &str), Vec<usize>> = Default::default();
+    let mut by_name: std::collections::HashMap<&str, Vec<usize>> = Default::default();
+    for (i, g) in gs.iter().enumerate() { by_key.entry((&g.cls, &g.prop)).or_default().push(i); by_name.entry(&g.prop).or_default().push(i); }
+    let triples: Vec<(&str, &str, &str)> = gs.iter().map(|g| (g.cls.as_str(), g.prop.as_str(), g.expr.as_str())).collect();
+    let reads = crate::infer::getter_reads(&triples);
+    // known edges first, then the conservative ones that close no cycle
+    let mut adj: Vec<Vec<usize>> = vec![vec![]; n];
+    let mut loose: Vec<(usize, usize)> = vec![];
+    for i in 0..n {
+        let rs = reads[i].clone().unwrap_or_else(|| text_reads(&gs[i].expr));
+        for r in rs {
+            match &r.cls {
+                Some(c) => for &j in by_key.get(&(c.as_str(), r.name.as_str())).into_iter().flatten() {
+                    if !(gs[j].cls == gs[i].cls && gs[j].prop == gs[i].prop) { adj[i].push(j); }
+                },
+                None => for &j in by_name.get(r.name.as_str()).into_iter().flatten() {
+                    if gs[j].prop != gs[i].prop { loose.push((i, j)); }
+                },
+            }
+        }
+    }
+    for l in adj.iter_mut() { l.sort_unstable(); l.dedup(); }
+    loose.sort_unstable(); loose.dedup();
+    let mut stamp = vec![0usize; n];
+    let mut tick = 0usize;
+    for (i, j) in loose {
+        if adj[i].contains(&j) { continue; }
+        tick += 1;
+        let mut todo = vec![j];
+        let mut closes = false;
+        while let Some(x) = todo.pop() {
+            if x == i { closes = true; break; }
+            if stamp[x] == tick { continue; }
+            stamp[x] = tick;
+            todo.extend(adj[x].iter().copied());
+        }
+        if !closes { adj[i].push(j); }
+    }
+    for l in adj.iter_mut() { l.sort_unstable(); l.dedup(); }
+    let mut lv = vec![0usize; n];
+    for _ in 0..n {
+        let mut moved = false;
+        for i in 0..n {
+            for &j in &adj[i] {
+                if lv[i] <= lv[j] && lv[j] + 1 <= n { lv[i] = lv[j] + 1; moved = true; }
+            }
+        }
+        if !moved { break; }
+    }
+    lv
+}
+
+/// The reads of an expression that does not parse: every word of its code (the old, conservative scan).
+fn text_reads(expr: &str) -> Vec<crate::infer::Read> {
+    let c = code_only(expr);
+    let mut out = vec![];
+    let mut w = String::new();
+    for ch in c.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphanumeric() || ch == '_' { w.push(ch); }
+        else if !w.is_empty() { out.push(crate::infer::Read { name: std::mem::take(&mut w), cls: None }); }
+    }
+    out.sort(); out.dedup();
+    out
+}
+
+/// The old ordering, by NAME across all classes: the reference the class-aware `levels` is tested against.
+pub fn levels_by_name(gs: &[Getter]) -> Vec<usize> {
+    let exprs: Vec<String> = gs.iter().map(|g| code_only(&g.expr)).collect();
     let mut lv = vec![0usize; gs.len()];
     for _ in 0..gs.len() {
         let mut moved = false;
         for i in 0..gs.len() {
             for j in 0..gs.len() {
-                if gs[j].prop != gs[i].prop && reads_name(&gs[i].expr, &gs[j].prop) && lv[i] <= lv[j] && lv[j] + 1 <= gs.len() {
+                if gs[j].prop != gs[i].prop && reads_name(&exprs[i], &gs[j].prop) && lv[i] <= lv[j] && lv[j] + 1 <= gs.len() {
                     lv[i] = lv[j] + 1; moved = true;
                 }
             }
@@ -106,6 +213,59 @@ fn levels(gs: &[Getter]) -> Vec<usize> {
         if !moved { break; }
     }
     lv
+}
+
+/// The expression with its data strings blanked: a dict key or a list element that happens to be a getter's name is not a read of
+/// it. A string that is the LAST argument of a call (`prop(row, 'name')`) names a field: it stays.
+fn code_only(expr: &str) -> String {
+    let c: Vec<char> = expr.chars().collect();
+    let mut out = String::with_capacity(expr.len());
+    let mut i = 0;
+    while i < c.len() {
+        if c[i] == '\'' || c[i] == '"' {
+            let q = c[i];
+            let mut j = i + 1;
+            while j < c.len() && c[j] != q { if c[j] == '\\' { j += 1; } j += 1; }
+            let end = j.min(c.len() - 1);
+            let prev = out.chars().rev().find(|x| !x.is_whitespace());
+            let next = c[end + 1..].iter().find(|x| !x.is_whitespace());
+            if prev == Some(',') && next == Some(&')') { out.extend(&c[i..=end]); }     // prop(x, 'name'): a read by name
+            else { out.push(' '); for _ in i..=end { out.push(' '); } }
+            i = end + 1;
+        } else { out.push(c[i]); i += 1; }
+    }
+    out
+}
+
+/// `this.<name>` read in an expression (a whole name: `this.level` is not `this.levels`).
+fn reads_this(expr: &str, name: &str) -> bool { reads_name(&expr.replace("this.", " "), name) && expr.contains(&format!("this.{name}")) }
+
+/// A setter sees the getters as they were BEFORE the write that fired it, so one that reads a getter depending (through
+/// this class's other getters) on its own trigger property reads a stale value. The loader refuses it and names the fix.
+fn stale_setter_read(setters: &[OnSet], getters: &[Getter]) -> Option<String> {
+    for st in setters {
+        let mut exprs: Vec<&str> = vec![&st.when];
+        exprs.extend(st.writes.iter().map(|w| w.2.as_str()));
+        for (c, ws) in &st.els { exprs.push(c); exprs.extend(ws.iter().map(|w| w.2.as_str())); }
+        let same: Vec<&Getter> = getters.iter().filter(|g| g.cls == st.cls && g.prop != st.prop).collect();
+        let depends = |g: &Getter| -> bool {
+            let mut seen = vec![g.prop.as_str()];
+            let mut todo = vec![g];
+            while let Some(x) = todo.pop() {
+                if reads_this(&x.expr, &st.prop) { return true; }
+                for y in &same { if !seen.contains(&y.prop.as_str()) && reads_this(&x.expr, &y.prop) { seen.push(&y.prop); todo.push(y); } }
+            }
+            false
+        };
+        for g in &same {
+            if exprs.iter().any(|e| reads_this(e, &g.prop)) && depends(g) {
+                return Some(format!(
+                    "{c}.{p} on-setter {n} reads the getter {c}.{g}, which depends on {c}.{p}: a setter sees the getters as they were before its write, so {g} is stale there. Act from an on-setter on {c}.{g} instead",
+                    c = st.cls, p = st.prop, n = st.name, g = g.prop));
+            }
+        }
+    }
+    None
 }
 
 fn reads_name(expr: &str, name: &str) -> bool {
@@ -118,13 +278,18 @@ fn reads_name(expr: &str, name: &str) -> bool {
     })
 }
 
+/// The words of the safety rule in a refusal (set_pack tells a refusal from a pack that waits for its imports by them).
+const UPDATED_PROP: &str = crate::vm::UPDATED;
+const OVERRIDE_RULE: &str = "a layer overrides only what it imports";
+
+/// How many times the start-up pass may repeat while values still change (see `rebuild`).
+const REBUILD_PASSES: usize = 16;
+
 pub struct Fields {
     pub setters: Vec<OnSet>,
     /// the llm calls the plan fields asked for (the effect that is not a prop write)
     pub calls: Vec<J>,
     pub writes: u64,
-    /// row 3: the Chat entities' `banner` getter (banner.rs) is on
-    pub banner: bool,
     /// row 4: the recall policy's guard setters and RecallAsk getters (recall.rs) are on
     pub recall: bool,
     /// row 5: written calls (adapters.rs) are on; the calls they asked the host to run
@@ -141,6 +306,12 @@ pub struct Fields {
     /// every write the field made (getters, setters, receipts), in order, until the host drains it:
     /// {eid, prop, new, writer}. The host applies them to its store (fields_live.py).
     pub out: Vec<J>,
+    /// entities a write of `retire = true` asked to remove (any writer): the host removes each (the engine's entity, its stored row) after it drains `out`
+    pub retired: Vec<String>,
+    /// entities a write of `unload = true` asked to take out of the engine (any writer): the host checks each against its pins and unloads it (`Host::unload_entity`)
+    pub unload_asked: Vec<String>,
+    /// the host takes the door's requests itself (to journal them, then `arrive`): a round leaves them in the store
+    pub inbound_by_host: bool,
     /// getters declared in cliffhanger, their levels, and their inputs: (eid, field) read -> instances (eid, getter)
     pub getters: Vec<Getter>,
     glevel: Vec<usize>,
@@ -150,6 +321,8 @@ pub struct Fields {
     /// entities whose getters are registered; `primed` once the start-up rebuild ran
     known: std::collections::HashSet<String>,
     primed: bool,
+    /// getters a pack load changed or added since the last prime: `sync` computes them for the entities that exist
+    fresh: Vec<usize>,
     /// cliffhanglet packs loaded at runtime (name -> its setters and getters), after the built-in goal graph
     packs: std::collections::BTreeMap<String, crate::syntax::Pack>,
     /// class -> the pack that owns it; pack -> the packs it imports; packs that aren't active, and why
@@ -159,14 +332,68 @@ pub struct Fields {
     /// the order packs were first loaded in: earlier packs keep the classes they own (a pack can't take a class
     /// by its name sorting first)
     load_order: Vec<String>,
+    /// PRIVILEGE: pack -> who granted it (docs/c1f-layers.md). A privileged pack is exempt from rule B (it may write and create any class)
+    /// and from nothing else: rule A (only the owner declares getters and setters on a class) is `compose`'s and stays.
+    granted: std::collections::BTreeMap<String, String>,
+    /// the class `Error` bookkeeping (docs/c1f-error.md): the derived writes a `compute` made (the round's loop takes them into its queue), how many times each entity's
+    /// class entry flipped in this run, the entities whose flip was held back until the run ends, and whether a run is going (only a run can loop)
+    late: Vec<Write>,
+    flips: std::collections::HashMap<String, u8>,
+    class_deferred: std::collections::BTreeSet<String>,
+    /// entities that arrived (restored, loaded) holding a `failed`: its entries are checked against the getters at the next run
+    recon: std::collections::BTreeSet<String>,
+    in_run: bool,
+    /// LAYERS: (eid, prop) -> the pack whose arm supplied a layered getter's value
+    layer_of: std::collections::HashMap<(String, String), String>,
+    /// the target (eid, prop) -> the (pack, setter) that wrote it FIRST this round: a stacked setter of another pack skips its write to it
+    claimed: std::collections::HashMap<(String, String), (String, String)>,
+    /// skipped writes (eid, prop, pack, setter) -> the pack that overrode it, as `why_layer` tells
+    skipped: std::collections::BTreeMap<(String, String, String, String), String>,
+    /// class -> its storage mode, from the active owner packs' VIRTUAL / RESIDENT header lines (`compose`)
+    storage: crate::vm::StorageMap,
+    /// set while the setters of a write on a VIRTUAL entity run: what they write to a stored entity is marked `virt` in `out`, so the host journals it as an
+    /// outside write (the virtual trigger is not in the journal, a replay could not derive it again)
+    trigger_virtual: bool,
+}
+
+/// How a class is stored (docs/cliffvm.md, "Storage modes"): its OWN class (the eid's), declared by the pack that owns it.
+pub use crate::vm::Storage;
+
+/// A storage line of pack `n` (`VIRTUAL X` / `RESIDENT X`) that the pack may not make: the class belongs to another pack, which alone declares its mode.
+/// The text says what to do, for a pack written by a model.
+fn storage_conflict(n: &str, p: &crate::syntax::Pack, owner: &std::collections::HashMap<String, String>, packs: &std::collections::BTreeMap<String, crate::syntax::Pack>) -> Option<String> {
+    for (word, list) in [("VIRTUAL", &p.virtuals), ("RESIDENT", &p.residents)] {
+        for c in list {
+            let Some(o) = owner.get(c).filter(|o| *o != n) else { continue };
+            let theirs = packs.get(o).map(|q| if q.virtuals.contains(c) { " (it declares it VIRTUAL)" } else if q.residents.contains(c) { " (it declares it RESIDENT)" } else { " (it declares no storage mode: the class is stored and loaded on demand)" }).unwrap_or("");
+            return Some(format!("pack {n}: {word} {c}: pack {o} owns {c}{theirs} and only the owner of a class declares its storage mode. Remove the line from pack {n}; to change the mode, change it in pack {o}"));
+        }
+    }
+    None
 }
 
 impl Fields {
+    /// Whether a write the running setter makes to `eid` comes from a VIRTUAL trigger and lands on a stored entity (then the host journals it as an outside write).
+    fn from_virtual(&self, core: &Core, eid: &str) -> bool {
+        self.trigger_virtual && core.docs.get(eid).map_or(false, |e| self.storage_of(&e.cls) != Storage::Virtual)
+    }
+    /// The `out` entry of a birth by a setter (the entity is in `core` already).
+    fn born_entry(&self, core: &Core, eid: &str, cls: &str) -> J {
+        let mut o = json!({"eid": eid, "born": cls});
+        if self.from_virtual(core, eid) { o["virt"] = json!(true); }
+        o
+    }
+    /// The classes declared with this storage mode.
+    pub fn classes_with(&self, s: Storage) -> Vec<String> { let mut v: Vec<String> = self.storage.read().unwrap_or_else(|e| e.into_inner()).iter().filter(|(_, m)| **m == s).map(|(c, _)| c.clone()).collect(); v.sort(); v }
+    /// The storage mode of a class (its own class, the eid's): what its OWNER pack declared; Lazy when none did.
+    pub fn storage_of(&self, cls: &str) -> Storage { self.storage.read().unwrap_or_else(|e| e.into_inner()).get(cls).copied().unwrap_or(Storage::Lazy) }
+    /// The class table the engine's core reads too (`Core::storage`): one shared map, written by `compose`.
+    pub fn storage_handle(&self) -> crate::vm::StorageMap { self.storage.clone() }
     pub fn goalgraph() -> Self {
-        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, banner: false, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![],
+        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], unload_asked: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
-            known: Default::default(), primed: false, packs: Default::default(),
-            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![] };
+            known: Default::default(), primed: false, fresh: vec![], late: vec![], flips: Default::default(), class_deferred: Default::default(), recon: Default::default(), in_run: false, packs: Default::default(),
+            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
         f.packs.insert("goalgraph".into(), gg);
         f.load_order.push("goalgraph".into());
@@ -179,6 +406,16 @@ impl Fields {
     pub fn set_pack(&mut self, name: &str, src: &str) -> Result<(), String> {
         let p = crate::syntax::parse_full(src).map_err(|e| format!("pack {}: {}", name, e))?;
         if let Some(n) = &p.name { if n != name { return Err(format!("pack {}: its PACK line says {}", name, n)); } }
+        if let Some(e) = stale_setter_read(&p.setters, &p.getters) { return Err(format!("pack {}: {}", name, e)); }
+        // the same check across the layers: this pack's setters against the getters of every other pack, and the other packs' setters against
+        // this pack's getters (an arm it adds to a lower getter can make that getter depend on a lower setter's trigger)
+        {
+            let others_s = self.setters.iter().filter(|st| st.pack != name);
+            let others_g = self.getters.iter().filter(|g| g.pack != name);
+            let sets: Vec<OnSet> = others_s.cloned().chain(p.setters.iter().cloned()).collect();
+            let gets: Vec<Getter> = others_g.cloned().chain(p.getters.iter().cloned()).collect();
+            if let Some(e) = stale_setter_read(&sets, &gets) { return Err(format!("pack {}: {}", name, e)); }
+        }
         let old = self.packs.insert(name.to_string(), p);
         if !self.load_order.iter().any(|n| n == name) { self.load_order.push(name.to_string()); }
         self.compose();
@@ -186,7 +423,7 @@ impl Fields {
             // an import problem: a pack that was active stays as it was; a new one waits for its imports
             match old {
                 Some(o) => { self.packs.insert(name.to_string(), o); self.compose(); }
-                None if e.contains("belongs to pack") => { self.packs.remove(name); self.load_order.retain(|n| n != name); self.compose(); }
+                None if e.contains("belongs to pack") || e.contains(OVERRIDE_RULE) => { self.packs.remove(name); self.load_order.retain(|n| n != name); self.compose(); }
                 None => {}                           // a new pack waiting for an import stays, and activates when it arrives
             }
             return Err(e);
@@ -194,11 +431,51 @@ impl Fields {
         Ok(())
     }
 
+    /// Whether the named pack is loaded and ACTIVE (its imports are met, no composition error against it).
+    pub fn pack_active(&self, name: &str) -> bool { self.packs.contains_key(name) && !self.pack_errors.contains_key(name) }
+    pub fn has_pack(&self, name: &str) -> bool { self.packs.contains_key(name) }
+    /// Whether an active pack owns (declares) the class.
+    pub fn owns_class(&self, cls: &str) -> bool { self.owner.contains_key(cls) }
+
     pub fn remove_pack(&mut self, name: &str) -> bool {
         let had = self.packs.remove(name).is_some();
         self.load_order.retain(|n| n != name);
         if had { self.compose(); }
         had
+    }
+
+    /// Remove a pack AND clear what its getters left on entities: a getter's value is a plain property once the getter is gone, and a stale value
+    /// of a pack that no longer exists must not linger. Derived writes of none (journal-neutral); a property another pack still computes stays.
+    pub fn remove_pack_clean(&mut self, core: &mut Core, host: &dyn Host, name: &str, now: f64, seq: &mut i64) -> bool {
+        let gone = self.pack_getters(name);
+        let had = self.remove_pack(name);
+        self.clear_gone(core, host, gone, now, seq);
+        had
+    }
+
+    /// Replace a pack's text AND clear what a getter of the OLD text left when the NEW text lacks it (the same cleanup as a removal).
+    pub fn set_pack_clean(&mut self, core: &mut Core, host: &dyn Host, name: &str, src: &str, now: f64, seq: &mut i64) -> Result<(), String> {
+        let before = self.pack_getters(name);
+        let r = self.set_pack(name, src);
+        self.clear_gone(core, host, before, now, seq);        // a refused text changes nothing: every getter is still there, nothing clears
+        r
+    }
+
+    fn pack_getters(&self, name: &str) -> Vec<(String, String)> {
+        self.packs.get(name).map(|p| p.getters.iter().map(|g| (g.cls.clone(), g.prop.clone())).collect()).unwrap_or_default()
+    }
+
+    fn clear_gone(&mut self, core: &mut Core, host: &dyn Host, gone: Vec<(String, String)>, now: f64, seq: &mut i64) {
+        let mut work = VecDeque::new();
+        for (cls, prop) in gone {
+            if self.has_getter(&cls, &prop) { continue; }
+            let mut eids: Vec<String> = core.docs.iter().filter(|(_, e)| e.in_classes(&cls) && e.props.contains_key(&prop)).map(|(k, _)| k.clone()).collect();
+            eids.sort();
+            for e in eids { self.emit_unchecked(core, &mut work, &e, &prop, J::Null, "pack-removed", seq, now); }
+        }
+        self.reconcile_all(core, seq, now);       // a failure of a getter the field no longer has leaves with it
+        work.extend(std::mem::take(&mut self.late));
+        if !work.is_empty() { self.new_round(); self.run(core, host, work, now, seq); }
     }
 
     /// Activate packs in import order: a pack is active once every pack it imports is active with the same major
@@ -220,13 +497,25 @@ impl Fields {
                 if !ready { continue; }
                 done.insert(n.clone());
                 moved = true;
-                let foreign: Vec<String> = p.classes().into_iter().filter(|c| owner.get(c).map(|o| o != n && !p.imports.iter().any(|(i, _)| i == o)).unwrap_or(false)).collect();
+                // RULE A: a class is defined by its owner; a declaration on it needs `IMPORT <owner>`, UNLESS the declaration overrides what a pack
+                // this one imports (DIRECTLY) defines: a getter by class+property, a setter by class+property+name (docs/c1f-layers.md)
+                let direct: Vec<&String> = p.imports.iter().map(|(i, _)| i).collect();   // B must be imported DIRECTLY: not transitive trust
+                let overrides = |c: &str| -> bool {
+                    p.getters.iter().filter(|g| g.cls == c).all(|g| direct.iter().filter_map(|q| self.packs.get(*q)).any(|o| o.getters.iter().any(|h| h.cls == g.cls && h.prop == g.prop)))
+                    && p.setters.iter().filter(|s| s.cls == c).all(|s| direct.iter().filter_map(|q| self.packs.get(*q)).any(|o| o.setters.iter().any(|t| t.cls == s.cls && t.prop == s.prop && t.name == s.name)))
+                };
+                let foreign: Vec<String> = p.classes().into_iter().filter(|c| owner.get(c).map(|o| o != n && !p.imports.iter().any(|(i, _)| i == o) && !overrides(c)).unwrap_or(false)).collect();
                 if let Some(c) = foreign.first() {
                     let o = &owner[c];
                     let maj = self.packs.get(o).map(|q| q.major()).unwrap_or(1);
-                    self.pack_errors.insert(n.clone(), format!("pack {}: declares on {}, which belongs to pack {}: add IMPORT {} {}", n, c, o, o, maj));
+                    self.pack_errors.insert(n.clone(), format!("pack {}: declares on {}, which belongs to pack {}: add IMPORT {} {} (or override only what a pack you import defines there)", n, c, o, o, maj));
                     continue;
                 }
+                // THE SAFETY RULE (docs/c1f-layers.md): a layer overrides only what it imports
+                if let Some(why) = self.override_without_import(n, &active) { self.pack_errors.insert(n.clone(), why); continue; }
+                // STORAGE MODES (docs/cliffvm.md): only the class OWNER declares VIRTUAL / RESIDENT; a storage line claims a class no pack owns yet
+                if let Some(why) = storage_conflict(n, p, &owner, &self.packs) { self.pack_errors.insert(n.clone(), why); continue; }
+                for c in p.virtuals.iter().chain(p.residents.iter()) { owner.entry(c.clone()).or_insert_with(|| n.clone()); }
                 for c in p.classes() { owner.entry(c).or_insert_with(|| n.clone()); }
                 active.push(n.clone());
             }
@@ -243,28 +532,141 @@ impl Fields {
             }).unwrap_or_else(|| "its imports form a cycle".into());
             self.pack_errors.insert(n.clone(), format!("pack {}: {}", n, why));
         }
-        let mut setters = vec![];
-        let mut getters = vec![];
+        // LAYERS: a pack later in `active` is above the packs before it (an importing pack always comes after what it imports).
+        // Setters: top layer first; a setter of the same class, property and name as one in a higher layer is replaced (dropped here).
+        let mut setters: Vec<OnSet> = vec![];
+        let mut seen: HashSet<(String, String, String)> = HashSet::new();
+        for n in active.iter().rev() {
+            for st in &self.packs[n].setters {
+                if !seen.insert((st.cls.clone(), st.prop.clone(), st.name.clone())) { continue; }
+                let mut st = st.clone();
+                st.pack = n.clone();
+                setters.push(st);
+            }
+        }
+        // Getters: the arms of every layer form ONE list, the top layer's first (see `Getter::layers`).
+        let mut getters: Vec<Getter> = vec![];
+        let mut at: HashMap<(String, String), usize> = HashMap::new();
+        let mut stack: Vec<Vec<(String, Getter)>> = vec![];
         for n in &active {
-            let p = &self.packs[n];
-            setters.extend(p.setters.iter().cloned().map(|mut s| { s.pack = n.clone(); s }));
-            getters.extend(p.getters.iter().cloned());
+            for g in &self.packs[n].getters {
+                let k = (g.cls.clone(), g.prop.clone());
+                match at.get(&k) {
+                    Some(&i) => stack[i].push((n.clone(), g.clone())),
+                    None => { at.insert(k, stack.len()); stack.push(vec![(n.clone(), g.clone())]); }
+                }
+            }
+        }
+        for mut layers in stack {
+            let (lowest_pack, mut g) = layers[0].clone();
+            g.pack = lowest_pack;
+            if layers.len() > 1 {
+                layers.reverse();                                   // the top layer first
+                let mut list: Vec<(String, Option<String>, String)> = vec![];
+                'stack: for (pack, lg) in &layers {
+                    for (when, e) in &lg.parts {
+                        list.push((pack.clone(), when.clone(), e.clone()));
+                        if when.is_none() { break 'stack; }         // a default ends the search: nothing below it answers
+                    }
+                }
+                let parts: Vec<(Option<String>, String)> = list.iter().map(|(_, w, e)| (w.clone(), e.clone())).collect();
+                g.expr = crate::syntax::fold_parts(&parts);
+                g.arms = parts.len();
+                g.layers = list;
+            }
+            if layers.len() > 1 { g.parts = vec![]; }               // a lone layer keeps its arms: they join the other classes' arms (`arms_of`)
+            getters.push(g);
         }
         self.imports = active.iter().map(|n| (n.clone(), self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect())).collect();
+        let mut modes: HashMap<String, Storage> = HashMap::new();
+        for n in &active { for c in &self.packs[n].virtuals { modes.insert(c.clone(), Storage::Virtual); } for c in &self.packs[n].residents { modes.insert(c.clone(), Storage::Resident); } }
+        *self.storage.write().unwrap_or_else(|e| e.into_inner()) = modes;
         self.owner = owner;
         self.setters = setters;
         self.set_getters(getters);
     }
 
+    /// The packs `n` imports, directly or through the packs they import.
+    fn reach(&self, n: &str) -> Vec<String> {
+        let mut reach: Vec<String> = vec![];
+        let mut todo: Vec<String> = self.packs[n].imports.iter().map(|(i, _)| i.clone()).collect();
+        while let Some(i) = todo.pop() {
+            if reach.contains(&i) { continue; }
+            if let Some(q) = self.packs.get(&i) { todo.extend(q.imports.iter().map(|(x, _)| x.clone())); }
+            reach.push(i);
+        }
+        reach
+    }
+
+    /// The safety rule: `Some(why)` when pack `n` defines a getter, or a setter by the same class, property and name, that an ACTIVE pack
+    /// defines too, and `n` does not import that pack (directly or through the packs it imports). (docs/c1f-layers.md)
+    fn override_without_import(&self, n: &str, active: &[String]) -> Option<String> {
+        let reach = self.reach(n);
+        let p = &self.packs[n];
+        for q in active {
+            if reach.contains(q) { continue; }
+            let o = &self.packs[q];
+            let maj = o.major();
+            if let Some(g) = p.getters.iter().find(|g| o.getters.iter().any(|h| h.cls == g.cls && h.prop == g.prop)) {
+                return Some(format!("pack {n}: {}.{} getter is defined by pack {q} too: {OVERRIDE_RULE}: add IMPORT {q} {maj}", g.cls, g.prop));
+            }
+            if let Some(st) = p.setters.iter().find(|s| o.setters.iter().any(|t| t.cls == s.cls && t.prop == s.prop && t.name == s.name)) {
+                return Some(format!("pack {n}: setter {} on {}.{} replaces pack {q}'s: {OVERRIDE_RULE}: add IMPORT {q} {maj}", st.name, st.cls, st.prop));
+            }
+        }
+        None
+    }
+
+    /// Record a grant (`on`) or a revoke of `Pack:<name>.privileged`, with the writer that wrote it. The grant is by NAME: it holds for a pack
+    /// loaded from a file or from `Pack:<name>.text`, before it is loaded and after it is removed, until a privileged writer revokes it.
+    pub fn note_grant(&mut self, name: &str, on: bool, by: &str) {
+        if on { self.granted.insert(name.to_string(), by.to_string()); } else { self.granted.remove(name); }
+    }
+    pub fn is_privileged(&self, name: &str) -> bool { self.granted.contains_key(name) }
+    pub fn granted_by(&self, name: &str) -> Option<&String> { self.granted.get(name) }
+
+    /// A write from `pack` to `Pack:<x>.privileged` is a grant: only a privileged writer makes one (a setter built outside a pack is not checked,
+    /// as in `may_write`). Whatever the pack owns or imports: a pack cannot promote itself or another by owning the class Pack, or by a
+    /// constructor, a computed name or a chain of setters (all of them run as the pack that declared the setter).
+    fn grant_check(&self, pack: &str) -> Result<(), String> {
+        if pack.is_empty() || self.is_privileged(pack) { return Ok(()); }
+        Err(format!("pack {} can't grant privilege (only a privileged pack can)", pack))
+    }
+
     /// May a setter from `pack` write an entity of class `cls`? Its own classes, an imported pack's, or a class no
     /// pack owns. A setter built outside a pack ("") is not checked.
+    /// The pack that owns a class; the name may come lower-cased from a `parents` entry (`cls:alpha` is Alpha).
+    fn owner_of(&self, cls: &str) -> Option<&String> {
+        self.owner.get(cls).or_else(|| self.owner.iter().find(|(k, _)| k.eq_ignore_ascii_case(cls)).map(|(_, v)| v))
+    }
+
     fn may_write(&self, pack: &str, cls: &str) -> Result<(), String> {
-        if pack.is_empty() { return Ok(()); }
-        match self.owner.get(cls) {
+        if pack.is_empty() || self.is_privileged(pack) { return Ok(()); }
+        match self.owner_of(cls) {
             None => Ok(()),
             Some(o) if o == pack || self.imports.get(pack).map(|v| v.contains(o)).unwrap_or(false) => Ok(()),
-            Some(o) => Err(format!("pack {} can't write {} (pack {} owns it): add IMPORT {}", pack, cls, o, o)),
+            Some(o) => {
+                let cls = self.owner.keys().find(|k| k.eq_ignore_ascii_case(cls)).map_or(cls, |k| k.as_str());   // as declared (a `parents` entry is lower-cased)
+                Err(format!("pack {} can't write {} (pack {} owns it): add IMPORT {}", pack, cls, o, o))
+            }
         }
+    }
+
+    /// Rule B on an existing entity, by its class list (`parents`, #1143): allowed when ANY of its classes may be written by `pack` (it owns or
+    /// imports it), or when no class has an owner; otherwise refused for the nearest owned class. A write of `parents` itself is a write.
+    fn may_write_ent(&self, core: &Core, pack: &str, eid: &str) -> Result<(), String> {
+        if pack.is_empty() || self.is_privileged(pack) { return Ok(()); }
+        let Some(e) = core.docs.get(eid) else { return Ok(()) };
+        let names: Vec<String> = e.class_names().into_iter().filter(|c| !c.eq_ignore_ascii_case(crate::vm::ERROR_CLASS)).collect();   // the VM's own Error entry is no class of the writer's
+        let mut first_err = None;
+        for c in &names {
+            match self.may_write(pack, c) {
+                Ok(()) if self.owner_of(c).is_some() => return Ok(()),
+                Ok(()) => {}
+                Err(w) => { first_err.get_or_insert(w); }
+            }
+        }
+        match first_err { Some(w) => Err(w), None => Ok(()) }
     }
 
     /// Every class a loaded setter or getter is declared on.
@@ -274,10 +676,40 @@ impl Fields {
         v
     }
 
+    /// The getters of the field are now `gs` (a pack was loaded or removed). A getter the new set carries unchanged keeps what the field learned of it (its
+    /// values, its inputs): only the getters this load changed or added are computed again (`fresh`, by `sync`). "Unchanged" is by property name: the getters of
+    /// one property stack their arms across classes, so every getter of a name whose set of getters moved counts as changed. The first set (nothing primed
+    /// yet) starts from nothing, as before. An idle seat evaluates no getter, and neither does a seat whose pack load touched none of the getters it reads.
     pub fn set_getters(&mut self, gs: Vec<Getter>) {
-        self.glevel = levels(&gs);
+        let glevel = levels(&gs);
+        if !self.primed || self.getters.is_empty() {
+            self.glevel = glevel;
+            self.getters = gs;
+            self.deps.clear(); self.reads.clear(); self.dirty.clear(); self.known.clear(); self.primed = false; self.fresh.clear();
+            return;
+        }
+        let same_prop = |a: &[Getter], b: &[Getter], prop: &str| -> bool {
+            let (mut x, mut y): (Vec<&Getter>, Vec<&Getter>) = (a.iter().filter(|g| g.prop == prop).collect(), b.iter().filter(|g| g.prop == prop).collect());
+            x.sort_by(|p, q| p.cls.cmp(&q.cls)); y.sort_by(|p, q| p.cls.cmp(&q.cls));
+            x == y
+        };
+        // new index -> old index, for the getters that stay
+        let mut map: std::collections::HashMap<usize, usize> = Default::default();   // old -> new
+        let mut fresh: Vec<usize> = vec![];
+        for (n, g) in gs.iter().enumerate() {
+            let old = self.getters.iter().position(|o| o.cls == g.cls && o.prop == g.prop);
+            match old {
+                Some(o) if same_prop(&self.getters, &gs, &g.prop) => { map.insert(o, n); }
+                _ => fresh.push(n),
+            }
+        }
+        for set in self.deps.values_mut() { *set = std::mem::take(set).into_iter().filter_map(|(e, gi)| map.get(&gi).map(|n| (e, *n))).collect(); }
+        self.deps.retain(|_, s| !s.is_empty());
+        self.reads = std::mem::take(&mut self.reads).into_iter().filter_map(|((e, gi), v)| map.get(&gi).map(|n| ((e, *n), v))).collect();
+        self.dirty = std::mem::take(&mut self.dirty).into_iter().filter_map(|(_, e, gi)| map.get(&gi).map(|n| (glevel[*n], e, *n))).collect();
+        self.glevel = glevel;
         self.getters = gs;
-        self.deps.clear(); self.reads.clear(); self.dirty.clear(); self.known.clear(); self.primed = false;
+        self.fresh = fresh;
     }
 
     /// Register entities the getters haven't seen: the first time, a silent rebuild (no setters run); after that,
@@ -285,6 +717,7 @@ impl Fields {
     fn sync(&mut self, core: &mut Core, now: f64, seq: &mut i64) {
         if self.getters.is_empty() { return; }
         if !self.primed { self.prime(core, now, seq); return; }
+        if !self.fresh.is_empty() { let only = std::mem::take(&mut self.fresh); self.prime_getters(core, &only, now, seq); }
         if core.docs.len() == self.known.len() { return; }   // nothing new (a removal is rare: its next birth registers at the scan after)
         let mut new: Vec<String> = core.docs.keys().filter(|k| !self.known.contains(*k)).cloned().collect();
         if new.is_empty() { return; }
@@ -292,38 +725,257 @@ impl Fields {
         for e in new { self.birth(core, &e, now, seq); }
     }
 
+    /// A new round: what the field wrote so far is forgotten (the loop guard, the first-write claims of the layers).
+    fn new_round(&mut self) { self.visited.clear(); self.claimed.clear(); self.flips.clear(); }
+
+
+    // ---- the class `Error` (docs/c1f-error.md) ----------------------------------------------------------------------------------------
+    // A failed property is written by the VM as TWO derived writes (writer `error`: stamped like a getter's value, never journalled): the reason into the entity's `failed`
+    // dict, and the class `Error` on top of its class list (`parents`) while `failed` is not empty. Both are plain properties of the entity: they persist, a read of a
+    // property in `failed` is the Error (`View::attr`), and the getter keeps recomputing under it, so a success clears the entry.
+
+    /// How many times an entity's class entry may flip (gain, then lose, the class `Error`) inside ONE run before the rest is held until the run ends. A flip wakes the
+    /// readers of the class list, and a getter whose failure depends on the class list could flip it again: the bound makes that end.
+    const CLASS_FLIPS: u8 = 2;
+
+    /// A derived write of the VM's own bookkeeping: heard and put in `out` as `emit_as` does, but queued in `late` for the loop (a `compute` has no queue of its own).
+    fn derive(&mut self, core: &mut Core, eid: &str, prop: &str, new: J, seq: &mut i64, now: f64) {
+        let mut tmp = VecDeque::new();
+        self.emit_as(core, &mut tmp, eid, prop, new, "error", seq, now, false);
+        self.late.extend(tmp);
+    }
+
+    /// Property `prop` of `eid` now fails with `reason` (or no longer does): the entry in `failed` follows, and the class entry with it.
+    fn set_failure(&mut self, core: &mut Core, eid: &str, prop: &str, reason: Option<&str>, seq: &mut i64, now: f64) {
+        if prop == "failed" { return; }
+        let Some(e) = core.docs.get(eid) else { return };
+        if e.failure(prop) == reason { return; }
+        let mut next = e.props.get("failed").and_then(|f| f.as_object()).cloned().unwrap_or_default();
+        match reason { Some(r) => { next.insert(prop.to_string(), J::String(r.to_string())); } None => { next.remove(prop); } }
+        self.derive(core, eid, "failed", if next.is_empty() { J::Null } else { J::Object(next) }, seq, now);
+        self.sync_class(core, eid, false, seq, now);
+    }
+
+    /// The class `Error` is in the entity's list exactly while its `failed` is not empty. A flip beyond `CLASS_FLIPS` in one run is held (`class_deferred`).
+    fn sync_class(&mut self, core: &mut Core, eid: &str, forced: bool, seq: &mut i64, now: f64) {
+        let Some(e) = core.docs.get(eid) else { return };
+        let want = e.props.get("failed").and_then(|f| f.as_object()).map_or(false, |f| !f.is_empty());
+        let is_err = |n: &str| n.eq_ignore_ascii_case(crate::vm::ERROR_CLASS);
+        let parents = e.props.get("parents").cloned().unwrap_or(J::Null);
+        let have = crate::vm::parent_names(&parents).iter().any(|n| is_err(n));
+        if want == have { return; }
+        if !forced && self.in_run {
+            let n = self.flips.entry(eid.to_string()).or_default();
+            if *n >= Self::CLASS_FLIPS { self.class_deferred.insert(eid.to_string()); return; }
+            *n += 1;
+        }
+        let mut rest: Vec<J> = match &parents { J::Array(a) => a.clone(), J::Null => vec![], p => vec![p.clone()] };
+        rest.retain(|p| !p.as_str().map_or(false, |s| is_err(s.rsplit(':').next().unwrap_or(""))));
+        let own = format!("cls:{}", e.cls.to_lowercase());
+        let new = if want {
+            if rest.is_empty() { rest.push(J::String(own)); }
+            rest.insert(0, J::String(format!("cls:{}", crate::vm::ERROR_CLASS.to_lowercase())));
+            J::Array(rest)
+        } else if rest.is_empty() || (rest.len() == 1 && rest[0].as_str().map_or(false, |s| s.eq_ignore_ascii_case(&own))) { J::Null } else { J::Array(rest) };   // back to the birth default
+        if forced { self.emit_quiet(core, eid, "parents", new, seq, now); } else { self.derive(core, eid, "parents", new, seq, now); }
+    }
+
+    /// A derived write that wakes nobody (not queued, no reader marked): the end of a run settling an entity whose class entry flipped too often.
+    fn emit_quiet(&mut self, core: &mut Core, eid: &str, prop: &str, new: J, seq: &mut i64, now: f64) {
+        let mut tmp = VecDeque::new();
+        self.emit_as(core, &mut tmp, eid, prop, new, "error", seq, now, false);
+    }
+
+    /// The derived writes a `compute` made, outside a run: the readers of what they changed are marked (the loop of a run queues them instead).
+    fn flush_late(&mut self) {
+        for w in std::mem::take(&mut self.late) {
+            self.mark(&w.eid, &w.prop);
+            if w.prop == "parents" { self.mark_key(&(crate::vm::CLASS_READ.to_string(), crate::vm::ERROR_CLASS.to_string())); }
+            self.mark_refs(&w.prop, &w.old, &w.new);
+        }
+    }
+
+    /// An entity's `failed` names only properties it has a getter for NOW (a pack removed or redefined while it was stored, a class dropped): the others leave.
+    fn reconcile_failed(&mut self, core: &mut Core, eid: &str, seq: &mut i64, now: f64) {
+        let Some(e) = core.docs.get(eid) else { return };
+        let Some(f) = e.props.get("failed").and_then(|f| f.as_object()) else { return };
+        let live: std::collections::HashSet<String> = self.getters_of(core, eid).into_iter().map(|i| self.getters[i].prop.clone()).collect();
+        let gone: Vec<String> = f.keys().filter(|k| !live.contains(*k)).cloned().collect();
+        for k in gone { self.set_failure(core, eid, &k, None, seq, now); }
+    }
+
+    fn reconcile_all(&mut self, core: &mut Core, seq: &mut i64, now: f64) {
+        let mut es: Vec<String> = core.docs.iter().filter(|(_, e)| e.props.contains_key("failed")).map(|(k, _)| k.clone()).collect();
+        es.sort();
+        for e in es { self.reconcile_failed(core, &e, seq, now); }
+    }
+
     fn has_getter(&self, cls: &str, prop: &str) -> bool { self.getters.iter().any(|g| g.cls == cls && g.prop == prop) }
 
+    /// The getters that apply to an entity for ONE property, nearest class first (the one rule: own class, `parents` in list order, the root
+    /// `Entity`; ties by declaration). The first is the property's node; the rest are only the arms it falls through to.
+    fn chain(&self, core: &Core, eid: &str, prop: &str) -> Vec<usize> {
+        let Some(e) = core.docs.get(eid) else { return vec![] };
+        let mut v: Vec<(usize, usize)> = (0..self.getters.len()).filter(|&i| self.getters[i].prop == prop)
+            .filter_map(|i| class_rank(core, eid, e, &self.getters[i].cls).map(|r| (r, i))).collect();
+        v.sort();
+        v.into_iter().map(|(_, i)| i).collect()
+    }
+
+    /// One node per property: the nearest class's getter (its chain holds the rest).
     fn getters_of(&self, core: &Core, eid: &str) -> Vec<usize> {
         let Some(e) = core.docs.get(eid) else { return vec![] };
-        // its own class, or a kind among its ISA parents (`parents: ["cls:chatthing"]`), as setters bind (core.is_a)
-        let mut v: Vec<usize> = (0..self.getters.len()).filter(|&i| self.getters[i].cls == e.cls
-            || has_kind(core, eid, &e.props, &self.getters[i].cls)).collect();
-        v.sort_by_key(|&i| self.glevel[i]);
+        let mut best: std::collections::HashMap<&str, (usize, usize)> = Default::default();
+        for i in 0..self.getters.len() {
+            let Some(r) = class_rank(core, eid, e, &self.getters[i].cls) else { continue };
+            let b = best.entry(self.getters[i].prop.as_str()).or_insert((r, i));
+            if (r, i) < *b { *b = (r, i); }
+        }
+        let mut v: Vec<usize> = best.into_values().map(|(_, i)| i).collect();
+        v.sort_by_key(|&i| (self.glevel[i], i));
         v
+    }
+
+    /// The properties getters wrote for the entity under its OLD `parents` value that no getter of its present list writes (and that it holds).
+    fn lost_props(&self, core: &Core, eid: &str, old: &J) -> Vec<String> {
+        let Some(e) = core.docs.get(eid) else { return vec![] };
+        let mut old_names = crate::vm::parent_names(old);
+        if old_names.is_empty() { old_names.push(e.cls.clone()); }
+        let mut v: Vec<String> = vec![];
+        for g in &self.getters {
+            if e.props.get(&g.prop).map_or(true, |x| x.is_null()) || v.contains(&g.prop) { continue; }
+            if class_rank_in(core, eid, e, &old_names, &g.cls).is_none() { continue; }
+            if (0..self.getters.len()).any(|i| self.getters[i].prop == g.prop && class_rank(core, eid, e, &self.getters[i].cls).is_some()) { continue; }
+            v.push(g.prop.clone());
+        }
+        v
+    }
+
+    /// Is getter `gi` the node of its property on this entity (the nearest class's)?
+    fn is_node(&self, core: &Core, eid: &str, gi: usize) -> bool {
+        self.chain(core, eid, &self.getters[gi].prop).first() == Some(&gi)
+    }
+
+    /// The arms of a getter in order: (pack, WHEN or None, expression). A lone layer carries them as `parts`, a stack as `layers`.
+    fn arms_of(g: &Getter) -> Vec<(String, Option<String>, String)> {
+        if !g.layers.is_empty() { return g.layers.clone(); }
+        if g.parts.is_empty() { return vec![(g.pack.clone(), None, g.expr.clone())]; }
+        g.parts.iter().map(|(w, e)| (g.pack.clone(), w.clone(), e.clone())).collect()
     }
 
     /// Evaluate one getter instance, record what it read as its inputs, and return its value (None on an error,
     /// with a receipt). Its own field is never an input (rule 3: own name = previous value).
     fn compute(&mut self, core: &mut Core, host: Option<&dyn Host>, eid: &str, gi: usize, now: f64, seq: &mut i64) -> Option<J> {
         let g = self.getters[gi].clone();
-        let asker = format!("{}\u{0}{}.{}", eid, g.cls, g.prop);
-        let (r, reads) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker, g.arms.max(1));
         let key = (eid.to_string(), gi);
+        let _count = crate::stats::scope(crate::stats::KIND_GETTER, &g.cls, &g.prop, &g.pack);   // eval accounting (stats.rs): this run, counted when it ends
+        let asker = format!("{}\u{0}{}.{}", eid, g.cls, g.prop);
+        // the arms of every class that applies, the nearest class's first; the first arm whose WHEN holds wins, a default ends the search
+        let chain = self.chain(core, eid, &g.prop);
+        let lone = chain.len() <= 1 && g.layers.is_empty();
+        let all_arms: Vec<(String, Option<String>, String)> = if lone { vec![] } else {
+            let mut list = vec![];
+            'cls: for &ci in &chain { for a in Self::arms_of(&self.getters[ci]) { let end = a.1.is_none(); list.push(a); if end { break 'cls; } } }
+            list
+        };
+        let (r, reads, nil, locals, layer) = if lone {
+            let (r, reads, nil, locals) = core.eval_traced(&g.expr, &me(eid), &[("clock", json!(now))], host, &asker);
+            (r, reads, nil, locals, None)
+        } else {
+            // several layers define it: the arms in order, the top layer's first; the first WHEN that holds supplies the value
+            let (mut reads_all, mut res) = (vec![], None);
+            for (pack, when, expr) in &all_arms {
+                if let Some(c) = when {
+                    let (rc, rd, cnil, _) = core.eval_traced(c, &me(eid), &[("clock", json!(now))], host, &asker);
+                    reads_all.extend(rd);
+                    // a condition over an Error is that Error: the getter is it, no arm is chosen (the next arm would hide it)
+                    if let Some(n @ crate::vm::Note::Error(_)) = cnil { res = Some((Ok(J::Null), Some(n), vec![], Some(pack.clone()))); break; }
+                    match rc {
+                        Ok(v) if crate::expr::truthy(&crate::expr::from_json(&v)) => {}
+                        Ok(_) => continue,
+                        Err(e) => { res = Some((Err(e), None, vec![], Some(pack.clone()))); break; }
+                    }
+                }
+                let (r, rd, nil, locals) = core.eval_traced(expr, &me(eid), &[("clock", json!(now))], host, &asker);
+                reads_all.extend(rd);
+                res = Some((r, nil, locals, Some(pack.clone())));
+                break;
+            }
+            let (r, nil, locals, layer) = res.unwrap_or((Ok(J::Null), None, vec![], None));   // no arm held: none, as a lone getter with no default
+            (r, reads_all, nil, locals, layer)
+        };
+        let key2 = (eid.to_string(), g.prop.clone());
+        match layer { Some(p) => { self.layer_of.insert(key2.clone(), p); } None => { self.layer_of.remove(&key2); } }
+        if locals.is_empty() { core.locals.remove(&key2); } else {
+            core.locals.insert(key2.clone(), locals.iter().map(|(k, v)| (k.clone(), match v {
+                crate::expr::V::Nil(why) => J::String(format!("null ({why})")),
+                crate::expr::V::Error(why) => J::String(format!("Error ({why})")),
+                v => crate::expr::to_json(v).unwrap_or(J::Null),
+            })).collect());
+        }
         if let Some(old) = self.reads.remove(&key) { for k in old { if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); } } }
         let mut ins: Vec<(String, String)> = reads.into_iter().filter(|(e, p)| !(e == eid && *p == g.prop)).collect();
-        if reads_name(&g.expr, "clock") { ins.push((CLOCK.into(), String::new())); }
+        if reads_name(&g.expr, "clock") || chain.iter().any(|&c| reads_name(&self.getters[c].expr, "clock")) { ins.push((CLOCK.into(), String::new())); }
         ins.sort(); ins.dedup();
         for k in &ins { self.deps.entry(k.clone()).or_default().insert(key.clone()); }
         self.reads.insert(key, ins);
         match r {
-            Ok(v) => Some(v),
+            Ok(v) => {
+                let mut fail: Option<String> = None;
+                match &nil { Some(n) if v.is_null() => { core.note_why(&key2, Some(n)); core.nulled.remove(&key2); if let crate::vm::Note::Error(r) = n { fail = Some(r.clone()); } } _ => { core.note_why(&key2, None); if v.is_null() { core.nulled.insert(key2.clone()); } else { core.nulled.remove(&key2); } } }   // a null remembers why; a failure goes to the entity's `failed`
+                { let nested = if v.is_array() || v.is_object() { std::mem::take(&mut core.nested_last) } else { vec![] }; core.set_nested(eid, &g.prop, nested); }
+                self.set_failure(core, eid, &g.prop, fail.as_deref(), seq, now);
+                Some(v)
+            }
             Err(e) => {
-                let reason = format!("error in getter {}.{}: {}; the field kept its value", g.cls, g.prop, e);
+                // an error is a null with the error as its reason (it no longer keeps a stale value); the receipt still says where
+                let reason = format!("error in getter {}.{}: {}; the value is null", g.cls, g.prop, e);
                 self.receipt(core, eid, &format!("getter:{}", g.prop), reason, J::Null, seq, now);
-                None
+                core.note_why(&key2, Some(&crate::vm::Note::Error(e.clone())));
+                self.set_failure(core, eid, &g.prop, Some(&e), seq, now);
+                Some(J::Null)
             }
         }
+    }
+
+    /// The chain behind a null: [{eid, prop, reason}] from the property asked about back to the first null that has a reason of
+    /// its own (each getter on the way read the next one, and its reason is the same). Empty when the value is not null, or the
+    /// property is not a getter of the entity.
+    pub fn why_chain(&self, core: &Core, eid: &str, prop: &str) -> Vec<J> {
+        let mut out: Vec<J> = vec![];
+        let mut cur = (eid.to_string(), prop.to_string());
+        let mut seen: std::collections::BTreeSet<(String, String)> = Default::default();
+        loop {
+            let null = core.docs.get(&cur.0).map(|e| e.props.get(&cur.1).map(|v| v.is_null()).unwrap_or(true)).unwrap_or(false);
+            let gi = self.getters_of(core, &cur.0).into_iter().find(|&i| self.getters[i].prop == cur.1);
+            if !null || gi.is_none() || !seen.insert(cur.clone()) { break; }
+            let reason = core.reason_of(&cur);
+            let mut node = json!({"eid": cur.0, "prop": cur.1, "reason": reason});
+            if let Some(l) = core.locals.get(&cur) { node["locals"] = J::Object(l.clone()); }
+            out.push(node);
+            let Some(r) = reason else { break };
+            // the input that is itself a null getter with the same reason is where this one came from
+            let next = self.reads.get(&(cur.0.clone(), gi.unwrap())).and_then(|ins| ins.iter().find(|k| {
+                core.reason_of(k).as_ref() == Some(&r) && core.docs.get(&k.0).map(|e| e.props.get(&k.1).map(|v| v.is_null()).unwrap_or(true)).unwrap_or(false)
+            }).cloned());
+            match next { Some(n) => cur = n, None => break }
+        }
+        out
+    }
+
+    /// Which layer supplied the value of a getter, and which writes to it were overridden (docs/c1f-layers.md). (`layer_of` is set by `compute`, `skipped` by `run_writes`).
+    pub fn why_layer(&self, core: &Core, eid: &str, prop: &str) -> Vec<String> {
+        let mut out = vec![];
+        if core.docs.get(eid).map_or(false, |e| e.props.contains_key(prop)) {
+            if let Some(p) = self.layer_of.get(&(eid.to_string(), prop.to_string())) { out.push(format!("layer: {p}")); }
+            else if let Some(gi) = self.getters_of(core, eid).into_iter().find(|&i| self.getters[i].prop == prop) {
+                if !self.getters[gi].pack.is_empty() { out.push(format!("layer: {}", self.getters[gi].pack)); }
+            }
+        }
+        for ((e, p, loser, setter), by) in &self.skipped {
+            if e == eid && p == prop { out.push(format!("overridden by {by}: {loser}'s {setter} write skipped")); }
+        }
+        out
     }
 
     /// A write changed (eid, prop): every getter instance that read it, or that asked `referencing(_, prop)`, is dirty.
@@ -334,7 +986,9 @@ impl Fields {
     fn mark_key(&mut self, k: &(String, String)) {
         if let Some(s) = self.deps.get(k) {
             let hit: Vec<(String, usize)> = s.iter().cloned().collect();
-            for (e, gi) in hit { self.dirty.insert((self.glevel[gi], e, gi)); }
+            for (e, gi) in hit {
+                self.dirty.insert((self.glevel[gi], e, gi));
+            }
         }
     }
 
@@ -353,7 +1007,7 @@ impl Fields {
         self.known.insert(e.to_string());
         if let Some(c) = core.docs.get(e).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c)); }
         for gi in self.getters_of(core, e) {
-            let Some(v) = self.compute(core, None, e, gi, now, seq) else { continue };
+            let v = self.compute(core, None, e, gi, now, seq); self.flush_late(); let Some(v) = v else { continue };
             let prop = self.getters[gi].prop.clone();
             if core.docs.get(e).and_then(|d| d.props.get(&prop)) == Some(&v) { continue; }
             *seq += 1;
@@ -370,7 +1024,13 @@ impl Fields {
     fn prime(&mut self, core: &mut Core, now: f64, seq: &mut i64) {
         self.primed = true;
         self.known = core.docs.keys().cloned().collect();
-        let mut order: Vec<usize> = (0..self.getters.len()).collect();
+        let all: Vec<usize> = (0..self.getters.len()).collect();
+        self.prime_getters(core, &all, now, seq);
+    }
+
+    /// Compute `only` (getter indices) for the entities that exist, silently; a value that differs from the stored one is dirty, so this round writes it live.
+    fn prime_getters(&mut self, core: &mut Core, only: &[usize], now: f64, seq: &mut i64) {
+        let mut order: Vec<usize> = only.to_vec();
         order.sort_by_key(|&i| self.glevel[i]);
         for gi in order {
             let cls = self.getters[gi].cls.clone();
@@ -378,10 +1038,13 @@ impl Fields {
             let mut es: Vec<String> = of_kind(core, &cls);
             es.sort();
             for e in es {
-                let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
+                if !self.is_node(core, &e, gi) { continue; }
+                let v = self.compute(core, None, &e, gi, now, seq); self.flush_late(); let Some(v) = v else { continue };
                 if core.docs.get(&e).and_then(|d| d.props.get(&prop)) != Some(&v) { self.dirty.insert((self.glevel[gi], e, gi)); }
             }
         }
+        self.reconcile_all(core, seq, now);
+        self.flush_late();
     }
 
     /// Start-up (a rebuild, #994 decisions): compute every getter of every entity, lower levels first, and keep the
@@ -391,20 +1054,44 @@ impl Fields {
         self.known = core.docs.keys().cloned().collect();
         let mut order: Vec<usize> = (0..self.getters.len()).collect();
         order.sort_by_key(|&i| self.glevel[i]);
-        for gi in order {
-            let cls = self.getters[gi].cls.clone();
-            let mut es: Vec<String> = of_kind(core, &cls);
-            es.sort();
-            for e in es {
-                let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
+        // A getter that reads the same getter on ANOTHER entity (a tree's depth through its children) cannot be ordered by class level:
+        // the parent may be computed before its children. So the pass repeats until nothing changes (bounded: a chain of references
+        // longer than REBUILD_PASSES settles in the live rounds that follow, since each change marks its readers dirty).
+        // Pass 0 computes every getter once. A later pass computes ONLY the getters whose inputs a write of the previous pass changed (the
+        // dependency table the computing learns: `mark` queues them in `dirty`): a getter that read nothing that moved is not evaluated again.
+        self.dirty.clear();
+        for pass in 0..REBUILD_PASSES {
+            let mut work: Vec<(usize, String)> = vec![];
+            if pass == 0 {
+                for &gi in &order {
+                    let mut es: Vec<String> = of_kind(core, &self.getters[gi].cls);
+                    es.sort();
+                    work.extend(es.into_iter().map(|e| (gi, e)));
+                }
+            } else {
+                work = std::mem::take(&mut self.dirty).into_iter().map(|(_, e, gi)| (gi, e)).collect();   // lowest level first, then id order
+            }
+            if work.is_empty() { break; }
+            for (gi, e) in work {
+                if !self.is_node(core, &e, gi) { continue; }
+                let v = self.compute(core, None, &e, gi, now, seq); self.flush_late(); let Some(v) = v else { continue };
                 let prop = self.getters[gi].prop.clone();
-                if core.docs.get(&e).and_then(|d| d.props.get(&prop)) == Some(&v) { continue; }
+                let was = core.docs.get(&e).and_then(|d| d.props.get(&prop)).cloned();
+                if was.as_ref() == Some(&v) || (v.is_null() && was.is_none()) { continue; }
                 *seq += 1;
                 let w = Write { eid: e.clone(), prop: prop.clone(), new: v, old: J::Null, writer: "field:rebuild".into(), chain: json!({}), seq: *seq };
-                self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
+                if pass == 0 || !self.out.iter().rev().take(64).any(|o| o["eid"] == json!(w.eid) && o["prop"] == json!(w.prop) && o["new"] == w.new) {
+                    self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
+                }
+                let newv = w.new.clone();
                 core.hear(w, None, now);
+                self.mark(&e, &prop);
+                self.mark_refs(&prop, &was.unwrap_or(J::Null), &newv);
             }
         }
+        self.dirty.clear();
+        self.reconcile_all(core, seq, now);
+        self.flush_late();
         self.dirty.clear();
     }
 
@@ -421,9 +1108,15 @@ impl Fields {
         }
     }
 
+    /// Recompute every getter of this entity in the next round (a banner build asks its store reads again: a getter over
+    /// constants is never dirty on its own).
+    pub fn refresh(&mut self, core: &mut Core, host: &dyn Host, eid: &str, now: f64, seq: &mut i64) {
+        for gi in self.getters_of(core, eid) { self.dirty.insert((self.glevel[gi], eid.to_string(), gi)); }
+        self.settle(core, host, now, seq);
+    }
     /// A round with no outside write (new entities registered, dirty getters settled).
     pub fn settle(&mut self, core: &mut Core, host: &dyn Host, now: f64, seq: &mut i64) {
-        self.visited.clear();
+        self.new_round();
         self.run(core, host, VecDeque::new(), now, seq);
     }
 
@@ -432,19 +1125,8 @@ impl Fields {
         for gi in self.getters_of(core, eid) { self.dirty.insert((self.glevel[gi], eid.to_string(), gi)); }
         let props: Vec<String> = core.docs.get(eid).map(|e| e.props.keys().cloned().collect()).unwrap_or_default();
         for p in props { self.mark(eid, &p); }
-        self.visited.clear();
+        self.new_round();
         self.run(core, host, VecDeque::new(), now, seq);
-    }
-
-    /// Row 3: a banner input (Message/Register/Edge/BannerRule) was written: recompute each Chat's `banner`.
-    fn banner_on(&mut self, core: &mut Core, work: &mut VecDeque<Write>, seq: &mut i64, now: f64) {
-        let mut chats: Vec<(String, String)> = core.docs.iter().filter(|(_, e)| e.cls == crate::banner::CLASS_CHAT)
-            .map(|(k, e)| (k.clone(), e.props.get("sid").and_then(|s| s.as_str()).unwrap_or(k).to_string())).collect();
-        chats.sort();
-        for (eid, sid) in chats {
-            let lines = crate::banner::walk(core, &sid);
-            self.emit_unchecked(core, work, &eid, "banner", json!(lines), "banner", seq, now);
-        }
     }
 
     /// Row 4: a dial was written -> its guard setter (a bad value goes back to the last accepted one); a dial or an ask
@@ -525,8 +1207,19 @@ impl Fields {
         core.hear(r, None, now);
     }
 
+    /// Is `prop` one of the verbs the drivers run (drivers::VERBS) on this entity's class?
+    fn is_driver_verb(core: &Core, eid: &str, prop: &str) -> bool {
+        #[cfg(feature = "store")]
+        { return core.docs.get(eid).map_or(false, |e| crate::drivers::VERBS.iter().any(|(c, v)| *c == e.cls && *v == prop)); }
+        #[cfg(not(feature = "store"))]
+        { let _ = (core, eid, prop); false }
+    }
+
     fn emit_as(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64, check: bool) {
         if core.docs.get(eid).map(|e| e.props.get(prop) == Some(&new)).unwrap_or(false) { return; }   // idempotent
+        // a driver verb (`Request.send`, `Command.run`, ...) is a COMMAND, not a state: each write of it is one effect, run in write order, and the slot is consumed
+        // at once. The loop check guards state that could cycle inside a cascade; two commands in one cascade (two producers sending to one stream) are both run.
+        let check = check && !Self::is_driver_verb(core, eid, prop);
         if check && !self.visited.insert((eid.to_string(), prop.to_string())) {
             // revisit in this round: refuse BEFORE applying
             let reason = format!("loop: ({}, {}) already written this round by the field; refused {} by {}", eid, prop, new, writer);
@@ -541,7 +1234,9 @@ impl Fields {
         self.writes += 1;
         let old = core.docs.get(eid).and_then(|e| e.props.get(prop).cloned()).unwrap_or(J::Null);
         let w = Write { eid: eid.into(), prop: prop.into(), new, old, writer: format!("field:{}", writer), chain: json!({}), seq: *seq };
-        self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
+        let mut o = json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer});
+        if self.from_virtual(core, eid) { o["virt"] = json!(true); }
+        self.out.push(o);
         core.hear(w.clone(), None, now);
         work.push_back(w);
     }
@@ -578,14 +1273,43 @@ impl Fields {
                           chain: json!({}), seq: *seq }, None, now);
         self.known.remove(eid);
         self.dirty.retain(|(_, e, _)| e != eid);
+        // what its getters read is forgotten with it: a reload under another class must not run the old class's getters
+        self.reads.retain(|(e, _), _| e != eid);
+        for set in self.deps.values_mut() { set.retain(|(e, _)| e != eid); }
         for (p, v) in &old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); }
         self.dirty.retain(|(_, e, _)| e != eid);
-        self.visited.clear();
+        self.new_round();
         self.run(core, host, VecDeque::new(), now, seq);
     }
 
+    /// Take a loaded entity out of the engine (`Core::unload`) and forget what the field remembers of it: its place among the known, its dirty getters, what its own getters
+    /// read, its layer notes. What OTHER entities' getters read of it stays: their cached values stand (an unload changes no value), and when one recomputes and reads it,
+    /// the read loads it again (`Core::fault_now`); when it loads, the readers of its fields recompute as they do for any arrival (`complete_arrivals`).
+    pub fn unload(&mut self, core: &mut Core, eid: &str) -> bool {
+        if !core.unload(eid) { return false; }
+        self.known.remove(eid);
+        self.dirty.retain(|(_, e, _)| e != eid);
+        self.reads.retain(|(e, _), _| e != eid);
+        for set in self.deps.values_mut() { set.retain(|(e, _)| e != eid); }
+        self.layer_of.retain(|(e, _), _| e != eid);
+        true
+    }
+
+    /// Unload many entities with ONE pass over each bookkeeping table (the same forgetting as `unload`, per entity). `unload` retains over the whole of `dirty`, `reads`, `deps`
+    /// and `layer_of` for each entity: a batch of N costs N passes (measured 2026-11-14 on a history import that unloads ~100 entities a page: the retains were the top of the
+    /// profile and a page took seconds). Here the passes are one, whatever N.
+    pub fn unload_many(&mut self, core: &mut Core, eids: &[String]) {
+        let gone: std::collections::HashSet<&str> = eids.iter().filter(|e| core.unload(e)).map(|e| e.as_str()).collect();
+        if gone.is_empty() { return; }
+        for e in &gone { self.known.remove(*e); }
+        self.dirty.retain(|(_, e, _)| !gone.contains(e.as_str()));
+        self.reads.retain(|(e, _), _| !gone.contains(e.as_str()));
+        for set in self.deps.values_mut() { set.retain(|(e, _)| !gone.contains(e.as_str())); }
+        self.layer_of.retain(|(e, _), _| !gone.contains(e.as_str()));
+    }
+
     pub fn react(&mut self, core: &mut Core, host: &dyn Host, w: Write, now: f64, seq: &mut i64) {
-        self.visited.clear();
+        self.new_round();
         self.visited.insert((w.eid.clone(), w.prop.clone()));   // the outside write starts the chain: returning to it is a loop
         self.run(core, host, VecDeque::from([w]), now, seq);
     }
@@ -593,29 +1317,100 @@ impl Fields {
     /// A round: the queued writes run (getters marked, setters fired); when the queue is empty, the dirty getters
     /// recalculate, lowest level first, and a changed value is written (which can queue more). Until both are empty.
     fn run(&mut self, core: &mut Core, host: &dyn Host, mut work: VecDeque<Write>, now: f64, seq: &mut i64) {
+        core.last_now = now;
+        self.in_run = true;
+        self.complete_arrivals(core, now);
         self.sync(core, now, seq);
+        for e in std::mem::take(&mut self.recon) { self.reconcile_failed(core, &e, seq, now); }
+        work.extend(std::mem::take(&mut self.late));
         for k in core.sql_ready() { self.mark_key(&(crate::vm::SQL.to_string(), k)); }   // a query's rows are in
+        if !self.inbound_by_host { for (e, cls, props) in core.inbound() { self.arrive(core, e, cls, props, now); } }   // the door pushed an entity (a request): born
         for (e, verb, rec) in core.effect_receipts() {                                       // a driver effect finished
             if !core.docs.contains_key(&e) { continue; }
             let rc = rec.get("rc").cloned().unwrap_or(J::Null);
-            self.emit_unchecked(core, &mut work, &e, &format!("{}_result", verb), rec, &format!("driver:{}", verb), seq, now);
-            self.emit_unchecked(core, &mut work, &e, &format!("{}_rc", verb), rc, &format!("driver:{}", verb), seq, now);
+            // the Sql driver's receipts are journalled (writer `record:`, host.rs stamp_writer): a replay has no file to ask and reads what was answered
+            let w = if e.starts_with("SqlQuery:") || e.starts_with("SqlSource:") { format!("record:{verb}") } else { format!("driver:{verb}") };
+            self.emit_unchecked(core, &mut work, &e, &format!("{}_result", verb), rec, &w, seq, now);
+            self.emit_unchecked(core, &mut work, &e, &format!("{}_rc", verb), rc, &w, seq, now);
         }
         loop {
+            if !core.arrived.is_empty() { self.complete_arrivals(core, now); }   // an evaluation loaded stored entities: they join the field before the next step
             if let Some(w) = work.pop_front() {
                 self.step(core, host, &mut work, w, now, seq);
                 continue;
             }
-            let Some((_, e, gi)) = self.dirty.pop_first() else { break };
-            let Some(v) = self.compute(core, Some(host), &e, gi, now, seq) else { continue };
+            let Some((_, e, gi)) = self.dirty.pop_first() else {
+                // the run is quiet: an entity whose class entry flipped too often settles to what its `failed` says, without waking anyone
+                let held = std::mem::take(&mut self.class_deferred);
+                for e in held { self.sync_class(core, &e, true, seq, now); }
+                break;
+            };
+            // a getter of a class the entity no longer has (its `parents` changed after something marked it) computes nothing
+            if !core.docs.get(&e).map_or(false, |d| class_rank(core, &e, d, &self.getters[gi].cls).is_some()) { continue; }
+            let v = self.compute(core, Some(host), &e, gi, now, seq);
+            work.extend(std::mem::take(&mut self.late));   // what the compute wrote for a failure (`failed`, the class entry) is heard like any write
+            let Some(v) = v else { continue };
             let prop = self.getters[gi].prop.clone();
             self.emit_unchecked(core, &mut work, &e, &prop, v, &format!("getter:{}", prop), seq, now);
         }
+        self.in_run = false;
+    }
+
+    /// Load a stored entity that is not loaded yet (a lazy class), as a restore does: its row's properties (a getter's value is computed again), its `updated`, its
+    /// getters dirty. A write calls this before it looks for its target, so a setter finds the stored entity and never makes it anew. -> whether it loaded.
+    pub fn ensure(&mut self, core: &mut Core, eid: &str, now: f64) -> bool {
+        core.last_now = now;
+        let loaded = core.fault_one(eid);
+        if loaded || !core.arrived.is_empty() { self.complete_arrivals(core, now); }
+        loaded
+    }
+
+    /// Register the entities a read loaded in the middle of an evaluation (`Core::fault_one`): as `arrive` does, minus the load itself. Their getters recompute (the stored
+    /// values were read right away, the recompute corrects what changed since), what listed their class (`instances`) or read their fields recalculates.
+    pub fn complete_arrivals(&mut self, core: &mut Core, now: f64) {
+        let _ = now;
+        for e in std::mem::take(&mut core.arrived) {
+            let Some(d) = core.docs.get(&e) else { continue };
+            let (cls, keys): (String, Vec<String>) = (d.cls.clone(), d.props.keys().cloned().collect());
+            self.mark_key(&(crate::vm::CLASS_READ.to_string(), cls));
+            self.known.insert(e.clone());
+            if d.props.contains_key("failed") { self.recon.insert(e.clone()); }
+            for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
+            for p in keys { self.mark(&e, &p); }
+            // what read this eid while it was not there (its `eid`, its class) reads it now
+            for k in ["eid", "cls", crate::vm::UPDATED] { self.mark(&e, k); }
+        }
+    }
+
+    /// An entity arrives from outside (the door's request, the host's birth): loaded and known, its getters and what read its
+    /// fields dirty for the next round, which also fires the setters on its writes (a birth by `sync` runs none: that is a rebuild).
+    pub fn arrive(&mut self, core: &mut Core, e: String, cls: String, props: serde_json::Map<String, J>, now: f64) {
+        let keys: Vec<String> = props.keys().cloned().collect();
+        self.mark_key(&(crate::vm::CLASS_READ.to_string(), cls.clone()));      // an arrival is a birth: what lists the class (`instances`) recalculates
+        if props.contains_key("failed") { self.recon.insert(e.clone()); }
+        core.load(e.clone(), cls, props, None, now);
+        self.known.insert(e.clone());
+        for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
+        for p in keys { self.mark(&e, &p); }
     }
 
     fn step(&mut self, core: &mut Core, host: &dyn Host, work: &mut VecDeque<Write>, w: Write, now: f64, seq: &mut i64) {
         self.driver_effect(core, work, &w, now, seq);
         self.mark(&w.eid, &w.prop);
+        // a `parents` write names kinds the entity did not have at its birth: the getters of those kinds are computed in this round (a getter
+        // that gets a value then is an ordinary change: its setters fire)
+        if w.prop == "parents" && w.writer == "field:error" {
+            // the VM's own class entry: no getter of the entity changes with it (the class declares no getter but `failed`), what lists the class or reads the list wakes
+            self.mark_key(&(crate::vm::CLASS_READ.to_string(), crate::vm::ERROR_CLASS.to_string()));
+        } else if w.prop == "parents" && self.known.contains(&w.eid) && w.new != w.old {
+            for gi in self.getters_of(core, &w.eid) { self.dirty.insert((self.glevel[gi], w.eid.clone(), gi)); }
+            // the classes the entity lost: what their getters wrote is cleared (as a removed pack's), unless another class still has the getter
+            let gone = self.lost_props(core, &w.eid, &w.old);
+            for p in gone { self.emit_unchecked(core, work, &w.eid, &p, J::Null, "class-dropped", seq, now); }
+            // a person's list is the whole list: the class `Error` follows `failed` anyway
+            self.sync_class(core, &w.eid, false, seq, now);
+            work.extend(std::mem::take(&mut self.late));
+        }
         self.mark_refs(&w.prop, &w.old, &w.new);
         {
             let cls = core.docs.get(&w.eid).map(|e| e.cls.clone()).unwrap_or_default();
@@ -623,16 +1418,15 @@ impl Fields {
                 self.recount(core, work, &w.eid, seq, now);
             }
         }
-            if self.banner && w.prop != "banner" {   // any write can move a line (a card's status, a name): the getter reads the whole field
-                self.banner_on(core, work, seq, now);
-            }
             if self.learn.is_some() { self.learn_on(core, host, work, &w, seq, now); }
             if self.adapters { self.adapters_on(core, work, &w, seq, now); }
             if self.recall { self.recall_on(core, work, &w, seq, now); }
             if w.writer.starts_with(DIRECT) { return; }   // rule 6: an own-name store bypasses the setters (getters above still ran)
             let hits: Vec<usize> = (0..self.setters.len())
                 .filter(|&i| self.setters[i].prop == w.prop && core.is_a(host, &w.eid, &self.setters[i].cls)).collect();
+            self.trigger_virtual = core.docs.get(&w.eid).map_or(false, |e| self.storage_of(&e.cls) == Storage::Virtual);
             for i in hits {
+                let _count = crate::stats::scope(crate::stats::KIND_SETTER, &self.setters[i].cls, &self.setters[i].prop, &self.setters[i].pack);   // eval accounting (stats.rs)
                 let name = self.setters[i].name.clone();
                 let truthy = |v: &J| match v {
                     J::Bool(b) => *b, J::String(s) => !s.is_empty(), J::Number(n) => n.as_f64().map_or(false, |f| f != 0.0), _ => false };
@@ -660,6 +1454,7 @@ impl Fields {
                     self.receipt(core, &w.eid, &name, reason, J::Null, seq, now);
                 }
             }
+            self.trigger_virtual = false;
     }
 
     /// A chosen branch's writes, in order: FOR blocks run their body once per item of their list, read when the
@@ -667,9 +1462,17 @@ impl Fields {
     /// list stops here (the writes above it stand).
     fn run_writes(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, wprop: &str, name: &str, pack: &str,
                   ws: &[(String, String, String)], binds: &[(String, crate::vm::Item)], now: f64, seq: &mut i64) -> Result<(), String> {
+        let mut binds = binds.to_vec();      // a local joins them for the lines below it, in this block only
         let mut k = 0;
         while k < ws.len() {
             let (target, prop, value) = &ws[k];
+            if target == crate::syntax::LET {
+                let item = { let (vars, extra) = scope(eid, &binds, now); core.eval_item(value, &vars, &extra).map_err(|e| format!("{} = {}: {}", prop, value, e))? };
+                binds.retain(|(n, _)| n != prop);
+                binds.push((prop.clone(), item));
+                k += 1;
+                continue;
+            }
             if target == crate::syntax::FOR {
                 let mut depth = 0; let mut j = k + 1;
                 while j < ws.len() {
@@ -678,7 +1481,7 @@ impl Fields {
                     j += 1;
                 }
                 let items = {
-                    let (vars, extra) = scope(eid, binds, now);
+                    let (vars, extra) = scope(eid, &binds, now);
                     core.eval_items(value, &vars, &extra).map_err(|e| format!("FOR {} IN {}: {}", prop, value, e))?
                 };
                 for it in items {
@@ -692,43 +1495,189 @@ impl Fields {
             }
             k += 1;
             if target == crate::syntax::END { continue; }
-            let (vars, extra) = scope(eid, binds, now);
-            let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
+            if prop == crate::syntax::CTOR {
+                self.construct(core, work, eid, name, pack, target, value, &binds, now, seq);
+                continue;
+            }
+            let (vars, extra) = scope(eid, &binds, now);
+            // `<target>.[<expr>] = v`: the property's name is computed (non-empty text; anything else writes nothing)
+            let dynamic: String;
+            let prop: &String = if let Some(inner) = prop.strip_prefix('[').and_then(|p| p.strip_suffix(']')) {
+                match core.eval_json(inner, &vars, &extra) {
+                    Ok(J::String(s)) if !s.is_empty() => { dynamic = s; &dynamic }
+                    _ => continue,
+                }
+            } else { prop };
+            // LAYERS: stacked setters writing one target in a round: the FIRST write wins (the top layer's). A later line of ANOTHER pack is
+            // skipped here, before its right-hand side is evaluated and without any effect; inside one pack a second write is the loop error.
+            let mut claim: Option<(String, String)> = None;
+            if target != LLM_CALL && !pack.is_empty() {
+                let t = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
+                if let Some(t) = t {
+                    match self.claimed.get(&(t.clone(), prop.clone())).cloned() {
+                        Some((by, _)) if by != pack => { self.skipped.insert((t, prop.clone(), pack.to_string(), name.to_string()), by); continue; }
+                        Some(_) => {}
+                        None => claim = Some((t, prop.clone())),
+                    }
+                }
+            }
+            if prop == crate::vm::UPDATED {
+                self.receipt(core, eid, name, format!("refused: `{UPDATED_PROP}` is provided by the VM (the time of the entity's last write) and is read-only: no setter writes it"), J::Null, seq, now);
+                continue;
+            }
+            if prop == crate::vm::PINNED {
+                self.receipt(core, eid, name, format!("refused: `{prop}` is provided by the VM (the reason an entity cannot be unloaded) and is read-only: no setter writes it"), J::Null, seq, now);
+                continue;
+            }
+            let v = match core.eval_value(value, &vars, &extra) {
+                Ok(crate::expr::V::Error(r)) => {
+                    // an Error is never stored: the write is refused, loudly, and the old value stays
+                    self.receipt(core, eid, name, format!("refused: {target}.{prop} = {r} (an Error is never stored: the write was not made; read it with `is Error` or `why(x)`, or fix what failed)"), J::Null, seq, now);
+                    continue;
+                }
+                Ok(v) => match crate::expr::to_json(&v) { Ok(j) => j, Err(_) => continue },
+                Err(_) => continue,
+            };
+            if let Some(k) = claim { self.claimed.insert(k, (pack.to_string(), name.to_string())); }   // a write that was made: it is the first
             if target == LLM_CALL { self.calls.push(v); continue; }
             let tgt = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
             let Some(tgt) = tgt else { continue };
+            let grant = tgt.strip_prefix("Pack:").filter(|n| !n.is_empty() && prop == "privileged").map(String::from);
+            if grant.is_some() {
+                if let Err(why) = self.grant_check(pack) { self.receipt(core, eid, name, why, J::Null, seq, now); continue; }
+            }
+            self.ensure(core, &tgt, now);   // stored but not loaded: it loads, it is not created anew
             if !core.docs.contains_key(&tgt) {
-                // creation: `<Class>:<key>` of a class the pack owns or imports
+                // creation: `<Class>:<key>` of a class the pack owns or imports (a privileged pack: any class)
                 let Some((cls, _)) = tgt.split_once(':') else { continue };
-                if self.owner.get(cls).is_none() || self.may_write(pack, cls).is_err() { continue; }
+                if !self.is_privileged(pack) {
+                    // loud, never silent: the receipt names the entity, the class and the pack (the same `refused` receipt as rule B)
+                    if self.owner.get(cls).is_none() {
+                        self.receipt(core, eid, name, format!("pack {} can't create {}: no loaded pack declares the class {} (a pack declares a class with a getter or a setter on it; or the pack needs privilege)", pack, tgt, cls), J::Null, seq, now);
+                        continue;
+                    }
+                    if let Err(why) = self.may_write(pack, cls) {
+                        self.receipt(core, eid, name, format!("can't create {}: {}", tgt, why), J::Null, seq, now);
+                        continue;
+                    }
+                }
                 core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
-                self.out.push(json!({"eid": tgt, "born": cls}));
+                self.out.push(self.born_entry(core, &tgt, cls));
                 self.birth(core, &tgt, now, seq);
             }
-            let cls = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
-            if let Err(why) = self.may_write(pack, &cls) {
+            if let Err(why) = self.may_write_ent(core, pack, &tgt) {
                 self.receipt(core, eid, name, why, J::Null, seq, now);
                 continue;
             }
             if tgt == eid && prop == wprop {   // rule 6: own name inside its setter stores directly
-                self.emit_unchecked(core, work, &tgt, prop, v, &format!("direct:{}", name), seq, now);
+                self.emit_unchecked(core, work, &tgt, prop, v.clone(), &format!("direct:{}", name), seq, now);
             } else {
-                self.emit(core, work, &tgt, prop, v, name, seq, now);
+                self.emit(core, work, &tgt, prop, v.clone(), name, seq, now);
+            }
+            if let Some(n) = grant {
+                if core.docs.get(&tgt).and_then(|e| e.props.get("privileged")) == Some(&v) { self.note_grant(&n, v == json!(true), &format!("pack:{}:{}", pack, name)); }
             }
         }
         Ok(())
     }
 
+    /// `<target> = Class(name: value, ...)`: the target is the identity. Created by the creation path of a write (the class must be one
+    /// the pack owns or imports: refused as a receipt otherwise), its arguments set as its first properties; idempotent (an entity that
+    /// exists is not created again, a property that has a value keeps it). A target whose eid prefix is not the class (the class cannot
+    /// be read from the eid, e.g. `membrane::Config:...` built as `Voice(...)`) is stamped `parents: ['cls:<class>']`, the ISA
+    /// kind-mirror; the entity is the class its eid names (`Config`), as the Python seat made it.
+    fn construct(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, name: &str, pack: &str, target: &str, value: &str,
+                 binds: &[(String, crate::vm::Item)], now: f64, seq: &mut i64) {
+        let (vars, extra) = scope(eid, binds, now);
+        let tgt = match core.eval_target(target, &vars, &extra) {
+            Ok(t) => t,
+            Err(why) => { self.receipt(core, eid, name, format!("error: constructor {} = ...: {}; nothing was created", target, why.strip_prefix("error: ").unwrap_or(&why)), J::Null, seq, now); return; }
+        };
+        let (cls, args) = match core.eval_ctor(value, &vars, &extra) {
+            Ok(x) => x,
+            Err(why) => { self.receipt(core, eid, name, format!("error: constructor {}: {}; nothing was created", tgt, why), J::Null, seq, now); return; }
+        };
+        if self.owner.get(&cls).is_none() && !self.is_privileged(pack) {
+            self.receipt(core, eid, name, format!("error: constructor {}({}): no pack owns the class {} (a pack owns a class it declares a getter or a setter on)", cls, tgt, cls), J::Null, seq, now);
+            return;
+        }
+        if let Err(why) = self.may_write(pack, &cls) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+        let mut args = args;
+        self.ensure(core, &tgt, now);   // stored but not loaded: it loads, it is not created anew
+        if !core.docs.contains_key(&tgt) {
+            // the class the eid names: after a namespace, up to the next colon
+            let tail = tgt.rsplit_once("::").map_or(tgt.as_str(), |(_, r)| r);
+            let own = tail.split(':').next().unwrap_or("").to_string();
+            if let Err(why) = self.may_write(pack, &own) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+            // the birth default of the class list: the eid's class first, then the constructor's class when it differs (the stamp), then any `parents` argument
+            if own != cls && !args.iter().any(|(k, _)| k == "parents") { args.push(("parents".into(), json!([format!("cls:{}", cls.to_lowercase())]))); }
+            core.load(tgt.clone(), own.clone(), Default::default(), None, now);
+            self.out.push(self.born_entry(core, &tgt, &own));
+            self.birth(core, &tgt, now, seq);
+        } else {
+            if let Err(why) = self.may_write_ent(core, pack, &tgt) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+        }
+        // a `parents` argument on an entity that has no list yet (its list is the birth default, the eid's class): the eid's class stays first
+        if core.docs.get(&tgt).map_or(false, |e| e.props.get("parents").map_or(true, |p| p.is_null())) {
+            let own = core.docs.get(&tgt).map(|e| e.cls.clone()).unwrap_or_default();
+            for a in args.iter_mut().filter(|(k, _)| k == "parents") {
+                let mut m = serde_json::Map::new(); m.insert("parents".into(), a.1.clone());
+                a.1 = crate::vm::birth_props(&own, m).remove("parents").unwrap_or(J::Null);
+            }
+        }
+        let kind_stamped = args.iter().any(|(k, _)| k == "parents");
+        for (prop, v) in args {
+            if v.is_null() { continue; }
+            if core.docs.get(&tgt).and_then(|e| e.props.get(&prop)).map_or(false, |old| !old.is_null()) { continue; }   // only what is unset
+            let grant = tgt.strip_prefix("Pack:").filter(|n| !n.is_empty() && prop == "privileged").map(String::from);
+            if grant.is_some() {
+                if let Err(why) = self.grant_check(pack) { self.receipt(core, eid, name, why, J::Null, seq, now); continue; }
+            }
+            self.emit(core, work, &tgt, &prop, v.clone(), name, seq, now);
+            if let Some(n) = grant {
+                if core.docs.get(&tgt).and_then(|e| e.props.get("privileged")) == Some(&v) { self.note_grant(&n, v == json!(true), &format!("pack:{}:{}", pack, name)); }
+            }
+        }
+        // the kind stamp came after the birth: the getters of the kind (ISA mirror) are computed now, for what was just made
+        if kind_stamped { self.birth(core, &tgt, now, seq); }
+    }
+
     /// A write of a driver verb (File.write, Command.run, ...: drivers.rs) runs its effect off the engine; the verb's
     /// slot is consumed. Entity scripts and peers never trigger one (a refusal receipt says so).
     fn driver_effect(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, now: f64, seq: &mut i64) {
-        #[cfg(feature = "python")]
+        // `retire = true` on any entity asks the host to remove it (docs/cliffvm.md, "Retiring an entity")
+        if w.prop == "retire" && w.new == json!(true) && !self.retired.contains(&w.eid) { self.retired.push(w.eid.clone()); }
+        // `unload = true` on any entity asks the host to take it out of the engine, its row kept (docs/cliffvm.md, "Unload"). The slot is consumed like a verb's, and the
+        // host never stores it, so the entity is the same after a reload
+        if w.prop == "unload" && w.new == json!(true) && !self.unload_asked.contains(&w.eid) {
+            self.unload_asked.push(w.eid.clone());
+            self.emit_unchecked(core, work, &w.eid, "unload", J::Null, "direct:consumed", seq, now);
+        }
+        #[cfg(feature = "store")]
         {
             if w.new.is_null() || w.new == json!("") { return; }
             let Some(cls) = core.docs.get(&w.eid).map(|e| e.cls.clone()) else { return };
             if !crate::drivers::VERBS.iter().any(|(c, v)| *c == cls && *v == w.prop) { return; }
-            let props = core.docs.get(&w.eid).map(|e| e.props.clone()).unwrap_or_default();
+            let mut props = core.docs.get(&w.eid).map(|e| e.props.clone()).unwrap_or_default();
             self.emit_unchecked(core, work, &w.eid, &w.prop.clone(), json!(""), "direct:consumed", seq, now);
+            if cls == "SqlQuery" {
+                // the Sql driver (sqldrv.rs): the same id as the run noted last is the same run (no second one); a new id runs
+                let id = w.new.get("id").cloned().unwrap_or(J::Null);
+                if !id.is_null() && props.get("running").and_then(|r| r.get("id")) == Some(&id) { return; }
+                self.emit_unchecked(core, work, &w.eid, "running", json!({"id": id, "started": now}), "driver:running", seq, now);
+                // the source's own props ride along (the effect runs off the engine and reads no entity)
+                let name = props.get("source").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let src = format!("SqlSource:{name}");
+                if let Some(s) = core.docs.get(&src) {
+                    props.insert("source_eid".into(), json!(src));
+                    for (k, p) in [("path", "source_path"), ("mode", "source_mode")] { if let Some(v) = s.props.get(k) { props.insert(p.into(), v.clone()); } }
+                }
+            }
+            if cls == "Command" && w.prop == "run" {
+                if let Some(c) = w.new.get("cmd").filter(|c| !c.is_null()) { self.emit_unchecked(core, work, &w.eid, "cmd", c.clone(), "driver:cmd", seq, now); }   // `run = {id, cmd}`: the cmd is kept on the entity
+                // a run in flight reads `running` (proc.c1f `status`) until its receipt lands
+                self.emit_unchecked(core, work, &w.eid, "running", json!({"id": w.new.get("id").cloned().unwrap_or(J::Null), "started": now, "timeout_s": w.new.get("timeout_s").or(props.get("timeout_s")).cloned().unwrap_or(J::Null)   /* only what was STATED: a replay has no store, so the default is not read here */}), "driver:running", seq, now);
+            }
             if w.writer.starts_with("script:") || w.writer.starts_with("peer") {
                 let id = w.new.get("id").cloned().unwrap_or(J::Null);
                 let rec = json!({"id": id, "status": "error", "rc": 2, "head": "refused: entity scripts and peers don't run effects"});
@@ -737,7 +1686,7 @@ impl Fields {
             }
             if let Some(st) = &core.store { crate::drivers::effect(st, &w.eid, &cls, &w.prop, &w.new, &props); }
         }
-        #[cfg(not(feature = "python"))]
+        #[cfg(not(feature = "store"))]
         { let _ = (core, work, w, now, seq); }
     }
 
@@ -746,7 +1695,7 @@ impl Fields {
         if self.has_getter("Wait", "due") {
             self.sync(core, now, seq);
             self.mark(CLOCK, "");
-            self.visited.clear();
+            self.new_round();
             self.run(core, host, VecDeque::new(), now, seq);
             return;
         }
@@ -763,5 +1712,25 @@ impl Fields {
                 self.react(core, host, wr, now, seq);
             }
         }
+    }
+}
+
+#[cfg(feature = "alloc-stats")]
+impl Fields {
+    /// The memory breakdown (alloc-stats): the sizes of the field's side tables.
+    pub fn mem_sizes(&self) -> Vec<crate::alloc_stats::Size> {
+        use crate::alloc_stats::{jsize, Size};
+        let mut v: Vec<Size> = vec![];
+        v.push(("fields.out".into(), self.out.len() as u64, self.out.iter().map(jsize).sum()));
+        v.push(("fields.calls+method_calls".into(), (self.calls.len() + self.method_calls.len()) as u64, self.calls.iter().chain(self.method_calls.iter()).map(jsize).sum()));
+        v.push(("fields.deps".into(), self.deps.len() as u64, self.deps.iter().map(|((a, b), s)| (a.len() + b.len() + 64) as u64 + s.iter().map(|(e, _)| e.len() as u64 + 40).sum::<u64>()).sum()));
+        v.push(("fields.reads".into(), self.reads.len() as u64, self.reads.iter().map(|((e, _), l)| e.len() as u64 + 64 + l.iter().map(|(a, b)| (a.len() + b.len() + 48) as u64).sum::<u64>()).sum()));
+        v.push(("fields.dirty".into(), self.dirty.len() as u64, self.dirty.iter().map(|(_, e, _)| e.len() as u64 + 48).sum()));
+        v.push(("fields.known".into(), self.known.len() as u64, self.known.iter().map(|e| e.len() as u64 + 40).sum()));
+        v.push(("fields.layer_of".into(), self.layer_of.len() as u64, 0));
+        v.push(("fields.visited+claimed".into(), (self.visited.len() + self.claimed.len()) as u64, 0));
+        v.push(("fields.accepted".into(), self.accepted.len() as u64, self.accepted.values().map(jsize).sum()));
+        v.push(("fields.refusals".into(), self.refusals.len() as u64, self.refusals.iter().map(jsize).sum()));
+        v
     }
 }

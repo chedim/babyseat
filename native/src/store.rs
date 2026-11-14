@@ -1,11 +1,11 @@
 //! THE STORE DRIVER (the operator, 2026-11-10: "build the sqlite driver c1f pack"): `.c1f` reads the seat's SQLite
 //! store. `sql(query, args...)` is a built-in of the engine.
 //!
-//! ONE SQLITE PER PROCESS (0.7.53, data safety): this module never opens a database. It used to, with a copy of SQLite
-//! compiled in (rusqlite "bundled"), on the very WAL file the seat's Python opens with CPython's sqlite3: two SQLite
-//! copies in one process on one WAL database (POSIX locks are per process: a close in one copy drops the other's
-//! locks, and the -shm/-wal can be truncated under the other's mmap -> SIGBUS in walFindFrame). Every query now runs
-//! through an `SqlExec` the host hands in -- in the seat, membrane/sqlread.py on the seat's own sqlite3.
+//! ONE SQLITE PER PROCESS (data safety, 0.7.53 / #1111): this module never opens a database itself. Two SQLite copies
+//! in one process on one WAL database corrupt it (POSIX locks are per process: a close in one copy drops the other's
+//! locks, and the -shm/-wal can be truncated under the other's mmap -> SIGBUS in walFindFrame). Every query runs
+//! through an `SqlExec` the host hands in -- in the seat, `sqlexec::NativeSqlExec`, on the same SQLite the native store
+//! (`db.rs`) writes through; Python's `sqlite3` is not used for the field.
 //!
 //! - Read-only: the executor opens read-only connections with `query_only` on and refuses a statement that is not a
 //!   pure read before it runs. Arguments are bound, never spliced.
@@ -32,12 +32,18 @@ pub trait SqlExec: Send + Sync {
     /// wrong argument count is refused before the run. Never on the engine's call (it would wait for the GIL).
     fn check(&self, _sql: &str, _nargs: usize) -> Result<(), String> { Ok(()) }
     fn interrupt(&self, token: u64);
+    /// Run write statements as ONE transaction (`Store:<x>.run`): -> (rows changed, RETURNING rows). A read, DDL, ATTACH or
+    /// PRAGMA is refused; a failure rolls the whole batch back. A store with no writer says so.
+    fn write(&self, _statements: &[(String, Vec<J>)]) -> Result<(i64, Vec<J>), String> { Err("sql: this store is read-only".into()) }
 }
 
 /// A query's answer as the engine sees it.
 pub enum Poll { Ready(Result<Vec<J>, String>), Pending }
 
 enum State { Pending, Done(Result<Vec<J>, String>) }
+
+/// the number of Command / File / Fetch effects that run at once (operator-approved 2026-11-13; the boot fact `effect_workers` changes it)
+pub const DEFAULT_EFFECT_WORKERS: usize = 4;
 
 #[derive(Default)]
 pub struct Shared {
@@ -51,9 +57,50 @@ pub struct Shared {
     /// effects run by the drivers (fs, proc): (entity, verb, receipt), taken by the engine's next round
     receipts: Vec<(String, String, J)>,
     effects_running: usize,
+    /// the effects started and not yet taken by the engine's round, by their entity (a receipt is taken: the entity is no longer in flight); what the engine's
+    /// garbage collector reads as "a running effect holds the entity" (`Store::holds`)
+    in_flight: HashMap<String, usize>,
+    /// the cap on the effect workers of the slow drivers (Command, File, Fetch): the boot fact `effect_workers` (0 = the default, 4), and how many run now
+    workers_cap: usize,
+    workers_active: usize,
+    /// the boot fact `command_timeout_s` (0 = the default, drivers::DEFAULT_COMMAND_TIMEOUT_S): the limit of a Command run that states no `timeout_s`
+    command_timeout_s: f64,
+    /// the HTTP door (http.rs): requests that arrived (taken by the engine's next round as entities), the connections held
+    /// open until a pack answers, and the listeners' stop flags by their entity
+    inbound: Vec<(String, String, serde_json::Map<String, J>)>,
+    conns: HashMap<u64, std::net::TcpStream>,
+    /// the open event streams by their request's connection number (http.rs `Stream`): a connection moves from `conns` to here when its
+    /// request is written `stream`, and leaves when it is written `end` (or the client went away)
+    streams: HashMap<u64, Arc<Mutex<crate::http::Stream>>>,
+    next_conn: u64,
+    listeners: HashMap<String, Arc<std::sync::atomic::AtomicBool>>,
+    /// each door's token secret by its entity (the verify verb reads it; a prop never carries it)
+    secrets: HashMap<String, Vec<u8>>,
     /// a running command's child process, by its entity (Command.stop kills it)
     children: HashMap<String, Arc<Mutex<Option<std::process::Child>>>>,
+    /// the open connections of the Sql driver (sqldrv.rs), by their SqlSource entity
+    sources: HashMap<String, crate::sqldrv::SourceSlot>,
     done: u64,
+    /// the barest seat (operator 2026-11-12): the door verifies nothing (every request is `authed`), and a listen that names no host binds `bind`
+    plain: bool,
+    bind: Option<String>,
+}
+
+#[cfg(feature = "alloc-stats")]
+impl Store {
+    /// The memory breakdown (alloc-stats): what the store's shared state holds.
+    pub fn mem_sizes(&self) -> Vec<crate::alloc_stats::Size> {
+        use crate::alloc_stats::{jsize, Size};
+        let g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        vec![
+            ("store.results".to_string(), g.results.len() as u64, g.results.iter().map(|(k, s)| k.len() as u64 + 48 + match s { State::Done(Ok(r)) => r.iter().map(jsize).sum::<u64>(), _ => 0 }).sum::<u64>()),
+            ("store.receipts".into(), g.receipts.len() as u64, g.receipts.iter().map(|(a, b, j)| (a.len() + b.len()) as u64 + jsize(j)).sum()),
+            ("store.inbound".into(), g.inbound.len() as u64, g.inbound.iter().map(|(a, b, m)| (a.len() + b.len()) as u64 + m.iter().map(|(k, v)| k.len() as u64 + jsize(v)).sum::<u64>()).sum()),
+            ("store.streams(frames queued)".into(), g.streams.values().map(|x| x.lock().unwrap_or_else(|e| e.into_inner()).queued().0).sum(), g.streams.values().map(|x| x.lock().unwrap_or_else(|e| e.into_inner()).queued().1).sum()),
+            ("store.conns".into(), g.conns.len() as u64, 0),
+            ("store.asked".into(), g.asked.len() as u64, g.asked.iter().map(|(a, b)| (a.len() + b.len()) as u64).sum()),
+        ]
+    }
 }
 
 pub struct Store { pub path: String, pub dir: std::path::PathBuf, sh: Arc<(Mutex<Shared>, Condvar)> }
@@ -73,6 +120,9 @@ impl Store {
         st.sh.0.lock().unwrap_or_else(|e| e.into_inner()).exec = Some(exec);
         st
     }
+
+    /// The store's SQLite (None for an io-only store): the write verb runs on it, off the engine's lock.
+    pub fn exec_handle(&self) -> Option<Arc<dyn SqlExec>> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).exec.clone() }
 
     /// The drivers without a database (fs, proc, jsonl): `sql(...)` then says no store is attached.
     pub fn io_only(dir: &str) -> Store {
@@ -210,7 +260,7 @@ impl Store {
     /// An effect (a driver's verb, written by a person, the model or a setter): run on its own thread; its receipt
     /// lands on the entity as `<verb>_result` at the engine's next round. Never under the engine's lock.
     pub fn effect(&self, eid: &str, verb: &str, job: Box<dyn FnOnce(&Arc<(Mutex<Shared>, Condvar)>, &str) -> J + Send>) {
-        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).effects_running += 1;
+        { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.effects_running += 1; *g.in_flight.entry(eid.to_string()).or_insert(0) += 1; }
         let (sh, eid, verb) = (self.sh.clone(), eid.to_string(), verb.to_string());
         std::thread::Builder::new().name("membrane-effect".into()).spawn(move || {
             let rec = job(&sh, &eid);
@@ -221,6 +271,47 @@ impl Store {
             sh.1.notify_all();
         }).expect("a thread for an effect");
     }
+
+    /// An effect of a SLOW driver (Command, File, Fetch): the same as `effect`, but its job starts only when fewer than the cap of such jobs are
+    /// running (the boot fact `effect_workers`, default 4): the thread waits for a slot. A held door request or an open stream is no worker.
+    pub fn effect_limited(&self, eid: &str, verb: &str, job: Box<dyn FnOnce(&Arc<(Mutex<Shared>, Condvar)>, &str) -> J + Send>) {
+        { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.effects_running += 1; *g.in_flight.entry(eid.to_string()).or_insert(0) += 1; }
+        let (sh, eid, verb) = (self.sh.clone(), eid.to_string(), verb.to_string());
+        std::thread::Builder::new().name("membrane-effect".into()).spawn(move || {
+            {
+                let mut g = sh.0.lock().unwrap_or_else(|e| e.into_inner());
+                while g.workers_active >= (if g.workers_cap == 0 { DEFAULT_EFFECT_WORKERS } else { g.workers_cap }) { g = sh.1.wait(g).unwrap_or_else(|e| e.into_inner()); }
+                g.workers_active += 1;
+            }
+            let rec = job(&sh, &eid);
+            let mut g = sh.0.lock().unwrap_or_else(|e| e.into_inner());
+            g.workers_active -= 1;
+            g.effects_running -= 1;
+            g.receipts.push((eid, verb, rec));
+            g.done += 1;
+            sh.1.notify_all();
+        }).expect("a thread for an effect");
+    }
+
+    /// The connection slot of a SqlSource entity (sqldrv.rs): made empty at first use, kept for the life of the process.
+    pub fn sql_source(&self, eid: &str) -> crate::sqldrv::SourceSlot {
+        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).sources.entry(eid.to_string()).or_default().clone()
+    }
+
+    /// A receipt for an entity that is not the one the effect runs on (the Sql driver tells the SqlSource how its open went): taken by the engine's next round.
+    pub fn note_receipt(&self, eid: &str, verb: &str, rec: J) {
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.receipts.push((eid.to_string(), verb.to_string(), rec));
+        g.done += 1;
+        self.sh.1.notify_all();
+    }
+
+    /// The limit of a Command run that states no `timeout_s` (the boot fact `command_timeout_s`); 0 = the default.
+    pub fn set_command_timeout(&self, s: f64) { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).command_timeout_s = s; }
+    pub fn command_timeout(&self) -> f64 { let t = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).command_timeout_s; if t > 0.0 { t } else { crate::drivers::DEFAULT_COMMAND_TIMEOUT_S } }
+
+    /// The cap on the slow drivers' workers (the boot fact `effect_workers`).
+    pub fn set_effect_workers(&self, n: usize) { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.workers_cap = n; g.done += 0; self.sh.1.notify_all(); }
 
     /// Drop the kept answers of every asker whose name starts with `prefix` (a banner build starts fresh); a job
     /// still running finishes and its answer is dropped.
@@ -233,15 +324,79 @@ impl Store {
         }
     }
 
+    pub(crate) fn from_shared(sh: &Arc<(Mutex<Shared>, Condvar)>) -> Store { Store { path: String::new(), dir: Default::default(), sh: sh.clone() } }
+
+    /// A handle on the same shared state (the door's threads hold one).
+    pub fn clone_handle(&self) -> Store { Store { path: self.path.clone(), dir: self.dir.clone(), sh: self.sh.clone() } }
+
+    /// A listener's stop flag by its entity: the previous one (a second listen replaces the first).
+    pub fn set_listener(&self, eid: &str, stop: Arc<std::sync::atomic::AtomicBool>) -> Option<Arc<std::sync::atomic::AtomicBool>> {
+        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).listeners.insert(eid.to_string(), stop)
+    }
+
+    /// A door's secret (set at listen) and its read (the verify verb).
+    /// Configuration of the host (never a pack's decision): the plain door, and the default address of a listen.
+    pub fn set_plain(&self, plain: bool, bind: Option<String>) { let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()); g.plain = plain; g.bind = bind; }
+    pub fn plain(&self) -> bool { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).plain }
+    pub fn bind_default(&self) -> Option<String> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).bind.clone() }
+    pub fn set_secret(&self, eid: &str, secret: Vec<u8>) { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).secrets.insert(eid.to_string(), secret); }
+    pub fn secret_of(&self, eid: &str) -> Option<Vec<u8>> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).secrets.get(eid).cloned() }
+
+    /// Keep an accepted connection open until a pack answers it: -> its number.
+    pub fn hold_conn(&self, s: std::net::TcpStream) -> u64 {
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.next_conn += 1;
+        let n = g.next_conn;
+        g.conns.insert(n, s);
+        n
+    }
+    pub fn open_stream(&self, n: u64, s: crate::http::Stream) -> Arc<Mutex<crate::http::Stream>> {
+        let a = Arc::new(Mutex::new(s));
+        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).streams.insert(n, a.clone());
+        a
+    }
+    pub fn stream_of(&self, n: u64) -> Option<Arc<Mutex<crate::http::Stream>>> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).streams.get(&n).cloned() }
+    pub fn drop_stream(&self, n: u64) { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).streams.remove(&n); }
+    pub fn take_conn(&self, n: u64) -> Option<std::net::TcpStream> { self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).conns.remove(&n) }
+
+    /// A request arrived (an entity born in the engine's next round); wakes the waiter.
+    pub fn push_inbound(&self, eid: String, cls: String, props: serde_json::Map<String, J>) {
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.inbound.push((eid, cls, props));
+        g.done += 1;
+        self.sh.1.notify_all();
+    }
+
+    /// The entities that arrived since the last round.
+    pub fn take_inbound(&self) -> Vec<(String, String, serde_json::Map<String, J>)> {
+        std::mem::take(&mut self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).inbound)
+    }
+
     /// The effects' receipts since the last round.
     pub fn take_receipts(&self) -> Vec<(String, String, J)> {
-        std::mem::take(&mut self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).receipts)
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        let r = std::mem::take(&mut g.receipts);
+        for (eid, _, _) in &r { if let Some(n) = g.in_flight.get_mut(eid) { *n -= 1; if *n == 0 { g.in_flight.remove(eid); } } }   // taken: no longer in flight
+        r
+    }
+
+    /// Does the driver side hold this entity (the garbage collector's in-flight rule)? An effect started on it whose receipt the engine has not taken, or the
+    /// listener the entity opened.
+    pub fn holds(&self, eid: &str) -> bool {
+        let g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.in_flight.contains_key(eid) || g.listeners.contains_key(eid)
+    }
+    /// Is the connection number held open: not answered yet, or an event stream not closed?
+    pub fn conn_held(&self, n: u64) -> bool {
+        let g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.conns.contains_key(&n) || g.streams.contains_key(&n)
     }
 
     /// Stop a running command (Command.stop): its child is killed; its run's receipt says so.
     pub fn kill(&self, eid: &str) -> bool {
         let c = self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).children.get(eid).cloned();
-        match c { Some(c) => c.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| ch.kill().is_ok()).unwrap_or(false), None => false }
+        // the child leads its own process group (drivers.rs): the whole tree dies at once
+        match c { Some(c) => c.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| { let r = unsafe { libc::kill(-(ch.id() as i32), libc::SIGKILL) } == 0; if !r { let _ = ch.kill(); } true }).unwrap_or(false), None => false }
     }
 
     fn finish(&self, k: &str, r: Result<Vec<J>, String>) -> Poll {
@@ -304,7 +459,7 @@ fn interrupt_all(sh: &Arc<(Mutex<Shared>, Condvar)>) {
 /// Queries, file reads and effects not landed yet: still running, or finished with their rows not taken by a round (the
 /// engine takes them at its next round) -- so a waiter never stops between a read finishing and its rows landing.
 fn outstanding(sh: &Shared) -> usize {
-    sh.results.values().filter(|v| matches!(v, State::Pending)).count() + sh.ready.len() + sh.effects_running + sh.receipts.len()
+    sh.results.values().filter(|v| matches!(v, State::Pending)).count() + sh.ready.len() + sh.effects_running + sh.receipts.len() + sh.inbound.len()
 }
 
 /// The drivers' access to a running command's slot (proc.rs).
@@ -316,4 +471,4 @@ pub(crate) fn child_slot(sh: &Arc<(Mutex<Shared>, Condvar)>, eid: &str) -> Arc<M
 pub(crate) fn child_done(sh: &Arc<(Mutex<Shared>, Condvar)>, eid: &str) {
     sh.0.lock().unwrap_or_else(|e| e.into_inner()).children.remove(eid);
 }
-pub(crate) type Sh = Arc<(Mutex<Shared>, Condvar)>;
+

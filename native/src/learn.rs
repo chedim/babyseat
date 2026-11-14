@@ -77,7 +77,7 @@ impl Learner {
 
     fn remove(&mut self, core: &mut Core, eid: &str) {
         self.cands.retain(|c| c.eid != eid);
-        core.docs.remove(eid);
+        core.drop_doc(eid);
     }
 
     /// One heard write: score the predictions on its path, then guess.

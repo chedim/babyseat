@@ -1,0 +1,95 @@
+PACK door_state 1
+IMPORT door 1
+RESIDENT Seat
+-- THE SEAT'S STATE AS A DOOR ROUTE FAMILY (#1143, the porting brief's `state` family): the reads and controls the page's panels use.
+--   GET  /membrane/seat, /membrane/seat/pause, /membrane/state (and /state), /membrane/self/card
+--   POST /membrane/seat/pause, /membrane/seat/control
+-- The seat's own facts are the presence entity (`membrane::presence`, class Seat): the seat panel refreshes its `state` and
+-- `events` there every few seconds, so a read is a getter over that entity and nothing else. The launcher's facts (Boot:seat):
+-- `nerve_pause_off` (MEMBRANE_NERVE_PAUSE=0).
+-- A control is a WRITE to the presence entity: `membrane::presence.control = {id, by, body}` for the verified person
+-- (Request.sub). THE GAP: nothing consumes that property yet -- the effect on the live seat (seat_panel.control /
+-- set_pause: the flag, the audit line, the self loop's mode) is still the Python the POST routes in server.py run; until the
+-- seat-state piece is native the door only records the ask and answers 202.
+-- QUOTA (quota.py, the out-of-tokens popup and the home ⚠): GET /membrane/quota and POST /membrane/quota/resume answer the released shape of a seat with
+-- NOTHING PAUSED, which is every seat here: no model is paused by a spent quota (the pause is the Python proxy's own bookkeeping, and the claude CLI's
+-- limit shows up as the turn's error). The page shows nothing for an empty `paused` list. `probe_s` is quota.py's PROBE_S (600), the released constant.
+-- DEGRADED (w46): /membrane/stats and /membrane/minds answer the released empty shape (a seat that counted nothing), below.
+-- NOT PORTED (reads live Python-only state; answers 501 and names why): the /membrane/state ?section= pull (where_we_are). (/membrane/self/sheet and /membrane/self/recent are the self family's:
+-- door_self.c1f.)
+
+-- the class is declared here so the engine mirrors the presence entity
+Seat.is_presence getter: this.eid == 'membrane::presence'
+
+Request.o_state getter: this.route in ['/membrane/seat', '/membrane/seat/pause', '/membrane/seat/control', '/membrane/state', '/state', '/membrane/self/card', '/membrane/stats', '/membrane/quota', '/membrane/quota/resume', '/membrane/minds']
+
+-- ---- the presence entity's facts ------------------------------------------------------------------------------------------------
+Request.st_seat getter: ([s for s in instances('Seat') if s.eid == 'membrane::presence'] or [None])[0]
+Request.st_state getter: prop(this.st_seat, 'state') or {}
+Request.st_events getter: prop(this.st_seat, 'events') or []
+Request.st_self getter: prop(this.st_state, 'self') or {}
+Request.st_off getter: ([b.nerve_pause_off for b in this.boots] or [False])[0] == True
+Request.st_paused getter: prop(this.st_state, 'paused') == True and not this.st_off
+
+-- ---- the answers --------------------------------------------------------------------------------------------------------------------
+Request.st_seat_body getter: {'state': this.st_state, 'events': this.st_events, 'controls': ['paused', 'loops_max', 'self', 'accept', 'self_name']} if this.st_seat != None else {}
+Request.st_pause_body getter: {'paused': this.st_paused, 'enabled': not this.st_off}
+Request.st_state_body getter: {'mode': 'DEV', 'paused': this.st_paused, 'seat': this.st_state}
+Request.st_card_mode getter: prop(this.st_self, 'mode') or 'off'
+Request.st_asleep getter: prop(this.st_self, 'asleep') == True
+Request.st_energy getter: prop(this.st_self, 'energy')
+Request.st_pull getter: prop(this.st_self, 'pull')
+Request.st_limiting getter: prop(this.st_self, 'limiting')
+Request.st_cap getter: prop(this.st_self, 'record_cap')
+Request.st_awake getter: this.st_card_mode != 'off' and not this.st_asleep
+Request.st_name getter: prop(this.st_state, 'self_name') or 'Blurp'
+Request.st_card_body getter: {'name': this.st_name, 'level': 0, 'rung_name': '', 'next': [], 'mode': this.st_card_mode, 'awake': this.st_awake, 'last_activity': None, 'generated': clock, 'energy': this.st_energy, 'asleep': this.st_asleep, 'pull': this.st_pull, 'limiting': this.st_limiting, 'record_cap': this.st_cap}
+
+-- the allowed methods (the door answers 405 + allow); the not-ported routes answer 501 whatever the method (None: the family answers)
+Request.m_state getter:
+  WHEN this.st_gap: None
+  ELSE WHEN this.route == '/membrane/seat/control' or this.route == '/membrane/quota/resume': ['POST']
+  ELSE WHEN this.route == '/membrane/seat/pause': ['GET', 'POST']
+  ELSE: ['GET']
+
+-- ---- the control writes: validate, then record the ask on the presence entity ----------------------------------------------------------
+Request.st_pause_ok getter: this.route == '/membrane/seat/pause' and (prop(this.jbody, 'paused') == True or prop(this.jbody, 'paused') == False)
+Request.st_ctl_ok getter: this.route == '/membrane/seat/control' and len([k for k in ['paused', 'loops_max', 'self', 'accept', 'self_name'] if prop(this.jbody, k) != None]) > 0
+Request.st_by getter: 'user:' + str(this.sub)
+Request.st_ask getter: {'id': this.eid, 'by': this.st_by, 'body': this.jbody} if this.method == 'POST' and this.authed == True and this.st_seat != None and (this.st_pause_ok or this.st_ctl_ok) else None
+Request.st_ask on-setter st-control:
+  WHEN this.st_ask != None:
+    ('membrane::presence').control = this.st_ask
+
+-- ---- the reply ---------------------------------------------------------------------------------------------------------------------------
+Request.st_gap getter: (this.route in ['/membrane/state', '/state'] and 'section=' in this.query)
+Request.st_post getter: this.method == 'POST' and this.route in ['/membrane/seat/pause', '/membrane/seat/control']
+Request.st_read getter:
+  WHEN this.route == '/membrane/seat': this.st_seat_body
+  ELSE WHEN this.route == '/membrane/seat/pause': this.st_pause_body
+  ELSE WHEN this.route == '/membrane/self/card': this.st_card_body
+  ELSE: this.st_state_body
+-- LAUNCH SETTINGS (`--fact name=value`, scripts/seat passes them on): the constants carried over from the release, each with the released value as its default (docs/release-parity.md, 'Settings').
+Request.st_probe_s getter: ([b.quota_probe_s for b in this.boots] or [None])[0] or 600
+Request.st_quota_body getter: {'now': clock, 'paused': [], 'probe_s': this.st_probe_s}
+-- STATS (tokenomics.py `_assemble`, the 📊 window): the released answer of a seat that counted nothing. The counters (the message store's token rows,
+-- bg-usage.json, the claude ledger) are Python state nothing here keeps, so every window is zero and `minds`/`models` are empty dicts, which the window
+-- draws as its zero rows and "no Claude answers since the seat started". `midnight` is the local midnight to the minute (localtime has no seconds, so it can be up to 59 s early; the page does not read it): a decision.
+Request.st_zero getter: {'calls': 0, 'input': 0, 'output': 0}
+Request.st_win getter: {'total': this.st_zero, 'minds': {}, 'models': {}}
+Request.st_split getter: {'cache_read': 0, 'cache_write': 0, 'input': 0, 'output': 0, 'effective': 0}
+Request.st_stats_body getter: {'now': clock, 'midnight': clock - 3600 * prop(localtime(clock), 'hour') - 60 * prop(localtime(clock), 'minute'), 'today': this.st_win, 'hour': this.st_win, 'claude': {'answers': 0, 'steps': 0, 'total': this.st_split, 'per_answer': this.st_split, 'first_step': this.st_split, 'later_step': this.st_split}, 'paused': []}
+-- MINDS (fieldpulse.minds(), the orbs' chat views): no loop session, no thinker log, no dream (lanes.py: the answer of a seat with no pulse)
+Request.st_minds_body getter: {'loops': {}, 'thinker': [], 'dreamer': []}
+Request.st_resume_model getter: strip(str(prop(this.jbody, 'model') or ''))
+Request.r_state getter:
+  WHEN this.route == '/membrane/quota': {'status': 200, 'body': this.st_quota_body}
+  ELSE WHEN this.route == '/membrane/stats': {'status': 200, 'body': this.st_stats_body}
+  ELSE WHEN this.route == '/membrane/minds': {'status': 200, 'body': this.st_minds_body}
+  ELSE WHEN this.route == '/membrane/quota/resume' and this.st_resume_model == '': {'status': 400, 'body': {'error': 'model required'}}
+  ELSE WHEN this.route == '/membrane/quota/resume': {'status': 200, 'body': {'now': clock, 'paused': [], 'probe_s': this.st_probe_s, 'resumed': False}}
+  ELSE WHEN this.st_gap: {'status': 501, 'body': {'error': 'not ported yet: reads the live seat'}}
+  ELSE WHEN this.st_post and not (this.st_pause_ok or this.st_ctl_ok): {'status': 400, 'body': {'error': 'the body is {"paused": true|false}' if this.route == '/membrane/seat/pause' else 'the body names a control: paused, loops_max, self, accept or self_name'}}
+  ELSE WHEN this.st_post and this.st_seat == None: {'status': 503, 'body': {'error': 'no seat'}}
+  ELSE WHEN this.st_post: {'status': 202, 'body': {'ok': True, 'queued': this.st_ask, 'state': this.st_state}}
+  ELSE: {'status': 200, 'body': this.st_read}

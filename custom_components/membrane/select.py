@@ -1,55 +1,52 @@
-"""#283: select.membrane_seat -- the house's active seat, one option per seat
-of the zoo; choosing one switches the relay, the sensors, Assist and speech
-(zoo.switch) without a restart. Automations can move the house with it."""
+"""The seat's model as a select: the models the seat lists (`GET /membrane/options`, background.models) and the one it runs on (background.loops); choosing one is the owner's write
+`POST /membrane/options {loops: <model>}`, the page's own post (docs/home-assistant.md)."""
 from __future__ import annotations
 
 from homeassistant.components.select import SelectEntity
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import zoo
-from .const import DOMAIN
+from .entity import device_info
+from .seat_client import SeatAuthError, SeatError
 
 
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
-    async_add_entities([MembraneSeatSelect(hass, entry)])
+    async_add_entities([SeatModel(entry.runtime_data.health, entry)])
 
 
-class MembraneSeatSelect(SelectEntity):
-    _attr_has_entity_name = False
-    _attr_icon = "mdi:account-switch"
+class SeatModel(CoordinatorEntity, SelectEntity):
+    _attr_has_entity_name = True
+    _attr_name = "Model"
+    _attr_icon = "mdi:robot"
 
-    def __init__(self, hass, entry) -> None:
-        self.hass, self._entry = hass, entry
-        self._attr_name = "Membrane seat"                # -> select.membrane_seat
-        self._attr_unique_id = f"{entry.entry_id}_seat"
-        self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id)}}
+    def __init__(self, coord, entry) -> None:
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_model_select"
+        self._attr_device_info = device_info(entry)
 
-    # the options and the choice are read live (the list may change under it)
-    def _seats(self) -> list:
-        return list((self._entry.options or {}).get(zoo.SEATS) or [])
+    def _bg(self) -> dict | None:
+        bg = ((self.coordinator.data or {}).get("options") or {}).get("background")
+        return bg if isinstance(bg, dict) else None
+
+    @property
+    def available(self) -> bool:
+        return bool(self.coordinator.last_update_success) and self._bg() is not None
 
     @property
     def options(self) -> list[str]:
-        return zoo.names(self._seats())
+        return [str(m) for m in (self._bg() or {}).get("models") or []]
 
     @property
     def current_option(self) -> str | None:
-        seats = self._seats()
-        comp = self.hass.data.get(DOMAIN) or {}
-        for s, n in zip(seats, zoo.names(seats)):
-            if s.get("id") == comp.get("active_seat"):
-                return n
-        return None
+        return (self._bg() or {}).get("loops") or None
 
     async def async_select_option(self, option: str) -> None:
-        seats = self._seats()
-        for s, n in zip(seats, zoo.names(seats)):
-            if n == option:
-                zoo.switch(self.hass, self._entry, s.get("id"))
-                break
-        self.async_write_ha_state()
-
-    async def async_added_to_hass(self) -> None:
-        comp = self.hass.data.get(DOMAIN) or {}
-        cbs = comp.setdefault("on_switch", [])
-        cbs.append(self.async_write_ha_state)
-        self.async_on_remove(lambda: self.async_write_ha_state in cbs and cbs.remove(self.async_write_ha_state))
+        try:
+            await self._entry.runtime_data.client.set_model(option)
+        except SeatAuthError:
+            self._entry.async_start_reauth(self.hass)
+            raise HomeAssistantError("the seat refused Home Assistant's token") from None
+        except SeatError as e:
+            raise HomeAssistantError(str(e)) from e
+        await self.coordinator.async_request_refresh()

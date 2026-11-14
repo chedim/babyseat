@@ -36,6 +36,21 @@ lease cuts the process. A restart that was asked for still comes back: on the cu
 the same command starts as a fresh process, then the old one exits. A plain stop
 just stops.
 
+**While the seat boots.** The serve port is reserved at the top of the boot and
+answers at once: every request gets `503` with `Retry-After` and the step the boot
+is on (`{"loading": true, "step": ..., "rows": ..., "states": ..., "recall": ...}`) until
+the seat is up and the real surface takes the port over. A browser gets the field
+growing: the last clean stop's field shape (`/__boot/shape`: the field view's 3-D layout
+of the heaviest entities and their strongest relations, numbers only -- no names or
+words, since the door asks for no auth) appears as its rows load, pulses once recall's
+models are up, and the page reloads into the UI when `/global/health` answers. With no
+saved shape (a first boot) it draws a generated field driven by the same progress.
+Every clean stop saves the warm snapshot: the vector matrices, the hot rows, the word
+index and the shape; the next boot uses each only when it matches the store.
+Nothing reads a booting seat as ready: `/global/health` (Home Assistant's readiness)
+is `200` only from the real surface. The boot ends with one `[boot]` log line, each
+step's wall time.
+
 **New page code after a restart.** `/ui/conf` carries `build`, a hash of the files
 under `membrane/ui/` taken at boot. On every reconnect the open tab compares it with
 the build it loaded and, if the seat came back with new code, reloads itself once
@@ -189,7 +204,8 @@ window fills the screen; × or Escape closes it.
 | Blurp's energy | (shown only when Blurp is on) read-only: its energy as a percentage and whether it is awake or asleep (#345, #363); "not running yet" before Blurp has run |
 | Background work: Goal worker | the model the watch and goal loops run on (`loops`); every loop turn runs on it, whatever its session remembers, and is stamped with it. A person's chat keeps its own model |
 | Background work: Idle thinker | the model of the idle cortex (`cortex`): the thinker, the dreamer and the claim judges |
-| Background work: credentials | shown only when that mind's model is a claude-agent rung: Same as the chat (default), API key, CLI login (`loops_auth`, `cortex_auth`). See [claude-agent.md](claude-agent.md) |
+| Background work: Leaf tasks | the model the goal graph's leaf tasks run on (`workers`, #1120): each task's one worker step. Unset (the default, "same as the Goal worker") = the loops' model; the watch loops and the planner stay on `loops` |
+| Background work: credentials | shown only when that mind's model is a claude-agent rung: Same as the chat (default), API key, CLI login (`loops_auth`, `cortex_auth`, `workers_auth`). See [claude-agent.md](claude-agent.md) |
 
 Writes go through the owner's door like every other write: from another
 machine they need the [seat token](auth.md#the-seat-token). Home Assistant's
@@ -302,11 +318,16 @@ would take the module with it). Both stay installed; to drop the old name later:
 
 The seat measures itself, without root (`membrane/diag.py`). Both ports answer
 `/membrane/diag/timing`, `/membrane/diag/profile`,
-`/membrane/diag/claude-agent`, `/membrane/diag/deliver` and
-`/membrane/diag/requests`, from localhost only
+`/membrane/diag/claude-agent`, `/membrane/diag/deliver`,
+`/membrane/diag/requests` and `/membrane/diag/goals-ledger`, from localhost only
 (a call from anywhere else gets 403). `claude-agent` counts the claude-agent
 rung's turn-cap hits and Continues, and sums its prompt-cache split (uncached
 input, cache reads, cache writes, output) ([claude-agent.md](claude-agent.md)).
+`goals-ledger` (#1120) reports each goal: tokens by model (each worker run's
+usage is on its result entity, the planner runs' summed on the goal as
+`planner_usage`; `estimated` counts runs whose tokens were guessed), the worker
+runs by outcome, the tasks by status, leaves, runs per leaf, re-planned leaves
+(run more than once), and whether the goal is open.
 `deliver` counts `busy_timeouts`: turns whose model didn't answer inside the
 rung's budget (`rung_budget_s`, 90 s; `MEMBRANE_TURN_BUDGET_S` sets it, for a slow local model that writes long replies).
 

@@ -1,0 +1,88 @@
+{
+ "status": 200,
+ "body": [
+  {
+   "info": {
+    "id": "msg_2e18b1de361fed721f376e7f",
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "role": "user",
+    "agent": "build",
+    "model": {
+     "providerID": "membrane",
+     "modelID": "claude"
+    },
+    "time": {
+     "created": 1794603477431
+    },
+    "summary": {
+     "diffs": []
+    }
+   },
+   "parts": [
+    {
+     "id": "prt_d4b79a2d8ba2f869260d9633",
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "messageID": "msg_2e18b1de361fed721f376e7f",
+     "type": "text",
+     "text": "this will fail"
+    }
+   ]
+  },
+  {
+   "info": {
+    "id": "msg_9cf9150711fb112fed38dbba",
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "role": "assistant",
+    "parentID": "msg_2e18b1de361fed721f376e7f",
+    "modelID": "claude",
+    "providerID": "membrane",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/srv/seat",
+     "root": "/srv/seat"
+    },
+    "cost": 0.0,
+    "tokens": {
+     "total": 17,
+     "input": 3,
+     "output": 14,
+     "reasoning": 0,
+     "cache": {
+      "read": 0,
+      "write": 0
+     }
+    },
+    "time": {
+     "created": 1794603477431,
+     "completed": 1794603477432
+    },
+    "error": {
+     "name": "Error",
+     "data": {
+      "message": "buffered call not used"
+     }
+    }
+   },
+   "parts": [
+    {
+     "id": "prt_fcbaca2e5e868d5eaf959dab",
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "messageID": "msg_9cf9150711fb112fed38dbba",
+     "type": "step-start"
+    },
+    {
+     "id": "prt_02155348c0af5c503b366a13",
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "messageID": "msg_9cf9150711fb112fed38dbba",
+     "type": "text",
+     "text": "model ladder failed: AssertionError: buffered call not used",
+     "time": {
+      "start": 1794603477431,
+      "end": 1794603477431
+     }
+    }
+   ]
+  }
+ ]
+}

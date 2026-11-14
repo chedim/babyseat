@@ -1,0 +1,30 @@
+PACK default_banner 1
+IMPORT boot 1
+RESIDENT Banner
+-- THE DEFAULT BANNER OF THE BAREST SEAT (#1143, operator 2026-11-13). `membrane::Banner:owner:main` is the entity `chat_turn.c1f` reads into
+-- every turn's system text, and it is FULLY the model's: the seat never segments, orders or joins what the model puts there. This pack is
+-- only the banner the seat is born with, the barest seat's cut of Memo's recall banner (membrane/packs/banner.c1f, RecallBanner), which stays
+-- as the Python era wrote it. `Banner.text` is a getter (cached, recomputed when what it reads changes), so the banner is live by nature.
+-- KEPT from RecallBanner: the header (NOW, the conversation) and the paused/error line (here: the previous turn's error, read from the
+-- ChatTurn and ChatResponse entities). DROPPED, for want of a source on this seat: recall, goals (OPEN), the ledger (DECIDED, STABLE),
+-- the sql-over-events sections (ABOUT, WORKING ON, SINCE) and the layout budget. The dials are properties of the instance: header_label, error_label. The error line is `<label>: <eid of the turn's :response entity> - <its summary>`, whole (no cap).
+-- THE MODEL REPLACES IT with a pack that imports this one and defines `Banner.text` (Help:banner): a runtime pack is the upper layer, its
+-- arm wins (docs/c1f-layers.md). The instance is born once: the host restores stored entities at start, so `seeded` and the dials come back.
+
+Banner.header_label getter: this.header_dial or 'CONVERSATION'
+Banner.error_label getter: this.error_dial or 'THE PREVIOUS TURN ENDED WITH AN ERROR'
+Banner.now_parts getter: localtime(clock)
+Banner.now_line getter: 'NOW (for reference, not an event): ' + prop(this.now_parts, 'date') + ' ' + prop(this.now_parts, 'clock') + ' ' + prop(this.now_parts, 'zone')
+Banner.conv_header getter: this.header_label + ': ' + str(this.chat or 'main')
+-- THE PREVIOUS TURN is the one the chat names: a turn that ends (done or error) writes its eid to `last_turn` on its chat (`membrane::Chat:<chat>`, packs/chat_turn.c1f,
+-- the setter `last-turn`). The chat's turns are a LAZY class (stored, loaded on demand), so a banner that listed them with `instances('Chat')` would see only the
+-- few that happen to be loaded; one reference to the turn the pointer names loads it. A chat from before the pointer has none: no error line until its next turn ends.
+Banner.last_turn getter: prop('membrane::Chat:' + str(this.chat or 'main'), 'last_turn')
+Banner.previous getter: [{'eid': this.last_turn, 'state': prop(this.last_turn, 'state')}] if this.last_turn != None else []
+Banner.error_ids getter: [prop(p, 'eid') + ':response' for p in this.previous if prop(p, 'state') == 'error']
+Banner.error_lines getter: [this.error_label + ': ' + e + ' - ' + str(prop(e, 'summary') or '') for e in this.error_ids]
+Banner.text getter: join(concat([this.now_line, this.conv_header], this.error_lines), '\n')
+
+Boot.started on-setter seed-banner:
+  WHEN prop('membrane::Banner:owner:main', 'seeded') != True:
+    membrane::Banner:owner:main = Banner(chat: 'main', owner: 'owner', seeded: True)

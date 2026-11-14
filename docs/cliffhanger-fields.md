@@ -214,7 +214,7 @@ setters on a `say` field paced by freeze (decision 2).
 | - | - | - | - |
 | 1 | Parity gate | #971 journal | the checksum test (section 7) |
 | 2 | Goal-graph triggers (12) | goalgraph.py | section 5 |
-| 3 | Banner rules | graphbanner.py | computed fields |
+| 3 | Banner rules | graphbanner.py (deleted, #1143: map mode is the only mode) | - |
 | 4 | Recall policy | recall_policy.py #983 | guard setters |
 | 5 | Calls as writes | adapters.py #959/#956 | `on` setters |
 | 6 | Self learned triggers (179) | ch_learn.py | field rules |
@@ -245,15 +245,53 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
 - **View packs:** packs importing `dom` wait on the seat and run in the page. `DomNode:<key>` entities are elements:
   `tag` (allow-listed), `text` (textContent only, never HTML), `parent`, and allow-listed attributes (`href` http(s)
   only). A click writes `clicked`. A round's DOM writes are applied together, once per frame.
+- **DOM v2 (W1, #1143):** `DOM_ALLOW` in `fieldvm.js` is the ONE table of what a pack may put in the page: tags (the
+  old ones plus `input textarea select option form label button`), SVG tags (`svg g circle line path text rect`, made in
+  the SVG namespace), attributes (`value placeholder disabled type name for tabindex rows checked selected multiple`, the SVG geometry names, and
+  the `aria-*` / `data-*` prefixes). Refused, with a visible reason (`data-refused` on the element, `refused` {name:
+  reason} on the DomNode): `style`, `src`, `srcdoc`, `formaction`, every `on*`, a `href` that is not http(s), and a tag
+  outside the table (made a div). Events are written back as entity writes: `input`/`change` -> `value` (the text),
+  `submit` -> `submitted` (time; the default navigation is cancelled), `keydown` -> `key` `{key, shift, ctrl, composing, time}` (`composing` = `isComposing`: an IME's Enter)
+  (Enter without Shift in a textarea is `preventDefault`ed: that is how a chat sends), `focus`/`blur` -> `focused`
+  (bool), `scroll` -> `scroll` `{top, height, client}`, `click` -> `clicked`. The other direction: a pack's write of
+  `value`, `disabled` or `focused` (a `focus()` / `blur()` call) updates the element; an event whose value or flag the
+  field already holds writes nothing, and a `value` equal to the element's own is not set (the caret and the user's
+  typing stay). Page elements (`link`) get the same events. Test: `tests/js/fieldvm_dom2.test.mjs` (headless Chrome).
+- **Shell gaps closed (w60, #1143):** a pack's write of `scroll` `{top: n}` or `'end'` scrolls the element (after the round's other writes, so
+  the rows written in the same round are there; the measured `{top, height, client}` is written back, so the field holds what is true; an
+  event's own `{top, height, client}` is no command). `before` (a sibling DomNode eid) puts a node above that sibling when it is made; writing
+  it again moves the node; any other write never reorders. The shell's explicit drivers, called by the mount (nothing starts by itself):
+  `host.run_clock(ms)` / `host.stop_clock()` (one `setInterval` that ticks the field; `host.timers` is the seam a test fakes) and
+  `host.track_hidden()` (`Conn:page.hidden`, a bool, at start and on `visibilitychange`). Test: `tests/js/fieldvm_shell.test.mjs`.
 - **The page's own DOM:** `link(document.body)` puts every page element (open shadow roots included) in the field as
   `DomNode:page:#<id>` (`DomNode:page:<n>` without an id) with `page=true`, its tag, parent, id, own text and the
   allow-listed attributes. A new element is born whole, a change is written (only what differs from the field, so a
   pack's own write never echoes), a removed element leaves the field (`Fields::remove`: what read or referenced it
   recalculates). Packs read page elements, put their nodes in them (`parent = 'DomNode:page:#chat'`) and write to them;
   writing `text` replaces the element's content.
+- **Fetch (W2, #1143):** the page's VM has the seat's `Fetch` class (the pack text of `membrane/packs/fetch.c1f`, `FETCH_PACK`). A pack writes
+  `Fetch:<id>.request = {id, url, method?, headers?, body?, timeout_s?}`; the shell makes ONE `fetch()` and writes `request_result` back in the
+  seat's shape: `{id, status:'ok', rc:0, head:'<code> <text>', http_status, headers (lower-case names), body, started, finished, ms}`; a failure is
+  `{id, status:'error', rc, head:<reason>, started, finished, ms}` (rc 2 refused before sending, rc 1 network failure, abort, timeout). A non-2xx is
+  a normal result with its `http_status`. Same origin only (`location.origin`, credentials `same-origin`, so the owner cookie goes with it; any
+  other origin is refused with a reason); verbs GET/POST/PATCH/DELETE; headers `content-type` and `accept` only (never authorization or cookie);
+  `body` text only. No page-side timeout unless the request has `timeout_s`. `abort = true` on the entity aborts the one in flight. The same
+  request id written again on the same entity is not fetched twice.
+  **Stream (W3):** `request.stream = true` reads the body as SSE (bytes decoded as a stream, frames split on the blank line across reads; a
+  comment, an empty frame and a frame with no `data` are ignored; an unterminated tail at the end is dropped). Each frame is a page-local
+  entity `Chunk:<fetch eid>:<n>` = `{fetch: <fetch eid>, id: <request id>, n, data, done: false}` (n from 1; a multi-line `data` is joined with
+  `\n`; the SSE `event` name is not kept, the seat's Chunk has no such key). The end is a last Chunk `{n: n+1, data: '', done: true}` (with `error`
+  when the stream failed or was aborted), as the seat's `fetch.rs`, then `request_result` as for a plain fetch but with no `body`. A closed
+  connection is a failure receipt (`status:'error'`); there is no auto-reconnect. Chunks are fed as mirrors (never fetched, never sent) and all are
+  kept; the count is `n` of the last one. Test: `tests/js/fieldvm_stream.test.mjs`.
+  What the seat's own snapshot and events carry (`feed(..., mirror=true)`) is never fetched again. "Toward the seat: read-only" now means the
+  page may CALL the seat's routes this way; it still never writes the seat's field.
 - **Caching:** the loader asks for the wasm by its content hash (`fieldvm_version.js`), since the seat caches `.wasm`.
 - **Tests:** `tests/js/fieldvm_core.test.mjs` (the wasm engine in Node) and `tests/js/fieldvm_link.test.mjs` (the page
   link in headless Chrome over the DevTools protocol).
+  `tests/js/fieldvm_clock.test.mjs` covers the eval clock: time decides no value, but stats read it, and on wasm32 std's `Instant` panics, so `expr.rs` reads `Date.now`
+  there. `native/tests/wasm_check_1143.rs` keeps `cargo check --target wasm32-unknown-unknown --no-default-features --features wasm`
+  green (it skips when the target is missing); the shipped `fieldvm_core*` files are rebuilt with `native/build-web.sh`.
 
 ## 10. The language, 2026-11-10: setters and getters support the same forms
 
@@ -272,6 +310,12 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
   - in any expression, a list: `FOR b IN this.listed: prop(b, 'title')` is `[prop(b, 'title') for b in this.listed]`.
 - **`prop(x, name)`** reads a dict's key and follows an entity's id (`prop(this.server, 'state')`), tracked like
   `x.name`; `this.eid` is an entity's id (a reference is written as an id, never as an entity).
+- **`x[i]`** (2026-11-12): a list by position (`xs[0]`, `xs[-1]` from the end), a dict by key (`d['a']`), an entity by property
+  name (`e['name']`, the same as `e.name`). A miss is none, never an error, and a none base stays none. No slices (use
+  `head`, `pluck`). It counts as one node toward the 64-node cap.
+- **Entity values** (2026-11-12): a getter or setter may store an entity, or a list or dict holding entities. It is kept as
+  a reference, `{"$ref": "<eid>"}`, and reads back as the entity (`this.open[0].name`); the stored list follows the
+  entities as they change.
 - **Host built-ins**: a getter may call a function the seat provides, on live rounds only (a silent rebuild or birth
   never calls out); an error in one is the getter's error (a `refused` receipt, the field keeps its value). Effects
   are never getters: they stay writes to adapter branches. The seat's slow ones (`recall`, `rerank`) run off the
@@ -302,3 +346,20 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
     and opencode's configs as disabled servers (`import_result`).
   - The I/O is `membrane/mcpfield.py` (one connection loop, no polling: list-changed notifications list again);
     enabled servers connect again at boot, stop with the seat, and are mounted into the Claude rung as its own tools.
+
+## 12. Pronouns (#1101)
+
+A bare `it`, `that`, `they` / `them`, `these` / `those`, `he` / `him` or `she` / `her` in an expression, with no
+variable of that name, resolves when the method runs, innermost first through the chat's context stack (the turn's
+last touch, the entered entities, the chat's promoted subjects, the person's registers; `callctx.pronoun`), to the
+entity (a list of them, for `they`) it stands for:
+
+```c1f
+it.run = {args: ["--offline"]}          # "it" = the Command the conversation is on
+read(that.path)                         # "that" = the file mentioned before
+```
+
+It is live, not copied: a method written with `it` follows whatever "it" means each time it runs. A variable of the
+same name wins. An unbound or expired pronoun fails naming itself (`the pronoun "it" is not bound here`), never a
+silent wrong target. `this` is not a pronoun: it is the method's own object. The engine asks the host through its
+`pronoun` built-in (`native/src/expr.rs`); the Python side is `fields_live._Host.call`.

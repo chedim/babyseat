@@ -1,0 +1,52 @@
+PACK turn 1
+RESIDENT Ctx
+-- A TURN IS AN ENTITY (operator, 2026-11-12) and the pronouns are getters on it, with the rules callctx.py had. `Turn:<id>`
+-- holds `sid`, `ctx` (its chat's `Ctx:<sid>`), `touched` (what it touched, NEWEST FIRST) and `state`; the `Ctx` holds the entered
+-- `frames` (innermost first, each {eid, bind: {sing, pers, place}}) and the chat's `promoted` subjects ({main, prev, age}).
+-- (the dicts' keys are NOT pronoun names: the engine orders getters by finding other getters' names in an expression, strings
+-- included, so a key 'it' beside a getter `it` is a cycle)
+-- (there is no `this` pronoun: a bare `this` is the entity itself, and a getter NAMED this is read by every getter)
+-- A bare it / that / they / he / there in a c1f expression reads the property of the same name on the running turn.
+-- Innermost first: the turn's touched things, then the entered frames, then the chat's promoted subjects. Only concrete
+-- entities bind (never a concept, a word, a session, a register or the seat); he/she bind a person, there/here a place.
+
+Turn.pairs getter: [[e, lower(replace(e, 'membrane::', ''))] for e in (this.touched or [])]
+Turn.conc getter: [x for x in this.pairs if x[1] != '' and len([p for p in ['concept:', 'w:', 'word:', 'register:', 'session:', 's:?', 'seat:'] if startswith(x[1], p)]) == 0]
+Turn.t_all getter: [x[0] for x in this.conc]
+Turn.t_person getter: [x[0] for x in this.conc if startswith(x[1], 'person:') or startswith(x[1], 'p:')]
+Turn.t_place getter: [x[0] for x in this.conc if startswith(x[1], 'place:') or startswith(x[1], 'loc:') or startswith(x[1], 'location:')]
+Turn.t_thing getter: [e for e in this.t_all if not (e in this.t_person) and not (e in this.t_place)]
+
+-- (read inside the comprehension: the turn recalculates when its chat's frames or promoted change)
+Turn.frames_rows getter: [c.frames or [] for c in instances('Ctx') if c.eid == this.ctx]
+Turn.promoted_rows getter: [c.promoted or {} for c in instances('Ctx') if c.eid == this.ctx]
+Turn.frames_of getter: this.frames_rows[0] if len(this.frames_rows) > 0 else []
+Turn.f_binds getter: [prop(f, 'bind') or {} for f in this.frames_of]
+Turn.f_it getter: [prop(b, 'sing') for b in this.f_binds if prop(b, 'sing') != None]
+Turn.f_he getter: [prop(b, 'pers') for b in this.f_binds if prop(b, 'pers') != None]
+Turn.f_there getter: [prop(b, 'place') for b in this.f_binds if prop(b, 'place') != None]
+Turn.pr getter: this.promoted_rows[0] if len(this.promoted_rows) > 0 else {}
+Turn.pr_it getter: [x for x in [prop(this.pr, 'main')] if x != None]
+Turn.pr_that getter: [x for x in [prop(this.pr, 'prev') or prop(this.pr, 'main')] if x != None]
+
+Turn.p_it getter: (concat(this.t_thing, this.f_it, this.pr_it) or [None])[0]
+Turn.p_that getter: (concat(this.t_thing, this.f_it, this.pr_that) or [None])[0]
+Turn.p_he getter: (concat(this.t_person, this.f_he) or [None])[0]
+Turn.p_there getter: (concat(this.t_place, this.f_there) or [None])[0]
+Turn.p_they getter: this.t_all if len(this.t_all) > 1 else None
+
+Turn.it getter: this.p_it
+Turn.that getter: this.p_that
+Turn.they getter: this.p_they
+Turn.them getter: this.p_they
+Turn.these getter: this.p_they
+Turn.those getter: this.p_they
+Turn.he getter: this.p_he
+Turn.him getter: this.p_he
+Turn.she getter: this.p_he
+Turn.her getter: this.p_he
+Turn.there getter: this.p_there
+Turn.here getter: this.p_there
+
+-- the chat's context (a class a pack declares is mirrored into the engine: the turns read it)
+Ctx.depth getter: len(this.frames or [])

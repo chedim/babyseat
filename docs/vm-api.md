@@ -49,7 +49,9 @@ A trigger is an entity of class `Trigger`: `WHEN <watchers> WHERE <atoms>: <targ
   those only for a call's arguments (`_writable`, `_call_envelope`).
 - **Expressions.** A small safe language: arithmetic, comparisons, and/or/not, `x.prop`,
   `dot`, `norm`, `distance`, `unit`, `abs`, `min`, `max`, `prop`. The caps are
-  `EXPR_MAX` 400 characters, `NODES_MAX` 64 AST nodes and `VEC_MAX` 8192.
+  `VEC_MAX` 8192. The old `EXPR_MAX` 400 / `NODES_MAX` 64 caps are gone from the native VM (ch.py parity for them is intentionally dropped): an
+  evaluation has a step budget (`DEFAULT_EVAL_BUDGET` 10000, env `MEMBRANE_EVAL_BUDGET`; over it: the Error `budget exceeded (N steps)`).
+  A getter body is a block of locals (`name = expr` lines) ending in its value (docs/c1f-stdlib.md).
 - **Denied properties.** No trigger may write `command`, `owner`, `owner_sig`, `when`,
   `where`, `write`, `shadow` or `predicted`.
 - **Index.** `changed` triggers are indexed by the property they watch (#957); level
@@ -94,6 +96,11 @@ A birth carries the entity's content, which a bare `(eid, None, eid)` can't rebu
   effects). A fresh VM is drained after each one, and its writes must equal the recorded
   `trigger:*` writes, in order. The final state must match too. A native VM passes the
   same test on the same journals (`tests/test_journal_971.py`).
+
+Limits an evaluation runs under (native): a step budget (default 100,000, env `MEMBRANE_EVAL_BUDGET`); over it the node is an
+Error (`budget exceeded (N steps)`). The budget is deterministic, and it is the only limit that changes a value: time decides nothing
+(2026-11-13; the former 10 ms self-time allowance and its `Trip` entities are gone, so a replay needs no recorded kills). Time is only
+measured: `Stats:eval` flags a `slow` evaluation (self time over `MEMBRANE_EVAL_TIME_MS`, default 10). See docs/c1f-stdlib.md, Limits.
 
 ## 6. The native VM (`native/`, `membrane/ch_native.py`, #971 step 3)
 

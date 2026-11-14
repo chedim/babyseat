@@ -1,0 +1,417 @@
+PACK field_view 1
+IMPORT dom 1
+IMPORT fetch 1
+IMPORT shell_view 1
+-- THE FIELD AS A 3D GRAPH, A VIEW PACK (#1143, operator 2026-11-14: "the field as a 3D graph, the graph growing around it, the cap following the field's activity").
+-- This app folder (apps/field.c1f) is an EXTRA app: the default launch (scripts/seat) does not load it; it runs in the PAGE's field engine when a seat is started with it (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f, and does not run it), the way chat_view.c1f does, and draws
+-- the field's entities as an SVG scene with a 3D layout that it computes itself: no JavaScript logic, only the shell's DOM mount (ui/fieldvm.js).
+--   DomNode:shell:slot:field   the shell's slot the view's root sits in (shell_view.c1f: the view registers `Nav:field` when the shell opens, draws when `Nav:field` first becomes active, and does no periodic work while it is not active)
+--   Scene:field   the view: the window, the polls, the camera (the basis rx/ry/rz), the clock; the shell's boot (ui/boot.js) births it {open: true}
+--   Dot:<eid>     one entity of the field: `raw` is the row of the seat's active window ({id, cls, updated, parent}), `p` its place in space; everything drawn is a getter of those
+--   Fetch:map     the poll of `GET /ui/fieldvm/active?m=<window>` (the page's Fetch, ui/fieldvm.js): the request is the effect, the receipt `request_result` comes back
+-- THE POLL: the answer of `GET /ui/fieldvm/active?m=<window>` gives the window, the hidden classes and prefixes; the view asks again `poll_ms` after each answer (no write stream: operator 2026-11-14 removed the host's write feed).
+-- THE ACTIVE WINDOW. The seat answers the `window` entities written most recently (by `updated`, hidden classes left out: docs/field-view-plan.md) and this view keeps exactly those:
+-- an entity that falls out of the answer is retired here (its Dot and its DomNodes leave the page's engine and the page), so the view's memory follows the field's activity; on the
+-- seat the route reads columns only, so the entities it does not list stay unloaded. A new row is born next to its owner (the eid's colon prefix) and the layout grows around it.
+-- THE LAYOUT is a force layout (a classic force layout) in 3D: every Dot repels every other, an owner pulls its children (the ownership edge), a weak pull to the centre keeps the cloud together.
+-- Each Dot is its own setter (`Dot.go`, one per clock tick) so the work of a step is bounded per evaluation; the layout cools (`heat`) and goes quiet, and a birth or a leave warms it again.
+-- MASS = the number of inbound edges (the owner's children), the radius. THE CAMERA turns only by the user's drag (no trig: the basis is rotated
+-- and re-normalised); the camera is a drag (the shell writes `pointer` on the SVG), the wheel, and buttons (nearer, farther); NOTHING turns by itself (the operator: no automatic rotation), so a settled scene writes nothing per tick; a click on a dot selects it.
+-- THE CONSTANTS are flagged in docs/field-view-plan.md "Field view 3D": `window` (the launch fact `field_window`; 150 is the value TRIED, not decided), the poll period (`field_poll_ms`, 2000 tried),
+-- and the layout and camera numbers in `Scene.open` (tuned by eye on a seat with a few hundred entities).
+
+Scene.tick getter: clock
+
+-- the shell's contract (shell_view.c1f): registered when the shell opens, drawn the first time the view is shown (a page whose Field is never opened never draws it)
+Shell.open on-setter field-register:
+  WHEN this.open:
+    ('Nav:field').title = 'Field'
+    ('Nav:field').order = 20
+Nav.active on-setter field-activate:
+  WHEN this.eid == 'Nav:field' and this.active == True and not prop('Scene:field', 'open'):
+    ('Scene:field').open = True
+
+-- ---- the scene: the skeleton, the settings, the first call ----
+Scene.open on-setter field-draw:
+  WHEN this.open:
+    ('DomNode:f:root').tag = 'div'
+    ('DomNode:f:root').parent = 'DomNode:shell:slot:field'
+    ('DomNode:f:root').class = 'fieldview'
+    ('DomNode:f:head').parent = 'DomNode:f:root'
+    ('DomNode:f:head').tag = 'div'
+    ('DomNode:f:head').class = 'fhead'
+    ('DomNode:f:count').parent = 'DomNode:f:head'
+    ('DomNode:f:count').tag = 'span'
+    ('DomNode:f:count').class = 'fcount'
+    ('DomNode:f:count').role = 'status'
+    ('DomNode:f:zin').parent = 'DomNode:f:head'
+    ('DomNode:f:zin').tag = 'button'
+    ('DomNode:f:zin').type = 'button'
+    ('DomNode:f:zin').text = 'Nearer'
+    ('DomNode:f:zout').parent = 'DomNode:f:head'
+    ('DomNode:f:zout').tag = 'button'
+    ('DomNode:f:zout').type = 'button'
+    ('DomNode:f:zout').text = 'Farther'
+    ('DomNode:f:wless').parent = 'DomNode:f:head'
+    ('DomNode:f:wless').tag = 'button'
+    ('DomNode:f:wless').type = 'button'
+    ('DomNode:f:wless').text = 'Fewer'
+    ('DomNode:f:wless').title = 'Half the window: keep only the more recently active entities'
+    ('DomNode:f:wmore').parent = 'DomNode:f:head'
+    ('DomNode:f:wmore').tag = 'button'
+    ('DomNode:f:wmore').type = 'button'
+    ('DomNode:f:wmore').text = 'More'
+    ('DomNode:f:wmore').title = 'Double the window: keep more of the field in view'
+    ('DomNode:f:body').parent = 'DomNode:f:root'
+    ('DomNode:f:body').tag = 'div'
+    ('DomNode:f:body').class = 'fbody'
+    ('DomNode:f:svg').parent = 'DomNode:f:body'
+    ('DomNode:f:svg').tag = 'svg'
+    ('DomNode:f:svg').class = 'fsvg'
+    ('DomNode:f:svg').viewBox = '-100 -100 200 200'
+    ('DomNode:f:svg').role = 'img'
+    ('DomNode:f:svg').aria-label = 'The field as a 3D graph of its most recently active entities. Each dot is an entity; a line joins an entity to its owner.'
+    ('DomNode:f:lines').parent = 'DomNode:f:svg'
+    ('DomNode:f:lines').tag = 'g'
+    ('DomNode:f:lines').class = 'flines'
+    ('DomNode:f:dots').parent = 'DomNode:f:svg'
+    ('DomNode:f:dots').tag = 'g'
+    ('DomNode:f:dots').class = 'fdots'
+    ('DomNode:f:legend').parent = 'DomNode:f:body'
+    ('DomNode:f:legend').tag = 'ul'
+    ('DomNode:f:legend').class = 'flegend'
+    ('DomNode:f:note').parent = 'DomNode:f:root'
+    ('DomNode:f:note').tag = 'div'
+    ('DomNode:f:note').class = 'fnote'
+    ('DomNode:f:note').hidden = True
+    ('Nav:field').filled = True
+    this.window = ([b.field_window for b in instances('Boot') if b.field_window != None] or [150])[0]
+    this.poll_ms = ([b.field_poll_ms for b in instances('Boot') if b.field_poll_ms != None] or [2000])[0]
+    this.tick_ms = 100
+    this.rx = [1.0, 0.0, 0.0]
+    this.ry = [0.0, 1.0, 0.0]
+    this.rz = [0.0, 0.0, 1.0]
+    this.zoom = 1.0
+    this.focal = 300.0
+    this.drag = 0.01
+    this.drag_px = 3.0
+    this.wheel = 0.001
+    this.heat = 1.0
+    this.birth_heat = 0.3
+    this.rep = 8000.0
+    this.rest = 16.0
+    this.pull = 0.08
+    this.centre = 0.015
+    this.cool = 0.985
+    this.polling = True
+    this.seq = 1
+    ('Fetch:map').request = {'id': 'map-1', 'url': '/ui/fieldvm/active?m=' + str(this.window)}
+
+-- ---- the poll: `poll_ms` after the last answer, one request at a time, not while the tab is hidden ----
+Scene.tick on-setter field-poll:
+  WHEN this.open and prop('Nav:field', 'active') != False and not this.polling and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= this.poll_ms / 1000:
+    n = (this.seq or 0) + 1
+    this.seq = n
+    this.polling = True
+    ('Fetch:map').request = {'id': 'map-' + str(n), 'url': '/ui/fieldvm/active?m=' + str(this.window)}
+
+-- the receipt, read once: ok = the call went and the seat said 2xx
+Fetch.mv getter:
+  rq = this.request_result
+  bd = json(str(prop(rq, 'body') or ''))
+  jb = {} if bd is Error else bd
+  hs = prop(rq, 'http_status')
+  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'edge_eid': prop(jb, 'eid'), 'cls': prop(jb, 'cls'), 'props': prop(jb, 'props'), 'owner': prop(jb, 'owner'), 'children': prop(jb, 'children'), 'refs': prop(jb, 'refs'), 'nodes': prop(jb, 'nodes'), 'total': prop(jb, 'n_total'), 'hidden': prop(jb, 'hidden'), 'prefixes': prop(jb, 'hidden_prefixes'), 'why': (str(prop(prop(jb, 'error'), 'message')) if prop(jb, 'error') else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+
+Fetch.mv on-setter field-answer:
+  WHEN this.eid == 'Fetch:map':
+    ('Scene:field').polling = False
+    ('Scene:field').last_poll = clock
+Fetch.mv on-setter field-rows:
+  WHEN this.eid == 'Fetch:map' and prop(this.mv, 'ok') and prop(this.mv, 'nodes') != None:
+    rows = prop(this.mv, 'nodes')
+    ids = [str(prop(r, 'id')) for r in rows]
+    ('Scene:field').note = ''
+    ('Scene:field').total = prop(this.mv, 'total')
+    ('Scene:field').hidden = prop(this.mv, 'hidden') or []
+    ('Scene:field').hidden_prefixes = prop(this.mv, 'prefixes') or []
+    gone = [d for d in instances('Dot') if not (d.rid in ids)]
+    born = [r for r in rows if prop('Dot:' + str(prop(r, 'id')), 'raw') == None]
+    FOR r IN rows:
+      ('Dot:' + str(prop(r, 'id'))).born = True
+      ('Dot:' + str(prop(r, 'id'))).raw = r
+    FOR d IN gone:
+      (d.eid).leave = True
+    ('Scene:field').heat = max(prop('Scene:field', 'heat'), prop('Scene:field', 'birth_heat')) if len(gone) + len(born) > 0 else prop('Scene:field', 'heat')
+    ('Scene:field').left = len(gone)
+  ELSE WHEN this.eid == 'Fetch:map':
+    ('Scene:field').note = 'The seat did not give the active entities: ' + str(prop(this.mv, 'why')) + '. The view keeps what it has and asks again.'
+
+-- a Dot leaves: it and its three DomNodes are retired (the host removes them from the engine and the page)
+Dot.leave on-setter dot-leave:
+  WHEN this.leave:
+    ('DomNode:f:c:' + this.rid).retire = True
+    ('DomNode:f:h:' + this.rid).retire = True
+    ('DomNode:f:g:' + this.rid).retire = True
+    ('DomNode:f:l:' + this.rid).retire = True
+    ('DomNode:f:t:' + this.rid).retire = True
+    (this.eid).retire = True
+
+Scene.note on-setter field-note:
+  ALWAYS:
+    ('DomNode:f:note').hidden = not this.note
+    ('DomNode:f:note').text = this.note or ''
+
+-- ---- a Dot: everything shown is a getter of its row and its place ----
+Dot.rid getter: str(prop(this.raw, 'id') or '')
+Dot.kind getter: str(prop(this.raw, 'cls') or '')
+Dot.parent_id getter: prop(this.raw, 'parent')
+-- MASS: the inbound edges (the entities that sit under it)
+Dot.kids getter: [d.eid for d in instances('Dot') if d.parent_id == this.rid]
+Dot.mass getter: len(this.kids)
+
+-- where a new Dot is born: next to its owner when the owner is here, else around the middle; the offset comes from the digits of its `updated` (no random builtin: the same write, the same place)
+Dot.raw on-setter field-born:
+  WHEN this.raw != None and this.p == None:
+    u = after(str(num(prop(this.raw, 'updated') or 0) + 0.1234567), '.')
+    jit = [num('0.' + head(u, 2)) - 0.5, num('0.' + head(tail(u, 4), 2)) - 0.5, num('0.' + tail(u, 2)) - 0.5]
+    pp = prop('Dot:' + str(prop(this.raw, 'parent')), 'p') if prop(this.raw, 'parent') != None else None
+    this.p = (pp + jit * [12.0]) if pp != None else (jit * [60.0])
+    ('DomNode:f:g:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:dots'
+    ('DomNode:f:g:' + str(prop(this.raw, 'id'))).tag = 'g'
+    ('DomNode:f:c:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:g:' + str(prop(this.raw, 'id'))
+    ('DomNode:f:c:' + str(prop(this.raw, 'id'))).tag = 'circle'
+    ('DomNode:f:h:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:g:' + str(prop(this.raw, 'id'))
+    ('DomNode:f:h:' + str(prop(this.raw, 'id'))).tag = 'circle'
+    ('DomNode:f:h:' + str(prop(this.raw, 'id'))).r = 7
+    ('DomNode:f:h:' + str(prop(this.raw, 'id'))).fill = 'rgba(0,0,0,0)'
+    ('DomNode:f:l:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:lines'
+    ('DomNode:f:l:' + str(prop(this.raw, 'id'))).tag = 'line'
+    ('DomNode:f:t:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:g:' + str(prop(this.raw, 'id'))
+    ('DomNode:f:t:' + str(prop(this.raw, 'id'))).tag = 'text'
+    ('DomNode:f:t:' + str(prop(this.raw, 'id'))).text = head(str(prop(this.raw, 'id')), 40)
+    ('DomNode:f:t:' + str(prop(this.raw, 'id'))).hidden = True
+    ('DomNode:f:l:' + str(prop(this.raw, 'id'))).hidden = pp == None
+
+-- ---- the projection: the camera's basis (rx, ry the screen, rz the depth) applied to the place, with a perspective ----
+Dot.scr getter:
+  WHEN this.p == None: None
+  ELSE:
+    sc = Scene:field
+    k = sc.zoom * sc.focal / (sc.focal + dot(sc.rz, this.p))
+    a = max(0.2, min(1.0, 0.65 - dot(sc.rz, this.p) / 200.0))
+    {'x': dot(sc.rx, this.p) * k, 'y': dot(sc.ry, this.p) * k, 'r': (1.4 + 0.9 * min(this.mass, 8)) * k, 'fill': 'rgba(' + prop(([h for h in sc.hues if prop(h, 'cls') == this.kind] or [{'rgb': '120,120,120'}])[0], 'rgb') + ',' + str(a) + ')'}
+
+-- the dot's group is moved by ONE write (`transform`), the circle, its invisible hit circle and its label sit in it at 0,0; the circle's size and colour are written only when they change
+Dot.scr on-setter field-draw-dot:
+  WHEN this.scr != None:
+    ('DomNode:f:g:' + this.rid).transform = 'translate(' + str(prop(this.scr, 'x')) + ' ' + str(prop(this.scr, 'y')) + ')'
+    ('DomNode:f:c:' + this.rid).r = prop(this.scr, 'r')
+    ('DomNode:f:c:' + this.rid).fill = prop(this.scr, 'fill')
+-- the selected dot is outlined: written when the selection changes, not per tick
+Dot.sel getter: Scene:field.selected == this.rid
+Dot.sel on-setter field-draw-sel:
+  WHEN this.raw != None:
+    ('DomNode:f:c:' + this.rid).stroke = 'currentColor' if this.sel else None
+    ('DomNode:f:c:' + this.rid).stroke-width = 0.8 if this.sel else None
+
+-- a label only for the selected dot and the dots joined to it
+Dot.show getter: Scene:field.selected != None and (this.rid == Scene:field.selected or this.parent_id == Scene:field.selected or prop('Dot:' + str(Scene:field.selected), 'parent_id') == this.rid)
+Dot.show on-setter field-label:
+  WHEN this.raw != None:
+    ('DomNode:f:t:' + this.rid).hidden = not this.show
+-- the label's offset is written only while it is shown
+Dot.lab getter: prop(this.scr, 'r') + 1.5 if this.show and this.scr != None else None
+Dot.lab on-setter field-label-place:
+  WHEN this.lab != None:
+    ('DomNode:f:t:' + this.rid).x = this.lab
+
+-- the line to the owner, drawn when the owner is here
+Dot.seg getter:
+  WHEN this.scr == None or this.parent_id == None: None
+  ELSE:
+    ps = prop('Dot:' + str(this.parent_id), 'scr')
+    {'x1': prop(this.scr, 'x'), 'y1': prop(this.scr, 'y'), 'x2': prop(ps, 'x'), 'y2': prop(ps, 'y')} if ps != None else None
+Dot.linked getter: this.seg != None
+Dot.linked on-setter field-line-shown:
+  WHEN this.raw != None:
+    ('DomNode:f:l:' + this.rid).hidden = not this.linked
+Dot.seg on-setter field-draw-line:
+  WHEN this.raw != None and this.seg != None:
+    ('DomNode:f:l:' + this.rid).x1 = prop(this.seg, 'x1')
+    ('DomNode:f:l:' + this.rid).y1 = prop(this.seg, 'y1')
+    ('DomNode:f:l:' + this.rid).x2 = prop(this.seg, 'x2')
+    ('DomNode:f:l:' + this.rid).y2 = prop(this.seg, 'y2')
+
+-- ---- the colours: a class gets the next colour of a fixed palette THE FIRST TIME the view sees it and keeps it (the twelfth colour serves every class after the eleventh) ----
+Scene.classes getter: [prop(r, 'c') for r in sort_by([{'c': c} for c in distinct([d.kind for d in instances('Dot')])], 'c')]
+Scene.palette getter: ['76,155,232', '240,140,60', '90,190,120', '200,100,200', '230,200,70', '90,200,210', '225,95,95', '150,150,240', '170,120,80', '140,200,60', '240,150,190', '120,120,120']
+Scene.classes on-setter field-hues:
+  WHEN this.open and this.classes != None:
+    old = this.hues or []
+    fresh = [c for c in this.classes if not (c in [prop(h, 'cls') for h in old])]
+    this.hues = concat(old, [{'cls': c, 'rgb': this.palette[min(len(old) + len([x for x in fresh if x < c]), 11)]} for c in fresh]) if len(fresh) > 0 else old
+-- the legend: one row per class in view (a colour dot and its name), keyed by the class; a class that left is retired
+Scene.legend getter: [h for h in (this.hues or []) if prop(h, 'cls') in this.classes]
+Scene.legend on-setter field-legend:
+  WHEN this.open and this.legend != None:
+    FOR l IN this.legend:
+      ('DomNode:f:lg:' + prop(l, 'cls')).parent = 'DomNode:f:legend'
+      ('DomNode:f:lg:' + prop(l, 'cls')).tag = 'li'
+      ('DomNode:f:lgd:' + prop(l, 'cls')).parent = 'DomNode:f:lg:' + prop(l, 'cls')
+      ('DomNode:f:lgd:' + prop(l, 'cls')).tag = 'svg'
+      ('DomNode:f:lgd:' + prop(l, 'cls')).viewBox = '0 0 10 10'
+      ('DomNode:f:lgd:' + prop(l, 'cls')).class = 'fdot'
+      ('DomNode:f:lgc:' + prop(l, 'cls')).parent = 'DomNode:f:lgd:' + prop(l, 'cls')
+      ('DomNode:f:lgc:' + prop(l, 'cls')).tag = 'circle'
+      ('DomNode:f:lgc:' + prop(l, 'cls')).cx = 5
+      ('DomNode:f:lgc:' + prop(l, 'cls')).cy = 5
+      ('DomNode:f:lgc:' + prop(l, 'cls')).r = 4.5
+      ('DomNode:f:lgc:' + prop(l, 'cls')).fill = 'rgb(' + prop(l, 'rgb') + ')'
+      ('DomNode:f:lgt:' + prop(l, 'cls')).parent = 'DomNode:f:lg:' + prop(l, 'cls')
+      ('DomNode:f:lgt:' + prop(l, 'cls')).tag = 'span'
+      ('DomNode:f:lgt:' + prop(l, 'cls')).text = prop(l, 'cls')
+    wanted = concat(concat(['DomNode:f:lg:' + prop(l, 'cls') for l in this.legend], ['DomNode:f:lgd:' + prop(l, 'cls') for l in this.legend]), concat(['DomNode:f:lgc:' + prop(l, 'cls') for l in this.legend], ['DomNode:f:lgt:' + prop(l, 'cls') for l in this.legend]))
+    FOR x IN [x for x in instances('DomNode') if startswith(x.eid, 'DomNode:f:lg') and not (x.eid in wanted)]:
+      (x.eid).retire = True
+
+-- ---- the layout: one step per clock tick, one setter per Dot (bounded work per evaluation) ----
+-- forces on a Dot: every other Dot pushes it away (the weight rep / (d^2 + 1)^2 along the line: the whole push is a few vector operations over the lists of every place, taken once per tick),
+-- its owner and its children pull it to `rest` apart (the spring), a pull to the middle; the step is capped and scaled by the heat.
+Scene.tick on-setter field-step:
+  WHEN this.open and this.heat > 0.0 and not prop('Conn:page', 'hidden') and prop('Nav:field', 'active') != False:
+    ps = [d.p for d in instances('Dot') if d.p != None]
+    this.xs = [p[0] for p in ps]
+    this.ys = [p[1] for p in ps]
+    this.zs = [p[2] for p in ps]
+    this.heat = this.heat * this.cool if this.heat > 0.02 else 0.0
+    FOR d IN instances('Dot'):
+      (d.eid).go = this.tick
+Dot.go on-setter field-force:
+  WHEN this.p != None and Scene:field.heat > 0.0:
+    dx = [this.p[0]] - Scene:field.xs
+    dy = [this.p[1]] - Scene:field.ys
+    dz = [this.p[2]] - Scene:field.zs
+    d2 = dx * dx + dy * dy + dz * dz + [1.0]
+    w = [Scene:field.rep] / (d2 * d2)
+    pushed = [dot(w, dx), dot(w, dy), dot(w, dz)]
+    pp = prop('Dot:' + str(this.parent_id), 'p') if this.parent_id != None else None
+    gap = (pp - this.p) if pp != None else [0.0, 0.0, 0.0]
+    pulled = gap * [Scene:field.pull * (norm(gap) - Scene:field.rest) / max(norm(gap), 0.1)] if pp != None else [0.0, 0.0, 0.0]
+    toward = [prop(k, 'p') - this.p for k in this.kids]
+    kw = [Scene:field.pull * (norm(g) - Scene:field.rest) / max(norm(g), 0.1) for g in toward]
+    drawn = [dot(kw, [g[0] for g in toward]), dot(kw, [g[1] for g in toward]), dot(kw, [g[2] for g in toward])] if len(toward) > 0 else [0.0, 0.0, 0.0]
+    f = pushed + pulled + drawn - this.p * [Scene:field.centre]
+    this.p = this.p + f * [Scene:field.heat * min(1.0, 4.0 / max(norm(f), 0.01))]
+
+-- ---- the pointer (the shell writes `pointer` and `wheel` on the SVG's DomNode): a drag with a button held turns the camera, a wheel zooms ----
+-- a drag of d pixels turns by the angle a = d * drag (radians, small-angle: cos = 1 - a^2/2, sin = a, then the basis is re-normalised); a wheel of dy zooms by 1 - dy * wheel, between 0.25 and 8
+DomNode.pointer on-setter field-drag:
+  WHEN this.eid == 'DomNode:f:svg' and prop(this.pointer, 'type') == 'pointerdown':
+    ('Scene:field').grab = {'x': prop(this.pointer, 'x'), 'y': prop(this.pointer, 'y')}
+    ('Scene:field').press = {'x': prop(this.pointer, 'x'), 'y': prop(this.pointer, 'y')}
+    ('Scene:field').moved = False
+  ELSE WHEN this.eid == 'DomNode:f:svg' and prop(this.pointer, 'type') == 'pointermove' and prop('Scene:field', 'grab') != None:
+    sc = Scene:field
+    ('Scene:field').moved = prop(sc, 'moved') or abs(prop(this.pointer, 'x') - prop(sc.press, 'x')) + abs(prop(this.pointer, 'y') - prop(sc.press, 'y')) > sc.drag_px
+    a = (prop(this.pointer, 'x') - prop(sc.grab, 'x')) * sc.drag
+    b = (prop(this.pointer, 'y') - prop(sc.grab, 'y')) * sc.drag
+    nx = unit(sc.rx * [1.0 - a * a / 2.0] + sc.rz * [a])
+    nz = unit(sc.rz * [1.0 - a * a / 2.0] - sc.rx * [a])
+    ny = unit(sc.ry * [1.0 - b * b / 2.0] - nz * [b])
+    mz = unit(nz * [1.0 - b * b / 2.0] + sc.ry * [b])
+    ('Scene:field').rx = nx
+    ('Scene:field').ry = ny
+    ('Scene:field').rz = mz
+    ('Scene:field').grab = {'x': prop(this.pointer, 'x'), 'y': prop(this.pointer, 'y')}
+  ELSE WHEN this.eid == 'DomNode:f:svg':
+    ('Scene:field').grab = None
+DomNode.wheel on-setter field-wheel:
+  WHEN this.eid == 'DomNode:f:svg':
+    ('Scene:field').zoom = max(0.25, min(8.0, prop('Scene:field', 'zoom') * (1.0 - prop(this.wheel, 'dy') * prop('Scene:field', 'wheel'))))
+
+-- ---- the controls and the selection ----
+DomNode.clicked on-setter field-click:
+  WHEN this.eid == 'DomNode:f:zin':
+    ('Scene:field').zoom = min(prop('Scene:field', 'zoom') * 1.25, 8.0)
+  ELSE WHEN this.eid == 'DomNode:f:zout':
+    ('Scene:field').zoom = max(prop('Scene:field', 'zoom') / 1.25, 0.25)
+  ELSE WHEN this.eid == 'DomNode:f:wless':
+    ('Scene:field').window = max(5, num(before(str(prop('Scene:field', 'window') / 2), '.')))
+  ELSE WHEN this.eid == 'DomNode:f:wmore':
+    ('Scene:field').window = prop('Scene:field', 'window') * 2
+  ELSE WHEN (startswith(this.eid, 'DomNode:f:c:') or startswith(this.eid, 'DomNode:f:h:')) and prop('Scene:field', 'moved'):
+    ('Scene:field').moved = False
+  ELSE WHEN startswith(this.eid, 'DomNode:f:c:'):
+    ('Scene:field').selected = None if prop('Scene:field', 'selected') == after(this.eid, 'DomNode:f:c:') else after(this.eid, 'DomNode:f:c:')
+  ELSE WHEN startswith(this.eid, 'DomNode:f:h:'):
+    ('Scene:field').selected = None if prop('Scene:field', 'selected') == after(this.eid, 'DomNode:f:h:') else after(this.eid, 'DomNode:f:h:')
+-- a new window is asked for at the next tick (the poll is not held by the last answer)
+Scene.window on-setter field-window:
+  WHEN this.open:
+    this.last_poll = 0
+
+-- ---- the words: how many are in view of how many there are, and the selected entity ----
+Scene.count_text getter: str(len(instances('Dot'))) + ' of ' + str(this.total if this.total != None else 0) + ' entities in view (the ' + str(this.window) + ' most recently active)'
+Scene.count_text on-setter field-count:
+  WHEN this.open:
+    ('DomNode:f:count').text = this.count_text
+Scene.info getter:
+  WHEN this.selected == None: None
+  ELSE WHEN prop('Dot:' + str(this.selected), 'rid') != None: prop('Dot:' + str(this.selected), 'rid') + ' · ' + prop('Dot:' + str(this.selected), 'kind') + ' · ' + str(prop('Dot:' + str(this.selected), 'mass')) + ' under it · changed ' + before(str(clock - num(prop(prop('Dot:' + str(this.selected), 'raw'), 'updated') or 0)), '.') + ' s ago'
+  ELSE: str(this.selected) + ' (not in view)'
+-- ---- the EDGE LIST of the selected entity (operator 2026-11-14: it replaces the card's "near"): the owner, the children and what it points at by `$ref`, each with its kind, from `GET /ui/fieldvm/edges` ----
+-- a click on a row selects that entity (it may be out of the window: the panel still lists its edges), so the graph can be walked
+Scene.selected on-setter field-edges-ask:
+  WHEN this.selected != None:
+    n = (this.seq or 0) + 1
+    this.seq = n
+    ('Fetch:edges').request = {'id': 'edges-' + str(n), 'url': '/ui/fieldvm/edges?eid=' + replace(str(this.selected), ' ', '%20') + '&n=' + str(this.window)}
+Fetch.mv on-setter field-edges-answer:
+  WHEN this.eid == 'Fetch:edges' and prop(this.mv, 'ok'):
+    ('Scene:field').edges = {'eid': prop(this.mv, 'edge_eid'), 'owner': prop(this.mv, 'owner'), 'children': prop(this.mv, 'children'), 'refs': prop(this.mv, 'refs')}
+Scene.edges_here getter: this.edges if this.edges != None and this.selected != None and prop(this.edges, 'eid') == this.selected else None
+Scene.edge_rows getter:
+  WHEN this.edges_here == None: []
+  ELSE:
+    e = this.edges_here
+    all = concat(concat([{'key': 'owner:' + str(prop(prop(e, 'owner'), 'id')), 'id': prop(prop(e, 'owner'), 'id'), 'text': 'owner · ' + str(prop(prop(e, 'owner'), 'id'))}] if prop(e, 'owner') != None else [], [{'key': 'child:' + str(prop(c, 'id')), 'id': prop(c, 'id'), 'text': 'child · ' + str(prop(c, 'id'))} for c in (prop(e, 'children') or [])]), [{'key': 'ref:' + str(prop(r, 'id')), 'id': prop(r, 'id'), 'text': 'ref → ' + str(prop(r, 'id'))} for r in (prop(e, 'refs') or [])])
+    all if len(all) > 0 else [{'key': 'none', 'id': None, 'text': 'no owner, no children, no references'}]
+
+-- ---- the DETAIL PANEL (the shell's slide-over, shell_view.c1f; operator 2026-11-14): a click on a node opens it from the right over the chat with the entity's id and class, its properties and its edges ----
+-- the properties come from `GET /ui/fieldvm/entity` (the one row: class and props, nothing loaded on the seat), the edges from `GET /ui/fieldvm/edges`; a click on an edge row (the panel's `picked`) selects that
+-- entity; closing the panel (the scrim, Close, Esc: `Panel.open` false) clears the selection.
+Scene.selected on-setter field-entity-ask:
+  WHEN this.selected != None:
+    n = (this.seq or 0) + 1
+    this.seq = n
+    ('Fetch:entity').request = {'id': 'entity-' + str(n), 'url': '/ui/fieldvm/entity?eid=' + replace(str(this.selected), ' ', '%20')}
+Fetch.mv on-setter field-entity-answer:
+  WHEN this.eid == 'Fetch:entity' and prop(this.mv, 'ok'):
+    ('Scene:field').ent = {'eid': prop(this.mv, 'edge_eid'), 'cls': prop(this.mv, 'cls'), 'props': prop(this.mv, 'props')}
+  ELSE WHEN this.eid == 'Fetch:entity':
+    ('Scene:field').ent = {'eid': prop('Scene:field', 'selected'), 'cls': None, 'props': None, 'why': prop(this.mv, 'why')}
+Scene.ent_here getter: this.ent if this.ent != None and this.selected != None and prop(this.ent, 'eid') == this.selected else None
+Scene.doc getter:
+  WHEN this.selected == None: None
+  ELSE:
+    pr = prop(this.ent_here, 'props')
+    prow = [{'key': 'b:' + str(prop(p, 'k')), 'label': str(prop(p, 'k')), 'text': str(prop(p, 'v'))} for p in (pr or [])]
+    erow = [{'key': 'd' + ('1' if startswith(str(prop(r, 'key')), 'owner') else ('2' if startswith(str(prop(r, 'key')), 'child') else ('3' if startswith(str(prop(r, 'key')), 'ref') else '4'))) + ':' + str(prop(r, 'key')), 'label': prop(r, 'text'), 'text': prop(r, 'text'), 'target': prop(r, 'id')} for r in this.edge_rows]
+    {'title': str(this.selected), 'sub': (str(prop(this.ent_here, 'cls')) + ' · ' if prop(this.ent_here, 'cls') != None else '') + str(this.info), 'note': ('Reading the properties…' if this.ent_here == None else ('The properties could not be read: ' + str(prop(this.ent_here, 'why')) + '.' if pr == None else '')), 'rows': concat(concat(concat([{'key': 'a:head', 'label': 'Properties', 'head': True}], prow if len(prow) > 0 else [{'key': 'b-none', 'label': 'No stored properties.'}] if pr != None else []), [{'key': 'c:head', 'label': 'Edges', 'head': True}]), erow)}
+Scene.doc on-setter field-panel:
+  WHEN this.doc != None:
+    ('Panel:detail').owner = 'field'
+    ('Panel:detail').title = prop(this.doc, 'title')
+    ('Panel:detail').sub = prop(this.doc, 'sub')
+    ('Panel:detail').note = prop(this.doc, 'note')
+    ('Panel:detail').rows = prop(this.doc, 'rows')
+    ('Panel:detail').open = True
+  ELSE WHEN prop('Panel:detail', 'owner') == 'field' and prop('Panel:detail', 'open'):
+    ('Panel:detail').open = False
+Panel.open on-setter field-panel-closed:
+  WHEN this.owner == 'field' and this.open == False and prop('Scene:field', 'selected') != None:
+    ('Scene:field').selected = None
+Panel.picked on-setter field-panel-pick:
+  WHEN this.owner == 'field' and this.picked != None:
+    ('Scene:field').selected = this.picked

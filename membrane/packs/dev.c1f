@@ -1,0 +1,13 @@
+PACK dev 1
+IMPORT boot 1
+IMPORT proc 1
+-- THE DEV COMMANDS (docs/python-to-c1f.md): programs a worker needs at once, as Command entities, made by writing to
+-- nodes. On a no-bash seat there is no shell: a worker that wanted git first had to define a Command for it, and the
+-- definitions split into a task tree seven levels deep. The seat writes Boot:seat.started once, after the field engine
+-- is up; this setter answers with the Commands (a write to `<Class>:<key>` of an imported class creates it).
+-- Run one with a write: Command:git.run = {id, args: ['-C', '<dir>', 'status']}; see the Help:stdlib topic if the seat has one (the release seat's list does not).
+
+Boot.started on-setter dev-commands:
+  ALWAYS:
+    ('Command:git').cmd = ['git']
+    ('Command:gh').cmd = ['gh']

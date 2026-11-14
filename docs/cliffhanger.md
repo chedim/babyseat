@@ -15,25 +15,17 @@ name on two classes is two implementations (polymorphism).
   of node entities in the field and links its root to its executor; the run ends
   on a result entity, and `node=<root>` re-runs it
   ([entity-field.md](entity-field.md#the-executor-code-is-a-tree-in-the-field-614)).
-- **Define once, call many:** `exec(action='define', on='ha light',
-  method='turn_on', command='…')`; then
-  `exec(action='call', object='ha:light.port_strip', method='turn_on')`.
-- **Binding:** `{{self.<prop>}}` fills from the object (its own values over its
-  classes'); other `{{params}}` bind from `args` — only `{{name}}` binds (`{n}`,
-  `$n`, `$1` do not), and an arg the command never names is refused. The
-  command is a code tree whose `{{name}}`s are `param` nodes (#614 part C):
-  a call fills them, each value shell-quoted once (a leading `~` or `~/` stays bare so the shell still expands it, #815), and runs the bound code
-  as code (a result entity per call). Write a placeholder as its own word
-  (`{{x}}`) or as a whole quoted word (`'{{x}}'`, `"{{x}}"`): inside a
-  longer quoted string (`'foo {{x}} bar'`) the quoted value breaks the
-  quoting.
-- **Compose:** a method's `steps` run in order (composite depth ≤ 3), stopping
-  on failure; `{{steps.<name>.state.<field>}}` reads a step's captured result.
-- **Guard and read:** `guard="result = {'ok': …}"` runs first (false = blocked,
-  nothing runs); `read_only=true` marks a read; `abstract=true` declares an
-  interface's required method.
-- **Inspect without running:** `exec(action='inspect', object=…, method=…,
-  args=…)` shows where the call resolves and the exact command it would run.
+- **Methods are retired (#1101).** There is no `define`, `call`, `each` or `inspect` any more (no tools, no
+  `exec` actions, no `/membrane/method/*` routes). `membrane/packs/methods.c1f` translates each old method whose
+  command binds mechanically into a `Command:<name>` entity at every start: `cmd` = the command, its `{{param}}`s
+  (bare or whole-quoted) the positional words `"$1"`, `"$2"`... in the order they first appear (`params` lists
+  them), `read_only` kept, `from_method` = the method's id; an existing Command is never rewritten. Run one by
+  writing `Command:<name>.run = {id, args: [...]}`; the receipt lands on the entity (`help('stdlib')`). What did not
+  translate (steps, a guard, abstract, `{{self.x}}` / `{{parent}}` placeholders, more than four placeholders, a
+  placeholder inside single quotes) is listed on the entity `Methods:review` (`untranslated` = `[{eid, name, why}]`)
+  for a person to rewrite as a pack or a Command. The sections below that describe `exec(action='define'/'call'/'each'/'inspect')`
+  are history; the Python behind `night.method_call` / `method_define` stays only while the adapters, the goal graph,
+  Home Assistant's bridge and the language layer still call it.
 
 The model reads this surface as `help('cliffhanger')` (and `help('exec')`); help topics are field entities, `membrane::help:<topic>`, shipped from `membrane/help/*.md`. The
 repo linked above is where the language is defined; this page is only membrane's
@@ -213,49 +205,6 @@ seat with `MEMBRANE_NO_AUTOINSTALL` (Home Assistant's supervisor sets it) instal
 beside HA's pinned packages unless `MEMBRANE_LANGUAGE=1` asks for it. The seeded `closed`
 matches closed, fulfilled and done.
 
-## The LLM as a coprocessor (#454, `MEMBRANE_COPROC=1`, off by default)
-
-With the flag on, a model's reply is read as cliffhanger words. The rule is
-rigid only where something runs (decide, remember, intend) and free
-everywhere else (the prose the person reads).
-
-- **Surfaces** (picked per model, `coproc` on its router record; defaults
-  `qwen*` -> word=node, every other model -> python-shaped):
-  - python-shaped: `decide(text)`, `remember(key, value)`, `intend(text)`,
-    `assistant.says(text)`, plus membrane's tool names;
-  - text: `DECIDE: ...`, `REMEMBER: key: value`, `INTEND: ...`, `SAY: ...`;
-  - word=node: sentences that start `Decided:` / `I decide`,
-    `Remember: X is Y.`, `Remind: ...`. Every other sentence is prose, and
-    the reply is the whole text.
-- **Strict parsing:** an action counts only when it parses fully. Python-shaped
-  lines are read with `ast`, literals only, and are never exec'd. Unknown or
-  garbled lines are lint errors that come back next turn and never run. A tool
-  name written as text is refused: tools run through the tool channel.
-- **Words:** each action is one flat word. `decide` records a decision,
-  `remember` records a fact (a newer value for the same key wins, the history
-  is kept), and `intend` puts a goal on the intent board. Each word is
-  recorded with who, when, the conversation key and the model, in
-  `<field>.coproc.jsonl`. Applied facts and decisions also become notes in the
-  field, so recall finds them. An identical action repeated in one answer, or
-  repeating the previous turn's applied action, is refused as a lint error.
-- **Injection guard:** an action is applied only when the person's message
-  in this turn carries it (`TRACE_MIN` of its words). An action that comes
-  from a tool round, a web page, recalled text or the model's own idea is held
-  as a **proposal**. The reply says so, and only the person applies it
-  (`POST /membrane/coproc/confirm {id}`).
-- **Rendering:** each turn carries the surface, three varied examples (a
-  normal turn, a question with no action, an undo), the memory, this chat's
-  recent exchanges and the last turn's receipts and lint errors. The person
-  sees only the decompiled reply. On the claude-agent rung, membrane's tools
-  named like the calls (`intend`) are hidden while the flag is on.
-- **Reading and steering:** `GET /membrane/coproc` shows the facts, decisions,
-  proposals, per-model maps and constants. `POST /membrane/coproc/map
-  {model, surface, examples}` overrides one model's map.
-- **Measuring:** `scripts/coproc_bench.py run` scores a labelled set per
-  surface (right, missed, extra, unparsed). `scripts/coproc_bench.py recall`
-  compares facts captured as actions with the same facts as prose, asked back
-  through `/membrane/ask`.
-
 See also: [entity-field.md](entity-field.md) (the executor and its queue),
 [background-mind.md](background-mind.md) (packs; entity scripts retired in 0.7.5).
 
@@ -322,7 +271,7 @@ WHEN near(?x, op, 0.2) WHERE isa(?x, toy): ?x.close = 1 + (x.close or 0)
   - Operators: `+ - * /` (Python arithmetic for scalars, numpy only for vectors; division by zero and non-finite results are refused), comparisons, `and` / `or` / `not`.
   - Reads: `x.prop`, `x.position`.
   - Built-ins: `dot`, `norm`, `distance`, `unit`, `abs`, `min`, `max`.
-  - Limits: at most 400 characters and 64 nodes. Each expression is parsed once and cached.
+  - Limits: at most 400 characters and 64 nodes in ch.py's triggers. Each expression is parsed once and cached. (The native VM's getters and setters have no such caps: a step budget (100,000 steps) per getter or setter evaluation instead (time decides no value), docs/c1f-stdlib.md; ch.py parity for the caps is intentionally dropped.)
 - **Validation:** an entity of class `Trigger` made any other way is validated like a definition before it runs.
 - **The VM.**
   - It hears every write (part A) and only queues it.
@@ -364,7 +313,7 @@ A call is a write of a request to the object's call path: `<obj>.call:<method> =
 The operator, 2026-10-26: "no one-shot commands ANYWHERE, everything MUST be done by programming the field first and then using it." The model does something in one of three ways: it **runs code**, which becomes a tree kept in the field and re-runnable (#614, 2026-10-27: "executors work as blurp's chat works"); it **defines a method** on the entity the work belongs to (or its class) and **calls** it; or it **writes a property** whose write is the effect (above; `entity_write`). What an entity *is* -- its getters and setters -- is a `.c1f` pack, loaded with `pack` ([cliffhanger-fields.md](cliffhanger-fields.md)).
 
 - **No raw edges.** The `entity_link` / `entity_unlink` tools, `exec(action='link'/'unlink')` and the `POST /membrane/entity/link|unlink` routes are gone. Code reaches an executor only as a tree: `exec(action='run')` mints it and writes its `-execute->` edge (#614).
-- **A call straight at the executor is refused.** `method_call` / `method_each` (and `exec(action='call'/'each')`) refuse, before anything runs, a call whose object is `tool:executor` (or inherits from it), the `remote_executor` interface itself, or an entity implementing `remote_executor` called on the interface's own method (`exec`). The refusal ends with `program the field first: define a method on an entity, then call it`. Other methods of an implementation (e.g. `presence.restart`) are not executor calls and still run. The check sits on the method routes, the model's only door to them (`night.direct_exec_refusal`, `night.direct_each_refusal`).
+- **A call straight at the executor is refused.** `night.method_call` / `method_each` refuse, before anything runs, a call whose object is `tool:executor` (or inherits from it), the `remote_executor` interface itself, or an entity implementing `remote_executor` called on the interface's own method (`exec`). The refusal ends with `program the field first: define a method on an entity, then call it`. Other methods of an implementation (e.g. `presence.restart`) are not executor calls and still run. The check sits on the callers (`night.direct_exec_refusal`, `night.direct_each_refusal`); the model's method routes are gone (#1101).
 - **Using the executor inside a method still works.** A method the model defined on another entity whose command runs, or whose steps call the executor (`steps=[{name, call: 'exec', object: 'presence', args: {code}}]`), runs as before: that is programming first.
 - **A call is recorded for the learner.** Each `method_call` sets `last_call = {object: <eid>, args: <the call's args in full>}` on the method entity in the same upsert that bumps its `runs`, so the write event (`<method eid>.last_call`) carries the call.
 - **The library lists methods.** The `commands` section of WHERE WE ARE (`your methods: …`) lists the seat's methods, most called first, with how to call them.
