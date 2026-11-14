@@ -25,9 +25,9 @@ use crate::store::{Poll, Store};
 
 /// a Command run that states no `timeout_s` is limited to this many seconds (the boot fact `command_timeout_s` changes it): the operator-delegated
 /// sensible default (2026-11-13), the time a model-run command may take unless the model says more
+pub const DEFAULT_COMMAND_TIMEOUT_S: f64 = 120.0;
 /// what a handed-over secret (`env_from`) becomes where the child printed it
 pub const MASK: &str = "***";
-pub const DEFAULT_COMMAND_TIMEOUT_S: f64 = 120.0;
 /// after the SIGTERM of a timeout the group gets this long to end; then it is killed with SIGKILL (the operator, 2026-11-13)
 pub const KILL_GRACE_MS: u64 = 2000;
 /// the exit code of a receipt whose run was killed by its timeout (the convention of GNU `timeout`)
