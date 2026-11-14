@@ -21,7 +21,7 @@ function world(facts) {
   f.set_pack('dom', DOM); f.set_pack('fetch', FETCH); f.set_pack('markdown', read('../../membrane/apps/barest.c1f/markdown.c1f')); f.set_pack('shell_view', read('../../membrane/apps/barest.c1f/shell_view.c1f')); f.set_pack('chat_view', PACK);
   assert.deepEqual(JSON.parse(f.pack_errors()), {}, 'chat_view loads once dom and fetch are there');
   const w = { f, t: T0, log: [] };
-  w.flush = () => { const o = JSON.parse(f.drain()); w.log.push(...o.writes); return o.writes; };
+  w.subs = []; w.flush = () => { const o = JSON.parse(f.drain()); w.log.push(...o.writes); w.subs.push(...(o.subs || [])); return o.writes; };
   w.get = (e) => JSON.parse(f.get(e));
   w.write = (e, p, v) => { f.write(e, p, JSON.stringify(v ?? null), w.t); return w.flush(); };
   w.feed = (e, cls, props) => { if (f.get(e) === 'null') f.load(e, cls, '{}'); for (const [k, v] of Object.entries(props)) f.write(e, k, JSON.stringify(v ?? null), w.t); w.flush(); };
@@ -217,6 +217,26 @@ scenario('with the link up the history is read only when the doorbell rings: no 
   // the link goes down: the timers are back (the active period while a turn runs)
   w.feed('Link:page', 'Link', { up: false });
   w.tick(0.8); assert.equal(reads(), 6, 'no link: the poll timers are the fallback');
+});
+
+// 5c. THE REAL ENGINE PATH: the engine names ONE subscription, the doorbell's `at`, and a value the link feeds rings it (the same counts as 5b, with the hooks instead of a local entity)
+scenario('the engine subscribes only the doorbell, and a value fed by the link is one read of the history', () => {
+  const w = world(); w.f.set_ns('pAAAAAAAA'); w.open();
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  assert.equal(w.subs.length, 0, 'link not up: nothing subscribed');
+  w.feed('Link:page', 'Link', { up: true });
+  assert.deepEqual(w.subs, [{ eid: 'membrane::Doorbell:chat', props: ['at'] }], 'the chat view reads one value of the seat\'s and nothing else (never Chat:)');
+  const reads = () => w.reqs('history').length;
+  for (let i = 0; i < 100; i++) w.tick(0.1);
+  assert.equal(reads(), 1, 'pending: no read, no timer');
+  w.f.feed_val('membrane::Doorbell:chat', 'at', '100.5', 1, w.t); w.flush();
+  w.tick(0.1); assert.equal(reads(), 2, 'a ring is one read');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  for (let i = 0; i < 100; i++) w.tick(0.1);
+  assert.equal(reads(), 2, 'quiet');
+  w.f.feed_val('membrane::Doorbell:chat', 'at', '101.5', 2, w.t); w.flush();
+  w.tick(0.1); assert.equal(reads(), 3);
+  assert.equal(w.subs.length, 1, 'no further subscription');
 });
 
 // 6. "Load older turns": the button, `before`, the older rows ABOVE the loaded ones
