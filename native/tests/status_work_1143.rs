@@ -22,8 +22,8 @@ fn run(n: usize) -> (serde_json::Value, u64) {
         c.execute("INSERT INTO c_field(k, body, cls) VALUES (?1, ?2, 'Chat')", (format!("membrane::Chat:session:{sid}"), r#"{"props":{"stitle":"t"}}"#)).unwrap();
         let state = if i % 10 == 0 { "running" } else { "done" };
         c.execute("INSERT INTO c_field(k, body, cls) VALUES (?1, ?2, 'Chat')",
-            (format!("membrane::Chat:message:{i}-1:turn"), format!(r#"{{"props":{{"sid":"{sid}","state":"{state}","pad":"{pad}"}}}}"#))).unwrap();
-        c.execute("INSERT INTO c_field(k, body, cls) VALUES (?1, ?2, 'Chat')", (format!("membrane::Chat:message:{i}-1"), format!(r#"{{"props":{{"sid":"{sid}"}}}}"#))).unwrap();
+            (format!("membrane::Chat:session:{sid}:message:{i:013}-00000001:turn"), format!(r#"{{"props":{{"state":"{state}","pad":"{pad}"}}}}"#))).unwrap();
+        c.execute("INSERT INTO c_field(k, body, cls) VALUES (?1, ?2, 'Chat')", (format!("membrane::Chat:session:{sid}:message:{i:013}-00000001"), r#"{"props":{}}"#)).unwrap();
     }
     let mut st = c.prepare(&query()).unwrap();
     let out: String = st.query_row([], |r| r.get(0)).unwrap();

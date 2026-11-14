@@ -48,11 +48,11 @@ ChatMessage.oai_plan getter: {'refuse': prop(this.oai_cfg, 'refuse')} if prop(th
 -- ---- start: the door's tool list, then round 1 -------------------------------------------------------------------------------------------------------------
 Chat.plan on-setter oai-start:
   WHEN prop(this.plan, 'oai') != None:
-    membrane::Chat:message[this.mid]:turn.state = 'running'
-    membrane::Chat:message[this.mid]:turn.started = clock
-    membrane::Chat:message[this.mid]:turn.oai = prop(this.plan, 'oai')
-    ('Fetch:oai:' + this.mid + ':tools').request = {'id': {'mid': this.mid, 'n': 0}, 'url': prop(prop(this.plan, 'oai'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'oai'), 'owner_env'), 'timeout_s': prop(prop(this.plan, 'oai'), 'timeout_s')}
-ChatMessage.oai_trr getter: prop('Fetch:oai:' + this.mid + ':tools', 'request_result')
+    membrane::Chat[this.cp]:turn.state = 'running'
+    membrane::Chat[this.cp]:turn.started = clock
+    membrane::Chat[this.cp]:turn.oai = prop(this.plan, 'oai')
+    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': prop(prop(this.plan, 'oai'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'oai'), 'owner_env'), 'timeout_s': prop(prop(this.plan, 'oai'), 'timeout_s')}
+ChatMessage.oai_trr getter: prop('Fetch:oai:' + this.cp + ':tools', 'request_result')
 ChatMessage.oai_tj getter: ([j for j in [json(str(prop(this.oai_trr, 'body') or ''))] if j is not Error] or [{}])[0]
 ChatMessage.oai_tlist getter: prop(prop(this.oai_tj, 'result'), 'tools')
 ChatMessage.oai_tools getter:
@@ -61,23 +61,23 @@ ChatMessage.oai_tools getter:
   ELSE: {'tools': [{'type': 'function', 'function': {'name': prop(t, 'name'), 'description': prop(t, 'description'), 'parameters': prop(t, 'inputSchema')}} for t in this.oai_tlist]}
 Chat.oai_tools on-setter oai-first:
   WHEN prop(this.oai_tools, 'tools') != None and not this.over:
-    membrane::Chat:message[this.mid]:turn.oai_tools = prop(this.oai_tools, 'tools')
-    membrane::Chat:message[this.mid]:turn:round[1] = ChatRound(mid: this.mid, n: 1, messages: [{'role': 'system', 'content': this.sys}, {'role': 'user', 'content': this.text}])
-    membrane::Chat:message[this.mid]:turn:round[1].go = True
-    membrane::Chat:message[this.mid]:turn.round = 1
+    membrane::Chat[this.cp]:turn.oai_tools = prop(this.oai_tools, 'tools')
+    membrane::Chat[this.cp]:turn:round[1] = ChatRound(cp: this.cp, n: 1, messages: [{'role': 'system', 'content': this.sys}, {'role': 'user', 'content': this.text}])
+    membrane::Chat[this.cp]:turn:round[1].go = True
+    membrane::Chat[this.cp]:turn.round = 1
 
 -- (a birth runs no setter: each entity made below is told `go = True` AFTER it is born, and the send waits for it, as the message's `queued`)
 -- ---- a round: one streamed call ---------------------------------------------------------------------------------------------------------------------------
 ChatRound.kind getter: 'round'
-ChatRound.turn_e getter: 'membrane::Chat:message:' + this.mid + ':turn'
-ChatRound.rq getter: 'Fetch:oai:' + this.mid + ':' + str(this.n)
+ChatRound.turn_e getter: 'membrane::Chat:' + this.cp + ':turn'
+ChatRound.rq getter: 'Fetch:oai:' + this.cp + ':' + str(this.n)
 ChatRound.cfg getter: prop(this.turn_e, 'oai')
 ChatRound.oai_req getter:
   WHEN this.go != True or this.messages == None or this.cfg == None or prop(this.turn_e, 'oai_tools') == None: None
-  ELSE: {'id': {'mid': this.mid, 'n': this.n}, 'url': prop(this.cfg, 'url'), 'method': 'POST', 'headers': {'Content-Type': 'application/json', 'Accept': 'text/event-stream'}, 'body': {'model': prop(this.cfg, 'model'), 'messages': this.messages, 'tools': prop(this.turn_e, 'oai_tools'), 'stream': True}, 'stream': True, 'lines': True, 'keep': True, 'bearer_env': prop(this.cfg, 'bearer_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
+  ELSE: {'id': {'mid': this.cp, 'n': this.n}, 'url': prop(this.cfg, 'url'), 'method': 'POST', 'headers': {'Content-Type': 'application/json', 'Accept': 'text/event-stream'}, 'body': {'model': prop(this.cfg, 'model'), 'messages': this.messages, 'tools': prop(this.turn_e, 'oai_tools'), 'stream': True}, 'stream': True, 'lines': True, 'keep': True, 'bearer_env': prop(this.cfg, 'bearer_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
 Chat.oai_req on-setter oai-send:
   WHEN this.oai_req != None:
-    ('Fetch:oai:' + this.mid + ':' + str(this.n)).request = this.oai_req
+    ('Fetch:oai:' + this.cp + ':' + str(this.n)).request = this.oai_req
 
 -- ---- the stream: the words as they arrive (chunks), the answer from the receipt -----------------------------------------------------------------------------------------------
 -- (`Chunk.part` of packs/chat_turn.c1f is the claude CLI's: it reads the chunks of a Command; these are the chunks of a Fetch, `fetch` in place of `cmd`.) A chunk is whole lines
@@ -121,17 +121,17 @@ ChatRound.step getter:
 Chat.step on-setter oai-calls:
   WHEN prop(this.step, 'calls') == True:
     FOR c IN this.calls:
-      membrane::Chat:message[this.mid]:turn:round[str(this.n)]:call[str(c['i'])] = ChatCall(mid: this.mid, n: this.n, i: c['i'], id: c['id'], name: c['name'], args: c['args'])
-      membrane::Chat:message[this.mid]:turn:round[str(this.n)]:call[str(c['i'])].go = True
+      membrane::Chat[this.cp]:turn:round[str(this.n)]:call[str(c['i'])] = ChatCall(cp: this.cp, n: this.n, i: c['i'], id: c['id'], name: c['name'], args: c['args'])
+      membrane::Chat[this.cp]:turn:round[str(this.n)]:call[str(c['i'])].go = True
 ChatCall.kind getter: 'call'
-ChatCall.rq getter: 'Fetch:oai:' + this.mid + ':' + str(this.n) + ':' + str(this.i)
-ChatCall.cfg getter: prop('membrane::Chat:message:' + this.mid + ':turn', 'oai')
+ChatCall.rq getter: 'Fetch:oai:' + this.cp + ':' + str(this.n) + ':' + str(this.i)
+ChatCall.cfg getter: prop('membrane::Chat:' + this.cp + ':turn', 'oai')
 -- the arguments are JSON text the model wrote: a call whose text is not a JSON object is not sent, and the model is told so as the tool's result
 ChatCall.bad getter: not (json(str(this.args or '') or '{}') is Dict)
 ChatCall.input getter: {} if this.bad else json(str(this.args or '') or '{}')
 ChatCall.creq getter:
   WHEN this.go != True or this.bad or this.cfg == None: None
-  ELSE: {'id': {'mid': this.mid, 'n': this.n, 'i': this.i}, 'url': prop(this.cfg, 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': this.name, 'arguments': this.input}}, 'bearer_env': prop(this.cfg, 'owner_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
+  ELSE: {'id': {'mid': this.cp, 'n': this.n, 'i': this.i}, 'url': prop(this.cfg, 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': this.name, 'arguments': this.input}}, 'bearer_env': prop(this.cfg, 'owner_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
 Chat.creq on-setter oai-tool-send:
   WHEN this.creq != None:
     (this.rq).request = this.creq
@@ -147,7 +147,7 @@ ChatCall.text getter:
   ELSE WHEN prop(prop(this.j, 'error'), 'message') != None: 'Error: ' + str(prop(prop(this.j, 'error'), 'message'))
   ELSE: 'Error: the door answered HTTP ' + str(prop(this.rr, 'http_status')) + ': ' + str(prop(this.rr, 'body') or '')
 ChatCall.out getter: {'id': this.id, 'name': this.name, 'input': this.input, 'text': this.text} if this.text != None else None
-ChatRound.call_eids getter: ['membrane::Chat:message:' + this.mid + ':turn:round:' + str(this.n) + ':call:' + str(c['i']) for c in this.calls]
+ChatRound.call_eids getter: ['membrane::Chat:' + this.cp + ':turn:round:' + str(this.n) + ':call:' + str(c['i']) for c in this.calls]
 ChatRound.results getter:
   WHEN prop(this.step, 'calls') != True: None
   ELSE: ([r for r in [[prop(e, 'out') for e in this.call_eids]] if len([x for x in r if x == None]) == 0] or [None])[0]
@@ -156,13 +156,13 @@ ChatRound.oai_next getter: {'messages': concat(concat(this.messages, [this.assis
 Chat.oai_next on-setter oai-next:
   WHEN this.oai_next != None:
     FOR r IN this.results:
-      membrane::Chat:message[this.mid]:turn:tool[r['id']] = ChatTool(name: r['name'], input: r['input'], result: r['text'])
-    membrane::Chat:message[this.mid]:turn:round[str(this.n + 1)] = ChatRound(mid: this.mid, n: this.n + 1, messages: prop(this.oai_next, 'messages'))
-    membrane::Chat:message[this.mid]:turn:round[str(this.n + 1)].go = True
-    membrane::Chat:message[this.mid]:turn.round = this.n + 1
+      membrane::Chat[this.cp]:turn:tool[r['id']] = ChatTool(name: r['name'], input: r['input'], result: r['text'])
+    membrane::Chat[this.cp]:turn:round[str(this.n + 1)] = ChatRound(cp: this.cp, n: this.n + 1, messages: prop(this.oai_next, 'messages'))
+    membrane::Chat[this.cp]:turn:round[str(this.n + 1)].go = True
+    membrane::Chat[this.cp]:turn.round = this.n + 1
 
 -- ---- what the turn has used, over its rounds (explicit, round by round) -----------------------------------------------------------------------------------------------
-ChatRound.prev getter: 'membrane::Chat:message:' + this.mid + ':turn:round:' + str(this.n - 1) if this.n > 1 else None
+ChatRound.prev getter: 'membrane::Chat:' + this.cp + ':turn:round:' + str(this.n - 1) if this.n > 1 else None
 ChatRound.ids_before getter: prop(this.prev, 'ids') or []
 ChatRound.names_before getter: prop(this.prev, 'names') or []
 ChatRound.ids getter: concat(this.ids_before, [c['id'] for c in this.calls])
@@ -172,7 +172,7 @@ ChatRound.cum getter: {'in': (prop(prop(this.prev, 'cum'), 'in') or 0) + (prop(t
 ChatRound.usage_out getter: {'input_tokens': prop(this.cum, 'in'), 'output_tokens': prop(this.cum, 'out')} if prop(this.cum, 'seen') == True else None
 
 -- ---- the end of the turn ------------------------------------------------------------------------------------------------------------------------------------------
-ChatMessage.oai_round getter: 'membrane::Chat:message:' + this.mid + ':turn:round:' + str(prop(this.turn_eid, 'round') or 0)
+ChatMessage.oai_round getter: 'membrane::Chat:' + this.cp + ':turn:round:' + str(prop(this.turn_eid, 'round') or 0)
 ChatMessage.oai_step getter: prop(this.oai_round, 'step')
 -- what ended the turn: the cause of a failure, or the answer; then ONE value holds everything the finish writes (a setter reads only the getter that triggers it and what it
 -- depends on: a sibling that reads the trigger would still be the old value when the setter runs)
@@ -189,14 +189,14 @@ ChatMessage.oai_end getter:
 -- (a write in a setter is seen by the lines after it: `state` is written LAST, because `over` ends what `oai_res` says)
 Chat.oai_end on-setter oai-finish:
   WHEN this.oai_end != None and not this.over:
-    membrane::Chat:message[this.mid]:turn.ended = clock
-    membrane::Chat:message[this.mid]:turn.error = prop(this.oai_end, 'fail')
-    membrane::Chat:message[this.mid]:turn.usage = prop(this.oai_end, 'usage')
-    membrane::Chat:message[this.mid]:turn.calls = prop(this.oai_end, 'calls')
+    membrane::Chat[this.cp]:turn.ended = clock
+    membrane::Chat[this.cp]:turn.error = prop(this.oai_end, 'fail')
+    membrane::Chat[this.cp]:turn.usage = prop(this.oai_end, 'usage')
+    membrane::Chat[this.cp]:turn.calls = prop(this.oai_end, 'calls')
     this.tools_run = prop(this.oai_end, 'names')
     this.tool_ids = prop(this.oai_end, 'ids')
-    membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: prop(this.oai_end, 'text'), error: prop(this.oai_end, 'fail') != None)
+    membrane::Chat[this.cp]:turn:response = ChatResponse(text: prop(this.oai_end, 'text'), error: prop(this.oai_end, 'fail') != None)
     FOR t IN ([prop(this.oai_end, 'text')] if prop(this.oai_end, 'fail') == None else []):
-      membrane::Chat:message[this.mid]:turn:response:body = SemText(text: t)
-      membrane::Chat:message[this.mid]:turn:response:body.mention = True
-    membrane::Chat:message[this.mid]:turn.state = 'error' if prop(this.oai_end, 'fail') != None else 'done'
+      membrane::Chat[this.cp]:turn:response:body = SemText(text: t)
+      membrane::Chat[this.cp]:turn:response:body.mention = True
+    membrane::Chat[this.cp]:turn.state = 'error' if prop(this.oai_end, 'fail') != None else 'done'

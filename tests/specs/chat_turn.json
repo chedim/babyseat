@@ -42,7 +42,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -53,186 +53,186 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.0",
     "equals": "env"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.1",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.2",
     "equals": "ANTHROPIC_AUTH_TOKEN"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.3",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.4",
     "equals": "CLAUDE_CODE_USE_BEDROCK"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.5",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.6",
     "equals": "CLAUDE_CODE_USE_VERTEX"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.7",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.8",
     "equals": "CLAUDE_CODE_USE_FOUNDRY"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.9",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.10",
     "equals": "CLAUDE_CODE_OAUTH_TOKEN"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.11",
     "equals": "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.12",
     "equals": "/opt/fake/claude"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.13",
     "equals": "-p"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.14",
     "equals": "--output-format"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.15",
     "equals": "stream-json"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.16",
     "equals": "--verbose"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.17",
     "equals": "--include-partial-messages"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.18",
     "equals": "--tools"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.19",
     "equals": ""
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.20",
     "equals": "--strict-mcp-config"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.21",
     "equals": "--mcp-config"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.22",
     "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\"}}}"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.23",
     "equals": "--allowedTools"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.24",
     "equals": "mcp__membrane__*"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.25",
     "equals": "--setting-sources"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.26",
     "equals": ""
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.27",
     "equals": "--no-session-persistence"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.28",
     "equals": "--max-turns"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.29",
     "equals": "7"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.30",
     "equals": "--system-prompt"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.32",
     "equals": "--"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.33",
     "equals": "hello"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.34",
     "none": true
    }
@@ -280,7 +280,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -291,36 +291,36 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "sys",
     "contains": "BANNER (placeholder)"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "sys",
     "contains": "Modify your banner to help you maintain continuity."
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "sys",
     "contains": "Program the graph as your memory."
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.29",
     "equals": "2048"
    }
@@ -366,7 +366,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -377,37 +377,37 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "queued",
     "value": true
    }
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "prop": "status",
     "equals": "error"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "text",
     "contains": "chat_claude_bin"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "error",
     "equals": true
    }
@@ -456,7 +456,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -467,42 +467,42 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "queued",
     "value": true
    }
   ],
   "expect": [
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "prop": "cmd.12",
     "equals": "/nonexistent/claude-fake"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "prop": "status",
     "equals": "error"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "text",
     "contains": "claude failed (rc 127)"
    },
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "prop": "cmd.1",
     "equals": "-u"
    }
@@ -550,7 +550,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -561,26 +561,26 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1",
+     "message": "membrane::Chat:main:message:1-1",
      "state": "running"
     }
    },
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "class": "Command",
     "props": {}
    }
   ],
   "writes": [
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "prop": "run_result",
     "value": {
      "id": "1-1",
@@ -594,22 +594,22 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "prop": "status",
     "equals": "done"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "text",
     "equals": "All done: Goal:a is open."
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "error",
     "equals": false
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "tools_run",
     "equals": [
      "entity_read",
@@ -617,32 +617,32 @@
     ]
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:tool:tu1",
+    "eid": "membrane::Chat:main:message:1-1:turn:tool:tu1",
     "prop": "name",
     "equals": "mcp__membrane__entity_read"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:tool:tu1",
+    "eid": "membrane::Chat:main:message:1-1:turn:tool:tu1",
     "prop": "input.spec",
     "equals": "Goal:a"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:tool:tu1",
+    "eid": "membrane::Chat:main:message:1-1:turn:tool:tu1",
     "prop": "result",
     "contains": "Goal:a (Goal)"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:tool:tu2",
+    "eid": "membrane::Chat:main:message:1-1:turn:tool:tu2",
     "prop": "name",
     "equals": "mcp__membrane__entity_write"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:tool:tu2",
+    "eid": "membrane::Chat:main:message:1-1:turn:tool:tu2",
     "prop": "input.prop",
     "equals": "status"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:tool:tu2",
+    "eid": "membrane::Chat:main:message:1-1:turn:tool:tu2",
     "prop": "result",
     "equals": "wrote Goal:a.status"
    }
@@ -690,7 +690,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -701,26 +701,26 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1",
+     "message": "membrane::Chat:main:message:1-1",
      "state": "running"
     }
    },
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "class": "Command",
     "props": {}
    }
   ],
   "writes": [
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "prop": "run_result",
     "value": {
      "id": "1-1",
@@ -734,12 +734,12 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "prop": "status",
     "equals": "done"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "text",
     "equals": "Let me look.\n\nDone."
    }
@@ -787,7 +787,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -798,26 +798,26 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1",
+     "message": "membrane::Chat:main:message:1-1",
      "state": "running"
     }
    },
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "class": "Command",
     "props": {}
    }
   ],
   "writes": [
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "prop": "run_result",
     "value": {
      "id": "1-1",
@@ -831,17 +831,17 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "prop": "status",
     "equals": "error"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "text",
     "equals": "claude reported an error: Credit balance is too low"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "error",
     "equals": true
    }
@@ -890,7 +890,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -901,26 +901,26 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1",
+     "message": "membrane::Chat:main:message:1-1",
      "state": "running"
     }
    },
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "class": "Command",
     "props": {}
    }
   ],
   "writes": [
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "prop": "run_result",
     "value": {
      "id": "1-1",
@@ -934,12 +934,12 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "prop": "status",
     "equals": "done"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "text",
     "equals": "Let me look.\n\n(stopped at the ceiling of 7 turns)"
    }
@@ -987,7 +987,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -998,26 +998,26 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1",
+     "message": "membrane::Chat:main:message:1-1",
      "state": "running"
     }
    },
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "class": "Command",
     "props": {}
    }
   ],
   "writes": [
    {
-    "eid": "membrane::Command:chat:1-1",
+    "eid": "membrane::Command:chat:main:message:1-1",
     "prop": "run_result",
     "value": {
      "id": "1-1",
@@ -1031,12 +1031,12 @@
   ],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "prop": "status",
     "equals": "error"
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn:response",
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
     "prop": "text",
     "equals": "claude failed (rc 1): Not logged in"
    }
@@ -1084,7 +1084,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -1096,26 +1096,26 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "owner_env.ANTHROPIC_API_KEY",
     "equals": "ANTHROPIC_API_KEY"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "plan.argv.0",
     "equals": "env"
    }
@@ -1163,7 +1163,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -1175,26 +1175,26 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "owner_env",
     "none": true
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "plan.refuse",
     "contains": "ANTHROPIC_API_KEY"
    }
@@ -1241,7 +1241,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -1253,26 +1253,26 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "owner_env",
     "none": true
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "plan.refuse",
     "contains": "ANTHROPIC_API_KEY"
    }
@@ -1321,7 +1321,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -1332,81 +1332,81 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "owner_env",
     "none": true
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.0",
     "equals": "env"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.1",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.2",
     "equals": "ANTHROPIC_API_KEY"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.3",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.4",
     "equals": "ANTHROPIC_AUTH_TOKEN"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.5",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.6",
     "equals": "CLAUDE_CODE_USE_BEDROCK"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.7",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.8",
     "equals": "CLAUDE_CODE_USE_VERTEX"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.9",
     "equals": "-u"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.10",
     "equals": "CLAUDE_CODE_USE_FOUNDRY"
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.11",
     "equals": "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
    }
@@ -1455,7 +1455,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -1466,21 +1466,21 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.22",
     "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://192.168.1.50:4321/mcp\"}}}"
    }
@@ -1529,7 +1529,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -1540,21 +1540,21 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.22",
     "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\"}}}"
    }
@@ -1603,7 +1603,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -1614,21 +1614,21 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.22",
     "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\"}}}"
    }
@@ -1677,7 +1677,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "class": "Chat",
     "props": {
      "parents": [
@@ -1688,21 +1688,21 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:1-1:turn",
+    "eid": "membrane::Chat:main:message:1-1:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:1-1"
+     "message": "membrane::Chat:main:message:1-1"
     }
    }
   ],
   "writes": [],
   "expect": [
    {
-    "eid": "membrane::Chat:message:1-1",
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.22",
     "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://[fe80::1]:4321/mcp\"}}}"
    }

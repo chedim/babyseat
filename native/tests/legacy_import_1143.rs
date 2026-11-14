@@ -105,9 +105,11 @@ fn the_batch_import_makes_messages_turns_responses_and_tools_from_the_old_rows_a
     import(&h, json!({"id": "i1", "sessions": "all", "page": 1}));
     settled(&h);
     // ses_a: two questions. The first (n 10, created 1790000010000) has two answering rows: one tool, then a tool and a text
-    let m1 = "membrane::Chat:message:1790000010000-10";
+    let m1 = "membrane::Chat:session:ses_a:message:1790000010000-00000010";
     assert_eq!(h.get(m1, "text"), json!("where do we start?"));
-    assert_eq!(h.get(m1, "sid"), json!("ses_a"));
+    assert_eq!(h.get(m1, "sid"), json!("ses_a"), "the session id is read from the key");
+    assert_eq!(h.get(m1, "mid"), json!("1790000010000-00000010"));
+    assert_eq!(h.get("membrane::Chat:main:time:1790000010000-00000010:session:ses_a", "chat"), json!("session:ses_a"), "the time row of the message");
     assert_eq!(h.get(m1, "pick"), json!("claude-agent:sonnet"));
     assert_eq!(h.get(m1, "legacy_src")["mid"], json!("msg_u1"));
     assert_eq!(h.get(m1, "legacy_src")["answers"], json!(2));
@@ -121,9 +123,9 @@ fn the_batch_import_makes_messages_turns_responses_and_tools_from_the_old_rows_a
     assert_eq!(h.get(m1, "tool_ids"), json!("toolu_1 toolu_2"), "the tools in the order they were called");
     assert_eq!(h.get(&format!("{m1}:turn"), "usage"), json!({"input_tokens": 200, "output_tokens": 40, "cache_creation_input_tokens": 10, "cache_read_input_tokens": 14}), "the two answering rows' numbers are summed");
     // the unanswered question of ses_c is a turn in error that says so; the orphan answer of ses_b is a note, not a message
-    assert_eq!(h.get("membrane::Chat:message:1790000410000-30:turn", "status"), json!("error"));
-    assert!(h.get("membrane::Chat:message:1790000410000-30:turn:response", "text").as_str().unwrap().contains("no answer"), "visible, never silently dropped");
-    assert!(h.get("membrane::Chat:message:1790000250000-22", "text").is_null(), "the stray answer is not made a message");
+    assert_eq!(h.get("membrane::Chat:session:ses_c:message:1790000410000-00000030:turn", "status"), json!("error"));
+    assert!(h.get("membrane::Chat:session:ses_c:message:1790000410000-00000030:turn:response", "text").as_str().unwrap().contains("no answer"), "visible, never silently dropped");
+    assert!(h.get("membrane::Chat:session:ses_b:message:1790000250000-00000022", "text").is_null(), "the stray answer is not made a message");
     // the ledgers: done, the old rows are all accounted for (rows consumed + unmapped = old rows), the reasoning part is counted as dropped
     for (sid, old_rows, unm) in [("ses_a", 5, 0), ("ses_b", 3, 1), ("ses_c", 1, 0), ("xcl_d", 0, 0)] {
         let l = format!("membrane::Legacy:session:{sid}");
@@ -170,7 +172,7 @@ fn a_session_that_fails_midway_is_an_error_with_the_reason_keeps_what_was_writte
     assert!(h.get(a, "reason").as_str().unwrap().to_lowercase().contains("json"), "SQLite's own words: {}", h.get(a, "reason"));
     assert_eq!(h.get(a, "cursor"), json!(10), "the first page was written with its ledger step");
     assert_eq!(h.get(a, "rows"), json!(3));
-    assert!(!h.get("membrane::Chat:message:1790000010000-10", "text").is_null(), "what was written stays");
+    assert!(!h.get("membrane::Chat:session:ses_a:message:1790000010000-00000010", "text").is_null(), "what was written stays");
     assert_eq!(h.get("membrane::Legacy:session:ses_b", "state"), json!("done"), "one session's failure does not stop the next");
     assert_eq!(h.get("membrane::Legacy:seat", "run_error"), json!(1));
     assert_eq!(h.get("membrane::Legacy:session:ses_c", "state"), json!("pending"), "a session not named is left as it was");
@@ -183,7 +185,7 @@ fn a_session_that_fails_midway_is_an_error_with_the_reason_keeps_what_was_writte
     assert_eq!(h.get(a, "reason"), J::Null);
     assert_eq!(h.get(a, "rows"), json!(5), "no row counted twice");
     assert_eq!(h.get("membrane::Legacy:seat", "run_total"), json!(1));
-    let msgs = |sid: &str| h.snapshot().iter().filter(|(k, v)| k.starts_with("membrane::Chat:message:") && !k[23..].contains(':') && v["props"]["sid"] == json!(sid)).count();
+    let msgs = |sid: &str| { let p = format!("membrane::Chat:session:{sid}:message:"); h.snapshot().iter().filter(|(k, _)| k.starts_with(&p) && !k[p.len()..].contains(':')).count() };
     assert_eq!((msgs("ses_a"), msgs("ses_b")), (2, 1), "none doubled");
 }
 
@@ -403,7 +405,7 @@ fn an_open_of_a_pending_session_imports_it_alone_when_the_page_fact_is_told_and_
     settled(&h);
     assert_eq!(h.get("membrane::Legacy:session:ses_a", "state"), json!("done"), "{}", h.get("membrane::Legacy:seat", "refused"));
     assert_eq!(h.get("membrane::Legacy:session:ses_b", "state"), json!("pending"));
-    assert_eq!(h.get("membrane::Chat:message:1790000010000-10", "sid"), json!("ses_a"));
+    assert_eq!(h.get("membrane::Chat:session:ses_a:message:1790000010000-00000010", "sid"), json!("ses_a"));
 }
 
 #[test]
@@ -421,7 +423,7 @@ fn an_open_during_a_running_import_waits_for_it_and_is_imported_once_after_it() 
     pump_until(&h, "ses_b", |h| h.get("membrane::Legacy:session:ses_b", "state") == json!("done"));
     assert_eq!(h.get("membrane::Legacy:session:ses_a", "state"), json!("done"));
     assert_eq!(h.get("membrane::Legacy:session:ses_c", "state"), json!("pending"));
-    assert_eq!(h.get("membrane::Chat:message:1790000210000-20", "sid"), json!("ses_b"));
+    assert_eq!(h.get("membrane::Chat:session:ses_b:message:1790000210000-00000020", "sid"), json!("ses_b"));
 }
 
 #[test]

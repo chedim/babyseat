@@ -54,15 +54,15 @@
    {
     "eid": "Request:1",
     "prop": "reply.body.id",
-    "equals": "2000-1"
+    "equals": "2000-00000001"
    },
    {
-    "eid": "membrane::Chat:message:2000-1",
+    "eid": "membrane::Chat:main:message:2000-00000001",
     "prop": "text",
     "equals": "hello there"
    },
    {
-    "eid": "membrane::Chat:message:2000-1",
+    "eid": "membrane::Chat:main:message:2000-00000001",
     "prop": "parents",
     "equals": [
      "cls:chat",
@@ -75,7 +75,7 @@
     "equals": "main"
    },
    {
-    "eid": "membrane::Chat:message:2000-1",
+    "eid": "membrane::Chat:main:message:2000-00000001",
     "prop": "queued",
     "equals": true
    }
@@ -334,7 +334,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:9-9",
+    "eid": "membrane::Chat:main:message:9-9",
     "class": "Chat",
     "props": {
      "text": "q?",
@@ -345,14 +345,14 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:9-9:turn",
+    "eid": "membrane::Chat:main:message:9-9:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:9-9"
+     "message": "membrane::Chat:main:message:9-9"
     }
    }
   ],
@@ -429,7 +429,7 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:9-9",
+    "eid": "membrane::Chat:main:message:9-9",
     "class": "Chat",
     "props": {
      "text": "q?",
@@ -443,19 +443,19 @@
     }
    },
    {
-    "eid": "membrane::Chat:message:9-9:turn",
+    "eid": "membrane::Chat:main:message:9-9:turn",
     "class": "Chat",
     "props": {
      "parents": [
       "cls:chat",
       "cls:chatturn"
      ],
-     "message": "membrane::Chat:message:9-9",
+     "message": "membrane::Chat:main:message:9-9",
      "state": "done"
     }
    },
    {
-    "eid": "membrane::Chat:message:9-9:turn:response",
+    "eid": "membrane::Chat:main:message:9-9:turn:response",
     "class": "Chat",
     "props": {
      "text": "the answer",

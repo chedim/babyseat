@@ -284,9 +284,9 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert!(!args.iter().any(|x| x == "--bare" || x == "--resume" || x == "--continue"), "{args:?}");
 
     // the tools it ran are entities under the message, and the write it made through the door is in the field
-    let (n, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn:tool:tu1"), "prop": "name"}));
+    let (n, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn:tool:tu1"), "prop": "name"}));
     assert_eq!(n, "mcp__membrane__entity_write");
-    let (n, _) = wait("the tool result", || { let r = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn:tool:tu2"), "prop": "result"})); if r.0.contains("echo") { Some(r) } else { None } });
+    let (n, _) = wait("the tool result", || { let r = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn:tool:tu2"), "prop": "result"})); if r.0.contains("echo") { Some(r) } else { None } });
     assert!(n.contains("echo") && n.contains("x"), "{n}");
     let (c, _) = call(port, "entity_read", json!({"spec": "Command:probe", "prop": "cmd"}));
     assert!(c.contains("echo"), "{c}");
@@ -381,7 +381,7 @@ fn the_banner_shows_the_previous_errors_entity_and_its_whole_text_until_a_turn_s
     std::fs::remove_file(dir.join("err")).unwrap();
     let id2 = send(port, "second");
     let sys = system_prompt(&dir, "second");
-    let line = format!("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:message:{id1}:turn:response - claude reported an error: {long}");
+    let line = format!("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:main:message:{id1}:turn:response - claude reported an error: {long}");
     assert!(sys.contains(&line), "the eid, the summary, no cap: {sys}");
     assert_eq!(finish(port, &dir, &id2, "second")["state"], "done");
     let id3 = send(port, "third");
@@ -559,7 +559,7 @@ fn a_finished_turn_keeps_its_answer_tools_and_usage_but_not_the_raw_output_and_s
     eprintln!("200 KB turn, 200 chunks: released to done in {:?}", t0.elapsed());
     assert!(t0.elapsed() < Duration::from_secs(30), "each chunk is parsed once, not again with every later chunk: {:?}", t0.elapsed());
     assert_eq!(v["state"], "done", "{v}");
-    let (cmd, msg) = (format!("membrane::Command:chat:{id}"), format!("membrane::Chat:message:{id}"));
+    let (cmd, msg) = (format!("membrane::Command:chat:main:message:{id}"), format!("membrane::Chat:main:message:{id}"));
     // the rows shrink after the turn (a later round than `done`): wait for both
     let (c, m) = wait("the finished turn's rows are small", || {
         let (c, m) = (row_text(port, &cmd), row_text(port, &msg));
@@ -698,7 +698,7 @@ fn the_turn_carries_usage_cost_calls_and_duration_of_the_result_event_in_the_vie
     assert_eq!(v["turn"]["usage"], want, "{v}");
     assert_eq!((v["turn"]["cost"].clone(), v["turn"]["calls"].clone(), v["turn"]["duration"].clone()), (json!(0.0123), json!(3), json!(4321)), "{v}");
     // the turn entity holds them as properties
-    let (u, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn"), "prop": "cost"}));
+    let (u, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn"), "prop": "cost"}));
     assert_eq!(u, "0.0123");
     // the event stream's final event carries them too
     let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
@@ -732,7 +732,7 @@ fn an_interrupted_turn_is_found_in_the_store_not_through_what_the_warm_boot_load
     assert!(terminate(&mut run));
     let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "warm_rows=0"]);
     // read the STORE's rows only (a poll of the message would load it, and the load itself would make the engine look at the turn)
-    let turn = format!("membrane::Chat:message:{id}:turn");
+    let turn = format!("membrane::Chat:main:message:{id}:turn");
     wait("the turn marked error in the store", || { let (r, _) = call(port2, "entity_query", json!({"q": format!("name~:{turn}"), "full": true})); (r.contains("\"state\":\"error\"")).then_some(()) });
     assert_eq!(view(port2, &id)["response"], "interrupted: the seat stopped while this turn was running");
     assert!(terminate(&mut run2));
@@ -902,12 +902,12 @@ fn a_banner_change_returns_reactions_that_do_not_grow_with_the_finished_messages
     let (small, _) = size(port, 1);
     // 50 FINISHED messages, as the chat makes them (class Chat, kind in parents, the state on the :turn entity)
     for i in 0..50 {
-        let (t, e) = call(port, "run_cliff", json!({"code": format!("membrane::Chat:message[{i}] = ChatMessage(text: 'q{i}')\nmembrane::Chat:message[{i}]:turn = ChatTurn(message: 'membrane::Chat:message:{i}')\nmembrane::Chat:message[{i}]:turn.state = 'done'")}));
+        let (t, e) = call(port, "run_cliff", json!({"code": format!("membrane::Chat:main:message[{i}] = ChatMessage(text: 'q{i}')\nmembrane::Chat:main:message[{i}]:turn = ChatTurn(message: 'membrane::Chat:main:message:{i}')\nmembrane::Chat:main:message[{i}]:turn.state = 'done'")}));
         assert!(!e, "{t}");
     }
     let (n50, t) = size(port, 2);
     eprintln!("reactions reply: {small} bytes with no finished message, {n50} bytes with 50");
-    assert!(!t.contains("membrane::Chat:message:"), "no finished message is in the reactions: {}", &t[..t.len().min(600)]);
+    assert!(!t.contains("membrane::Chat:main:message:"), "no finished message is in the reactions: {}", &t[..t.len().min(600)]);
     assert!(n50 < small + 1500, "the reply does not grow with the finished messages: {small} -> {n50}");
     assert!(terminate(&mut run));
 }
@@ -1123,7 +1123,13 @@ fn a_message_may_name_a_session_and_the_history_route_filters_by_it() {
     };
     let a = post("in-session", Some(&sid));
     let b = post("main-chat", None);
-    for id in [&a, &b] { wait("a message done", || (view(port, id)["state"] == "done").then_some(())); }
+    wait("the main message done", || (view(port, &b)["state"] == "done").then_some(()));
+    // the id is inside its chat: the session's message is read with `?sid=`; without it, it is not in the main chat
+    wait("the session message done", || { let (st, t) = http(port, "GET", &format!("/membrane/chat/message/{a}?sid={sid}"), ""); (st == 200 && serde_json::from_str::<J>(&t).unwrap()["state"] == "done").then_some(()) });
+    assert_eq!(http(port, "GET", &format!("/membrane/chat/message/{a}"), "").0, 404, "a session's message is not in the main chat");
+    assert_eq!(http(port, "GET", &format!("/membrane/chat/message/{a}?sid=x:y"), "").0, 404, "a colon in a sid names nothing");
+    assert_eq!(http(port, "POST", "/membrane/chat/message", &json!({"text": "t", "sid": "a:b"}).to_string()).0, 400, "a sid with a colon is refused");
+    assert_eq!(http(port, "GET", "/membrane/chat/messages?sid=a:b", "").0, 400);
     assert_eq!(texts(&history(port, &format!("?sid={sid}"))), vec!["in-session"]);
     assert_eq!(texts(&history(port, "?sid=")), vec!["main-chat"], "an empty sid is the chat with no session");
     assert_eq!(texts(&history(port, "")).len(), 2, "no sid at all: every turn, as before");
@@ -1221,7 +1227,7 @@ fn a_tool_that_read_a_large_result_gives_a_small_page_while_the_shared_view_keep
     let h: J = serde_json::from_str(&body).unwrap();
     assert_eq!(calls_of(&h["messages"][0]), json!([{"name": "entity_read", "input": {"spec": "Q:big read"}}]));
     // the shared view (the future opencode adapter's) still carries the result
-    let (t, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}"), "prop": "history_view"}));
+    let (t, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}"), "prop": "history_view"}));
     assert!(t.len() > 200000 && t.contains("\"result\""), "history_view keeps the whole result ({} bytes)", t.len());
     assert!(terminate(&mut run));
 }
@@ -1270,7 +1276,7 @@ fn a_message_from_before_the_tool_order_list_still_lists_its_stored_tools() {
     let id = send(port, "three");
     wait("done", || (view(port, &id)["state"] == "done").then_some(()));
     // an older message has no `tool_ids`: its tools are the stored rows under its turn
-    let (t, e) = call(port, "entity_write", json!({"spec": format!("membrane::Chat:message:{id}"), "prop": "tool_ids", "value": null}));
+    let (t, e) = call(port, "entity_write", json!({"spec": format!("membrane::Chat:main:message:{id}"), "prop": "tool_ids", "value": null}));
     assert!(!e, "{t}");
     let h = history(port, "");
     let mut names: Vec<String> = h["messages"][0]["tool_calls"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
@@ -1287,7 +1293,7 @@ fn instances_of_a_kind_lists_the_loaded_entities_that_carry_it_in_their_parents(
     // messages, turns, responses and tools are eid class Chat; their kinds are in `parents`
     let (t, e) = cliff(port, "[m.eid for m in instances('ChatMessage')]");
     assert!(!e, "{t}");
-    assert_eq!(serde_json::from_str::<J>(&t).unwrap(), json!([format!("membrane::Chat:message:{id}")]), "{t}");
+    assert_eq!(serde_json::from_str::<J>(&t).unwrap(), json!([format!("membrane::Chat:main:message:{id}")]), "{t}");
     let (t, _) = cliff(port, "len([m for m in instances('ChatTool')])");
     assert_eq!(t.trim(), "1", "{t}");
     let (t, _) = cliff(port, "len([m for m in instances('Chat')])");
@@ -1511,7 +1517,7 @@ fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_
     let v = finish(port, &dir, &id, text);
     assert_eq!(v["state"], "done", "{v}");
     assert_eq!(v["text"], text, "the page's `text` keeps working");
-    let body = format!("membrane::Chat:message:{id}:body");
+    let body = format!("membrane::Chat:main:message:{id}:body");
     assert_eq!(call(port, "entity_read", json!({"spec": &body, "prop": "text"})).0, text);
     let words = wait("the body's words", || { let t = call(port, "entity_read", json!({"spec": &body, "prop": "words"})).0; if t.contains("Dogs") { Some(t) } else { None } });
     assert!(words.contains("chase"), "{words}");
@@ -1520,7 +1526,7 @@ fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_
     assert!(cat.contains("\"sentence\":0"), "{cat}");
     wait("the identifier", || { let t = call(port, "entity_read", json!({"spec": "Identifier:name:my_fn", "prop": "mentioned_in"})).0; t.contains(&body).then_some(()) });
     // the answer is a SemText too, under the response
-    let rbody = format!("membrane::Chat:message:{id}:turn:response:body");
+    let rbody = format!("membrane::Chat:main:message:{id}:turn:response:body");
     assert_eq!(call(port, "entity_read", json!({"spec": &rbody, "prop": "text"})).0, format!("Final answer to: {text}"));
     wait("the answer's words", || { let t = call(port, "entity_read", json!({"spec": "Word:lemma:answer", "prop": "mentioned_in"})).0; t.contains(&rbody).then_some(()) });
     // recall by edges: ask the body for the sentences that mention the same things (the dial is the question), read them through the door
@@ -1531,12 +1537,12 @@ fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_
     let (t, e) = call(port, "run_cliff", json!({"code": format!("[r['semtext'] for r in prop('{body}', 'related')]")}));
     assert!(!e && t.contains(&rbody), "{t}");
     // a tool's result is NOT tokenized: the only SemTexts of the message are the two bodies
-    let (q, _) = call(port, "entity_query", json!({"q": "kind:SemText & name~:membrane::Chat:message:"}));
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:SemText & name~:membrane::Chat:main:message:"}));
     assert!(q.contains(&body) && q.contains(&rbody) && !q.contains(":tool:"), "{q}");
     let (n, _) = call(port, "entity_query", json!({"q": "kind:SemText", "count": true}));
     assert!(n.starts_with("2 entity"), "{n}");
     // what one message costs in entities (the fake runs two tools): the message, its turn, its body, the response and ITS body, two tools = 7; the words are Word entities
-    let (n, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:message:", "count": true}));
+    let (n, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:main:message:", "count": true}));
     assert!(n.starts_with("7 entity"), "{n}");
     let (n, _) = call(port, "entity_query", json!({"q": "kind:Word", "count": true}));
     println!("WORDS after one message and its answer: {n}");
@@ -1585,7 +1591,7 @@ fn the_turns_cli_reaches_the_mcp_door_with_the_owner_token_from_its_environment_
     assert!(!std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("with a token")))).unwrap().contains(&tok));
     // the token is in no row of the field either: not in the message's view, not in the command entity
     assert!(!v.to_string().contains(&tok));
-    let (c, _) = call(port, "entity_read", json!({"spec": format!("membrane::Command:chat:{id}")}));
+    let (c, _) = call(port, "entity_read", json!({"spec": format!("membrane::Command:chat:main:message:{id}")}));
     assert!(!c.contains(&tok), "{c}");
     assert!(terminate(&mut run));
 }
@@ -1625,7 +1631,7 @@ fn a_turn_the_cli_died_in_stores_its_cause_on_the_turn_the_response_and_the_next
     let r = v["response"].as_str().unwrap_or("").to_string();
     assert!(r.contains("rc") && r.contains("about to be killed"), "the response names how it ended and the stderr: {v}");
     assert!(r.contains("signal"), "a death by signal says so, not a bare rc: {v}");
-    let (e, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn"), "prop": "error"}));
+    let (e, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn"), "prop": "error"}));
     assert!(e.contains("about to be killed"), "the turn itself carries the cause: {e}");
     std::fs::remove_file(dir.join("die")).unwrap();
     send(port, "after");
@@ -1669,7 +1675,7 @@ fn assert_nowhere_in_routes(port: u16, id: &str, needle: &str) {
         let (_, b) = http(port, "GET", &p, "");
         seen.push((p, b));
     }
-    for spec in [format!("membrane::Command:chat:{id}"), format!("membrane::Chat:message:{id}:turn"), format!("membrane::Chat:message:{id}:turn:response"), "Boot:seat".to_string(), format!("membrane::Chat:message:{id}")] {
+    for spec in [format!("membrane::Command:chat:main:message:{id}"), format!("membrane::Chat:main:message:{id}:turn"), format!("membrane::Chat:main:message:{id}:turn:response"), "Boot:seat".to_string(), format!("membrane::Chat:main:message:{id}")] {
         seen.push((spec.clone(), call(port, "entity_read", json!({"spec": spec})).0));
     }
     for q in ["kind:Command", "kind:Boot", "kind:ChatMessage", "kind:ChatTool", "kind:Chat"] { seen.push((q.to_string(), call(port, "entity_query", json!({"q": q})).0)); }
@@ -1809,7 +1815,7 @@ fn a_keep_write_with_running_turns_answers_small_the_written_in_full_the_rest_as
     assert_eq!(own("summary")["cls"], "Keep", "the host's class field: {t}");
     let other = other.unwrap_or_else(|| panic!("the rest as counts: {t}"));
     assert!(other.contains("Banner.text x1") && other.contains("Chat.argv x"), "grouped as <Class>.<prop> xN: {other}");
-    assert!(!rs.iter().any(|r| r["eid"].as_str().unwrap().contains("Chat:message")), "no Chat value is listed: {t}");
+    assert!(!rs.iter().any(|r| r["eid"].as_str().unwrap().contains("Chat:main:message")), "no Chat value is listed: {t}");
     // a reasoned null on an entity that was not written still surfaces its reason
     assert!(t.contains("no alert for a keep"), "the reason of a null on another entity stays: {t}");
     for p in &prompts { std::fs::write(dir.join(format!("go.{}", tag_of(p))), "").unwrap(); }

@@ -8,7 +8,7 @@ If `SqlSource:legacy` has no path yet, the seat was started without it: write `S
 
 ## What is already in the field: the chat history
 
-The chat history (every session and every message) was imported into the field: the sessions are `Chat:session:<id>` entities with their messages, and the page shows them like any session. The import is `Legacy:seat`
+The chat history (every session and every message) was imported into the field: the sessions are `Chat:session:<id>` entities and their messages are `Chat:session:<id>:message:<ms>-<n>` (the session id is in the key), and the page shows them like any session. The import is `Legacy:seat`
 (`Legacy:seat.import = {id, sessions: 'all', page: <n>}`; progress on the seat and a ledger entity `Legacy:session:<id>` per old session, with `state`, `rows` and a note of the rows that had no place). Read the ledger
 before you read the source: a session that says `done` is already whole in the field.
 

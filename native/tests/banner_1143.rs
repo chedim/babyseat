@@ -38,7 +38,7 @@ fn a_fresh_banner_is_born_once_and_its_text_is_the_default_banner() {
 
 fn turn(h: &Host, n: u32, state: &str, ended: f64, said: Option<&str>) {
     // as the chat makes them: the class of the eid's namespace (Chat), the kind in `parents`
-    let eid = format!("membrane::Chat:message:{n}:turn");
+    let eid = format!("membrane::Chat:main:message:{n}:turn");
     let mut p = Map::new(); p.insert("ended".into(), json!(ended)); p.insert("parents".into(), json!(["cls:chatturn"]));
     h.born(&eid, "Chat", p, "person");
     if let Some(t) = said {
@@ -56,7 +56,7 @@ fn the_previous_turns_error_shows_in_the_default_banner_and_a_done_turn_adds_not
     let done = text(&seat_with(|h| turn(h, 1, "done", 1.0, Some("all done"))));
     assert_eq!(done.lines().count(), quiet.lines().count(), "a done turn adds nothing: {done}");
     let t = text(&seat_with(|h| { turn(h, 1, "done", 1.0, Some("fine")); turn(h, 2, "error", 2.0, Some("claude failed (rc 1): boom")); }));
-    assert!(t.contains("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:message:2:turn:response - claude failed (rc 1): boom"), "{t}");
+    assert!(t.contains("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:main:message:2:turn:response - claude failed (rc 1): boom"), "{t}");
     // the error is the PREVIOUS turn's: a later done turn takes it away
     let t = text(&seat_with(|h| { turn(h, 1, "error", 1.0, Some("boom")); turn(h, 2, "done", 2.0, Some("fine")); }));
     assert!(!t.contains("ERROR"), "{t}");
