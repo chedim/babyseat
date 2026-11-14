@@ -297,7 +297,7 @@ scenario('the import line is shown while the history is imported and goes away w
   w.write('DomNode:chat:older:btn', 'clicked', 2);
   assert.equal(w.asked('older').url, '/membrane/chat/messages?limit=20&before=1002-3', 'the same cursor');
   w.reply('older', 200, { ...page([MSGS[0], MSGS[1]], false, null), import: LINE });
-  assert.equal(row(w, '1000-1', ':me').text, 'hello', 'the older turns that arrived are drawn');
+  assert.equal(w.text('DomNode:chat:row:1000-1:me'), 'hello', 'the older turns that arrived are drawn');
   // a poll after the end of the import: no line
   w.tick(3.5);
   w.reply('history', 200, { ...page([MSGS[2], MSGS[3]], false, null), import: null });

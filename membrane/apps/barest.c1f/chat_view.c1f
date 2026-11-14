@@ -60,7 +60,7 @@ View.open on-setter chat-draw:
     ('DomNode:chat:list').class = 'rows'
     ('DomNode:chat:import').parent = 'DomNode:chat:root'
     ('DomNode:chat:import').tag = 'div'
-    ('DomNode:chat:import').class = 'pollnote'
+    ('DomNode:chat:import').class = 'importnote'
     ('DomNode:chat:import').role = 'status'
     ('DomNode:chat:import').hidden = True
     ('DomNode:chat:pollnote').parent = 'DomNode:chat:root'
