@@ -16,12 +16,12 @@ The integration keeps this entity current with what the person exposed to Home A
 -- reads HaCatalog:ha.service_ids = ["light.turn_on"]
 ```
 
-## What you may do: `HaAllow:<name>` (every call is denied until the owner allows it)
+## What you may do: `HaAllow:<name>` (every call is denied until the admin allows it)
 
 An entry lists `services` and `entities`. A call runs when ONE entry lists its service (`light.turn_on`, or `light.*` for every service of a domain) AND every entity the call names (`light.kitchen`, or `light.*`).
 A read of a state is the service word `states.read`. A service that takes no entity (a notification) needs only its service. A call names its entities in `target.entity_id` or in `data.entity_id`, a text or a list.
 A target by device, area, floor or label is denied: name the entity ids (the catalog lists them). Refreshing the catalog (`{read: 'catalog'}`) needs no entry.
-Ask the owner to write the entry; an entry you write yourself stands in the journal for the owner to see.
+Ask the admin to write the entry; an entry you write yourself stands in the journal for the admin to see.
 
 ## Call a service
 

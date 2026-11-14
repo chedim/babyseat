@@ -1,5 +1,5 @@
 """Slice 2 (#1143), B: the few entities the component makes for the seat, from what the seat really knows (`GET /membrane/ha/metrics`, `GET /membrane/options`, the health poll), the select
-of the seat's model (a write through the owner-only `/membrane/options`), and the migration that removes what the old component left in the entity registry. A REAL cliffvm seat (fake claude);
+of the seat's model (a write through `/membrane/options`), and the migration that removes what the old component left in the entity registry. A REAL cliffvm seat (fake claude);
 Home Assistant is the fake of fakeha.py."""
 import asyncio
 import datetime
@@ -19,7 +19,7 @@ def _added(module, entry):
 async def _loaded(pkg, hass, seat, token=None):
     s = aiohttp.ClientSession()
     hass.session = s
-    entry = fakeha.FakeConfigEntry(data={"serve_url": seat.url, "serve_user": "opencode", "serve_pass": token or seat.owner_token()})
+    entry = fakeha.FakeConfigEntry(data={"serve_url": seat.url, "serve_user": "opencode", "serve_pass": token or seat.admin_token()})
     hass.config_entries.entries.append(entry)
     await pkg.async_setup_entry(hass, entry)
     for t in entry.tasks:
@@ -101,7 +101,7 @@ def test_reachable_goes_off_when_the_seat_stops_answering_and_the_others_become_
     assert asyncio.run(go()) == (False, True, False)
 
 
-def test_a_token_that_is_not_the_owners_gets_the_reachable_sensor_and_the_model_list_but_no_rows_and_no_write(ha, real_seat):
+def test_a_token_with_sub_ha_is_the_admin_and_gets_the_rows_the_model_list_and_the_write(ha, real_seat):
     pkg, hass = ha
 
     async def go():
@@ -119,9 +119,9 @@ def test_a_token_that_is_not_the_owners_gets_the_reachable_sensor_and_the_model_
         finally:
             await s.close()
     sensors, flags, options, err = asyncio.run(go())
-    assert sensors == [] and flags == ["Reachable"]
+    assert sensors != [] and "Reachable" in flags and "Busy" in flags, "no users: the token's sub names nobody, every valid token is the admin"
     assert options == ["claude", "claude-agent:sonnet"]
-    assert err is not None and "owner" in err
+    assert err is None, "the model write is not refused"
 
 
 def test_the_select_lists_the_seats_models_shows_the_one_it_runs_and_a_choice_is_written_to_the_seat(ha, real_seat):

@@ -83,10 +83,10 @@ fn status(r: &[u8]) -> String { split(r).0.lines().next().unwrap().to_string() }
 fn header(r: &[u8], name: &str) -> Option<String> {
     split(r).0.lines().skip(1).find_map(|l| l.split_once(':').filter(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()))
 }
-fn req(path: &str, extra: &str) -> String { format!("GET {path} HTTP/1.1\r\nHost: t\r\n{extra}\r\n") }
+fn req(path: &str, extra: &str) -> String { format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{extra}\r\n") }
 
 #[test]
-fn the_page_fetched_from_loopback_sets_the_owner_cookie() {
+fn the_page_fetched_from_loopback_sets_the_admin_cookie() {
     let (mut c, mut f, port) = world();
     for path in ["/", "/index.html", "/membrane"] {
         let r = get(&mut c, &mut f, port, &req(path, ""));
@@ -97,7 +97,7 @@ fn the_page_fetched_from_loopback_sets_the_owner_cookie() {
         assert!(ck.contains("; HttpOnly") && ck.contains("; SameSite=Strict") && ck.contains("; Path=/"), "{ck}");
         let tok = ck[name.len() + 1..].split(';').next().unwrap();
         let claims = membrane_vm::jwt::verify(tok, SECRET.as_bytes(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()).unwrap();
-        assert_eq!(claims["sub"], "owner", "the owner's token");
+        assert_eq!(claims["sub"], "admin", "the admin's token");
         assert_eq!(split(&r).1, std::fs::read(format!("{}/index.html", ui_dir())).unwrap(), "{path}: the page's bytes");
     }
 }
@@ -131,7 +131,7 @@ fn the_served_routes_need_the_cookie_or_a_bearer_and_answer_401_in_the_released_
     let body: J = serde_json::from_slice(&split(&r).1).unwrap();
     assert_eq!(body, json!({"error": {"message": "missing or invalid token", "type": "unauthorized"}}));
     // a bad JWT (cookie and bearer): the same 401; a token signed with another key too
-    let other = membrane_vm::jwt::mint(b"another secret of at least 32 bytes!!", "owner", "owner", 3600.0, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()).unwrap();
+    let other = membrane_vm::jwt::mint(b"another secret of at least 32 bytes!!", "admin", "admin", 3600.0, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()).unwrap();
     for extra in [format!("Cookie: {name}=garbage\r\n"), "Authorization: Bearer not.a.jwt\r\n".to_string(), format!("Authorization: Bearer {other}\r\n")] {
         let r = get(&mut c, &mut f, port, &req("/ui/serve/global/health", &extra));
         assert!(status(&r).starts_with("HTTP/1.1 401"), "{extra}: {}", status(&r));
@@ -171,8 +171,8 @@ fn the_prefix_is_stripped_and_a_route_answers_on_both_paths() {
 }
 
 #[test]
-fn a_bare_loopback_caller_is_not_the_owner_when_the_door_has_a_secret() {
-    // the operator's rule (#842): a localhost peer is not the owner. Every route but the public shell needs a verified token, the unprefixed ones too
+fn a_bare_loopback_caller_is_not_the_admin_when_the_door_has_a_secret() {
+    // the operator's rule (#842): a localhost peer is not the admin. Every route but the public shell needs a verified token, the unprefixed ones too
     let (mut c, mut f, port) = world();
     for path in ["/global/health", "/command", "/path", "/ui/conf", "/session", "/ui/serve/global/health"] {
         let r = get(&mut c, &mut f, port, &req(path, ""));
@@ -181,12 +181,12 @@ fn a_bare_loopback_caller_is_not_the_owner_when_the_door_has_a_secret() {
         assert_eq!(serde_json::from_slice::<J>(&split(&r).1).unwrap(), json!({"error": {"message": "missing or invalid token", "type": "unauthorized"}}), "{path}");
     }
     // the same call with a token is served
-    let auth = format!("Authorization: Bearer {}\r\n", token("owner"));
+    let auth = format!("Authorization: Bearer {}\r\n", token("admin"));
     let r = get(&mut c, &mut f, port, &req("/global/health", &auth));
     assert!(status(&r).starts_with("HTTP/1.1 200"), "{}", status(&r));
     // a token past its life (beyond the 30 s leeway) is the same 401
     let old = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() - 7200.0;
-    let expired = membrane_vm::jwt::mint(SECRET.as_bytes(), "owner", "owner", 60.0, old).unwrap();
+    let expired = membrane_vm::jwt::mint(SECRET.as_bytes(), "admin", "admin", 60.0, old).unwrap();
     let r = get(&mut c, &mut f, port, &req("/global/health", &format!("Authorization: Bearer {expired}\r\n")));
     assert!(status(&r).starts_with("HTTP/1.1 401"), "{}", status(&r));
 }

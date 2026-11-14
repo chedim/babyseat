@@ -12,9 +12,9 @@ from .test_entities import _by_name, _loaded, _platform
 from .test_house import LIGHT, _allow, _ask, _house, _response, _state
 
 
-def test_connect_with_a_minted_owner_token_and_the_health_check_passes_and_a_foreign_token_is_refused(ha, release_seat):
+def test_connect_with_a_minted_token_and_the_health_check_passes_and_a_foreign_token_is_refused(ha, release_seat):
     pkg, hass = ha
-    owner = release_seat.mint(sub="owner")                                  # `cliffvm token mint --sub owner`, the way docs/home-assistant.md says
+    tok = release_seat.mint(sub="ha")                                      # `cliffvm token mint --sub ha`, the way docs/home-assistant.md says
 
     async def go(token):
         s, entry = await _loaded(pkg, hass, release_seat, token=token)
@@ -22,7 +22,7 @@ def test_connect_with_a_minted_owner_token_and_the_health_check_passes_and_a_for
             return entry.runtime_data.health.data, entry
         finally:
             await s.close()
-    data, entry = asyncio.run(go(owner))
+    data, entry = asyncio.run(go(tok))
     assert data and entry.runtime_data.health.last_update_success is not False
     # a token of another secret: the setup is a reauth, not a working entry
     other = release_seat.mint_at(600)
@@ -42,7 +42,7 @@ def test_a_call_the_allow_list_permits_is_pulled_run_and_answered_and_one_it_den
     assert "not allowed" in _response(release_seat, "no1")
 
     async def go():
-        s, entry, house = await _house(pkg, hass, release_seat, token=release_seat.mint(sub="owner"))
+        s, entry, house = await _house(pkg, hass, release_seat, token=release_seat.mint(sub="ha"))
         try:
             return await house.pump_once()
         finally:
@@ -53,7 +53,7 @@ def test_a_call_the_allow_list_permits_is_pulled_run_and_answered_and_one_it_den
     assert json.loads(_response(release_seat, "ok1")) == {"called": "light.turn_on"}
 
 
-def test_a_token_that_is_not_the_owners_cannot_pull_the_calls(ha, release_seat):
+def test_a_token_whatever_its_sub_pulls_the_calls(ha, release_seat):
     pkg, hass = ha
     _allow(release_seat)
     _ask(release_seat, "ok1", LIGHT)
@@ -64,19 +64,15 @@ def test_a_token_that_is_not_the_owners_cannot_pull_the_calls(ha, release_seat):
             return await house.pump_once()
         finally:
             await s.close()
-    try:
-        pulled = asyncio.run(go())
-    except Exception:                                                        # a refusal may surface as an error: either way nothing ran
-        pulled = 0
-    assert not pulled and hass.services.calls == []
-    assert _state(release_seat, "ok1") == "pending", "and the call is still waiting for the owner's token"
+    assert asyncio.run(go()) == 1 and [c["service"] for c in hass.services.calls] == ["turn_on"]
+    assert _state(release_seat, "ok1") == "done", "no users: the token's sub is no identity, every valid token is the admin"
 
 
 def test_the_model_select_and_the_metrics_work_on_the_release_launchers_seat(ha, release_seat):
     pkg, hass = ha
 
     async def go():
-        s, entry = await _loaded(pkg, hass, release_seat, token=release_seat.mint(sub="owner"))
+        s, entry = await _loaded(pkg, hass, release_seat, token=release_seat.mint(sub="ha"))
         try:
             data = entry.runtime_data
             sid = await data.client.create_session("rv")

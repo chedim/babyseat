@@ -100,7 +100,7 @@ Fixture.brightness getter: 'dim'
 ```
 
 Writing `parents` is also the second way to replace your banner: give a class of your own a `text` getter and write `parents: ["cls:<yourclass>"]`
-on `Banner:owner:main` (`Help:banner`).
+on `Banner:admin:main` (`Help:banner`).
 
 ## Storage: stored and loaded on demand, resident, or only in memory
 

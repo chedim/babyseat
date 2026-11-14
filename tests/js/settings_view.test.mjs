@@ -99,7 +99,7 @@ scenario('one section per group, in the operator\'s order, each row in its order
   assert.deepEqual(rowsOf('model'), ['model.chat', 'model.default', 'model.list', 'model.cloud', 'model.signin', 'model.cli']);
   assert.deepEqual(rowsOf('chat'), ['chat.max_steps', 'chat.timeout']);
   assert.deepEqual(rowsOf('home'), ['home.allow']);
-  assert.deepEqual(rowsOf('access'), ['access.owner', 'access.token_life', 'access.token_file', 'access.mode', 'access.people', 'access.port']);
+  assert.deepEqual(rowsOf('access'), ['access.token_life', 'access.token_file', 'access.mode', 'access.port']);
   assert.equal(rowsOf('limits').length, 9);
   assert.equal(w.eids('DomNode:set:map.').length, 0, 'a hidden row has no node'); assert.equal(w.eids('DomNode:setg:map').length, 0, 'and no group');
   assert.equal(w.get('SetRow:map.window'), null);
@@ -166,11 +166,11 @@ scenario('an out-of-range number: the seat\'s reason is shown next to the row, t
   assert.equal(w.n('chat.max_steps', 'state').text, 'Saving…', 'the old refusal is not shown while the new write is out');
 });
 
-scenario('a refusal of the call itself (a person who is not the owner: 403) or a failure is text, with the reason, and the row is usable again', () => {
+scenario('a refusal of the call itself (a 403 or a failure; the seat itself never answers 403 for who asks) is text, with the reason, and the row is usable again', () => {
   const w = world().open();
   w.type('chat.timeout', 'in', '5'); w.submit('chat.timeout');
-  w.reply('setw:chat.timeout', 403, { type: 'error', error: { message: 'for the owner' } });
-  assert.equal(w.n('chat.timeout', 'state').text, 'Not saved: the seat answered: for the owner'); assert.equal(w.n('chat.timeout', 'state')['data-kind'], 'bad');
+  w.reply('setw:chat.timeout', 403, { type: 'error', error: { message: 'forbidden by a proxy' } });
+  assert.equal(w.n('chat.timeout', 'state').text, 'Not saved: the seat answered: forbidden by a proxy'); assert.equal(w.n('chat.timeout', 'state')['data-kind'], 'bad');
   assert.equal(w.n('chat.timeout', 'save').disabled, false);
   assert.equal(w.n('chat.timeout', 'now').text, 'In force: 21600 seconds');
   w.submit('chat.timeout'); w.fail('setw:chat.timeout', 'the connection was reset');
@@ -322,14 +322,14 @@ scenario('an answer of an older read (a newer one was asked for) is dropped', ()
 });
 
 scenario('no secret is on the page: the view shows only what the feed holds, and the feed holds names of variables, never values', () => {
-  const SECRETS = ['sk-ant-secret-0001', 'hunter2pw', 'owner-jwt-token-xyz'];
+  const SECRETS = ['sk-ant-secret-0001', 'hunter2pw', 'admin-jwt-token-xyz'];
   const w = world().open((rows) => {
     byId(rows, 'model.cloud').current = [{ name: 'gpt', backend: 'openai', api_key_env: 'OTHER_PROVIDER_KEY' }];   // what the seat's feed carries (native/tests/settings_1143.rs: the real feed holds no secret)
-    byId(rows, 'access.token_file').current = '/data/owner.token';
+    byId(rows, 'access.token_file').current = '/data/admin.token';
   });
   const page = allText(w) + JSON.stringify(w.log.filter((x) => x.eid.startsWith('DomNode:')).map((x) => x.new));
   for (const s of SECRETS) assert.ok(!page.includes(s), s);
-  assert.ok(page.includes('OTHER_PROVIDER_KEY') && page.includes('/data/owner.token'), 'the NAME of the variable and the PATH of the file are shown');
+  assert.ok(page.includes('OTHER_PROVIDER_KEY') && page.includes('/data/admin.token'), 'the NAME of the variable and the PATH of the file are shown');
   // and nothing the page sends carries one either: a write is the setting id and the value typed
   w.type('chat.timeout', 'in', '90'); w.submit('chat.timeout');
   assert.ok(!w.asked('setw:chat.timeout').body.includes('sk-'), 'the write holds no key');

@@ -1,5 +1,5 @@
-//! The owner's token (#1143, operator 2026-11-13): a localhost peer is NOT the owner (#842). When the seat has a door secret, `cliffvm run` makes sure the secret
-//! exists (0600), mints an owner JWT at every boot and writes it to `<seat_data_dir>/owner.token` (0600), so local tools read a token like anyone else.
+//! The admin's token (#1143, operator 2026-11-13): a localhost peer is NOT the admin (#842). When the seat has a door secret, `cliffvm run` makes sure the secret
+//! exists (0600), mints an admin JWT at every boot and writes it to `<seat_data_dir>/admin.token` (0600), so local tools read a token like anyone else.
 //! The barest seat (no secret) has none and stays open. Every wait has a timeout and the child is always reaped.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
@@ -56,7 +56,7 @@ fn launch_secret(dir: &std::path::Path, more: &[&str]) -> (Run, u16) {
 fn http(port: u16, method: &str, path: &str, extra: &str, body: &str) -> (u16, String, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
-    let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}", body.len());
+    let raw = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}", body.len());
     s.write_all(raw.as_bytes()).unwrap();
     let mut out = vec![];
     let _ = s.read_to_end(&mut out);
@@ -68,20 +68,20 @@ fn http(port: u16, method: &str, path: &str, extra: &str, body: &str) -> (u16, S
 fn bearer(t: &str) -> String { format!("Authorization: Bearer {t}\r\n") }
 fn now() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() }
 fn mode(p: &std::path::Path) -> u32 { std::fs::metadata(p).unwrap().permissions().mode() & 0o777 }
-fn token_of(dir: &std::path::Path) -> String { std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string() }
+fn token_of(dir: &std::path::Path) -> String { std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string() }
 fn secret_of(dir: &std::path::Path) -> Vec<u8> { std::fs::read_to_string(dir.join("door.secret")).unwrap().trim().as_bytes().to_vec() }
 
 #[test]
-fn the_boot_makes_the_secret_and_writes_an_owner_token_that_the_door_accepts_and_a_bare_caller_does_not_get_in() {
-    let dir = tmp("owner-token");
+fn the_boot_makes_the_secret_and_writes_an_admin_token_that_the_door_accepts_and_a_bare_caller_does_not_get_in() {
+    let dir = tmp("admin-token");
     let (_run, port) = launch_secret(&dir, &[]);
-    // the secret was made (0600, long enough), and the owner's token file beside it (0600), signed with it
+    // the secret was made (0600, long enough), and the admin's token file beside it (0600), signed with it
     assert_eq!(mode(&dir.join("door.secret")), 0o600);
     assert!(secret_of(&dir).len() >= 32);
-    assert_eq!(mode(&dir.join("owner.token")), 0o600);
+    assert_eq!(mode(&dir.join("admin.token")), 0o600);
     let tok = token_of(&dir);
     let claims = membrane_vm::jwt::verify(&tok, &secret_of(&dir), now()).expect("the token verifies with the door's secret");
-    assert_eq!(claims["sub"], "owner");
+    assert_eq!(claims["sub"], "admin");
     assert_eq!(claims["exp"].as_f64().unwrap() - claims["iat"].as_f64().unwrap(), 2592000.0, "the default life is 30 days");
     // a bare loopback caller: the released 401; with the file's token: served
     let (st, head, body) = http(port, "GET", "/global/health", "", "");
@@ -92,11 +92,11 @@ fn the_boot_makes_the_secret_and_writes_an_owner_token_that_the_door_accepts_and
     assert_eq!(http(port, "GET", "/global/health", &bearer(&tok), "").0, 200);
     assert_eq!(http(port, "GET", "/ui/serve/global/health", &bearer(&tok), "").0, 200);
     // another key, and a token past its life: 401
-    let other = membrane_vm::jwt::mint(b"another secret of at least 32 bytes!!", "owner", "owner", 3600.0, now()).unwrap();
+    let other = membrane_vm::jwt::mint(b"another secret of at least 32 bytes!!", "admin", "admin", 3600.0, now()).unwrap();
     assert_eq!(http(port, "GET", "/global/health", &bearer(&other), "").0, 401);
-    let old = membrane_vm::jwt::mint(&secret_of(&dir), "owner", "owner", 60.0, now() - 7200.0).unwrap();
+    let old = membrane_vm::jwt::mint(&secret_of(&dir), "admin", "admin", 60.0, now() - 7200.0).unwrap();
     assert_eq!(http(port, "GET", "/global/health", &bearer(&old), "").0, 401);
-    // the public set stays public, and the page's cookie flow works: the page from this machine is given the owner cookie, /ui/login turns a token into one
+    // the public set stays public, and the page's cookie flow works: the page from this machine is given the admin cookie, /ui/login turns a token into one
     for p in ["/", "/index.html", "/membrane"] { assert_ne!(http(port, "GET", p, "", "").0, 401, "{p}"); }
     assert_ne!(http(port, "GET", "/ui/www/nothing.js", "", "").0, 401);
     let (st, head, _) = http(port, "GET", "/", "", "");
@@ -109,7 +109,7 @@ fn the_boot_makes_the_secret_and_writes_an_owner_token_that_the_door_accepts_and
 
 #[test]
 fn the_path_is_a_fact_of_the_boot_and_the_token_is_nowhere_in_the_field() {
-    let dir = tmp("owner-token-field");
+    let dir = tmp("admin-token-field");
     let (_run, port) = launch_secret(&dir, &[]);
     let tok = token_of(&dir);
     let read = |spec: &str, prop: Option<&str>| -> String {
@@ -119,7 +119,7 @@ fn the_path_is_a_fact_of_the_boot_and_the_token_is_nowhere_in_the_field() {
         assert_eq!(st, 200, "{body}");
         body
     };
-    assert!(read("Boot:seat", Some("owner_token_file")).contains(&dir.join("owner.token").display().to_string()));
+    assert!(read("Boot:seat", Some("admin_token_file")).contains(&dir.join("admin.token").display().to_string()));
     assert!(!read("Boot:seat", None).contains(&tok), "the token value is never a property of the field");
     let (st, _, qb) = http(port, "POST", "/mcp", &bearer(&tok), &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "entity_query", "arguments": {"q": "Boot"}}}).to_string());
     assert_eq!(st, 200);
@@ -127,37 +127,37 @@ fn the_path_is_a_fact_of_the_boot_and_the_token_is_nowhere_in_the_field() {
 }
 
 #[test]
-fn the_operator_and_the_life_are_boot_facts() {
-    let dir = tmp("owner-token-facts");
-    let (_run, _port) = launch_secret(&dir, &["--fact", "operator=ann", "--fact", "owner_token_ttl_s=120"]);
+fn the_life_is_a_boot_fact_and_the_sub_is_always_admin() {
+    let dir = tmp("admin-token-facts");
+    let (_run, _port) = launch_secret(&dir, &["--fact", "operator=ann", "--fact", "admin_token_ttl_s=120"]);
     let claims = membrane_vm::jwt::verify(&token_of(&dir), &secret_of(&dir), now()).unwrap();
-    assert_eq!(claims["sub"], "ann");
+    assert_eq!(claims["sub"], "admin", "no users: the operator fact names nobody (a leftover `--fact operator=` is ignored)");
     assert_eq!(claims["exp"].as_f64().unwrap() - claims["iat"].as_f64().unwrap(), 120.0);
 }
 
 #[test]
 fn a_restart_keeps_the_secret_and_replaces_the_token_file_with_a_fresh_one() {
-    let dir = tmp("owner-token-restart");
-    let (run, _p) = launch_secret(&dir, &["--fact", "operator=ann"]);
+    let dir = tmp("admin-token-restart");
+    let (run, _p) = launch_secret(&dir, &[]);
     let (first, secret) = (token_of(&dir), secret_of(&dir));
     drop(run);
     std::thread::sleep(Duration::from_millis(1100));   // iat is in whole seconds: a second boot in the same second would mint the same token
-    let (_run2, port) = launch_secret(&dir, &["--fact", "operator=bob"]);
+    let (_run2, port) = launch_secret(&dir, &[]);
     let second = token_of(&dir);
     assert_ne!(first, second, "every boot rotates the token");
     assert_eq!(secret_of(&dir), secret, "the secret is kept");
-    assert_eq!(mode(&dir.join("owner.token")), 0o600);
-    assert_eq!(membrane_vm::jwt::verify(&second, &secret, now()).unwrap()["sub"], "bob");
+    assert_eq!(mode(&dir.join("admin.token")), 0o600);
+    assert_eq!(membrane_vm::jwt::verify(&second, &secret, now()).unwrap()["sub"], "admin");
     assert_eq!(http(port, "GET", "/global/health", &bearer(&second), "").0, 200);
-    let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.contains("owner.token") && n != "owner.token").collect();
+    let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.contains("admin.token") && n != "admin.token").collect();
     assert!(leftovers.is_empty(), "the replace leaves no temp file: {leftovers:?}");
 }
 
 #[test]
 fn the_barest_seat_has_no_secret_no_token_file_and_stays_open() {
-    let dir = tmp("owner-token-barest");
+    let dir = tmp("admin-token-barest");
     let (_run, port) = launch(&dir, &[]);
-    assert!(!dir.join("owner.token").exists());
+    assert!(!dir.join("admin.token").exists());
     assert!(!dir.join("door.secret").exists());
     assert_eq!(http(port, "GET", "/global/health", "", "").0, 200, "the barest seat is open by decision");
 }

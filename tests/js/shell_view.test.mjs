@@ -126,8 +126,8 @@ scenario('ONE chat: no session list, no New session; the history is read with no
   assert.equal(w.get('DomNode:chat:row:900-0').before, 'DomNode:chat:row:1000-1', 'the older turn sits above, in the same thread');
   w.write('DomNode:chat:input', 'value', 'hello'); w.write('DomNode:chat:form', 'submitted', w.t);
   assert.deepEqual(JSON.parse(w.asked('send').body), { text: 'hello' });
-  w.reply('send', 403, { error: 'for the owner' });
-  assert.match(w.get('DomNode:chat:note:bubble').text, /for the owner/, 'a refusal is text');
+  w.reply('send', 403, { error: 'forbidden by a proxy' });
+  assert.match(w.get('DomNode:chat:note:bubble').text, /forbidden by a proxy/, 'a refusal is text');
 });
 
 scenario('the status line: connected or not, idle or a turn running; a poll every status_ms, not while hidden', () => {

@@ -272,7 +272,7 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/apps/bar
   `Fetch:<id>.request = {id, url, method?, headers?, body?, timeout_s?}`; the shell makes ONE `fetch()` and writes `request_result` back in the
   seat's shape: `{id, status:'ok', rc:0, head:'<code> <text>', http_status, headers (lower-case names), body, started, finished, ms}`; a failure is
   `{id, status:'error', rc, head:<reason>, started, finished, ms}` (rc 2 refused before sending, rc 1 network failure, abort, timeout). A non-2xx is
-  a normal result with its `http_status`. Same origin only (`location.origin`, credentials `same-origin`, so the owner cookie goes with it; any
+  a normal result with its `http_status`. Same origin only (`location.origin`, credentials `same-origin`, so the admin cookie goes with it; any
   other origin is refused with a reason); verbs GET/POST/PATCH/DELETE; headers `content-type` and `accept` only (never authorization or cookie);
   `body` text only. No page-side timeout unless the request has `timeout_s`. `abort = true` on the entity aborts the one in flight. The same
   request id written again on the same entity is not fetched twice.
@@ -324,7 +324,7 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/apps/bar
 
 ## 11. Libraries in `.c1f`
 
-- **`membrane/packs/banner.c1f`** (the whole banner): one `Banner:<owner>:<chat>` per person per chat, internal
+- **`membrane/packs/banner.c1f`** (the whole banner): one `Banner:<admin>:<chat>` per person per chat, internal
   chats too; a turn writes `ask` and the seat's facts as fields (`paused`, `alerts` -- the track alerts it took --,
   `tools`, and Blurp's `blurp` / `suggest` when Blurp is on), and shows `text` (every section and the layout:
   RECALL, OPEN, DECIDED, WORKING ON, ABOUT, STABLE, SINCE, the paused / alert / more lines; `lines` is RECALL). Built-ins: `recall(text, pool, session)`,

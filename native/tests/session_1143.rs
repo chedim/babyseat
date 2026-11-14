@@ -33,7 +33,7 @@ const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f
 
 /// the seat's folder holds the fake claude; the binary is told its path as a fact
 fn seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) { seat_with(tag, script, false) }
-/// `strict`: the seat has a door secret (and so an owner token file, `<dir>/owner.token`): every route but the public set needs the token
+/// `strict`: the seat has a door secret (and so an admin token file, `<dir>/admin.token`): every route but the public set needs the token
 fn seat_with(tag: &str, script: &str, strict: bool) -> (Run, u16, std::path::PathBuf) { seat_facts(tag, script, strict, &[]) }
 /// `facts`: more `--fact name=value` lines
 fn seat_facts(tag: &str, script: &str, strict: bool, facts: &[&str]) -> (Run, u16, std::path::PathBuf) {
@@ -545,9 +545,9 @@ fn http_tok(port: u16, method: &str, path: &str, token: Option<&str>, body: &str
 }
 
 #[test]
-fn on_a_seat_with_a_secret_the_session_routes_and_streams_need_the_owner_token_and_work_with_it() {
+fn on_a_seat_with_a_secret_the_session_routes_and_streams_need_the_admin_token_and_work_with_it() {
     let (_run, port, dir) = seat_with("ses-strict", QUICK, true);
-    let token = wait("the owner token file", || std::fs::read_to_string(dir.join("owner.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
+    let token = wait("the admin token file", || std::fs::read_to_string(dir.join("admin.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
     // without the token: the released 401 on every session route, the streams included, prefixed or not
     for (m, p) in [("GET", "/session"), ("POST", "/session"), ("GET", "/session/status"), ("GET", "/ui/serve/session"), ("GET", "/ui/serve/event")] {
         let (st, body) = http_tok(port, m, p, None, "{}");
@@ -598,7 +598,7 @@ fn http_basic(port: u16, method: &str, path: &str, pass: &str, body: &str) -> (u
 #[test]
 fn the_home_assistant_component_s_calls_work_with_a_token_as_the_basic_password_and_the_speaker_part_reaches_the_model_as_written() {
     let (_run, port, dir) = seat_with("ses-ha", QUICK, true);
-    let token = wait("the owner token file", || std::fs::read_to_string(dir.join("owner.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
+    let token = wait("the admin token file", || std::fs::read_to_string(dir.join("admin.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
     // the health the component polls and the setup form checks: the token is the password, any user name; no token and a wrong one are the door's 401
     let (st, b) = http_basic(port, "GET", "/global/health", &token, "");
     assert_eq!(st, 200, "{b}");
