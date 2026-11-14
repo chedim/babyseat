@@ -1,4 +1,4 @@
-//! scripts/seat: the one launcher, the strict door on the barest pack set, claude the only model (a fake `claude`: nothing runs a model here).
+//! scripts/seat: the dev wrapper of `cliffvm serve`, the strict door on the barest pack set, claude the only model (a fake `claude`: nothing runs a model here).
 #![cfg(feature = "bin")]
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -30,7 +30,8 @@ fn start(data: &std::path::Path, extra: &[&str]) -> Run {
     let mut said = vec![];
     while let Ok(l) = rx.recv_timeout(Duration::from_secs(30)) {
         said.push(l.clone());
-        if l.starts_with("cliffvm: door listening on") { port = l.rsplit(':').next().unwrap().trim().parse().unwrap(); break; }
+        if l.starts_with("cliffvm: door listening on") { port = l.rsplit(':').next().unwrap().trim().parse().unwrap(); }
+        if port != 0 && l.contains("curl") { break; }   // `cliffvm serve` tells the URL and the curl example after the door is up
     }
     assert!(port != 0, "the door came up");
     Run { child, _lines: rx, port, said }

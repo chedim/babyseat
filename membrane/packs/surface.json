@@ -116,7 +116,7 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 58,
+    "members": 65,
     "writes": [
       "membrane:*.mention",
       "membrane:*.queued",
@@ -180,29 +180,34 @@
       "chat",
       "semtext",
       "proc",
-      "boot"
+      "boot",
+      "door"
     ],
     "classes": [
       "Boot",
       "Chat",
       "ChatMessage",
-      "Chunk"
+      "Chunk",
+      "Request"
     ],
-    "members": 57,
+    "members": 58,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
+      "membrane:*.aborted",
       "membrane:*.calls",
       "membrane:*.cost",
       "membrane:*.duration",
       "membrane:*.ended",
       "membrane:*.error",
+      "membrane:*.kept",
       "membrane:*.mention",
       "membrane:*.result",
       "membrane:*.run",
       "membrane:*.run_result",
       "membrane:*.started",
       "membrane:*.state",
+      "membrane:*.stop",
       "membrane:*.usage",
       "membrane:*=ChatResponse()",
       "membrane:*=ChatTool()",
@@ -272,7 +277,7 @@
       "Http",
       "Request"
     ],
-    "members": 90,
+    "members": 91,
     "writes": [
       "Http:door.listen"
     ],
@@ -298,8 +303,10 @@
     "boot_facts": [
       "app_dirs",
       "build_id",
+      "default_port",
       "door_port",
       "door_secret_file",
+      "minds",
       "seat_aliases",
       "seat_blurp",
       "seat_cwd",
@@ -392,7 +399,7 @@
       "FvFile",
       "Request"
     ],
-    "members": 40,
+    "members": 42,
     "writes": [
       "FieldVm:seat.born",
       "FvDir:*.path",
@@ -746,6 +753,23 @@
       "Intent"
     ]
   },
+  "launcher": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot"
+    ],
+    "members": 2,
+    "writes": [],
+    "claims": [],
+    "boot_facts": [
+      "cloud_models",
+      "minds",
+      "router_on",
+      "seat_backend"
+    ]
+  },
   "legacy_cutover": {
     "imports": [
       "boot",
@@ -840,6 +864,34 @@
     ],
     "claims": [],
     "boot_facts": []
+  },
+  "link": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "Page",
+      "Vm"
+    ],
+    "members": 8,
+    "writes": [
+      "*.retire",
+      "Vm:*.connected_at",
+      "Vm:*.page",
+      "Vm:*.seen"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "link_stale_s",
+      "started"
+    ],
+    "virtual": [
+      "Page"
+    ],
+    "resident": [
+      "Vm"
+    ]
   },
   "mcp": {
     "imports": [],

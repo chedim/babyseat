@@ -75,3 +75,5 @@ recon.txt
 dist/
 # the binary the wheel carries (built by the packaging step, never committed)
 membrane/dist/
+# the release dist folder (scripts/dist/build.sh) is build output; the scripts that make it are source
+!scripts/dist/

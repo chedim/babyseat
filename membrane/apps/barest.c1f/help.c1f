@@ -21,3 +21,4 @@ Boot.started on-setter seed-help:
     Help:ha.file = dir + '/help/ha.md'
     Help:settings.file = dir + '/help/settings.md'
     Help:environment.file = dir + '/help/environment.md'
+    Help:page.file = dir + '/help/page.md'

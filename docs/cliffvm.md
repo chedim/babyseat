@@ -55,14 +55,32 @@ cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--
 The barest usable agent seat: one command starts `cliffvm` on the shipped packs and the barest app, and the page is a graph viewer plus the one chat.
 
 ```
+cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--store <sqlite>] [--root <dist folder>] [--fact name=value ...]      # the users' launcher (cliffvm serve --help)
+scripts/seat [--open] [--data-dir <dir>] [--port <n>] [--fact name=value ...]                                                    # the dev wrapper: the same, on this checkout's membrane/ folder
+```
+
+`cliffvm serve` only FINDS things. The dist folder is the one above `bin/` (`<root>/bin/cliffvm`, `--root` names another; the repo's `membrane/` has the same shape: `packs/ apps/`); it reads
+`<root>/apps/barest.packs` (one pack per line, load order, the first is the root of trust), loads those packs from `<root>/packs/`, then `launcher.c1f`, then the app `<root>/apps/barest.c1f` (the page is that app's `ui/` folder).
+The data folder is `--data-dir`, else `$XDG_DATA_HOME/membrane`, else `~/Library/Application Support/membrane` (macOS) or `~/.local/share/membrane`; it holds `seat.sqlite` (the store), `door.secret`
+(made at the first run, mode 0600) and `owner.token` (new at every start, mode 0600). The claude CLI is `CLAUDE_BIN`, else `claude` on PATH. It tells the facts `door_secret_file`, `seat_data_dir`, `chat_claude_bin`,
+then yours (`--fact`, which win), and prints the URL, where the owner token is and a ready curl line once the door is up. The door binds 127.0.0.1 unless `--bind` says otherwise.
+
+**The defaults are c1f, not Rust** (`membrane/packs/launcher.c1f`, loaded by `serve` after the packs of `barest.packs`; `cliffvm run` does not load it): the default port (`Boot.default_port`, 4096, read by `door.c1f`'s `door-listen` when `--port` told none), the minds (the claude CLI for
+every mind and the chat's pick), the model rung `claude`, the local backend address, `router_on=false`. Each fills a fact only when none was told, so a fact always wins; edit the pack in the dist folder to change a default. Not here: `chat_auth`
+(the default `api_key` lives in `chat_turn.c1f`). The chat needs `ANTHROPIC_API_KEY` in the environment; `--fact chat_auth=login` opts into the claude CLI's own login (`scripts/seat` maps `CLAUDE_AUTH=login` to it); with neither, `serve`
+says so at start and a message is answered with how to set it.
+
+```
 (cd native && cargo build --release --no-default-features --features bin)      # once; the launcher builds nothing
 scripts/seat [--store ./.cliffvm/seat.sqlite] [--port 4096] [--open] [--fact name=value ...]
 ```
 
-It runs `cliffvm run <the packs of membrane/apps/barest.packs, one file each> membrane/apps/barest.c1f --store <sqlite> --port <n> [--fact name=value ...] --fact chat_claude_bin=<claude>`
-from the repo root and prints the URL. `CLIFFVM` names the binary (else `native/target/release/cliffvm`, else PATH); `CLAUDE_BIN` names the claude CLI
-(else the one on PATH; with none, the seat starts and the chat answers with how to name it). The chat needs `ANTHROPIC_API_KEY` in the environment, or `CLAUDE_AUTH=login` to use the claude CLI's own login (docs/cliffvm.md, "The claude turn's auth"). `--fact name=value` (repeatable) is passed on as a Boot fact (`--fact warm_rows=0`). `--open` opens the page on macOS. The launcher starts nothing else
-(no Ollama, nothing under `~/.membrane`) and uses no port but `--port`.
+`scripts/seat` is `cliffvm serve --root membrane` with the data in `./.cliffvm` (when no `--data-dir`/`--store` is named) and its own `--open`. `CLIFFVM` names the binary (else `native/target/release/cliffvm`, else PATH).
+
+**The dist folder** (`scripts/dist/build.sh [--bin <cliffvm>] [--out <dir>] [--target <triple>] [--archive <tar.gz>]`; default `dist/<version>`, the version of `native/Cargo.toml`):
+`bin/cliffvm  packs/  apps/{barest.packs, barest.c1f/}  help/  LICENSE  VERSION  MANIFEST.sha256` (a sha256 per file but itself, sorted; `scripts/dist/verify.sh <dir>` checks it; `scripts/dist/smoke.sh <dir>` starts
+`serve --port 0` from the folder and reads `/global/health`; `scripts/dist/assemble_wheel_payload.sh <dist> <payload>` makes the folder the wheel wrapper packages as `membrane/dist/`).
+`.github/workflows/release-binaries.yml` builds it per platform on a tag `v*` or by hand, and publishes nothing. Tests: `native/tests/serve_1143.rs`, `native/tests/dist_1143.rs`.
 
 **What you see** (`membrane/apps/barest.c1f/ui/`: `index.html` (a bootstrap: one mount node), `boot.js` (starts the engine, feeds the seat's packs and facts, runs the clock), `app.css`; the whole page is c1f view packs in the browser VM: `shell_view.c1f` (layout, nav, sessions, status line, theme, the slide-over detail panel), `chat_view.c1f`, `field_view.c1f`, see docs/ui-rebuild-plan.md "The shell and the view-pack contract"); static files served by the door
 from the app folder, no build step, no dependencies; a later piece ports it to c1f view packs in the browser VM):

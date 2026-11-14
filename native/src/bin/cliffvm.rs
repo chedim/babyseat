@@ -15,6 +15,15 @@ fn main() {
     match cli::parse(&args) {
         Ok(Cmd::Version) => println!("{} {}", env!("CARGO_BIN_NAME"), env!("CARGO_PKG_VERSION")),
         Ok(Cmd::Help) => println!("{}", cli::USAGE),
+        Ok(Cmd::ServeHelp) => println!("{}", cli::SERVE_USAGE),
+        Ok(Cmd::Serve(s)) => {
+            unsafe {
+                libc::signal(libc::SIGTERM, on_term as *const () as usize);
+                libc::signal(libc::SIGINT, on_term as *const () as usize);
+            }
+            let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from(std::env::args().next().unwrap_or_default()));
+            std::process::exit(cli::serve(&s, &exe, &STOP));
+        }
         Ok(Cmd::Mint(m)) => {
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
             match cli::mint(&m, now) {

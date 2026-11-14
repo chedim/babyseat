@@ -160,6 +160,13 @@
       "ChatTool.kind": "Text",
       "ChatTurn.kind": "Text",
       "ChatTurn.status": "Any",
+      "Request.ab1_cp": "Text?",
+      "Request.ab1_gid": "Text",
+      "Request.ab1_live": "Bool",
+      "Request.ab1_on": "Bool",
+      "Request.ab1_reply": "Dict?",
+      "Request.ab1_turns": "List(Text?)?",
+      "Request.ab1_view": "Any",
       "Request.cm_eid": "Text?",
       "Request.cm_events": "Bool",
       "Request.cm_get": "Dict",
@@ -344,11 +351,13 @@
     "writes": {
       "*.text": "Text",
       "*.tools": "Text",
+      "Chat.aborted": "Bool",
       "Chat.calls": "Any",
       "Chat.cost": "Any",
       "Chat.duration": "Any",
       "Chat.ended": "Num",
       "Chat.error": "Any",
+      "Chat.kept": "Any",
       "Chat.last_turn": "Any",
       "Chat.mention": "Bool",
       "Chat.result": "Any",
@@ -358,7 +367,9 @@
       "Chat.tools_run": "Any",
       "Chat.usage": "Any",
       "Command.run": "Dict",
-      "Command.run_result": "Dict"
+      "Command.run_result": "Dict",
+      "Command.stop": "Dict",
+      "Request.ab1_done": "Bool"
     },
     "findings": [],
     "virtual": [
@@ -434,6 +445,7 @@
   },
   "door": {
     "getters": {
+      "Boot.door_listen_port": "Any",
       "Http.up": "Bool?",
       "Request.ag_allow": "List(Dict)",
       "Request.ag_body": "List(Dict)",
@@ -708,6 +720,8 @@
       "Request.fn_props": "Any",
       "Request.fn_row": "Any",
       "Request.fv_body": "Dict?",
+      "Request.fv_page": "Any",
+      "Request.fv_rows": "Any",
       "Request.fv_seat": "Entity(FieldVm)?",
       "Request.m_fieldvm": "List(Text)",
       "Request.o_fieldvm": "Bool",
@@ -1367,6 +1381,18 @@
       "Intent"
     ]
   },
+  "launcher": {
+    "getters": {
+      "Boot.default_port": "Int"
+    },
+    "writes": {
+      "Boot.cloud_models": "List(Dict)",
+      "Boot.minds": "Dict",
+      "Boot.router_on": "Bool",
+      "Boot.seat_backend": "Text"
+    },
+    "findings": []
+  },
   "legacy_cutover": {
     "getters": {
       "LegacyCutover.batch": "Any",
@@ -1479,6 +1505,29 @@
       "Person.sub": "Text?"
     },
     "findings": []
+  },
+  "link": {
+    "getters": {
+      "Boot.old_vms": "Any",
+      "Page.ns": "Text",
+      "Vm.kind": "Text",
+      "Vm.silent": "Num?",
+      "Vm.stale_s": "Num?",
+      "Vm.state": "Text?"
+    },
+    "writes": {
+      "*.retire": "Bool",
+      "Vm.connected_at": "Any",
+      "Vm.page": "Entity(Page)",
+      "Vm.seen": "Num"
+    },
+    "findings": [],
+    "virtual": [
+      "Page"
+    ],
+    "resident": [
+      "Vm"
+    ]
   },
   "mcp": {
     "getters": {

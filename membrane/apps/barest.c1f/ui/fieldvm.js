@@ -32,9 +32,9 @@ export const FETCH_PACK = "PACK fetch 1\nRESIDENT Fetch\n-- THE OUTBOUND HTTP DR
 
 // THE ALLOW-LIST: the one table of what a pack may put in the page. Changing it is a one-line edit here.
 export const DOM_ALLOW = {
-  tags: 'div span p ul ol li h1 h2 h3 h4 button a section header footer small strong em code pre table thead tbody tr td th label details summary input textarea select option form',
+  tags: 'div span p ul ol li h1 h2 h3 h4 h5 h6 button a section header footer small strong em code pre table thead tbody tr td th label details summary input textarea select option form blockquote hr',   // blockquote hr h5 h6: the markdown view (markdown.c1f); a decision, 2026-11-14
   svgTags: 'svg g circle line path text rect',                       // made in the SVG namespace
-  attrs: 'class title role hidden alt href aria-label value placeholder disabled type name for tabindex rows checked selected multiple',
+  attrs: 'class title role hidden alt href aria-label value placeholder disabled type name for tabindex rows checked selected multiple target rel',   // target rel: a link opens in a new tab (decision, 2026-11-14)
   svgAttrs: 'cx cy r x y x1 y1 x2 y2 d width height viewBox points fill stroke stroke-width transform',
   prefixes: ['aria-', 'data-'],
   // never written to the element, each with its reason (a decision: `style`, `href`'s scheme, `src`)
@@ -59,6 +59,45 @@ const reason = (name, v) => {
   if (name === 'href' && v != null && v !== false && !DOM_ALLOW.hrefSchemes.test(String(v))) return 'href must be http(s)';
   return null;
 };
+
+// ---- THE GRAPH LINK, SLICE 1 (#1143, docs/graph-link.md): what this page can do, told to the seat (link_view.c1f writes it as `Vm:<ns>.caps`). Read from what the host really holds, never hand-written. ----
+/** A pack's header facts: `PACK <name> <major>` and its `IMPORT <name> <major>` lines, in order. */
+export function pack_facts(src) {
+  const text = String(src), head = /^PACK\s+(\S+)\s+(\d+)/m.exec(text);
+  const imports = [...text.matchAll(/^IMPORT\s+(\S+)\s+(\d+)/gm)].map(m => ({ pack: m[1], major: Number(m[2]) }));
+  return { pack: head ? head[1] : null, major: head ? Number(head[2]) : null, imports };
+}
+/** The transitive closure of a pack's imports over the packs given ({name: pack_facts}): every {pack, major} it needs, in discovery order, itself left out. A pack nobody loaded is still named (it is needed). */
+export function closure(name, facts) {
+  const out = [], seen = new Set([name]), todo = [...(facts[name] ? facts[name].imports : [])];
+  while (todo.length) {
+    const i = todo.shift();
+    if (seen.has(i.pack)) continue;
+    seen.add(i.pack); out.push(i);
+    if (facts[i.pack]) todo.push(...facts[i.pack].imports);
+  }
+  return out;
+}
+/** Which VMs may run a pack: those whose `provides` ({pack, major} list) hold every pack of its closure. `vms` is {name: provides}. Returns {vms: [names], conflict: [...]}: when NO single VM can,
+ *  `conflict` is {vm: [the packs of the closure it lacks]}, so a refusal can name the imports that cannot meet (docs/graph-link.md, "Placement by imports"). */
+export function eligible(needs, vms) {
+  const has = (prov, n) => prov.some(p => p.pack === n.pack && p.major === n.major);
+  const ok = Object.entries(vms).filter(([, prov]) => needs.every(n => has(prov, n))).map(([v]) => v);
+  if (ok.length || !needs.length) return { vms: ok, conflict: {} };
+  const conflict = {};
+  for (const [v, prov] of Object.entries(vms)) conflict[v] = needs.filter(n => !has(prov, n)).map(n => n.pack);
+  return { vms: [], conflict };
+}
+/** The DOM allow-list as data: the tag and attribute lists (the one table, DOM_ALLOW), the refused names, and a short hash of all of it (FNV-1a over its JSON: a version of the list). */
+export function dom_allow_report() {
+  const a = DOM_ALLOW, data = {
+    tags: a.tags.split(' '), svgTags: a.svgTags.split(' '), attrs: a.attrs.split(' '), svgAttrs: a.svgAttrs.split(' '),
+    prefixes: [...a.prefixes], refused: Object.keys(a.refused), refusedPrefixes: Object.keys(a.refusedPrefixes), hrefSchemes: a.hrefSchemes.source,
+  };
+  let h = 0x811c9dc5;
+  for (const c of JSON.stringify(data)) { h ^= c.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return { ...data, hash: h.toString(16).padStart(8, '0') };
+}
 const NODE = 'DomNode:';
 const EVENTS = ['input', 'change', 'submit', 'keydown', 'focus', 'blur', 'scroll', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'wheel'];
 const FETCH = 'Fetch:';
@@ -71,11 +110,13 @@ export async function start(root, { packs = {}, wasm } = {}) {
   const f = new Field();
   f.set_pack('dom', DOM_PACK);
   f.set_pack('fetch', FETCH_PACK);
-  const errors = {};
+  const errors = {}, sources = new Map([['dom', DOM_PACK], ['fetch', FETCH_PACK]]);
   for (const [name, src] of Object.entries(packs)) {
-    try { f.set_pack(name, src); } catch (e) { errors[name] = String(e); }
+    try { f.set_pack(name, src); sources.set(name, src); } catch (e) { errors[name] = String(e); }
   }
-  return new Host(f, root, errors);
+  const host = new Host(f, root, errors);
+  host.sources = sources;                                           // the packs that LOADED, name -> text (what `describe` reports)
+  return host;
 }
 
 class Host {
@@ -134,11 +175,25 @@ class Host {
 
   /** Load or replace a pack while the page runs. */
   pack(name, src) {
-    try { this.f.set_pack(name, src); delete this.errors[name]; return null; }
+    try { this.f.set_pack(name, src); this.sources.set(name, src); delete this.errors[name]; return null; }
     catch (e) { this.errors[name] = String(e); return this.errors[name]; }
   }
 
   get(eid) { return JSON.parse(this.f.get(eid)); }
+
+  /** What this page can do (the graph link, slice 1): protocol, encodings, frames, the DOM allow-list, the packs it runs (`provides`, each with its `requires` = its IMPORT lines and `closure` = all it needs),
+   *  the classes its engine can evaluate, limits, the host's version, and `sizes` (pack -> characters). Read from the loaded packs and the host, nothing typed by hand. */
+  describe() {
+    const facts = {}, sizes = {};
+    for (const [n, src] of this.sources) { facts[n] = pack_facts(src); sizes[n] = String(src).length; }
+    const provides = Object.entries(facts).map(([n, f]) => ({ pack: n, major: f.major, requires: f.imports, closure: closure(n, facts) }));
+    return {
+      protocol: 1, encodings: ['json'],
+      frames: [{ frame: 'write-request', over: 'POST /mcp entity_write' }, { frame: 'poll', over: 'GET' }],
+      dom: dom_allow_report(), provides, sizes, classes: JSON.parse(this.f.classes()),
+      limits: { max_frame: 'none yet', subscriptions: 'none yet' }, host_version: WASM_VERSION,
+    };
+  }
 
   flush() {
     for (;;) {
@@ -255,6 +310,16 @@ class Host {
     }
   }
 
+  /** The clipboard, for a pack's `copy` write: the text only (a string, at most 1 MB), by the async clipboard where the page may use it, else a hidden textarea and execCommand. A failure is not silent: it is written as `Conn:page.copy_error`. */
+  copy(v) {
+    const text = v && typeof v === 'object' && typeof v.text === 'string' ? v.text.slice(0, 1_000_000) : null;
+    if (text === null) return;
+    const fallback = () => { const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); let ok = false; try { ok = document.execCommand('copy'); } catch {} t.remove(); return ok; };
+    const fail = (why) => { if (this.f.get('Conn:page') === 'null') this.f.load('Conn:page', 'Conn', '{}'); this.f.write('Conn:page', 'copy_error', JSON.stringify(String(why)), this.now()); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => { if (!fallback()) fail('the browser refused the clipboard'); });
+    else if (!fallback()) fail('the browser has no clipboard');
+  }
+
   /** A name or tag the allow-list refuses: the reason is written on the DomNode and marked on the element. */
   refuseDom(el, eid, name, why) {
     const cur = (this.get(eid) || {}).refused || {};
@@ -268,6 +333,7 @@ class Host {
     if (prop === 'text') el.textContent = v == null ? '' : String(v);
     else if (prop === 'parent') this.attach(el, v, (this.get(eid) || {}).before);
     else if (prop === 'before') { if (!(this.made && this.made.has(eid))) this.attach(el, (this.get(eid) || {}).parent, v, true); }   // a node made this round is already in place
+    else if (prop === 'copy') this.copy(v);                       // a pack's `copy` {text, at}: the text goes to the clipboard (the Copy button of a code block); `at` makes a second click a new value
     else if (prop === 'focused') {                                // a pack's focus(): the event that follows is no write (same value)
       if (v && document.activeElement !== el) el.focus(); else if (!v && document.activeElement === el) el.blur();
     }

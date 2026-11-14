@@ -8,7 +8,7 @@ use serde_json::{json, Map, Value as J};
 use crate::host::{self, Host, Options};
 use crate::plan::{self, Outcome};
 
-pub const USAGE: &str = "usage: cliffvm --version | cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>] [--fact <name>=<value>]... | cliffvm token mint --sub <id> --ttl <30d|12h|15m|45s|seconds> --secret-file <path> [--name <name>]";
+pub const USAGE: &str = "usage: cliffvm --version | cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--fact <name>=<value>]... (cliffvm serve --help) | cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>] [--fact <name>=<value>]... | cliffvm token mint --sub <id> --ttl <30d|12h|15m|45s|seconds> --secret-file <path> [--name <name>]";
 
 #[derive(Debug, PartialEq)]
 pub struct RunArgs { pub apps: Vec<String>, pub store: String, pub port: Option<u16>, pub bind: Option<String>, pub ui_dir: Option<String>, pub facts: Vec<(String, J)> }
@@ -19,7 +19,7 @@ pub struct RunArgs { pub apps: Vec<String>, pub store: String, pub port: Option<
 pub struct MintArgs { pub sub: String, pub name: Option<String>, pub ttl_s: f64, pub secret_file: String }
 
 #[derive(Debug, PartialEq)]
-pub enum Cmd { Version, Help, Run(RunArgs), Mint(MintArgs) }
+pub enum Cmd { Version, Help, ServeHelp, Serve(ServeArgs), Run(RunArgs), Mint(MintArgs) }
 
 /// The released ttl spelling: `30d`, `12h`, `15m`, `45s` or plain seconds, a positive whole number.
 pub fn parse_ttl(s: &str) -> Result<f64, String> {
@@ -41,6 +41,25 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
     match it.next().map(|s| s.as_str()) {
         None | Some("--help") | Some("-h") | Some("help") => Ok(Cmd::Help),
         Some("--version") | Some("-V") | Some("version") => Ok(Cmd::Version),
+        Some("serve") => {
+            let mut s = ServeArgs::default();
+            while let Some(a) = it.next() {
+                let mut val = |n: &str| it.next().cloned().ok_or_else(|| format!("{n} needs a value"));
+                match a.as_str() {
+                    "--help" | "-h" => return Ok(Cmd::ServeHelp),
+                    "--port" => s.port = Some(val("--port")?.parse().map_err(|_| "--port: a number 0-65535 (0 = any free port)".to_string())?),
+                    "--bind" => s.bind = Some(val("--bind")?),
+                    "--data-dir" => s.data_dir = Some(val("--data-dir")?),
+                    "--store" => s.store = Some(val("--store")?),
+                    "--root" => s.root = Some(val("--root")?),
+                    "--legacy" => s.legacy = Some(val("--legacy")?),
+                    "--fact" => s.facts.push(fact_arg(&val("--fact")?)?),
+                    x if x.starts_with("--") => return Err(format!("serve: unknown option {x}")),
+                    x => return Err(format!("serve: unexpected argument {x} (serve takes options only)")),
+                }
+            }
+            Ok(Cmd::Serve(s))
+        }
         Some("run") => {
             let mut r = RunArgs { apps: vec![], store: "cliffvm.sqlite3".into(), port: None, bind: None, ui_dir: None, facts: vec![] };
             while let Some(a) = it.next() {
@@ -119,7 +138,10 @@ fn absolute(p: &str) -> String {
 
 /// `run`: the app is the folder. Load its packs, compute the getters once, tell the facts and `started`, then loop until `stop`.
 /// Prints `cliffvm: door listening on <host>:<port>` once the door is up. -> the process's exit code.
-pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
+pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 { run_with(r, stop, &|_, _| {}) }
+
+/// `run`, and `on_up(host, port)` once the door is listening (after its line is printed).
+pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i32 {
     // the owner's token (owner.rs): with a door secret, the secret is made if missing and a fresh owner token is written at every boot; before any thread starts
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
     let owner_facts = match crate::owner::boot(&r.facts, now) { Ok(m) => m, Err(e) => { eprintln!("cliffvm: owner token: {e}"); return 2; } };
@@ -189,7 +211,119 @@ pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
         if res["rc"] == json!(0) {
             println!("cliffvm: door listening on {}:{}", res["host"].as_str().unwrap_or("127.0.0.1"), res["port"]);
             use std::io::Write; let _ = std::io::stdout().flush();
+            on_up(res["host"].as_str().unwrap_or("127.0.0.1"), res["port"].as_u64().unwrap_or(0));
         } else { eprintln!("cliffvm: door: {}", res["head"]); code = 2; }
     });
     code
+}
+
+// ---- `serve`: the one-command launcher (docs/packaging-plan.md, decided 2026-11-14) ----
+// It only FINDS things (the dist folder, the data folder, the claude CLI) and runs the barest seat there. Every app default (the minds, the models, the local backend, the
+// default port) is in the pack `packs/launcher.c1f`, not here; what is here is where files are.
+pub const SERVE_USAGE: &str = "\
+usage: cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--store <sqlite>] [--root <dist folder>] [--legacy <path>] [--fact <name>=<value>]...
+
+Starts the barest seat: the packs listed in <root>/apps/barest.packs, and the app <root>/apps/barest.c1f (the page is its ui/ folder), with the claude CLI as the only model.
+  --port <n>         the door's port (0 = any free port). Default: the one launcher.c1f says (4096).
+  --bind <addr>      the address the door opens on. Default 127.0.0.1 (this machine only); 0.0.0.0 opens it to the network.
+  --data-dir <dir>   the seat's data: its store (seat.sqlite), the door's secret (door.secret, made at the first run, mode 0600) and the owner token (owner.token, new at every start, mode 0600).
+                     Default: $XDG_DATA_HOME/membrane, else ~/Library/Application Support/membrane (macOS) or ~/.local/share/membrane.
+  --store <sqlite>   the store file, instead of <data-dir>/seat.sqlite.
+  --root <dir>       the dist folder (has packs/ apps/). Default: the folder above the one this binary is in (bin/cliffvm); the repo's membrane/ folder has the same shape.
+  --legacy <path>     where the old Python seat's store is (a file, or a folder that holds it): told as the fact legacy_path, which the cutover pack (packs/legacy_cutover.c1f) imports from.
+                     Default: the old variable MEMBRANE_DATA_DIR when set (that seat's data dir), else the pack searches its own places.
+  --fact <name>=<value>   a Boot fact, after the defaults so it wins (repeatable): JSON when the value parses, else text. Defaults: packs/launcher.c1f.
+
+The chat answers through the claude CLI: CLAUDE_BIN names it, else `claude` on PATH. It authenticates with ANTHROPIC_API_KEY from this environment (the default);
+the CLI's own login is an opt-in: --fact chat_auth=login. A local tool presents the owner token: curl -H \"Authorization: Bearer $(cat <data-dir>/owner.token)\" <url>/global/health";
+
+#[derive(Debug, PartialEq, Default)]
+pub struct ServeArgs { pub port: Option<u16>, pub bind: Option<String>, pub data_dir: Option<String>, pub store: Option<String>, pub root: Option<String>, pub legacy: Option<String>, pub facts: Vec<(String, J)> }
+
+fn fact_arg(v: &str) -> Result<(String, J), String> {
+    let (k, x) = v.split_once('=').filter(|(k, _)| !k.is_empty()).ok_or_else(|| "--fact: name=value".to_string())?;
+    Ok((k.to_string(), serde_json::from_str(x).unwrap_or_else(|_| json!(x))))
+}
+
+/// The user's data folder for the seat: `$XDG_DATA_HOME/membrane` when set, else `~/Library/Application Support/membrane` on macOS, else `~/.local/share/membrane`.
+pub fn default_data_dir(home: &str, xdg: Option<&str>, macos: bool) -> String {
+    match xdg.filter(|x| !x.is_empty()) {
+        Some(x) => format!("{x}/membrane"),
+        None if macos => format!("{home}/Library/Application Support/membrane"),
+        None => format!("{home}/.local/share/membrane"),
+    }
+}
+
+/// The dist folder: `--root`, else the folder above the one this binary is in (`<root>/bin/cliffvm`). It must hold `packs/` and `apps/barest.packs`.
+pub fn find_root(root: Option<&str>, exe: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let dir = match root {
+        Some(r) => std::path::PathBuf::from(r),
+        None => std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf()).parent().and_then(|b| b.parent()).map(|p| p.to_path_buf()).unwrap_or_default(),
+    };
+    if dir.join("packs").is_dir() && dir.join("apps/barest.packs").is_file() { return Ok(std::fs::canonicalize(&dir).unwrap_or(dir)); }
+    Err(format!("no packs folder at {} (looked for {} and {}). Install the whole dist folder (bin/ packs/ apps/ together) or name it with --root <dir>.",
+        dir.display(), dir.join("packs").display(), dir.join("apps/barest.packs").display()))
+}
+
+/// What `serve` made of its arguments and where it looked: the `run` arguments, and the lines to tell.
+pub struct ServePlan { pub run: RunArgs, pub data: String, pub notes: Vec<String> }
+
+/// `serve` -> the `run` it stands for. `env` reads an environment variable (a test passes its own);
+pub fn serve_plan(s: &ServeArgs, exe: &std::path::Path, env: &dyn Fn(&str) -> Option<String>) -> Result<ServePlan, String> {
+    let root = find_root(s.root.as_deref(), exe)?;
+    let data = match &s.data_dir {
+        Some(d) => d.clone(),
+        None => default_data_dir(&env("HOME").ok_or("no HOME in the environment: name the data folder with --data-dir")?, env("XDG_DATA_HOME").as_deref(), cfg!(target_os = "macos")),
+    };
+    std::fs::create_dir_all(&data).map_err(|e| format!("{data}: {e}"))?;
+    let data = absolute(&data);
+    let store = s.store.clone().unwrap_or_else(|| format!("{data}/seat.sqlite"));
+    if let Some(d) = std::path::Path::new(&store).parent().filter(|d| !d.as_os_str().is_empty()) { std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?; }
+    // the packs are the barest seat's own, one name per line in apps/barest.packs (load order; the first is the root of trust), then the app folder
+    let list = std::fs::read_to_string(root.join("apps/barest.packs")).map_err(|e| format!("apps/barest.packs: {e}"))?;
+    let mut apps: Vec<String> = vec![];
+    for name in list.lines().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let p = root.join("packs").join(format!("{name}.c1f"));
+        if !p.is_file() { return Err(format!("apps/barest.packs names the pack {name}, and {} is not there", p.display())); }
+        apps.push(p.to_string_lossy().to_string());
+    }
+    // the defaults pack (launcher.c1f): after the list, so `cliffvm run` on barest.packs alone stays a seat with no defaults
+    let launcher = root.join("packs/launcher.c1f");
+    if !launcher.is_file() { return Err(format!("{} is not there (the pack that holds the defaults)", launcher.display())); }
+    apps.push(launcher.to_string_lossy().to_string());
+    let app = root.join("apps/barest.c1f");
+    if !app.exists() { return Err(format!("{} is not there", app.display())); }
+    apps.push(app.to_string_lossy().to_string());
+    let mut notes = vec![];
+    // the places and the claude CLI, told as facts BEFORE the operator's own (which win)
+    let mut facts: Vec<(String, J)> = vec![("door_secret_file".into(), json!(format!("{data}/door.secret"))), ("seat_data_dir".into(), json!(data))];
+    let claude = env("CLAUDE_BIN").filter(|c| !c.is_empty()).or_else(|| env("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join("claude")).find(|c| c.is_file()).map(|c| c.to_string_lossy().to_string())));
+    match &claude {
+        Some(c) => { facts.push(("chat_claude_bin".into(), json!(c))); notes.push(format!("cliffvm serve: claude CLI: {c}")); }
+        None => notes.push("cliffvm serve: no claude CLI found: the chat answers through it. Name it with CLAUDE_BIN=/path/to/claude, or put `claude` on PATH, then restart.".into()),
+    }
+    // the old Python seat's store: `--legacy <path>`, else the old variable MEMBRANE_DATA_DIR (that seat's data dir); c1f cannot read the environment, so it is told as the fact `legacy_path`
+    // (packs/legacy_cutover.c1f searches the place; a named path that holds no store is its error)
+    if let Some(l) = s.legacy.clone().or_else(|| env("MEMBRANE_DATA_DIR").filter(|v| !v.is_empty())) { facts.push(("legacy_path".into(), json!(l))); }
+    facts.extend(s.facts.iter().cloned());
+    let login = facts.iter().rev().find(|(k, _)| k == "chat_auth").map(|(_, v)| v == &json!("login")).unwrap_or(false);
+    if !login && !env("ANTHROPIC_API_KEY").map_or(false, |k| !k.is_empty()) {
+        notes.push("cliffvm serve: no ANTHROPIC_API_KEY in the environment: the chat refuses a message until you set it and restart (or opt into the claude CLI's login: --fact chat_auth=login).".into());
+    }
+    Ok(ServePlan { run: RunArgs { apps, store, port: s.port, bind: s.bind.clone(), ui_dir: None, facts }, data, notes })
+}
+
+/// `serve`: tell what was found, run the seat, and once the door is up tell the URL and how a local tool uses the owner token.
+pub fn serve(s: &ServeArgs, exe: &std::path::Path, stop: &AtomicBool) -> i32 {
+    let plan = match serve_plan(s, exe, &|k| std::env::var(k).ok()) { Ok(p) => p, Err(e) => { eprintln!("cliffvm serve: {e}"); return 2; } };
+    for n in &plan.notes { println!("{n}"); }
+    println!("cliffvm serve: data {} (the door's secret and the owner token are made here)", plan.data);
+    let token = format!("{}/owner.token", plan.data);
+    run_with(&plan.run, stop, &|host, port| {
+        let url = format!("http://{host}:{port}/");
+        println!("cliffvm serve: open {url}");
+        println!("cliffvm serve: a localhost peer is not the owner: a local tool sends the owner token, written (mode 600, new at every start) to {token}");
+        println!("cliffvm serve: curl -H \"Authorization: Bearer $(cat {token})\" {url}global/health");
+        use std::io::Write; let _ = std::io::stdout().flush();
+    })
 }
