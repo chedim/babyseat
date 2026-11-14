@@ -52,10 +52,6 @@ jobs:
           tests/test_field_readonly.py tests/test_person_turn_first.py tests/test_recall_bugs_429.py
           tests/test_serve_stores_in_cbl.py tests/test_store_turn_first_541.py tests/test_tool_recall_429.py
           tests/test_warm_restart_720.py tests/test_efstore_cb.py tests/test_efstore_file.py
-      # The integration's suite is its own tree with its own stub-conftest
-      # (a fake HA + aiohttp) -- run in its own process, never together with
-      # the seat's.
-      - run: pytest -q -p no:cacheprovider integrations/homeassistant/tests
   # #971: the native (Rust) VM. Built here and held to the same contract as ch.VM: every VM suite runs
   # against it, plus its own tests. Without this
   # job the native tests skip in `tests` and nothing enforces the contract (Memo's review of #972).

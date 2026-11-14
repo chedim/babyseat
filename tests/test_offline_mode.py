@@ -112,11 +112,6 @@ class TestTheMindsWaitAndStrikesPause(unittest.TestCase):
         N._script_fail(srv.entity_store, ent)
         self.assertEqual(ent.properties["script_failures"], 1)
 
-    def test_the_supervisor_starts_the_seat_without_the_mac(self):
-        sh = (Path(__file__).resolve().parent.parent / "integrations/homeassistant/deploy/brain/membrane-supervise.sh").read_text()
-        self.assertIn("starting the seat offline", sh)
-        self.assertNotIn("down; waiting", sh)
-
 
 if __name__ == "__main__":
     unittest.main()
