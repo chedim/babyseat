@@ -1,0 +1,190 @@
+PACK ha 1
+IMPORT door 1
+IMPORT door_state 1
+RESIDENT HaCall
+RESIDENT HaCatalog
+RESIDENT HaAllow
+-- THE SEAT'S USE OF HOME ASSISTANT (#1143, slice 2; docs/home-assistant.md, docs/hass-plan.md "D-act: B"). The seat holds NO Home Assistant secret and Home Assistant holds none of
+-- the seat's but its own token: the model WRITES a call, the component inside Home Assistant (which already talks to this door with a token) PULLS the pending calls, runs them
+-- with Home Assistant's own services and states, and writes the receipt back. Nothing here runs an effect; a call is data until the component answers it.
+--
+--   HaCall:<id>.request = {domain, service, data?, target?: {entity_id}}   a service call            {read: '<entity_id>'}  one state             {read: 'catalog'}  refresh the catalog
+--   HaCall:<id>.state     pending | running | done | error        .response  the answer (an Error when the call failed: `why` says why)        .ok  true, or the same Error
+--   HaAllow:<name> {services: [...], entities: [...]}   the allow-list, DEFAULT DENY: a call runs only when ONE entry lists its service (`light.turn_on`, `light.*`, or `states.read`
+--                                                       for a read) AND every entity it names (`light.kitchen` or `light.*`). A call names entities in `target.entity_id` or
+--                                                       `data.entity_id` (a text or a list); a target by device, area, floor or label cannot be checked against names and is denied.
+--   HaCatalog:ha {entities: [{entity_id, name}], services: [{id, target, fields}]}   what Home Assistant exposes to Assist, pushed by the component
+-- The routes are the OWNER's (door.c1f `owner`): 401 with no token, 403 for another person (the arms of the door's `state` family, last section):
+--   GET  /membrane/ha/calls        {calls: [{id, request}]}  the pending calls (an allowed call nobody claimed yet)
+--   POST /membrane/ha/calls        {id, claim: true}                                  the component takes the call: running (409 when it is not pending)
+--                                  {id, result: {ok, response?, error?}}              the answer: done or error (409 when the call is not running)
+--   POST /membrane/ha/catalog      {entities, services}                              the component's copy of what Home Assistant exposes
+--   GET  /membrane/ha/metrics      {rows: [...]}                                     what the seat tells Home Assistant's sensors (below)
+-- THE JOURNAL: every write here is a write of an entity, so the journal holds the calls, their claims and their receipts; a restart replays them as they were and runs nothing (the
+-- component is the only effect). A call the component claimed and never finished stays `running` for ever: it may have run, so it is never offered again; the model asks again under
+-- a new id. The allow-list is read at the moment of the claim (a pending call that was denied and is allowed later is offered then); a running or finished call is never gated again.
+-- THE LIMIT, said once: the model's own tool (`entity_write`) is the owner's, so the model can write a HaAllow entry itself. The seat has no security inside it by decision
+-- (docs/c1f-layers.md, "Privilege"); the entry is journalled and visible, and Home Assistant's own side of the line (what is exposed to Assist) is the one the model cannot write.
+
+-- ---- the call ------------------------------------------------------------------------------------------------------------------------------
+HaCall.kind getter: 'ha_call'
+HaCall.cid getter: tail(this.eid, len(this.eid) - 7)
+HaCall.rd getter: prop(this.request, 'read')
+HaCall.is_read getter: this.request is Dict and this.rd != None
+HaCall.tg getter: prop(this.request, 'target')
+HaCall.dt getter: prop(this.request, 'data')
+HaCall.dom getter: prop(this.request, 'domain')
+HaCall.svc getter: prop(this.request, 'service')
+-- the word the allow-list is asked for: `domain.service`, or `states.read` for a read
+HaCall.need getter: 'states.read' if this.is_read else str(this.dom) + '.' + str(this.svc)
+-- the entities the call names (target.entity_id and data.entity_id, each a text or a list)
+HaCall.ids_t getter: [prop(this.tg, 'entity_id')] if prop(this.tg, 'entity_id') is Text else (prop(this.tg, 'entity_id') if prop(this.tg, 'entity_id') is List else [])
+HaCall.ids_d getter: [prop(this.dt, 'entity_id')] if prop(this.dt, 'entity_id') is Text else (prop(this.dt, 'entity_id') if prop(this.dt, 'entity_id') is List else [])
+HaCall.ents getter:
+  WHEN this.is_read: [str(this.rd)] if this.rd != 'catalog' else []
+  ELSE: concat(this.ids_t, this.ids_d)
+HaCall.ends_wide getter: len([k for k in ['device_id', 'area_id', 'floor_id', 'label_id'] if prop(this.tg, k) != None or prop(this.dt, k) != None]) > 0
+-- what is wrong with the request itself (None when it is a request)
+HaCall.shape_err getter:
+  WHEN this.request == None: None
+  ELSE WHEN not (this.request is Dict): 'request must be an object: {domain, service, data?, target?} or {read: <entity_id> | catalog}'
+  ELSE WHEN this.is_read and not (this.rd is Text): 'read must be an entity_id (text) or catalog'
+  ELSE WHEN this.is_read: None
+  ELSE WHEN not (this.dom is Text) or not (this.svc is Text) or this.dom == '' or this.svc == '': 'a service call needs domain and service (text), e.g. {domain: light, service: turn_on}'
+  ELSE WHEN this.tg != None and not (this.tg is Dict): 'target must be an object: {entity_id: <id or list>}'
+  ELSE WHEN this.dt != None and not (this.dt is Dict): 'data must be an object'
+  ELSE WHEN this.ends_wide: 'a target by device, area, floor or label cannot be checked against the allow-list: name the entity_ids'
+  ELSE WHEN len([x for x in this.ents if not (x is Text)]) > 0 or len([v for v in [prop(this.tg, 'entity_id'), prop(this.dt, 'entity_id')] if v != None and not (v is Text) and not (v is List)]) > 0: 'entity_id must be text, or a list of text'
+  ELSE: None
+-- the allow entries that cover this call: one entry lists the service AND every entity (an exact name, or `<domain>.*`)
+HaCall.allow_by getter: [a.eid for a in instances('HaAllow') if (this.need in (a.services or []) or len([p for p in (a.services or []) if p is Text and tail(p, 2) == '.*' and startswith(this.need, head(p, len(p) - 1))]) > 0) and len([x for x in this.ents if len([p for p in (a.entities or []) if p is Text and (p == x or (tail(p, 2) == '.*' and startswith(x, head(p, len(p) - 1))))]) == 0]) == 0]
+HaCall.denied getter:
+  WHEN this.request == None: None
+  ELSE WHEN this.shape_err != None: this.shape_err
+  ELSE WHEN this.rd == 'catalog': None
+  ELSE WHEN len(this.allow_by) == 0: 'not allowed: ' + this.need + ((' on ' + join([str(x) for x in this.ents], ', ')) if len(this.ents) > 0 else '') + ' is on no HaAllow entry (the seat denies by default: the owner writes HaAllow:<name>.services = [...] and HaAllow:<name>.entities = [...], then asks again)'
+  ELSE: None
+-- pending: offered to the component; running: it took it (and may have run it); done / error: its receipt (or the seat's own refusal, which the component never sees)
+HaCall.state getter:
+  WHEN this.request == None: None('no request yet: write ' + this.eid + '.request = {domain, service, data, target}')
+  ELSE WHEN this.result != None: 'done' if prop(this.result, 'ok') == True else 'error'
+  ELSE WHEN this.claimed != None: 'running'
+  ELSE WHEN this.denied != None: 'error'
+  ELSE: 'pending'
+HaCall.why_text getter: str(this.denied or prop(this.result, 'error') or 'the call failed')
+HaCall.response getter:
+  WHEN this.state == 'error': Error(this.eid + ': ' + this.why_text)
+  ELSE WHEN this.state == 'done': prop(this.result, 'response')
+  ELSE: None(this.eid + ' is ' + str(this.state) + ': read response when state is done or error')
+HaCall.ok getter:
+  WHEN this.state == 'error': Error(this.eid + ': ' + this.why_text)
+  ELSE WHEN this.state == 'done': True
+  ELSE: None(this.eid + ' is ' + str(this.state))
+
+-- THE CLAIM and THE RESULT, written by the door (one write each, carrying the request's id); the receipt is a row of the call's log, which the request waits for
+HaCall.claim on-setter ha-claim:
+  WHEN this.state == 'pending':
+    this.claimed = {'by': prop(this.claim, 'by'), 'at': clock}
+    this.claim_log = concat(this.claim_log or [], [{'id': prop(this.claim, 'id'), 'ok': True}])
+  ELSE:
+    this.claim_log = concat(this.claim_log or [], [{'id': prop(this.claim, 'id'), 'ok': False, 'conflict': True, 'error': 'not pending: the call is ' + str(this.state)}])
+HaCall.finish on-setter ha-finish:
+  WHEN this.state == 'running':
+    this.result = {'ok': prop(this.finish, 'ok') == True, 'response': prop(this.finish, 'response'), 'error': prop(this.finish, 'error'), 'at': clock}
+    this.finish_log = concat(this.finish_log or [], [{'id': prop(this.finish, 'id'), 'ok': True}])
+  ELSE:
+    this.finish_log = concat(this.finish_log or [], [{'id': prop(this.finish, 'id'), 'ok': False, 'conflict': True, 'error': 'not running: the call is ' + str(this.state)}])
+
+-- ---- the catalog ---------------------------------------------------------------------------------------------------------------------------
+HaCatalog.kind getter: 'ha_catalog'
+HaCatalog.entity_ids getter: [prop(e, 'entity_id') for e in (this.entities or [])]
+HaCatalog.service_ids getter: [prop(s, 'id') for s in (this.services or [])]
+HaCatalog.domains getter: distinct([before(x, '.') for x in this.entity_ids])
+HaAllow.kind getter: 'ha_allow'
+
+-- ---- the metrics: what the seat tells Home Assistant's sensors (#1143, docs/hass-plan.md I4/I12) -----------------------------------------------------------
+-- Rows {key, name, platform, value, icon, unit?, device_class?, attributes?} built here from what the seat really knows: the chat's turns (the store's turn rows: state, ended, error)
+-- and the model the chat runs on. The component makes one entity per row, so the list lives in this pack, not in Python. The 13 keys of the old component that read the efield, the
+-- thinker and the loops have no source on cliffvm and are gone. `value` is a plain value (a time is epoch seconds, `device_class: timestamp`: the component turns it into a time).
+-- today starts at the local midnight to the minute (door_state.c1f `st_stats_body`: localtime has no seconds, so it can be up to 59 s early).
+Request.ha_met_on getter: this.ha_route == '/membrane/ha/metrics' and this.method == 'GET' and this.gate == None and this.owner == True
+Request.ha_midnight getter: clock - 3600 * prop(localtime(clock), 'hour') - 60 * prop(localtime(clock), 'minute')
+Request.ha_met getter:
+  WHEN not this.ha_met_on: None
+  ELSE: ([r for r in (sql("SELECT (SELECT count(*) FROM c_field WHERE k LIKE ? AND json_extract(body, '$.props.state') IN ('done', 'error') AND json_extract(body, '$.props.ended') >= ?) AS turns_today, (SELECT count(*) FROM c_field WHERE k LIKE ? AND json_extract(body, '$.props.state') = 'running') AS running, (SELECT max(json_extract(body, '$.props.ended')) FROM c_field WHERE k LIKE ? AND json_extract(body, '$.props.state') = 'done') AS last_answer, (SELECT json_extract(body, '$.props.error') FROM c_field WHERE k LIKE ? AND json_extract(body, '$.props.state') = 'error' ORDER BY json_extract(body, '$.props.ended') DESC LIMIT 1) AS last_error, (SELECT max(json_extract(body, '$.props.ended')) FROM c_field WHERE k LIKE ? AND json_extract(body, '$.props.state') = 'error') AS error_at", 'membrane::Chat:message:%:turn', this.ha_midnight, 'membrane::Chat:message:%:turn', 'membrane::Chat:message:%:turn', 'membrane::Chat:message:%:turn', 'membrane::Chat:message:%:turn') or [])] or [None])[0]
+Request.ha_model getter: str(prop('Minds:seat', 'loops') or prop('Minds:seat', 'seat_default') or 'claude')
+Request.ha_rows getter:
+  WHEN this.ha_met == None: None
+  ELSE: [{'key': 'busy', 'name': 'Busy', 'platform': 'binary_sensor', 'value': prop(this.ha_met, 'running') > 0, 'icon': 'mdi:brain', 'device_class': 'running'}, {'key': 'model', 'name': 'Model', 'platform': 'sensor', 'value': this.ha_model, 'icon': 'mdi:robot'}, {'key': 'turns_today', 'name': 'Turns today', 'platform': 'sensor', 'value': prop(this.ha_met, 'turns_today'), 'unit': 'turns', 'icon': 'mdi:counter'}, {'key': 'last_answer', 'name': 'Last answer', 'platform': 'sensor', 'value': prop(this.ha_met, 'last_answer'), 'device_class': 'timestamp', 'icon': 'mdi:message-text-clock'}, {'key': 'last_error', 'name': 'Last error', 'platform': 'sensor', 'value': clip(str(prop(this.ha_met, 'last_error')), 250) if prop(this.ha_met, 'last_error') != None else None, 'icon': 'mdi:alert-circle', 'attributes': {'at': prop(this.ha_met, 'error_at')}}]
+
+-- ---- the routes (owner only) -------------------------------------------------------------------------------------------------------------
+Request.ha_route getter: this.route if this.route in ['/membrane/ha/calls', '/membrane/ha/catalog', '/membrane/ha/metrics'] else None
+Request.ha_methods getter: ['GET', 'POST'] if this.ha_route == '/membrane/ha/calls' else (['POST'] if this.ha_route == '/membrane/ha/catalog' else ['GET'])
+Request.ha_pending getter: [{'id': c.cid, 'request': c.request} for c in instances('HaCall') if c.state == 'pending']
+-- a write is the owner's AND past the door's gate: a request the door refuses writes nothing (the override answers 401 / 403 for it, but a setter runs whatever the reply is)
+Request.ha_post getter: this.method == 'POST' and this.ha_route in ['/membrane/ha/calls', '/membrane/ha/catalog'] and this.gate == None and this.owner == True
+Request.ha_cid getter: str(prop(this.jbody, 'id') or '')
+Request.ha_ceid getter: 'HaCall:' + this.ha_cid
+Request.ha_has getter: prop(this.ha_ceid, 'request') != None
+Request.ha_kind getter: 'claim' if prop(this.jbody, 'claim') == True else ('result' if prop(this.jbody, 'result') is Dict and prop(prop(this.jbody, 'result'), 'ok') is Bool else None)
+-- what is refused before anything is written
+Request.ha_refused getter:
+  WHEN not this.ha_post: None
+  ELSE WHEN this.ha_route == '/membrane/ha/catalog':
+    es = prop(this.jbody, 'entities')
+    ss = prop(this.jbody, 'services')
+    None if (es is List and ss is List and len([e for e in es if not (e is Dict) or not (prop(e, 'entity_id') is Text)]) == 0 and len([s for s in ss if not (s is Dict) or not (prop(s, 'id') is Text)]) == 0) else {'status': 400, 'body': {'error': 'the body is {entities: [{entity_id, name}], services: [{id, target, fields}]}'}}
+  ELSE WHEN this.ha_cid == '': {'status': 400, 'body': {'error': 'id is required'}}
+  ELSE WHEN not this.ha_has: {'status': 404, 'body': {'error': 'no such call: ' + this.ha_cid}}
+  ELSE WHEN this.ha_kind == None: {'status': 400, 'body': {'error': 'the body is {id, claim: true} or {id, result: {ok: true|false, response?, error?}}'}}
+  ELSE: None
+Request.ha_ask getter: True if this.ha_post and this.ha_refused == None else None
+Request.ha_ask on-setter ha-stamp:
+  WHEN this.ha_ask == True and this.ha_rid == None:
+    this.ha_rid = this.eid + '@' + str(clock)
+Request.ha_plan getter:
+  WHEN this.ha_ask != True or this.ha_rid == None: None
+  ELSE WHEN this.ha_route == '/membrane/ha/catalog': {'kind': 'catalog'}
+  ELSE WHEN this.ha_kind == 'claim': {'kind': 'claim', 'value': {'id': this.ha_rid, 'by': this.sub}}
+  ELSE: {'kind': 'finish', 'value': {'id': this.ha_rid, 'ok': prop(prop(this.jbody, 'result'), 'ok'), 'response': prop(prop(this.jbody, 'result'), 'response'), 'error': prop(prop(this.jbody, 'result'), 'error')}}
+Request.ha_plan on-setter ha-claim-write:
+  WHEN prop(this.ha_plan, 'kind') == 'claim' and this.ha_sent == None:
+    this.ha_sent = True
+    (this.ha_ceid).claim = prop(this.ha_plan, 'value')
+Request.ha_plan on-setter ha-finish-write:
+  WHEN prop(this.ha_plan, 'kind') == 'finish' and this.ha_sent == None:
+    this.ha_sent = True
+    (this.ha_ceid).finish = prop(this.ha_plan, 'value')
+Request.ha_plan on-setter ha-catalog-write:
+  WHEN prop(this.ha_plan, 'kind') == 'catalog' and this.ha_sent == None:
+    this.ha_sent = True
+    ('HaCatalog:ha').entities = prop(this.jbody, 'entities')
+    ('HaCatalog:ha').services = prop(this.jbody, 'services')
+    ('HaCatalog:ha').received = {'id': this.ha_rid, 'at': clock, 'entities': len(prop(this.jbody, 'entities')), 'services': len(prop(this.jbody, 'services'))}
+-- the receipt: the call's own log row of this request, or the catalog's `received` of it
+Request.ha_got getter:
+  WHEN this.ha_rid == None: None
+  ELSE WHEN this.ha_route == '/membrane/ha/catalog': prop('HaCatalog:ha', 'received') if prop(prop('HaCatalog:ha', 'received'), 'id') == this.ha_rid else None
+  ELSE WHEN this.ha_kind == 'claim': ([r for r in (prop(this.ha_ceid, 'claim_log') or []) if prop(r, 'id') == this.ha_rid] or [None])[0]
+  ELSE: ([r for r in (prop(this.ha_ceid, 'finish_log') or []) if prop(r, 'id') == this.ha_rid] or [None])[0]
+Request.ha_receipt getter:
+  WHEN this.ha_got == None: None
+  ELSE WHEN this.ha_route == '/membrane/ha/catalog': {'status': 200, 'body': {'ok': True, 'entities': prop(this.ha_got, 'entities'), 'services': prop(this.ha_got, 'services')}}
+  ELSE WHEN prop(this.ha_got, 'ok') != True: {'status': 409, 'body': {'error': prop(this.ha_got, 'error')}}
+  ELSE WHEN this.ha_kind == 'claim': {'status': 200, 'body': {'ok': True, 'id': this.ha_cid, 'request': prop(this.ha_ceid, 'request')}}
+  ELSE: {'status': 200, 'body': {'ok': True, 'id': this.ha_cid}}
+Request.ha_reply getter:
+  WHEN this.ha_route == '/membrane/ha/calls' and this.method == 'GET': {'status': 200, 'body': {'calls': this.ha_pending}}
+  ELSE WHEN this.ha_route == '/membrane/ha/metrics': ({'status': 200, 'body': {'rows': this.ha_rows}} if this.ha_rows != None else None)
+  ELSE WHEN this.ha_refused != None: this.ha_refused
+  ELSE: this.ha_receipt
+
+-- THE FAMILY: the routes are the door's `state` family (docs/c1f-stdlib.md, route families): the arms below stack ON TOP of door_state's, so the door's own gate comes first (401),
+-- its method check answers 405 with `allow`, and a reply that is still None (the metrics wait for the store) WAITS instead of falling through to a 404.
+Request.o_state getter:
+  WHEN this.ha_route != None: True
+Request.m_state getter:
+  WHEN this.ha_route != None: this.ha_methods
+Request.r_state getter:
+  WHEN this.ha_route != None and this.owner != True: this.forbidden
+  ELSE WHEN this.ha_route != None: this.ha_reply

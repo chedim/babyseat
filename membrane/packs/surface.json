@@ -690,6 +690,37 @@
       "Dir"
     ]
   },
+  "ha": {
+    "imports": [
+      "door",
+      "door_state"
+    ],
+    "classes": [
+      "HaAllow",
+      "HaCall",
+      "HaCatalog",
+      "Request"
+    ],
+    "members": 49,
+    "writes": [
+      "*.claim",
+      "*.finish",
+      "HaCatalog:ha.entities",
+      "HaCatalog:ha.received",
+      "HaCatalog:ha.services"
+    ],
+    "claims": [
+      "/membrane/ha/calls",
+      "/membrane/ha/catalog",
+      "/membrane/ha/metrics"
+    ],
+    "boot_facts": [],
+    "resident": [
+      "HaCall",
+      "HaCatalog",
+      "HaAllow"
+    ]
+  },
   "intents": {
     "imports": [
       "goalgraph",
