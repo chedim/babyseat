@@ -1,107 +1,135 @@
-#!/usr/bin/env bash
-# babyseat (formerly membrane) installer -- curl | bash
+#!/bin/sh
+# babyseat installer, for a machine without pip (#1143, docs/packaging-plan.md):
 #
-#   curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh | sh
+#   sh install.sh --version 0.7.60
 #
-# Installs the `membrane` and `babyseat` CLIs globally (user-local, no sudo):
-#   1. uv tool install  (preferred, if uv is on PATH)
-#   2. fallback: a managed venv at ~/.membrane/venv + `membrane` on PATH
+# It downloads the release tarball of your platform (macOS arm64/x86_64, Linux x86_64/aarch64 on glibc or musl), CHECKS its sha256 against the release's .sha256 file BEFORE extracting,
+# extracts it into a staging folder, checks every file against the folder's own MANIFEST.sha256, and only then moves it to
+#   ~/.local/share/membrane/<version>/        (the dist folder: bin/cliffvm packs/ apps/ help/ ...)
+#   ~/.local/share/membrane/babyseat          (a two-line launcher: `cliffvm serve "$@"` of the CURRENT version)
+#   ~/.local/share/membrane/current           (a link to the installed version)
+#   ~/.local/bin/babyseat                     (a link to the launcher)
+# Never uses sudo; nothing outside those two folders is touched. A failed run leaves the previous install as it was. Run it again to upgrade.
 #
-# Then, in ANY project directory, just run:
-#   membrane opencode
-# and it bootstraps that project on first use: agent skills into
-# .opencode/skills/ there, per-project memory data into .membrane/ there.
-#
-# Re-running the installer is safe (upgrade/relink in place).
-# Override the source (e.g. a local checkout while hacking):
-#   MEMBRANE_REPO=/path/to/membrane bash install.sh
+#   --version <X.Y.Z>   the release to install (default: the latest GitHub release)
+#   --base-url <url>    where babyseat-<version>-<target>.tar.gz and its .sha256 are (default: the GitHub release of the version; file:// works)
+#   --prefix <dir>      the install folder (default ~/.local/share/membrane; env MEMBRANE_INSTALL_DIR)
+#   --bin-dir <dir>     where the babyseat link goes (default ~/.local/bin; env MEMBRANE_BIN_DIR)
+#   --target <triple>   the platform's rust triple, instead of detecting it
+#   --print-target      print the detected triple and stop
+# Also pip: `pip install babyseat` carries the same binary (and is the way to the Home Assistant / docker-less Python worlds).
+set -eu
 
-set -eo pipefail
+REPO=${MEMBRANE_REPO_SLUG:-chedim/membrane}
+version=${MEMBRANE_VERSION:-}
+base=${MEMBRANE_RELEASE_URL:-}
+prefix=${MEMBRANE_INSTALL_DIR:-}
+bindir=${MEMBRANE_BIN_DIR:-}
+target=''
+print_target=0
 
-REPO_URL="${MEMBRANE_REPO:-https://github.com/chedim/membrane.git}"
-case "$REPO_URL" in
-  /*) PIP_SPEC="$REPO_URL" ;;                    # local dir
-  *)  PIP_SPEC="babyseat @ git+$REPO_URL" ;;   # the distribution's name (#303)
-esac
+say() { printf '[babyseat] %s\n' "$*"; }
+die() { printf '[babyseat] %s\n' "$*" >&2; exit 1; }
 
-BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; OFF='\033[0m'
-say()  { printf "${BLUE}[membrane]${OFF} %s\n" "$*"; }
-ok()   { printf "${GREEN}[membrane]${OFF} %s\n" "$*"; }
-warn() { printf "${YELLOW}[membrane]${OFF} %s\n" "$*"; }
-
-BIN_DIR="${MEMBRANE_BIN_DIR:-$HOME/.local/bin}"
-
-# ------------------------------------------------------------- rust (0.7.5) ---
-# babyseat's field engine is native (Rust): this installer builds it from source, so it needs cargo. When there is
-# none, a user-local Rust toolchain is installed with rustup (no sudo, the shell profile left alone); the package's
-# build (setuptools-rust) then compiles the engine. A `pip install babyseat` from PyPI needs none of this on macOS and
-# Linux: the wheels there carry the engine compiled.
-ensure_rust() {
-  export PATH="$HOME/.cargo/bin:$PATH"
-  command -v cargo >/dev/null 2>&1 && return 0
-  say "babyseat's field engine is native (Rust): installing a user-local Rust toolchain (rustup, no sudo)..."
-  command -v curl >/dev/null 2>&1 || { warn "curl is needed to fetch rustup"; return 1; }
-  curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path >/dev/null \
-    || { warn "rustup failed: install Rust (https://rustup.rs) and re-run"; return 1; }
-  command -v cargo >/dev/null 2>&1 || { warn "cargo still not on PATH ($HOME/.cargo/bin)"; return 1; }
-  ok "Rust ready ($(cargo --version))"
-}
-
-# ---------------------------------------------------------------- uv path ---
-install_with_uv() {
-  command -v uv >/dev/null 2>&1 || return 1
-  say "installing with uv (isolated tool venv, upgrades on re-run)..."
-  uv tool install --force "$PIP_SPEC" >/dev/null
-  ok "membrane CLI installed via uv -> $(command -v membrane || echo "$HOME/.local/bin/membrane")"
-}
-
-# -------------------------------------------------------------- venv path ---
-install_with_venv() {
-  local PY="${MEMBRANE_PYTHON:-}"
-  [ -n "$PY" ] || PY="$(command -v python3 || command -v python)"
-  [ -n "$PY" ] || { warn "no python3 found on PATH"; return 1; }
-
-  local VENV="$HOME/.membrane/venv"
-  say "installing into $VENV (managed venv)..."
-  "$PY" -m venv "$VENV"
-  "$VENV/bin/pip" install --upgrade pip -q
-  "$VENV/bin/pip" install -q "$PIP_SPEC"
-
-  mkdir -p "$BIN_DIR"
-  ln -sfn "$VENV/bin/membrane" "$BIN_DIR/membrane"
-  ln -sfn "$VENV/bin/babyseat" "$BIN_DIR/babyseat"
-  ok "membrane CLI installed -> $BIN_DIR/membrane"
-
-  case ":$PATH:" in
-    *":$BIN_DIR:"*) ;;
-    *) warn "$BIN_DIR is not on your PATH -- add it, e.g.:"
-       warn "  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc" ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version) version=${2:?--version needs a number}; shift 2 ;;
+    --base-url) base=${2:?--base-url needs a url}; shift 2 ;;
+    --prefix) prefix=${2:?--prefix needs a folder}; shift 2 ;;
+    --bin-dir) bindir=${2:?--bin-dir needs a folder}; shift 2 ;;
+    --target) target=${2:?--target needs a rust triple}; shift 2 ;;
+    --print-target) print_target=1; shift ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
+    *) die "unknown option $1 (see: sh install.sh --help)" ;;
   esac
+done
+
+detect_target() {
+  os=${MEMBRANE_UNAME_S:-$(uname -s)}
+  cpu=${MEMBRANE_UNAME_M:-$(uname -m)}
+  case "$cpu" in
+    arm64|aarch64) arch=aarch64 ;;
+    x86_64|amd64) arch=x86_64 ;;
+    *) arch='' ;;
+  esac
+  case "$os" in
+    Darwin) [ -n "$arch" ] && { echo "$arch-apple-darwin"; return 0; } ;;
+    Linux)
+      if [ -n "$arch" ]; then
+        libc=${MEMBRANE_LIBC:-}
+        if [ -z "$libc" ]; then
+          if [ -e /etc/alpine-release ] || (ldd --version 2>&1 | grep -qi musl); then libc=musl; else libc=gnu; fi
+        fi
+        echo "$arch-unknown-linux-$libc"; return 0
+      fi ;;
+  esac
+  echo "[babyseat] no binary for this platform ($os $cpu): the releases cover macOS and Linux on x86_64 and arm64. Try: pip install babyseat (it says so too when there is no wheel)." >&2
+  return 1
 }
 
-# ------------------------------------------------------------------- main ---
-ensure_rust || exit 1
-say "building babyseat (its native field engine compiles here: a minute or two the first time)..."
-if ! install_with_uv 2>/dev/null; then
-  install_with_venv
-fi
+if [ -z "$target" ]; then target=$(detect_target) || exit 1; fi
+if [ "$print_target" = 1 ]; then echo "$target"; exit 0; fi
 
-# the field engine must be in: a seat without it fails at startup
-_py="$HOME/.membrane/venv/bin/python"
-[ -x "$_py" ] || _py="$(uv tool dir 2>/dev/null)/babyseat/bin/python"
-if [ -x "$_py" ] && ! "$_py" -c "from membrane import membrane_vm" >/dev/null 2>&1; then
-  warn "the native field engine did not build (membrane.membrane_vm is missing): re-run with Rust on PATH"
-  exit 1
-fi
+command -v curl >/dev/null 2>&1 || die "curl is needed to download the release"
+if command -v sha256sum >/dev/null 2>&1; then sha() { sha256sum "$1" | cut -d' ' -f1; }; else sha() { shasum -a 256 "$1" | cut -d' ' -f1; }; fi
 
-# sanity check
-if ! "$BIN_DIR/membrane" --help >/dev/null 2>&1 \
-   && ! membrane --help >/dev/null 2>&1; then
-  warn "installed, but the smoke check failed -- open a fresh shell and try: membrane --help"
+if [ -z "$version" ]; then
+  # the redirect of /releases/latest names the tag: v0.7.60
+  tag=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") || die "could not ask GitHub for the latest release: name one with --version"
+  version=${tag##*/v}
+  case "$version" in ''|*[!0-9.]*) die "could not read a version from $tag: name one with --version" ;; esac
 fi
+version=${version#v}
+[ -n "$base" ] || base=https://github.com/$REPO/releases/download/v$version
+[ -n "$prefix" ] || prefix=${HOME:?no HOME in the environment: name the folder with --prefix}/.local/share/membrane
+[ -n "$bindir" ] || bindir=${HOME:?no HOME in the environment: name the folder with --bin-dir}/.local/bin
+asset=babyseat-$version-$target.tar.gz
 
-ok "done. in any project directory:"
-ok "  babyseat            # the seat with its own web UI (= membrane standalone)"
-ok "  membrane opencode   # field-backed opencode; auto-installs skills + .membrane/ there on first run"
-ok "  membrane doctor     # what's installed/running"
-ok "  MEMBRANE_NO_AUTOINSTALL=1 membrane opencode   # never touch the project dir"
+work=$(mktemp -d)
+mkdir -p "$prefix"
+stage=$prefix/.partial.$$
+trap 'rm -rf "$work" "$stage"' EXIT INT TERM
+
+say "downloading $asset ($base)"
+curl -fsSL -o "$work/$asset" "$base/$asset" || die "could not download $base/$asset (is there a release $version for $target?)"
+curl -fsSL -o "$work/$asset.sha256" "$base/$asset.sha256" || die "could not download $base/$asset.sha256: no sha256 to check the download against, nothing installed"
+want=$(cut -d' ' -f1 < "$work/$asset.sha256")
+have=$(sha "$work/$asset")
+[ -n "$want" ] && [ "$want" = "$have" ] || die "the sha256 of $asset is $have, the release says ${want:-nothing}: the download is not the release, nothing installed"
+
+mkdir -p "$stage"
+tar -xzf "$work/$asset" -C "$stage"
+n=$(ls "$stage" | wc -l | tr -d ' ')
+[ "$n" = 1 ] || die "the tarball should hold one folder, it holds $n: nothing installed"
+dist=$stage/$(ls "$stage")
+[ -f "$dist/MANIFEST.sha256" ] && [ -x "$dist/bin/cliffvm" ] || die "the tarball is not a dist folder (no MANIFEST.sha256 or bin/cliffvm): nothing installed"
+bad=0
+while IFS= read -r line; do
+  w=${line%%  *}; f=${line#*  }
+  { [ -f "$dist/$f" ] && [ "$(sha "$dist/$f")" = "$w" ]; } || { echo "[babyseat] MANIFEST.sha256: $f is missing or changed" >&2; bad=1; }
+done < "$dist/MANIFEST.sha256"
+[ "$bad" = 0 ] || die "the folder does not match its MANIFEST.sha256: nothing installed"
+[ "$(cat "$dist/VERSION")" = "$version" ] || die "the folder is version $(cat "$dist/VERSION"), not $version: nothing installed"
+
+# verified: replace the version folder, then flip the links (a failure above leaves the previous install untouched)
+rm -rf "${prefix:?}/$version"
+mv "$dist" "$prefix/$version"
+ln -sfn "$version" "$prefix/current"
+cat > "$prefix/.babyseat.$$" <<EOF
+#!/bin/sh
+# babyseat: the seat of the current install ($prefix/current). Written by install.sh.
+case "\${1:-}" in --version|-V) exec "$prefix/current/bin/cliffvm" --version ;; esac
+exec "$prefix/current/bin/cliffvm" serve "\$@"
+EOF
+chmod 755 "$prefix/.babyseat.$$"
+mv "$prefix/.babyseat.$$" "$prefix/babyseat"
+mkdir -p "$bindir"
+ln -sfn "$prefix/babyseat" "$bindir/babyseat"
+
+say "installed babyseat $version ($target) in $prefix/$version"
+say "start it:   babyseat            (the seat on http://127.0.0.1:4096; --port N for another port, --data-dir <dir> for its data, babyseat --help for the rest)"
+say "it chats with Claude through the claude CLI or an API key: export ANTHROPIC_API_KEY=... before starting"
+case ":$PATH:" in *":$bindir:"*) ;; *) say "$bindir is not on your PATH: add it, e.g.  echo 'export PATH=\"$bindir:\$PATH\"' >> ~/.profile" ;; esac
+say "macOS: files installed this way are not quarantined. A tarball downloaded in a browser is: right-click the binary and choose Open once, or run  xattr -dr com.apple.quarantine <folder>"
+say "upgrade: run this installer again. Remove: rm -rf $prefix/$version $prefix/current $prefix/babyseat $bindir/babyseat (on Linux the seat's data lives in $prefix too (seat.sqlite, door.secret): leave those)"

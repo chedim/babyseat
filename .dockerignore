@@ -1,19 +1,5 @@
-# ALLOWLIST build context (#202): the image is a public distribution, and a
-# dev tree's root holds .membrane/ (the field, audit logs, serve-auth.json),
-# field dumps and logs. Exclude everything, then re-include only what
-# `pip install .` and the entrypoint need. Add a path here only if the image
-# truly needs it -- never a root wildcard.
+# ALLOWLIST build context (#202): the image is a public distribution, and a dev tree's root holds .membrane/ (the field, audit logs, tokens), field dumps and logs.
+# Exclude everything, then re-include only what the image needs: the release tarballs and the entrypoint. Add a path here only if the image truly needs it, never a root wildcard.
 *
-!pyproject.toml
-!setup.py
-!native/**
-!README.md
-!LICENSE
-!membrane/**
-!docker/**
-# never ship bytecode caches from a dev tree
-**/__pycache__
-**/*.pyc
-# the engine's local build outputs: Rust's target dir and an extension built on the dev machine (wrong platform)
-native/target
-membrane/*.so
+!docker-dist/*.tar.gz
+!docker/docker-entrypoint.sh

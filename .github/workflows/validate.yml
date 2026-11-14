@@ -93,5 +93,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install pytest
+      - run: pip install pytest build setuptools
+      # the packaging scripts and the installer: parse-clean and shellcheck-clean
+      - run: shellcheck -S warning install.sh scripts/dist/*.sh docker/docker-entrypoint.sh
+      # the wrapper's tests: the launcher, the versions, the wheel (built from a fake payload), install.sh (a file:// release), the Dockerfile and the workflows
       - run: pytest -q -p no:cacheprovider tests/wrapper

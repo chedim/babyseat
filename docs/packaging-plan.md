@@ -212,3 +212,18 @@ What is lost at step 3 for users of the dropped items (Ollama, cloud keys, peers
 | 3 | Home Assistant integration frozen on `babyseat==0.7.53` | NO (what replaces it: open, see the question asked on 2026-11-14) |
 | 4 | version | `0.7.60` (not `0.8.0`) |
 | 5 | default bind | `127.0.0.1` |
+
+## Packaging round (w118-wheels, 2026-11-14): what is built, locally, nothing pushed
+
+| piece | where | state |
+|---|---|---|
+| the wheel | `setup.py` (payload in, `py3-none-<tag>` out, no payload = "no binary for this platform"), `membrane/launcher.py` (VERSION check, exec-bit fallback), `scripts/dist/build_wheel.sh <tag> --dist <dist folder>|--payload <dir>`, `scripts/dist/smoke_wheel.sh <wheel>` | built for macOS arm64 here: `babyseat-0.7.60-py3-none-macosx_11_0_arm64.whl` 3.6 MB (the dist tarball is 3.5 MB, the binary 6.2 MB uncompressed), installed in a fresh venv, `babyseat --version`, `--help` and `serve --port 0` with a fake claude: health 401 without a token, 200 with `<data>/owner.token` |
+| the sdist | `python -m build --sdist`: 17 files, the launcher alone | building a wheel from it stops with "no binary for this platform" (decision 4) |
+| CI | `wheels.yml` (calls `release-binaries.yml`, one wheel row per target, smoke test per row, the sdist check), `publish.yml` (dispatch + typed confirmation `publish <tag>` + tag == version, PyPI before any GitHub release, the shim), `docker.yml` (build and check on a PR; push only on a dispatch that ticks `push` and types `push <tag>`) | YAML parses; NOT run on a runner |
+| Docker | `Dockerfile`, `.dockerignore`, `docker/docker-entrypoint.sh` | the image mechanics (uid 10001, `/data`, 4096, entrypoint args, no claude) checked locally with a stand-in binary; the real Linux binary in the image is NOT verified here |
+| installer | `install.sh` (+ `build.sh --archive` now writes `<tarball>.sha256`) | tested with a `file://` release, and with the real macOS tarball |
+| upgrade | `tests/wrapper/test_upgrade_cutover.py` | the launcher with `MEMBRANE_DATA_DIR` at a fake old store: `legacy_path` reaches the seat and the cutover picks `field.sqlite/field.sqlite3` up |
+
+**macOS and Gatekeeper (decided 2026-11-14: the 0.7.60 binaries are UNSIGNED; signing and notarization are a later decision).** A binary that `pip` or `install.sh` writes carries no `com.apple.quarantine` attribute, so Gatekeeper does not stop it: `pip install babyseat` and the installer are the way in on macOS. A tarball downloaded in a BROWSER is quarantined and the first run is refused: right-click the `cliffvm` binary and choose Open once, or remove the mark with `xattr -dr com.apple.quarantine <folder>`. (Apple silicon runs an unsigned arm64 binary only if it carries the linker's ad-hoc signature, which rustc's linker adds: the binary built here runs. Not tested from a browser download.)
+
+**What could not be closed locally:** the Linux and musl binaries (no Rust target installed here and Docker Hub refused the pull of a Rust image), so those four wheels, the Docker image with the real binary and the Alpine smoke have never run; the macOS x86_64 wheel under Rosetta; `shellcheck` and `actionlint` are not installed here (the CI step runs `shellcheck -S warning`); PyPI, GitHub release and Docker Hub steps cannot be run by design.

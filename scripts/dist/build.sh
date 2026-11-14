@@ -3,7 +3,7 @@
 #   scripts/dist/build.sh [--bin <cliffvm>] [--out <dir>] [--target <rust triple>] [--archive <file.tar.gz>]
 # --bin      the binary to put in bin/ (default: build it: `cargo build --release --no-default-features --features bin` in native/, with --target when given)
 # --out      the folder to make (default: <repo>/dist/<version>; <version> is native/Cargo.toml's package version). An existing folder is replaced only if it is empty or a dist (it has a VERSION file).
-# --archive  also pack the folder as <file.tar.gz> (the one top folder is the out folder's name)
+# --archive  also pack the folder as <file.tar.gz> (the one top folder is the out folder's name) and write <file.tar.gz>.sha256 next to it
 # The tree (what `cliffvm serve` finds by itself, relative to bin/cliffvm; the repo's membrane/ folder has the same shape, so `cliffvm serve --root membrane` is the dev run):
 #   bin/cliffvm  packs/*.c1f + boot.json ...  apps/barest.packs apps/barest.c1f/  help/*.md  LICENSE  VERSION  MANIFEST.sha256
 # MANIFEST.sha256 is `<sha256>  <path>` per file but itself, sorted by path (bytes): the same inputs give the same manifest; scripts/dist/verify.sh checks a folder against it.
@@ -65,6 +65,8 @@ mv "$tmp" "$out"
 if [ -n "$archive" ]; then
   mkdir -p "$(dirname "$archive")"
   tar -C "$(dirname "$out")" -czf "$archive" "$(basename "$out")"
+  # the sidecar install.sh checks the download against: `<sha256>  <file name>` (release-binaries.yml uploads both)
+  printf '%s  %s\n' "$(sha "$archive")" "$(basename "$archive")" > "$archive.sha256"
   echo "dist/build.sh: $archive"
 fi
 echo "dist/build.sh: $out ($version, $(wc -l < "$out/MANIFEST.sha256" | tr -d ' ') files)"

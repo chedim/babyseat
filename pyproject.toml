@@ -24,14 +24,10 @@ babyseat = "membrane.launcher:main"
 
 [tool.setuptools]
 packages = ["membrane"]
+# the wheel carries the three launcher files and, from the PREPARED PAYLOAD (setup.py, scripts/dist/build_wheel.sh), the dist folder `membrane/dist/{bin/cliffvm,packs,apps,help,VERSION,MANIFEST.sha256}`;
+# nothing else of the repo's membrane/ folder (packs, apps, help, CHANGELOG) is package data: the dist folder is the one copy
+include-package-data = false
 
 [tool.pytest.ini_options]
 # the Home Assistant component's tests (fake HA, fake seat, a real cliffvm when built: CLIFFVM_BIN) and the wrapper's
 testpaths = ["tests/ha", "tests/wrapper"]
-
-# TODO(packaging, docs/python-retirement.md step 9): the wheel must carry the binary and the data as `membrane/dist/{bin/cliffvm,packs,apps,ui,help}`
-# (setup.py builds `native/` with setuptools-rust Binding.Exec and tags the wheel py3-none-<platform>); until then the data folders below
-# ship from the source tree and the launcher says "no binary for this platform" when it finds none.
-[tool.setuptools.package-data]
-membrane = ["packs/*.c1f", "packs/*.json", "apps/*.packs", "apps/*/*.c1f", "apps/*/help/*.md", "apps/*/ui/*",
-            "help/*.md", "CHANGELOG.md"]

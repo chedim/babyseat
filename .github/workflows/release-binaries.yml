@@ -17,6 +17,7 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+  workflow_call:        # wheels.yml (the wheels are built from this run's wheel-payload-<target> artifacts) and so publish.yml
 
 permissions:
   contents: read
@@ -97,7 +98,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.target }}
-          path: dist/babyseat-${{ env.VER }}-${{ matrix.target }}.tar.gz
+          # the tarball and its .sha256 (install.sh checks the download against it before extracting)
+          path: |
+            dist/babyseat-${{ env.VER }}-${{ matrix.target }}.tar.gz
+            dist/babyseat-${{ env.VER }}-${{ matrix.target }}.tar.gz.sha256
           if-no-files-found: error
           retention-days: 14
 

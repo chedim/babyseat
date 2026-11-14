@@ -1,12 +1,13 @@
 name: wheels
 
-# THE FIELD ENGINE SHIPS COMPILED (0.7.5, the operator: "don't make users build half the project"): babyseat's
-# native engine (native/, Rust + PyO3) is built into one wheel per platform with PyO3's stable ABI, so each wheel
-# serves every Python >= 3.10. macOS (arm64, Intel) and Linux (x86_64, aarch64), glibc (manylinux) AND musl
-# (musllinux: Home Assistant's container is Alpine, and 0.7.5 shipped without these); anything else builds from the sdist
-# (install.sh fetches a Rust toolchain when it is missing). Each wheel is installed into a clean environment and must
-# import the engine before it can be published. publish.yml calls this workflow; a PR that touches the engine or the
-# build runs it too, so a broken wheel never reaches a release.
+# THE WHEELS (#1143, docs/packaging-plan.md decided 2026-11-14, docs/python-retirement.md the wrapper): `babyseat` ships as one platform wheel per target, `py3-none-<platform>`, that carries the
+# prebuilt `cliffvm` seat and its packs/apps/help as `membrane/dist/`; Python is only the launcher. No cargo here: the binaries come from release-binaries.yml (called below: its `wheel-payload-<target>`
+# artifacts are the dist folders), and scripts/dist/build_wheel.sh packs each into its wheel. Each wheel is installed into a fresh venv and smoke-tested (scripts/dist/smoke_wheel.sh: babyseat --version,
+# --help, serve --port 0 with a fake claude, /global/health 401 without a token and 200 with the owner token) wherever the runner can run it: macOS arm64 natively, macOS x86_64 under Rosetta,
+# Linux x86_64 and aarch64 on their runners, musl inside an Alpine container. The sdist carries the three launcher files and NO binary: building a wheel from it must FAIL with "no binary for this platform"
+# (checked below). Nothing is published here (publish.yml is the operator's dispatch); the wheels are artifacts: `wheel-<name>` and `sdist`.
+#
+# Platforms and tags: the binaries are built with MACOSX_DEPLOYMENT_TARGET=11.0 (macosx_11_0_*) inside manylinux_2_28 containers (manylinux_2_28_*) and static on musl (musllinux_1_2_*).
 
 on:
   workflow_call:
@@ -17,49 +18,67 @@ on:
         default: ""
   pull_request:
     paths:
-      - "native/**"
       - "setup.py"
       - "pyproject.toml"
+      - "membrane/__init__.py"
+      - "membrane/launcher.py"
+      - "membrane/__main__.py"
+      - "scripts/dist/**"
       - ".github/workflows/wheels.yml"
+      - ".github/workflows/release-binaries.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  wheels:
+  binaries:
+    uses: ./.github/workflows/release-binaries.yml
+
+  wheel:
     name: wheel ${{ matrix.name }}
+    needs: binaries
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x86_64, os: ubuntu-latest, archs: x86_64, build: "cp310-manylinux_*" }
-          - { name: linux-aarch64, os: ubuntu-24.04-arm, archs: aarch64, build: "cp310-manylinux_*" }
-          - { name: linux-musl-x86_64, os: ubuntu-latest, archs: x86_64, build: "cp310-musllinux_*" }
-          - { name: linux-musl-aarch64, os: ubuntu-24.04-arm, archs: aarch64, build: "cp310-musllinux_*" }
-          - { name: macos-arm64, os: macos-latest, archs: arm64, build: "cp310-*" }
-          - { name: macos-x86_64, os: macos-latest, archs: x86_64, build: "cp310-*" }      # cross-built on Apple silicon
+          - { name: macos-arm64,        os: macos-14,         target: aarch64-apple-darwin,       tag: macosx_11_0_arm64 }
+          - { name: macos-x86_64,       os: macos-14,         target: x86_64-apple-darwin,        tag: macosx_11_0_x86_64, rosetta: true }
+          - { name: linux-x86_64,       os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,   tag: manylinux_2_28_x86_64 }
+          - { name: linux-aarch64,      os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu,  tag: manylinux_2_28_aarch64 }
+          - { name: linux-musl-x86_64,  os: ubuntu-22.04,     target: x86_64-unknown-linux-musl,  tag: musllinux_1_2_x86_64,  musl: true }
+          - { name: linux-musl-aarch64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, tag: musllinux_1_2_aarch64, musl: true }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
-      - uses: pypa/cibuildwheel@v2.23
-        env:
-          CIBW_BUILD: ${{ matrix.build }}           # abi3: the one cp310 build serves every newer Python
-          CIBW_ARCHS: ${{ matrix.archs }}
-          CIBW_BEFORE_ALL_LINUX: "curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
-          # musl: Rust links the C runtime statically by default, and a static-CRT cdylib can't be a Python extension
-          CIBW_ENVIRONMENT_LINUX: 'PATH="$HOME/.cargo/bin:$PATH" RUSTFLAGS="-C target-feature=-crt-static"'
-          CIBW_BEFORE_ALL_MACOS: "rustup target add x86_64-apple-darwin aarch64-apple-darwin"
-          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=11.0"
-          # the wheel alone, in a clean environment: the engine must import (no dependencies needed for it)
-          CIBW_TEST_COMMAND: >-
-            python -c "from membrane import membrane_vm as m; assert m.evaluate('1 + 1', '{}') == '2'; print('engine ok')"
-          CIBW_TEST_SKIP: "*-macosx_x86_64"          # cross-built: no Intel CPU to run it on
+      - uses: actions/setup-python@v5
         with:
-          output-dir: dist
+          python-version: "3.13"
+      - run: python -m pip install build setuptools
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-payload-${{ matrix.target }}
+          path: payload
+      - name: the wheel (the payload's dist folder, packed)
+        run: sh scripts/dist/build_wheel.sh "${{ matrix.tag }}" --payload payload --out dist-wheels
+      - name: Rosetta (the x86_64 binary runs on Apple silicon)
+        if: matrix.rosetta
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+      - name: "smoke test: install into a fresh venv, --version, --help, serve --port 0, /global/health"
+        if: ${{ !matrix.musl }}
+        run: sh scripts/dist/smoke_wheel.sh dist-wheels/*.whl
+      - name: "smoke test on musl: the same inside Alpine (python + curl from apk)"
+        if: matrix.musl
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w alpine:3.20 sh -c \
+            'apk add --no-cache python3 py3-pip curl >/dev/null && PYTHON=python3 sh scripts/dist/smoke_wheel.sh dist-wheels/*.whl'
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ matrix.name }}
-          path: dist/*.whl
+          path: dist-wheels/*.whl
+          if-no-files-found: error
 
   sdist:
     runs-on: ubuntu-latest
@@ -70,7 +89,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install build && python -m build --sdist --outdir dist
+      - run: pip install build setuptools
+      - run: python -m build --sdist --outdir dist
+      - name: "the sdist has no binary and cannot become a wheel (decision 4: it fails loudly)"
+        run: |
+          set -eu
+          tar -tzf dist/*.tar.gz | grep -q 'membrane/launcher.py'
+          ! tar -tzf dist/*.tar.gz | grep -q 'cliffvm'
+          mkdir x && tar -xzf dist/*.tar.gz -C x
+          if pip wheel --no-deps --no-build-isolation -w w x/*/ > out.txt 2>&1; then echo "a wheel was built from the sdist"; exit 1; fi
+          grep -q 'no binary for this platform' out.txt || { cat out.txt; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
