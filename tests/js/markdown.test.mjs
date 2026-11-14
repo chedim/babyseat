@@ -26,6 +26,7 @@ function world() {
       const n = w.nodes.get(x.eid) || {}; if (!x.born) { n[x.prop] = x.new; w.dom++; } w.nodes.set(x.eid, n);
     }
   };
+  w.tick = (dt) => { w.t += dt; f.tick(w.t); w.flush(); };
   w.write = (e, p, v) => { f.write(e, p, JSON.stringify(v ?? null), w.t); w.flush(); };
   w.md = (id, text) => { if (f.get('Md:' + id) === 'null') f.load('Md:' + id, 'Md', '{}'); w.write('Md:' + id, 'into', 'DomNode:root'); w.write('Md:' + id, 'src', text); };
   // the children of a node in the order the page would hold them: made in order, a node with `before` sits above that sibling (fieldvm.js attach)
@@ -165,5 +166,44 @@ scenario('ORDER: the blocks of a long mixed message come out in the order of the
   const long = Array.from({ length: 90 }, (_, i) => `para ${i}\n`).join('\n');
   const texts = []; const w2 = render(long); const collect = (eid) => { for (const n of w2.kids(eid)) { if (n.tag === 'span' && /^para \d+$/.test(n.text ?? '')) texts.push(Number(n.text.slice(5))); collect(n.k); } }; collect('DomNode:root');
   assert.deepEqual(texts, [...texts].sort((a, b) => a - b)); assert.ok(texts.length >= 80);
+});
+
+scenario('Copy: "Copied" is announced and goes back to "Copy" after 2 s of the clock; a refusal is visible text', () => {
+  const w = render('```js\nlet a = 1;\n```');
+  const copy = w.all().find((x) => x.class === 'md-copy'), live = w.all().find((x) => x.class === 'md-live');
+  assert.equal(copy['aria-label'], 'Copy code'); assert.equal(live.role, 'status'); assert.equal(live['aria-live'], 'polite'); assert.equal(live.text ?? '', '');
+  w.write(copy.k, 'clicked', w.t);
+  assert.equal(JSON.parse(w.f.get(copy.k)).copy.text, 'let a = 1;', 'the click asks the host to copy');
+  w.write(copy.k, 'copy_result', { ok: true, at: w.t });                     // the host's answer
+  assert.equal(w.nodes.get(copy.k).text, 'Copied'); assert.equal(w.nodes.get(live.k).text, 'Copied', 'announced');
+  w.tick(1.0); assert.equal(w.nodes.get(copy.k).text, 'Copied', 'still there after 1 s');
+  w.tick(1.2); assert.equal(w.nodes.get(copy.k).text, 'Copy', 'back after 2 s'); assert.equal(w.nodes.get(live.k).text, '', 'the announcement is cleared');
+  w.write(copy.k, 'clicked', w.t);
+  w.write(copy.k, 'copy_result', { ok: false, why: 'the browser refused the clipboard', at: w.t });
+  assert.equal(w.nodes.get(copy.k).text, 'Copy failed'); assert.equal(w.nodes.get(live.k).text, 'Copy failed: the browser refused the clipboard');
+  w.tick(2.5); assert.equal(w.nodes.get(copy.k).text, 'Copy');
+});
+scenario('keyboard and small screens: a code block and a table scroll as focusable regions with a label; Show all is a button', () => {
+  const w = render('```python\nx\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |');
+  const body = w.all().find((x) => x.class === 'md-codebody'); assert.equal(body.tabindex, 0); assert.equal(body.role, 'region'); assert.equal(body['aria-label'], 'python code');
+  assert.equal(w.all().find((x) => x.class === 'md-codebody').tag, 'code');
+  const wrap = w.all().find((x) => x.class === 'md-tablewrap'); assert.equal(wrap.tabindex, 0); assert.equal(wrap.role, 'region'); assert.equal(wrap['aria-label'], 'table');
+  const big = render('a\n\n' + Array.from({ length: 3000 }, (_, i) => `line ${i}`).join('\n\n'));
+  const btn = big.all().find((x) => x.class === 'md-showall'); assert.equal(btn.tag, 'button'); assert.equal(btn.type, 'button');
+  assert.equal(render('```\nx\n```').all().find((x) => x.class === 'md-codebody')['aria-label'], 'code', 'no language: just code');
+});
+scenario('a text that SHRINKS retires the nodes of the blocks that went (grow, shrink: the same nodes as a fresh render)', () => {
+  const small = 'first paragraph\n\n- a\n- b';
+  const big = small + '\n\n> a quote\n\n| t | u |\n|---|---|\n| 1 | 2 |\n\n```js\ncode\n```\n\n1. x\n   - y\n\ntail';
+  const fresh = render(small); const w = world();
+  w.md('s', small); const n0 = w.nodes.size, h0 = w.html();
+  w.write('Md:s', 'src', big); assert.ok(w.nodes.size > n0 + 20, 'it grew');
+  w.write('Md:s', 'src', small);
+  assert.equal(w.html(), h0, 'the page shows the small text again'); assert.equal(w.nodes.size, fresh.nodes.size, 'and holds no node of the blocks that went');
+  assert.deepEqual(w.failed(), []);
+  // a list losing items, a long text losing a whole chunk, a code block turning into prose
+  const l = world(); l.md('l', '- a\n- b\n- c\n  - d'); const nl = render('- a').nodes.size; l.write('Md:l', 'src', '- a'); assert.equal(l.nodes.size, nl);
+  const long = Array.from({ length: 120 }, (_, i) => `para ${i}`).join('\n\n'); const c = world(); c.md('c', long); assert.ok(c.nodes.size > 400); c.write('Md:c', 'src', 'short'); assert.equal(c.nodes.size, render('short').nodes.size, 'chunks past the first are gone');
+  const k = world(); k.md('k', '```js\nx\n```'); k.write('Md:k', 'src', 'plain words'); assert.equal(k.nodes.size, render('plain words').nodes.size);
 });
 console.log(`markdown: ok (${n} scenarios)`);

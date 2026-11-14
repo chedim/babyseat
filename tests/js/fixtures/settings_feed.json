@@ -348,27 +348,6 @@
    "choices": null
   },
   {
-   "id": "import.page",
-   "group": "import",
-   "key": "page",
-   "label": "Old turns read per query",
-   "help": "How many turns of old history one query reads. Unset means opening a chat imports nothing.",
-   "kind": "readonly",
-   "live": "restart",
-   "order": 17,
-   "default": null,
-   "min": null,
-   "max": null,
-   "whole": false,
-   "unit": null,
-   "how": "start the seat with --fact legacy_page=<number>",
-   "hidden": false,
-   "current": null,
-   "refused": "",
-   "applied": null,
-   "choices": null
-  },
-  {
    "id": "access.token_life",
    "group": "access",
    "key": "token_life",
