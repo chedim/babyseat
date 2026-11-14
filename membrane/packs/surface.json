@@ -114,7 +114,7 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 41,
+    "members": 42,
     "writes": [
       "membrane:*.mention",
       "membrane:*.queued",
@@ -143,7 +143,7 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 44,
+    "members": 49,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
@@ -466,7 +466,7 @@
       "Request",
       "SesBus"
     ],
-    "members": 102,
+    "members": 108,
     "writes": [
       "*.eo",
       "*.retire",
@@ -477,6 +477,7 @@
       "membrane:*.mention",
       "membrane:*.queued",
       "membrane:*.retire",
+      "membrane:*.smodel",
       "membrane:*.stitle",
       "membrane:*.stop",
       "membrane:*.upd",
