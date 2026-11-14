@@ -149,6 +149,14 @@
    "wired": false,
    "why": "the lazy history import (membrane/packs/legacy_import.c1f, door_session.c1f; #1143): how many old user rows one query reads when a session imported as a header only is opened for the first time (GET /session/<sid>/message imports its messages, once, and answers). NO default: unset, an open imports nothing (the eager `Legacy:seat.import` stays); told by `--fact legacy_page=<n>`"
   },
+  "legacy_path": {
+   "wired": false,
+   "why": "the earlier (Python, 0.7.x) seat's store, for the automatic history cutover (membrane/packs/legacy_cutover.c1f; #1143): a file (its field.sqlite3), or a folder that holds it (its `.membrane` folder, its `field.sqlite` folder, or the folder of field.sqlite3). Told, it is the ONLY place looked at (a path that holds no store is an error shown as text, never a fallback); unset, the seat looks in `<seat_data_dir>`, `<seat_data_dir>/.membrane`, `<seat_cwd>/.membrane`, `<seat_home>/membrane/.membrane` and `/config/membrane/.membrane` (each `field.sqlite/field.sqlite3`), the first that has a store wins, and when none has one nothing happens; told by `--fact legacy_path=<path>` (the launcher's `--legacy <path>`)"
+  },
+  "legacy_batch": {
+   "wired": false,
+   "why": "the automatic history cutover's page (membrane/packs/legacy_cutover.c1f; #1143): how many old user rows one query reads, and so how many questions one background step imports and then leaves out of memory; default 5 (measured on the real store: 20 stalled the seat up to 3.5 s a page, 5 up to 0.9 s; a number flagged for the operator); told by `--fact legacy_batch=<n>`"
+  },
   "effect_workers": {
    "wired": false,
    "why": "the cap on Command / File / Fetch / SqlQuery effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"

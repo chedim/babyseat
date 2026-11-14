@@ -129,9 +129,12 @@ fn the_launcher_makes_a_door_secret_and_an_admin_token_and_the_strict_door_serve
 
 #[test]
 fn the_launcher_binds_loopback_by_default() {
+    // the wrapper names no address, and `cliffvm serve` states loopback as the default and binds it
     let t = std::fs::read_to_string(repo().join("scripts/seat")).unwrap();
-    assert!(!t.contains("0.0.0.0"), "no all-interfaces default");
-    assert!(t.contains("127.0.0.1"));
+    assert!(!t.contains("0.0.0.0") && !t.contains("--bind"), "the wrapper sets no bind");
+    let help = Command::new(BIN).args(["serve", "--help"]).output().unwrap();
+    let h = String::from_utf8_lossy(&help.stdout);
+    assert!(h.contains("Default 127.0.0.1") && !h.contains("Default 0.0.0.0"), "{h}");
 }
 
 // ---- (4) small fixes -------------------------------------------------------------------------------------------------------------------

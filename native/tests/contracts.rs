@@ -153,12 +153,14 @@ fn the_boot_facts_packs_read_are_registered_and_the_wired_ones_are_written_by_th
     let facts = reg["facts"].as_object().expect("facts: {name: {wired, why}}");
     // the launcher is what tells the seat its facts: the `cliffvm run` command line and the boot (cli.rs, host.rs) and the release launcher's own `--fact` list (scripts/seat)
     let launcher = std::fs::read_to_string(root().join("native/src/cli.rs")).unwrap() + &std::fs::read_to_string(root().join("native/src/host.rs")).unwrap() + &std::fs::read_to_string(root().join("scripts/seat")).unwrap();
+    // and the defaults `cliffvm serve` tells through the pack packs/launcher.c1f (a setter on Boot.started writes `this.<fact> = ...` when none was told)
+    let launcher = launcher + &std::fs::read_to_string(root().join("membrane/packs/launcher.c1f")).unwrap();
     let mut bad = vec![];
     for id in &read {
         if !facts.contains_key(id) { bad.push(format!("a pack reads the Boot fact `{id}` that is not in membrane/packs/facts.json")); }
     }
     for (name, f) in facts {
-        if f["wired"].as_bool() == Some(true) && !(launcher.contains(&format!("\"{name}\"")) || launcher.contains(&format!("{name}="))) {
+        if f["wired"].as_bool() == Some(true) && !(launcher.contains(&format!("\"{name}\"")) || launcher.contains(&format!("{name}=")) || launcher.contains(&format!("this.{name} = "))) {
             bad.push(format!("fact `{name}` is marked wired but the launcher (native/src/cli.rs, host.rs / scripts/seat) never writes it"));
         }
         if f["why"].as_str().unwrap_or("").is_empty() { bad.push(format!("fact `{name}` has no `why`")); }

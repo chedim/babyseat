@@ -272,7 +272,11 @@
       "Http",
       "Request"
     ],
+<<<<<<< HEAD
     "members": 87,
+=======
+    "members": 91,
+>>>>>>> memo-hotfix-0753
     "writes": [
       "Http:door.listen"
     ],
@@ -298,8 +302,10 @@
     "boot_facts": [
       "app_dirs",
       "build_id",
+      "default_port",
       "door_port",
       "door_secret_file",
+      "minds",
       "seat_aliases",
       "seat_blurp",
       "seat_cwd",
@@ -731,6 +737,48 @@
       "Intent"
     ]
   },
+  "launcher": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot"
+    ],
+    "members": 2,
+    "writes": [],
+    "claims": [],
+    "boot_facts": [
+      "cloud_models",
+      "minds",
+      "router_on",
+      "seat_backend"
+    ]
+  },
+  "legacy_cutover": {
+    "imports": [
+      "boot",
+      "sql",
+      "legacy_import"
+    ],
+    "classes": [
+      "LegacyCutover",
+      "LegacySeat"
+    ],
+    "members": 33,
+    "writes": [
+      "SqlSource:legacy.mode",
+      "SqlSource:legacy.path",
+      "membrane::Legacy:cutover.checked",
+      "membrane::Legacy:cutover.ended",
+      "membrane::Legacy:cutover.path",
+      "membrane::Legacy:cutover.reason",
+      "membrane::Legacy:cutover.started",
+      "membrane::Legacy:cutover.state",
+      "membrane::Legacy:cutover=LegacyCutover()"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
   "legacy_import": {
     "imports": [
       "boot",
@@ -747,7 +795,7 @@
       "LegacySession",
       "Request"
     ],
-    "members": 18,
+    "members": 20,
     "writes": [
       "*.cursor",
       "*.dropped_parts",
@@ -755,6 +803,7 @@
       "*.reason",
       "*.rows",
       "*.state",
+      "*.unload",
       "SqlQuery:legacy:msgs.run",
       "SqlQuery:legacy:msgs.source",
       "SqlQuery:legacy:msgs.sql",
@@ -770,6 +819,8 @@
       "membrane:*=ChatTurn()",
       "membrane:*=LegacySession()",
       "membrane:*=SemText()",
+      "membrane::Legacy:seat.cur",
+      "membrane::Legacy:seat.queue",
       "membrane::Legacy:seat.running",
       "membrane::Legacy:seat=LegacySeat()"
     ],

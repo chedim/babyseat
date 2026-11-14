@@ -5,6 +5,19 @@ oracle tag), `N/` = `native/`, `P/` = `membrane/packs/`. Numbers marked **[copy]
 `rosetta-check/.membrane/field.sqlite/field.sqlite3.good-121525` (a 2026-11-11 12:15 snapshot of the Rosie seat, 615 MB, WAL empty), copied to the
 session scratchpad and opened with `immutable=1`. No live store was opened; the main seat's directory was only sized (`du`: 14 GB, includes its backups).
 
+## Phase 1b: the automatic cutover (built 2026-11-14, #1143, `membrane/packs/legacy_cutover.c1f`, tests `native/tests/legacy_cutover_1143.rs`)
+
+Operator: "history cutover: automatic". A user upgrading from the Python seat starts the new seat once and finds the history in the ONE chat. At the start the seat finds the old store, declares `SqlSource:legacy` (read-only, immutable), and imports in the
+background, newest session first and, inside a session, the newest questions first, in small batches whose entities leave the engine at once. Resumable (the per-session ledgers), once (`Legacy:cutover.state` done), silent when there is no old store.
+- **Search order** (first hit wins; each place holds `field.sqlite/field.sqlite3`): the fact `legacy_path` (a file or a folder; named, it is the only place, a miss is an error with the path) or a source already declared `legacy`; then `<seat_data_dir>`, `<seat_data_dir>/.membrane`,
+  `<seat_cwd>/.membrane` (the Python seat's cwd folder, `cli.py DATA_DIR`), `<seat_home>/membrane/.membrane` (`restarts.py` default), `/config/membrane/.membrane` (the Home Assistant component's seat folder). The old `MEMBRANE_DATA_DIR` env is not seen by c1f: the launcher passes it as `legacy_path`.
+- **Which sessions** (kinds on the ledger, `session_kind`): `chat` = old `agent` build or speaker, imported; `absorbed` (title "absorbed claude session") and `background` (every other agent) are `skipped`: no ChatSession, no messages, no time rows. The progress counts chats only.
+- **What the user sees**: the history route carries `import` (a plain line, or the reason of an error) while it runs; the chat view shows it above the composer and keeps "Load older turns"; the Settings Import group has the read-only row "Earlier conversations".
+- **Engine findings** (measured on the real store, 2026-11-14): (1) a name bound above a FOR is copied for every statement of its body (`Fields::run_writes`/`scope`): the page setter no longer binds `rows`/`tools`/`texts` (385 GB of allocation in 45 s before, a page took seconds);
+  (2) `Fields::unload` retained over every bookkeeping table per entity: `unload_many` does one pass per batch; (3) the in-memory journal kept every journalled query receipt (megabytes a page) for the life of the process: a line over 256 KiB is kept without its value in RAM (the stored line is whole).
+- **Measured, Memo's real store (1,605 sessions, 5.5 GB, opened in place immutable), release build, private seat on port 4521, fake claude**: 17 chat sessions, 2,178 turns imported (=ledger and store counts), 1,588 sessions skipped; door up 0.9 s, recent history visible after about 6 s (the headers),
+  the whole import 108 s (batch 5), peak RSS about 610 MB, turn start 0.03 to 0.9 s and answered 0.02 to 2.7 s during the import, store 612 MB; a SIGTERM at 9 of 17 sessions and a restart finished it from the ledgers (9 of 17 on the first status), no duplicates.
+
 ## Phase 1: history import (built 2026-11-14, #1143)
 
 **Scope (operator decisions 2026-11-14, fixed).** ONLY the chat history (sessions and messages) is migrated into the new field. Nothing else is converted: no entities, no recall data, no vectors, no goals, decisions or options, no

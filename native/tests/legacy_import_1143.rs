@@ -161,8 +161,8 @@ fn a_session_that_fails_midway_is_an_error_with_the_reason_keeps_what_was_writte
     let (old, good) = (d.join("old.sqlite"), d.join("good.sqlite"));
     make_legacy(&old);
     std::fs::copy(&old, &good).unwrap();
-    // the second answer of ses_a has parts that are not JSON objects: SQLite refuses the page that reads them (the first page, one user row, is fine)
-    rusqlite::Connection::open(&old).unwrap().execute("UPDATE c_messages SET body = replace(body, '\"parts\":[{\"id\":\"prt_t\"', '\"parts\":[\"oops\",{\"id\":\"prt_t\"') WHERE k = 'ses_a|msg_a3'", []).unwrap();
+    // an answer of the OLDER question of ses_a has parts that are not JSON objects: SQLite refuses the page that reads them (the pages come newest question first: the first page, one user row, is fine)
+    rusqlite::Connection::open(&old).unwrap().execute("UPDATE c_messages SET body = replace(body, '\"parts\":[{\"id\":\"prt_t\"', '\"parts\":[\"oops\",{\"id\":\"prt_t\"') WHERE k = 'ses_a|msg_a2'", []).unwrap();
     let h = host_at(&d);
     legacy_source(&h, &old);
     import(&h, json!({"id": "i1", "sessions": ["ses_a", "ses_b"], "page": 1}));
@@ -170,9 +170,9 @@ fn a_session_that_fails_midway_is_an_error_with_the_reason_keeps_what_was_writte
     let a = "membrane::Legacy:session:ses_a";
     assert_eq!(h.get(a, "state"), json!("error"), "{}", h.get(a, "reason"));
     assert!(h.get(a, "reason").as_str().unwrap().to_lowercase().contains("json"), "SQLite's own words: {}", h.get(a, "reason"));
-    assert_eq!(h.get(a, "cursor"), json!(10), "the first page was written with its ledger step");
-    assert_eq!(h.get(a, "rows"), json!(3));
-    assert!(!h.get("membrane::Chat:session:ses_a:message:1790000010000-00000010", "text").is_null(), "what was written stays");
+    assert_eq!(h.get(a, "cursor"), json!(13), "the first page (the newest question) was written with its ledger step: the cursor is the lowest `n` read");
+    assert_eq!(h.get(a, "rows"), json!(2));
+    assert!(!h.get("membrane::Chat:session:ses_a:message:1790000020000-00000013", "text").is_null(), "what was written stays");
     assert_eq!(h.get("membrane::Legacy:session:ses_b", "state"), json!("done"), "one session's failure does not stop the next");
     assert_eq!(h.get("membrane::Legacy:seat", "run_error"), json!(1));
     assert_eq!(h.get("membrane::Legacy:session:ses_c", "state"), json!("pending"), "a session not named is left as it was");
@@ -185,7 +185,8 @@ fn a_session_that_fails_midway_is_an_error_with_the_reason_keeps_what_was_writte
     assert_eq!(h.get(a, "reason"), J::Null);
     assert_eq!(h.get(a, "rows"), json!(5), "no row counted twice");
     assert_eq!(h.get("membrane::Legacy:seat", "run_total"), json!(1));
-    let msgs = |sid: &str| { let p = format!("membrane::Chat:session:{sid}:message:"); h.snapshot().iter().filter(|(k, _)| k.starts_with(&p) && !k[p.len()..].contains(':')).count() };
+    // (the STORED rows: the import leaves what it wrote out of the engine, so the loaded snapshot holds only a few)
+    let msgs = |sid: &str| { let p = format!("membrane::Chat:session:{sid}:message:"); h.rows().iter().filter(|(k, _)| k.starts_with(&p) && !k[p.len()..].contains(':')).count() };
     assert_eq!((msgs("ses_a"), msgs("ses_b")), (2, 1), "none doubled");
 }
 

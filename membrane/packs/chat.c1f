@@ -132,7 +132,7 @@ Request.ev_snap on-setter ev-send:
     this.send = {'id': 'event', 'event': 'message', 'data': this.ev_snap}
 
 -- ---- GET: the history (the newest turns, then older ones) ------------------------------------------------------------------------------
--- {messages: [history_view, ...] oldest first, more: older turns exist, next: the oldest id of the page (pass it as `before`) or null}.
+-- {messages: [history_view, ...] oldest first, more: older turns exist, next: the oldest id of the page (pass it as `before`) or null, import: the plain line of the history cutover (packs/legacy_cutover.c1f: the progress while the earlier seat's history is imported in the background, or the reason it failed) or null}.
 -- `limit` (default 20, at least 1), `before` = a message id: only turns older than it; an unknown id is a 404. Only a history request computes any of this.
 -- THE PAGE IS CHOSEN BY THE STORE, never by a comprehension over every message (a store holds thousands; the step budget is for the page) and never by reading a body (docs/chat-keys.md):
 --   `sid=<sid>`  one session: the keys under `membrane::Chat:session:<sid>:message:` (a range of the `(cls, k)` index, newest first, LIMIT limit + 1);
@@ -173,7 +173,7 @@ Request.hs_get getter:
   WHEN this.hs_bad: {'status': 400, 'body': {'error': 'sid and before must not contain a colon'}}
   ELSE WHEN this.hs_rows == None or this.hs_cut == None: None
   ELSE WHEN this.hs_before != None and len(this.hs_cut) == 0: {'status': 404, 'body': {'error': 'no such message'}}
-  ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'page_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None}}
+  ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'page_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None, 'import': prop('membrane::Legacy:cutover', 'line')}}
 
 Request.r_session getter:
   WHEN this.route == '/membrane/chat/message': this.cm_post
