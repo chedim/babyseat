@@ -253,7 +253,7 @@ class Host {
 
   /** The page's visibility as a fact: `Conn:page.hidden` (bool), written now and on every `visibilitychange`. Returns the function that stops it. */
   track_hidden(doc = document) {
-    const put = () => { const h = !!doc.hidden; if ((this.get('Conn:page') || {}).hidden !== h) this.feed('Conn:page', 'Conn', { hidden: h }, true); if (this.link) this.link.visibility(h); };
+    const put = () => { const h = !!doc.hidden; if ((this.get('Conn:page') || {}).hidden !== h) this.feed('Conn:page', 'Conn', { hidden: h }, true); if (this.graph) this.graph.visibility(h); };
     put();
     doc.addEventListener('visibilitychange', put);
     return () => doc.removeEventListener('visibilitychange', put);
@@ -266,9 +266,9 @@ class Host {
 
   /** Start the graph link (the `Link` above): returns false when the engine has no link hooks. The page's visibility is read now; `track_hidden` keeps it after. */
   start_link(opts = {}) {
-    this.link = new Link(this, { ns: this.ns, ...opts });
-    if ((this.get('Conn:page') || {}).hidden) this.link.visibility(true);
-    return this.link.start();
+    this.graph = new Link(this, { ns: this.ns, ...opts });                // (`link(top)` below is the DOM link, an older name)
+    if ((this.get('Conn:page') || {}).hidden) this.graph.visibility(true);
+    return this.graph.start();
   }
 
   /** An entity arrives: made empty, then each field written, so the views' setters see it. */
@@ -318,7 +318,7 @@ class Host {
     for (;;) {
       const out = JSON.parse(this.f.drain());
       this.pending.push(...out.writes);
-      if (this.link && ((out.subs && out.subs.length) || (out.unsubs && out.unsubs.length))) this.link.note(out);   // the link (docs/graph-link.md 15b): what the page now reads of the seat
+      if (this.graph && ((out.subs && out.subs.length) || (out.unsubs && out.unsubs.length))) this.graph.note(out);   // the link (docs/graph-link.md 15b): what the page now reads of the seat
       this.fetches(out.writes);                                   // W2: a write of Fetch:<x>.request / .abort
       const gone = out.writes.filter(w => w.prop === 'retire' && w.new === true).map(w => w.eid);
       for (const eid of gone) this.retire(eid);                   // the seat's engine removes a retired entity (docs/cliffvm.md): so does the page's; what that changes is drained again
