@@ -4,7 +4,6 @@ IMPORT door 1
 RESIDENT FieldVm
 VIRTUAL FvDir
 VIRTUAL FvFile
-VIRTUAL Wire
 -- THE BROWSER VM'S START AS A DOOR ROUTE (#1143, swap step 3): GET /ui/fieldvm (the page's `fieldvm.js connect()`: the snapshot, then the event stream).
 -- The page runs its own field engine (WebAssembly, the same VM) and follows the seat's: it starts from this snapshot, {packs: {name: c1f text}, entities:
 -- [{eid, cls, props}]}, and the packs that import `dom` run in the page and draw there (the About window is one: packs/about.c1f).
@@ -60,7 +59,7 @@ FieldVm.snapshot getter:
     {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars'), 'field_window': prop('Setting:map.window', 'current') or prop(bt, 'field_window'), 'field_poll_ms': prop('Setting:map.poll_ms', 'current') or prop(bt, 'field_poll_ms'), 'chat_poll_timeout_s': prop(bt, 'chat_poll_timeout_s'), 'shell_status_ms': prop(bt, 'shell_status_ms'), 'shell_panel_chars': prop(bt, 'shell_panel_chars')}}], 'views': {'chat': prop(prop(bt, 'ui_views'), 'chat') or 'legacy', 'field': prop(prop(bt, 'ui_views'), 'field') or 'legacy'}}
   ELSE: None
 
-Request.o_fieldvm getter: this.route in ['/ui/fieldvm', '/ui/fieldvm/active', '/ui/fieldvm/events', '/ui/fieldvm/edges', '/ui/fieldvm/entity']
+Request.o_fieldvm getter: this.route in ['/ui/fieldvm', '/ui/fieldvm/active', '/ui/fieldvm/edges', '/ui/fieldvm/entity']
 Request.m_fieldvm getter: ['GET']
 Request.fv_seat getter: ([s for s in instances('FieldVm') if s.eid == 'FieldVm:seat'] or [None])[0]
 Request.fv_body getter: this.fv_seat.snapshot if this.fv_seat != None else None
@@ -84,17 +83,6 @@ Request.fa_answer getter:
   WHEN not this.fa_ok: {'status': 400, 'body': {'error': {'message': 'm (the number of entities, at least 1) is required', 'type': 'membrane_error'}}}
   ELSE WHEN this.fa_rows == None or this.fa_total == None: None
   ELSE: {'status': 200, 'body': {'nodes': this.fa_rows, 'n_total': prop(this.fa_total[0], 'n'), 'hidden': this.fa_hidden, 'hidden_prefixes': this.fa_prefixes, 'm': this.fa_m}}
-
--- THE WRITE STREAM (#1143, operator 2026-11-14): `GET /ui/fieldvm/events` is an event stream of `field.write` frames, `{type, eid, cls, prop, ts}` (no value: the view needs who and when), pushed as entities are
--- written, so the field view grows without a poll tick. The host notes the writes of every round and gives the engine ONE batch per round, `Wire:host.batch` (an outside write stamped by the host's sensor,
--- never journalled; the Wire is VIRTUAL, no row; host.rs `flush_wire`, docs/cliffvm.md "The write feed"), one entry per entity (its last write), never a VIRTUAL class's. The setter below sends it as ONE
--- `send` with all the frames to each open stream. No keep-alive and no cap on a batch (thresholds, not chosen). A `Request` is an open stream once its head is out (`stream_rc` 0).
-Request.fv_events getter: this.route == '/ui/fieldvm/events'
-Request.wire_open getter: this.fv_events and this.stream_rc == 0
-Wire.batch on-setter fv-wire:
-  WHEN len([r for r in instances('Request') if r.wire_open == True]) > 0:
-    FOR r IN [r for r in instances('Request') if r.wire_open == True]:
-      (r.eid).send = {'id': 'wire', 'frames': [{'data': {'type': 'field.write', 'eid': prop(x, 'eid'), 'cls': prop(x, 'cls'), 'prop': prop(x, 'prop'), 'ts': prop(x, 'ts')}} for x in this.batch]}
 
 -- THE EDGE LIST OF ONE ENTITY (operator 2026-11-14: the card's "near" is replaced by the edges): `GET /ui/fieldvm/edges?eid=<eid>&n=<cap>` answers `{eid, owner, children, refs}`: the owner (the nearest colon-prefix
 -- ancestor that exists: the key column), the direct children (the key column's range; at most `n`, the view's window), and the entities this one points at by a `$ref` value (the ONE row's body; a ref to an entity
@@ -125,5 +113,4 @@ Request.r_fieldvm getter:
   WHEN this.route == '/ui/fieldvm/entity': this.fn_answer
   ELSE WHEN this.route == '/ui/fieldvm/edges': this.fe_answer
   ELSE WHEN this.route == '/ui/fieldvm/active': this.fa_answer
-  ELSE WHEN this.fv_events: {'status': 200, 'stream': True}
   ELSE: {'status': 200, 'body': this.fv_body} if this.fv_body != None else None

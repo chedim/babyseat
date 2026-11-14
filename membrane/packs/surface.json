@@ -388,12 +388,10 @@
       "FieldVm",
       "FvDir",
       "FvFile",
-      "Request",
-      "Wire"
+      "Request"
     ],
-    "members": 43,
+    "members": 40,
     "writes": [
-      "*.send",
       "FieldVm:seat.born",
       "FvDir:*.path",
       "FvFile:*.file",
@@ -403,16 +401,14 @@
       "/ui/fieldvm",
       "/ui/fieldvm/active",
       "/ui/fieldvm/edges",
-      "/ui/fieldvm/entity",
-      "/ui/fieldvm/events"
+      "/ui/fieldvm/entity"
     ],
     "boot_facts": [
       "app_dirs"
     ],
     "virtual": [
       "FvDir",
-      "FvFile",
-      "Wire"
+      "FvFile"
     ],
     "resident": [
       "FieldVm"

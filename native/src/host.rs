@@ -60,7 +60,6 @@ pub fn class_of_eid(eid: &str) -> String {
 /// the sensor's writes are not journalled (a replay never sees them, and never repeats an unload they caused).
 pub const SENSOR_WRITER: &str = "host:sensor:mem";
 pub const MEM_ENTITY: &str = "Mem:host";
-pub const WIRE_ENTITY: &str = "Wire:host";
 /// The sensor writes the resident size again only when it moved by this much (1 MiB), so an idle seat is not rewriting a row every second (a threshold, flagged).
 pub const MEM_STEP_BYTES: u64 = 1 << 20;
 
@@ -179,8 +178,6 @@ pub struct Host {
     /// the memory sensor (`sense_memory`): its config (the boot facts), the injected reading (tests), the last values written
     memory: Mutex<MemoryConfig>,
     rss_reading: Mutex<Option<RssReading>>,
-    /// THE WRITE FEED (#1143, `flush_wire`): the entities the last rounds wrote, noted only while a pack owns the class `Wire`
-    wire: Mutex<Vec<(String, String, String, f64)>>,
 }
 
 /// The memory sensor's configuration: the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard` (none of them has a default number).
@@ -295,7 +292,7 @@ impl Host {
         core.storage = fields.storage_handle();   // the core reads the classes' modes too (`.pinned`)
         fields.inbound_by_host = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
-        Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default(), memory: Default::default(), rss_reading: Default::default(), wire: Default::default() })
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default(), memory: Default::default(), rss_reading: Default::default() })
     }
 
     /// Whether the named pack holds the privilege (exempt from rule B): the packs of the first app (the root of trust, by the host), any other by a
@@ -441,8 +438,7 @@ impl Host {
             for (e, cls, props) in inbound { self.born_at(now, &e, &cls, props, DOOR_WRITER); }
             { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.settle(core, &NullHost, now, seq); }
             let applied = self.drain_apply();
-            let wired = self.flush_wire() && self.drain_apply();     // the write feed: the batch is one more write, drained like any (its own writes are virtual: no batch follows)
-            if !applied && !wired && !had { break; }
+            if !applied && !had { break; }
         }
     }
 
@@ -503,14 +499,12 @@ impl Host {
                 let eid = w["eid"].as_str().unwrap_or("").to_string();
                 let stamp = if w.get("virt") == Some(&json!(true)) { stamp_virtual_writer("create") } else { stamp_born_writer(cls) };
                 self.store_born(&eid, cls, &Map::new(), &stamp);
-                self.wire_note(&eid, "", ts);
                 if is_outside(&stamp) { self.journal_push(Line::Born { ts, writer: stamp, eid, cls: cls.into(), props: Map::new() }); }
                 continue;
             }
             let (Some(eid), Some(prop)) = (w["eid"].as_str(), w["prop"].as_str()) else { continue };
             let stamp = if w.get("virt") == Some(&json!(true)) { stamp_virtual_writer(w["writer"].as_str().unwrap_or("")) } else { stamp_writer(w["writer"].as_str().unwrap_or("")) };
             self.store_prop(eid, None, prop, &w["new"], &stamp);
-            self.wire_note(eid, prop, ts);
             if prop == "text" { self.pack_text(eid, &w["new"]); }
             if prop == "privileged" && eid.starts_with(PACK_PREFIX) { self.packs_dirty.store(true, Ordering::SeqCst); }   // `granted_by` is mirrored
             if is_outside(&stamp) { self.journal_push(Line::Write { ts, writer: stamp, eid: eid.into(), prop: prop.into(), new: w["new"].clone() }); }
@@ -546,31 +540,6 @@ impl Host {
         for (req, list) in reactions { self.inject_write(ts, &req, "reactions", list, "reactions", &stamp_writer("reactions")); }
         if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); self.load_new_residents(); return true; }
         any
-    }
-
-    /// THE WRITE FEED (#1143, operator 2026-11-14; docs/cliffvm.md "The write feed"): note one applied write, for the stream of `field.write` frames. Only while a pack owns the class `Wire`
-    /// (a host without the pack notes nothing), never a VIRTUAL class's write (a Request, a Chunk, the Wire itself): those are RAM and the view does not draw them.
-    fn wire_note(&self, eid: &str, prop: &str, ts: f64) {
-        let cls = { let g = self.eng(); if !g.1.owns_class("Wire") { return; } g.0.docs.get(eid).map(|e| e.cls.clone()) };
-        let Some(cls) = cls else { return };
-        if self.storage_of(&cls) == crate::fields::Storage::Virtual { return; }
-        self.wire.lock().unwrap_or_else(|e| e.into_inner()).push((eid.to_string(), cls, prop.to_string(), ts));
-    }
-
-    /// Give the engine what the rounds wrote since the last call as ONE batch: `Wire:host.batch` = [{eid, cls, prop, ts}], one entry per entity (its last write), in the order of last write. An outside
-    /// write stamped by the host's sensor, like `Mem:host`: NOT journalled (history is not a stream of its own reads), and the Wire is VIRTUAL, so no row either. A pack's setter fans it out
-    /// to the open streams. -> whether a batch was given (the caller drains again).
-    pub fn flush_wire(&self) -> bool {
-        let noted = std::mem::take(&mut *self.wire.lock().unwrap_or_else(|e| e.into_inner()));
-        if noted.is_empty() { return false; }
-        let mut last: Vec<(String, String, String, f64)> = vec![];
-        for n in noted.into_iter().rev() { if !last.iter().any(|l| l.0 == n.0) { last.push(n); } }
-        last.reverse();
-        let batch: Vec<J> = last.into_iter().map(|(eid, cls, prop, ts)| json!({"eid": eid, "cls": cls, "prop": prop, "ts": ts})).collect();
-        let ts = self.now();
-        if !self.eng().0.docs.contains_key(WIRE_ENTITY) { self.inject_born(ts, WIRE_ENTITY, "Wire", Map::new(), SENSOR_WRITER, SENSOR_WRITER); self.hold(WIRE_ENTITY); }
-        self.inject_write(ts, WIRE_ENTITY, "batch", json!(batch), SENSOR_WRITER, SENSOR_WRITER);
-        true
     }
 
     /// Take the asked entities out of the engine, or answer each pinned one with `unload_result` = {status: refused, reason}. Pins: the core's (`Core::pinned_reason`:

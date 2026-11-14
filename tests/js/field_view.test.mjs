@@ -38,15 +38,8 @@ function world(facts) {
   w.asked = () => (w.get('Fetch:map') || {}).request;
   w.reqs = () => w.log.filter((e) => e.eid === 'Fetch:map' && e.prop === 'request' && !e.born);
   w.reply = (status, body) => w.write('Fetch:map', 'request_result', { id: w.asked().id, status: 'ok', rc: 0, head: String(status), http_status: status, headers: {}, body: typeof body === 'string' ? body : JSON.stringify(body), started: w.t, finished: w.t, ms: 1 });
-  const reply0 = w.reply; w.reply = (st, b) => { const r = reply0(st, b); if (w.autoEnd && w.wireReq() && (w.get('Fetch:wire') || {}).request_result?.id !== w.wireReq().id) w.wireEnds(); return r; };
   w.fail = (why) => w.write('Fetch:map', 'request_result', { id: w.asked().id, status: 'error', rc: 1, head: why, started: w.t, finished: w.t, ms: 1 });
-  // the write stream (`Fetch:wire`, a Fetch with stream: true): its frames arrive as Chunk entities, one per frame, and its receipt is the end of the stream. Most scenarios below are about the POLL
-  // (the fallback), so `open` lets the stream end at once; `open(facts, {wire: true})` keeps it.
-  w.wireReq = () => (w.get('Fetch:wire') || {}).request;
-  w.wireN = 0;
-  w.frame = (o) => { w.wireN++; w.feed('Chunk:Fetch:wire:' + w.wireN, 'Chunk', { fetch: 'Fetch:wire', id: w.wireReq().id, n: w.wireN, data: JSON.stringify({ type: 'field.write', prop: 'n', ts: w.t, ...o }), done: false }); };
-  w.wireEnds = (why) => w.write('Fetch:wire', 'request_result', { id: w.wireReq().id, status: why ? 'error' : 'ok', rc: why ? 1 : 0, head: why || '200 OK', started: w.t, finished: w.t, ms: 1 });
-  w.open = (facts, o = {}) => { if (facts) w.feed('Boot:seat', 'Boot', facts); w.feed('Scene:field', 'Scene', { open: true }); w.autoEnd = !o.wire; if (w.autoEnd) w.wireEnds(); };
+  w.open = (facts) => { if (facts) w.feed('Boot:seat', 'Boot', facts); w.feed('Scene:field', 'Scene', { open: true }); };
   w.n = (k) => w.get('DomNode:f:' + k) || {};
   w.dot = (id) => w.get('Dot:' + id);
   return w;
@@ -315,67 +308,6 @@ scenario('work per tick (counted, no clock): a hot tick writes per dot a bounded
     w.ticks(400); const n1 = w.log.length; w.ticks(10);
     assert.equal(w.log.length - n1, 20, 'a settled scene writes two getter values per tick, no DomNode');
   }
-});
-
-scenario('the write STREAM: open asks for it; a frame draws a dot next to its owner with no poll', () => {
-  const w = world(); w.open(null, { wire: true });
-  assert.equal(w.wireReq().url, '/ui/fieldvm/events'); assert.equal(w.wireReq().stream, true);
-  w.reply(200, rows(...BASE)); w.ticks(3);
-  const polls = w.reqs().length;
-  w.frame({ eid: 'Chat:1:c', cls: 'Chat', ts: 120.5 });
-  assert.ok(w.dot('Chat:1:c') && w.dot('Chat:1:c').p, 'the dot is there the moment the frame is');
-  assert.equal(w.dot('Chat:1:c').parent_id, 'Chat:1', 'next to its owner');
-  assert.ok(dist(w.dot('Chat:1:c').p, w.dot('Chat:1').p) < 12);
-  assert.equal(w.get('DomNode:f:c:Chat:1:c').tag, 'circle'); assert.equal(w.dot('Chat:1').mass, 3);
-  assert.equal(w.n('count').text, '6 of 501 entities in view (the 150 most recently active)', 'the total grew by one');
-  assert.ok(w.get('Scene:field').heat >= 0.3, 'the layout is warmed');
-  w.ticks(60, 0.1); assert.equal(w.reqs().length, polls, 'no poll while the stream is open');
-  assert.equal(w.get('Chunk:Fetch:wire:1'), null, 'a frame is let go once read');
-});
-
-scenario('the stream: a frame of a known entity moves it to the front; hidden classes and prefixes are not drawn; a retire removes the dot', () => {
-  const w = world(); w.open(null, { wire: true }); w.reply(200, rows(...BASE)); w.ticks(2);
-  w.frame({ eid: 'Chat:1', cls: 'Chat', ts: 300.25 });
-  assert.equal(w.dot('Chat:1').raw.updated, 300.25, 'its `updated` is the frame\'s');
-  assert.equal(w.n('count').text, '5 of 500 entities in view (the 150 most recently active)', 'no new entity: the same count');
-  w.frame({ eid: 'Chat:message:9', cls: 'Chat', ts: 301 }); w.frame({ eid: 'Chat:message:9:body', cls: 'Chat', ts: 301 }); w.frame({ eid: 'Msg:1', cls: 'Message', ts: 301 });
-  assert.equal(w.dot('Chat:message:9'), null, 'a hidden eid prefix'); assert.equal(w.dot('Chat:message:9:body'), null); assert.equal(w.dot('Msg:1'), null, 'a hidden class');
-  w.frame({ eid: 'membrane::Chat:message:9:turn:tool:toolu_x', cls: 'Chat', ts: 301 }); w.frame({ eid: 'Chat:session:ses_1', cls: 'Chat', ts: 301 }); w.frame({ eid: 'membrane::Chat:main', cls: 'Chat', ts: 301 }); w.frame({ eid: 'other::Chat:message:2', cls: 'Chat', ts: 301 }); w.frame({ eid: 'Keep:a::b', cls: 'Keep', ts: 301 });
-  assert.equal(w.dot('membrane::Chat:message:9:turn:tool:toolu_x'), null, 'the stored form behind the membrane:: namespace is hidden too'); assert.equal(w.dot('Chat:session:ses_1'), null, 'a session header is hidden by default'); assert.equal(w.dot('membrane::Chat:main'), null, 'and the main chat, namespaced'); assert.equal(w.dot('other::Chat:message:2'), null, 'any leading <name>:: is a namespace'); assert.ok(w.dot('Keep:a::b'), 'a :: inside the eid is not');
-  w.frame({ eid: 'Goal:x', cls: 'Goal', prop: 'retire', ts: 302 });
-  assert.equal(w.dot('Goal:x'), null, 'a retired entity leaves the view'); assert.equal(w.get('DomNode:f:c:Goal:x'), null);
-  w.frame({ eid: 'Early:1', cls: 'Early', ts: 303 }); assert.ok(w.dot('Early:1'));
-});
-
-scenario('the stream: the window holds: a new entity pushes the least recently active one out', () => {
-  const w = world(); w.open({ field_window: 4 }, { wire: true });
-  w.reply(200, rows(['A:1', 'A', 100.5], ['B:1', 'B', 101.5], ['C:1', 'C', 102.5], ['D:1', 'D', 103.5]));
-  w.frame({ eid: 'A:1', cls: 'A', ts: 110.5 });                    // A is active again: B is now the oldest
-  w.frame({ eid: 'E:1', cls: 'E', ts: 111.5 });
-  const have = ['A:1', 'B:1', 'C:1', 'D:1', 'E:1'].filter((i) => w.dot(i));
-  assert.deepEqual(have, ['A:1', 'C:1', 'D:1', 'E:1'], 'B, the least recently active, left the view and the engine');
-  assert.equal(w.get('DomNode:f:c:B:1'), null);
-  w.frame({ eid: 'F:1', cls: 'F', ts: 112.5 });
-  assert.equal(['A:1', 'C:1', 'D:1', 'E:1', 'F:1'].filter((i) => w.dot(i)).length, 4);
-});
-
-scenario('the stream: a child that arrives before its owner is joined to it when the owner comes', () => {
-  const w = world(); w.open(null, { wire: true }); w.reply(200, rows(['Z:1:kid', 'Z', 100.5]));
-  assert.ok(w.dot('Z:1:kid').parent_id == null);
-  w.frame({ eid: 'Z:1', cls: 'Z', ts: 101.5 });
-  assert.equal(w.dot('Z:1:kid').parent_id, 'Z:1'); assert.equal(w.dot('Z:1').mass, 1);
-});
-
-scenario('the stream drops: the poll is the fallback, and the stream is asked for again', () => {
-  const w = world(); w.open(null, { wire: true }); w.reply(200, rows(...BASE)); w.ticks(30);
-  assert.equal(w.reqs().length, 1, 'no poll while the stream is up');
-  const first = w.wireReq().id;
-  w.wireEnds('connection reset');
-  w.ticks(25); assert.equal(w.reqs().length, 2, 'the stream is gone: the poll resumes');
-  assert.notEqual(w.wireReq().id, first, 'and a new stream is asked for'); assert.equal(w.wireReq().url, '/ui/fieldvm/events');
-  w.reply(200, rows(...BASE));
-  w.frame({ eid: 'New:1', cls: 'New', ts: 400.5 }); assert.ok(w.dot('New:1'), 'frames of the new stream count');
-  w.ticks(60); assert.equal(w.reqs().length, 2, 'up again: no more polls');
 });
 
 console.log(`field view: ${n} scenarios ok`);

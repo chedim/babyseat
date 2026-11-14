@@ -695,15 +695,12 @@
       "Request.fn_props": "Any",
       "Request.fn_row": "Any",
       "Request.fv_body": "Dict?",
-      "Request.fv_events": "Bool",
       "Request.fv_seat": "Entity(FieldVm)?",
       "Request.m_fieldvm": "List(Text)",
       "Request.o_fieldvm": "Bool",
-      "Request.r_fieldvm": "Dict?",
-      "Request.wire_open": "Bool"
+      "Request.r_fieldvm": "Dict?"
     },
     "writes": {
-      "*.send": "Dict",
       "FieldVm.born": "Num",
       "FvDir.opened": "Bool",
       "FvDir.path": "Any",
@@ -713,8 +710,7 @@
     "findings": [],
     "virtual": [
       "FvDir",
-      "FvFile",
-      "Wire"
+      "FvFile"
     ],
     "resident": [
       "FieldVm"

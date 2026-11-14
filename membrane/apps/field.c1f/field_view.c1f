@@ -8,10 +8,8 @@ IMPORT shell_view 1
 --   DomNode:shell:slot:field   the shell's slot the view's root sits in (shell_view.c1f: the view registers `Nav:field` when the shell opens, draws when `Nav:field` first becomes active, and does no periodic work while it is not active)
 --   Scene:field   the view: the window, the polls, the camera (the basis rx/ry/rz), the clock; the page's shell (ui/chatmount.js) births it {open: true} when the page asks for the pack view
 --   Dot:<eid>     one entity of the field: `raw` is the row of the seat's active window ({id, cls, updated, parent}), `p` its place in space; everything drawn is a getter of those
---   Fetch:wire    the write STREAM `GET /ui/fieldvm/events` (Fetch with stream: true): one Chunk per `field.write` frame {type, eid, cls, prop, ts}; a frame draws, moves or removes a dot at once, no poll
 --   Fetch:map     the poll of `GET /ui/fieldvm/active?m=<window>` (the page's Fetch, fieldvm.js W2): the request is the effect, the receipt `request_result` comes back
--- LIVE: the first answer of the poll gives the window and the hidden classes and prefixes; from then on the stream keeps it (a new entity is born next to its owner, a known one moves to the front, a
--- retire removes it, and the window's size is held by dropping the least recently active); the poll is only the FALLBACK (it runs, and the stream is asked for again, while the stream is down).
+-- THE POLL: the answer of `GET /ui/fieldvm/active?m=<window>` gives the window, the hidden classes and prefixes; the view asks again `poll_ms` after each answer (no write stream: operator 2026-11-14 removed the host's write feed).
 -- THE ACTIVE WINDOW. The seat answers the `window` entities written most recently (by `updated`, hidden classes left out: docs/field-view-plan.md) and this view keeps exactly those:
 -- an entity that falls out of the answer is retired here (its Dot and its DomNodes leave the page's engine and the page), so the view's memory follows the field's activity; on the
 -- seat the route reads columns only, so the entities it does not list stay unloaded. A new row is born next to its owner (the eid's colon prefix) and the layout grows around it.
@@ -108,19 +106,14 @@ Scene.open on-setter field-draw:
     this.polling = True
     this.seq = 1
     ('Fetch:map').request = {'id': 'map-1', 'url': '/ui/fieldvm/active?m=' + str(this.window)}
-    this.wired = True
-    ('Fetch:wire').request = {'id': 'wire-1', 'url': '/ui/fieldvm/events', 'stream': True}
 
 -- ---- the poll: `poll_ms` after the last answer, one request at a time, not while the tab is hidden ----
--- the poll is the FALLBACK: it runs only while the stream is down (and asks for the stream again)
 Scene.tick on-setter field-poll:
-  WHEN this.open and prop('Nav:field', 'active') != False and not this.polling and not this.wired and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= this.poll_ms / 1000:
+  WHEN this.open and prop('Nav:field', 'active') != False and not this.polling and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= this.poll_ms / 1000:
     n = (this.seq or 0) + 1
     this.seq = n
     this.polling = True
-    this.wired = True
     ('Fetch:map').request = {'id': 'map-' + str(n), 'url': '/ui/fieldvm/active?m=' + str(this.window)}
-    ('Fetch:wire').request = {'id': 'wire-' + str(n), 'url': '/ui/fieldvm/events', 'stream': True}
 
 -- the receipt, read once: ok = the call went and the seat said 2xx
 Fetch.mv getter:
@@ -133,11 +126,6 @@ Fetch.mv getter:
 Fetch.mv on-setter field-answer:
   WHEN this.eid == 'Fetch:map':
     ('Scene:field').polling = False
-    ('Scene:field').last_poll = clock
--- the receipt of the stream is its END (a drop, a refusal, the seat going away): the poll takes over and asks for the stream again
-Fetch.mv on-setter field-wire-ended:
-  WHEN this.eid == 'Fetch:wire':
-    ('Scene:field').wired = False
     ('Scene:field').last_poll = clock
 Fetch.mv on-setter field-rows:
   WHEN this.eid == 'Fetch:map' and prop(this.mv, 'ok') and prop(this.mv, 'nodes') != None:
@@ -168,39 +156,6 @@ Dot.leave on-setter dot-leave:
     ('DomNode:f:l:' + this.rid).retire = True
     ('DomNode:f:t:' + this.rid).retire = True
     (this.eid).retire = True
-
--- ---- the stream: one Chunk per frame; what it says is applied at once and the chunk is let go ----
-Chunk.fw getter: json(this.data) if this.fetch == 'Fetch:wire' and this.data != None and this.data != '' else None
-Chunk.fw on-setter field-frame-done:
-  WHEN this.fw != None:
-    (this.eid).retire = True
--- what a frame means, worked out in a getter (a setter sees the getters as they were before its write, so the setters below act on THIS value): `what` is retire | skip | touch | new
-Chunk.act getter:
-  WHEN this.fw == None or not (this.fw is Dict) or prop('Scene:field', 'hidden') == None: None
-  ELSE:
-    sc = Scene:field
-    id = str(prop(this.fw, 'eid'))
-    have = prop('Dot:' + id, 'raw')
-    bare = after(id, '::') if len(after(id, '::')) > 0 and len(replace(before(id, '::'), ':', '')) == len(before(id, '::')) else id
-    skip = (str(prop(this.fw, 'cls')) in sc.hidden) or len([x for x in sc.hidden_prefixes if startswith(bare, x)]) > 0
-    {'what': 'retire' if prop(this.fw, 'prop') == 'retire' else ('skip' if skip else ('touch' if have != None else 'new')), 'id': id, 'cls': str(prop(this.fw, 'cls')), 'ts': num(prop(this.fw, 'ts') or 0), 'have': have != None, 'parent': prop(have, 'parent'), 'owner': ([prop(o, 'r') for o in sort_by([{'r': d.rid, 'n': len(d.rid)} for d in instances('Dot') if startswith(id, d.rid + ':')], 'n', True)] or [None])[0], 'kids': [{'eid': d.eid, 'rid': d.rid, 'cls': d.kind, 'updated': prop(d.raw, 'updated')} for d in instances('Dot') if startswith(d.rid, id + ':') and (d.parent_id == None or len(d.parent_id) < len(id))], 'out': [prop(x, 'e') for x in head(sort_by([{'e': d.eid, 'u': num(prop(d.raw, 'updated') or 0)} for d in instances('Dot')], 'u'), max(0, len(instances('Dot')) + 1 - sc.window))]}
-Chunk.act on-setter field-frame-retire:
-  WHEN prop(this.act, 'what') == 'retire' and prop(this.act, 'have'):
-    ('Dot:' + prop(this.act, 'id')).leave = True
-    ('Scene:field').total = max(0, (prop('Scene:field', 'total') or 0) - 1)
-Chunk.act on-setter field-frame-touch:
-  WHEN prop(this.act, 'what') == 'touch':
-    ('Dot:' + prop(this.act, 'id')).raw = {'id': prop(this.act, 'id'), 'cls': prop(this.act, 'cls'), 'updated': prop(this.act, 'ts'), 'parent': prop(this.act, 'parent')}
-Chunk.act on-setter field-frame-new:
-  WHEN prop(this.act, 'what') == 'new':
-    ('Dot:' + prop(this.act, 'id')).born = True
-    ('Dot:' + prop(this.act, 'id')).raw = {'id': prop(this.act, 'id'), 'cls': prop(this.act, 'cls'), 'updated': prop(this.act, 'ts'), 'parent': prop(this.act, 'owner')}
-    FOR k IN prop(this.act, 'kids'):
-      (prop(k, 'eid')).raw = {'id': prop(k, 'rid'), 'cls': prop(k, 'cls'), 'updated': prop(k, 'updated'), 'parent': prop(this.act, 'id')}
-    FOR e IN prop(this.act, 'out'):
-      (e).leave = True
-    ('Scene:field').total = (prop('Scene:field', 'total') or 0) + 1
-    ('Scene:field').heat = max(prop('Scene:field', 'heat'), prop('Scene:field', 'birth_heat'))
 
 Scene.note on-setter field-note:
   ALWAYS:
