@@ -35,7 +35,7 @@
   },
   "ui_dir": {
    "wired": true,
-   "why": "the folder of the UI's files (membrane/ui)"
+   "why": "the folder of the UI's files: the lowest layer under each app's own ui/ folder (--ui-dir; none by default)"
   },
   "build_id": {
    "wired": true,

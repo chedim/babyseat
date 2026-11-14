@@ -18,8 +18,8 @@ impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn app_ui() -> std::path::PathBuf { repo().join("membrane/apps/barest.c1f/ui") }
-/// a file the page loads: the app folder's own, else the shared ui folder's (the host, fieldvm.js)
-fn app_file(rel: &str) -> std::path::PathBuf { let a = app_ui().join(rel); if a.is_file() { a } else { repo().join("membrane/ui").join(rel) } }
+/// a file the page loads: every one is in the app folder (the page's own and the browser VM's host: fieldvm.js, the wasm)
+fn app_file(rel: &str) -> std::path::PathBuf { app_ui().join(rel) }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -156,8 +156,8 @@ fn the_page_and_its_files_are_served_with_their_content_types_and_every_referenc
     while i < js.len() {
         let src = std::fs::read_to_string(app_file(&js[i])).unwrap();
         for m in module_imports(&src) {
-            assert!(app_ui().join(&m).is_file() || repo().join("membrane/ui").join(&m).is_file(), "{} imports {m}, which is in neither the app folder nor the ui folder", js[i]);
-            if app_ui().join(&m).is_file() { assert_eq!(http(port, "GET", &format!("/ui/www/{m}"), "").0, 200, "{m}"); }   // the shared host (fieldvm.js) is the seat's --ui-dir, which this seat is not given
+            assert!(app_ui().join(&m).is_file(), "{} imports {m}, which is not in the app folder (this seat is given no --ui-dir)", js[i]);
+            assert_eq!(http(port, "GET", &format!("/ui/www/{m}"), "").0, 200, "{m}");
             if !js.contains(&m) { js.push(m); }
         }
         i += 1;
@@ -212,6 +212,25 @@ fn a_message_posted_to_the_chat_is_answered_by_the_fake_and_found_through_the_mc
     assert_eq!(n_all, format!("{} entity(ies)", rows.len()));
     let (full, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:message:", "k": 100, "full": true}));
     assert!(full.contains(":response (Chat) {") && full.contains("Seat answer to: hello seat"), "{full}");
+    assert!(terminate(&mut run));
+}
+
+/// The browser VM's host travels with the page (#1143): fieldvm.js, the wasm it asks for by a relative URL, its version key and the tab icon are in the
+/// app folder, so a seat given NO --ui-dir serves them (the page does `import './fieldvm.js'`, which loads `fieldvm_core_bg.wasm` and `fieldvm_version.js`).
+#[test]
+fn the_browser_vms_host_the_wasm_and_the_icon_are_served_from_the_app_folder() {
+    let (mut run, port) = seat("host", true);
+    for (path, file, want) in [("/ui/www/fieldvm.js", "fieldvm.js", "application/javascript"), ("/ui/www/fieldvm_core.js", "fieldvm_core.js", "application/javascript"),
+                               ("/ui/www/fieldvm_core_bg.wasm", "fieldvm_core_bg.wasm", "application/wasm"), ("/ui/www/fieldvm_version.js", "fieldvm_version.js", "application/javascript"),
+                               ("/favicon.ico", "favicon.svg", "image/svg+xml")] {
+        assert!(app_ui().join(file).is_file(), "{file} is not in the app folder");
+        let (st, ct, body) = http(port, "GET", path, "");
+        assert_eq!(st, 200, "{path}");
+        assert!(ct.starts_with(want), "{path}: {ct}");
+        if !file.ends_with(".wasm") { assert_eq!(body, std::fs::read_to_string(app_ui().join(file)).unwrap(), "{path} is served as it is on disk"); }
+    }
+    let host = std::fs::read_to_string(app_ui().join("fieldvm.js")).unwrap();
+    assert!(host.contains("./fieldvm_core.js") && host.contains("./fieldvm_version.js"), "the host imports its core and its version key by relative URL");
     assert!(terminate(&mut run));
 }
 

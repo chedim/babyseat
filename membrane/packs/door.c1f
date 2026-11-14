@@ -227,7 +227,7 @@ Request.routed getter: this.family_checked if this.owned else this.own_routes
 Request.shipped getter: this.gate if this.gate != None else this.routed
 
 -- ---- the page's prefix: /ui/serve/<path> is <path> (the released page calls every route through it) --------------------------------
--- The page (membrane/ui/boot.js and the view packs) asks `/ui/serve/session`, `/ui/serve/global/health`, ...; the released Python seat stripped the prefix and
+-- The page (boot.js of the app's ui/ and the view packs) asks `/ui/serve/session`, `/ui/serve/global/health`, ...; the released Python seat stripped the prefix and
 -- answered the route behind it. The door does the same, once and only at the front, with two getters and no rewrite: `ui_served` says
 -- the request came through the prefix (the page's own call: door_auth.c1f gives the page its token and refuses a tokenless one), `ui_path`
 -- is the path without it, and `route` is the path every route family reads: ALWAYS `this.route`, never `this.path` (the raw path stays

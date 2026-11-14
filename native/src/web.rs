@@ -1,6 +1,6 @@
 //! The browser binding: the same field engine (getters, setters, `.c1f` packs, imports) running in a page,
 //! compiled to WebAssembly (`wasm-pack build --features wasm --no-default-features`). Values cross as JSON text,
-//! like the Python binding. The page's host (membrane/ui/fieldvm.js) mounts DomNode entities as the DOM.
+//! like the Python binding. The page's host (fieldvm.js, in the app's ui/ folder) mounts DomNode entities as the DOM.
 use serde_json::{Map, Value as J};
 use wasm_bindgen::prelude::*;
 

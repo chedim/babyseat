@@ -34,4 +34,4 @@ testpaths = ["tests/ha", "tests/wrapper"]
 # ship from the source tree and the launcher says "no binary for this platform" when it finds none.
 [tool.setuptools.package-data]
 membrane = ["packs/*.c1f", "packs/*.json", "apps/*.packs", "apps/*/*.c1f", "apps/*/help/*.md", "apps/*/ui/*",
-            "ui/*.html", "ui/*.js", "ui/*.svg", "ui/*.wasm", "help/*.md", "CHANGELOG.md"]
+            "help/*.md", "CHANGELOG.md"]

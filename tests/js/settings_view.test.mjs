@@ -7,9 +7,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { initSync, Field } from '../../membrane/ui/fieldvm_core.js';
+import { initSync, Field } from '../../membrane/apps/barest.c1f/ui/fieldvm_core.js';
 
-const ui = new URL('../../membrane/ui/', import.meta.url);
+const ui = new URL('../../membrane/apps/barest.c1f/ui/', import.meta.url);
 initSync({ module: readFileSync(fileURLToPath(new URL('fieldvm_core_bg.wasm', ui))) });
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
 const DOM = "PACK dom 1\nDomNode.tag getter: this.tag or 'div'\n";
