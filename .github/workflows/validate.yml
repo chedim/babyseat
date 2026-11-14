@@ -19,6 +19,72 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
+  # The release's own gates (#1143): the Rust seat is what ships, so its suites run here. Added BEFORE the Python
+  # jobs below are removed (docs/python-retirement.md step 2): nothing may be deleted while it is the only gate.
+  cargo:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5   # the native tests use a system python3 as a fake `claude` and an http.server
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - run: cargo test --release --no-default-features --features bin --no-fail-fast
+        working-directory: native
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5   # the page tests serve the repo with `python3 -m http.server` and use a fake `claude`
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - run: cargo build --release --no-default-features --features bin
+        working-directory: native
+      # headless Chrome is on the runner image; every page test starts it itself
+      - run: |
+          set -e
+          export CLIFFVM="$PWD/native/target/release/cliffvm" CHROME="$(command -v google-chrome)"
+          for t in tests/js/*.test.mjs; do echo "== $t"; node "$t"; done
+  ha:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - run: cargo build --release --no-default-features --features bin
+        working-directory: native
+      - run: pip install pytest aiohttp
+      - run: CLIFFVM_BIN="$PWD/native/target/release/cliffvm" pytest -q -p no:cacheprovider tests/ha
+  # the browser VM is committed as a build output: it must be the build of the Rust source in this tree
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-pack --locked
+      - run: sh native/build-web.sh
+      - run: git diff --exit-code -- membrane/ui/
   tests:
     runs-on: ubuntu-latest
     steps:
