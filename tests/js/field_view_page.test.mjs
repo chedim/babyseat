@@ -94,7 +94,7 @@ const seat = startSeat(['ui_views={"field":"pack"}', 'field_window=8', 'field_po
 const b = await browser();
 const call = async (s, tool, args) => (await (await fetch(`http://127.0.0.1:${s.port}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }) })).json());
 const put = async (s, eid) => { await call(s, 'entity_write', { spec: eid, prop: 'n', value: 1 }); await sleep(40); };
-const circles = `document.querySelectorAll('#fieldmount .fdots circle').length`;
+const circles = `document.querySelectorAll('#fieldmount .fdots circle[data-key^="DomNode:f:c:"]').length`;
 try {
   await Promise.all([up(seat), up(plain)]);
   // 1. the default is the legacy graph; the seat reports it
@@ -116,10 +116,17 @@ try {
   assert.equal(await b.ev(`document.querySelector('#fieldmount .fsvg').getAttribute('viewBox')`), '-100 -100 200 200');
   assert.match(await b.ev(`document.querySelector('#fieldmount .fcount').textContent`), /^\d+ of \d+ entities in view \(the 8 most recently active\)$/);
   assert.equal(await b.ev(`window.MEMBRANE_FIELD_VIEW.clockId !== null`), true, 'the mount runs the clock');
-  const geo = await b.ev(`[...document.querySelectorAll('#fieldmount circle')].every((c) => isFinite(+c.getAttribute('cx')) && isFinite(+c.getAttribute('cy')) && +c.getAttribute('r') > 0)`);
-  assert.equal(geo, true, 'every circle has a place and a size');
-  const x0 = await b.ev(`document.querySelector('#fieldmount circle').getAttribute('cx')`); await sleep(700);
-  assert.notEqual(await b.ev(`document.querySelector('#fieldmount circle').getAttribute('cx')`), x0, 'the camera turns: the picture moves');
+  const geo = await b.ev(`[...document.querySelectorAll('#fieldmount .fdots > g')].every((g) => /^translate\\(-?[0-9.e-]+ -?[0-9.e-]+\\)$/.test(g.getAttribute('transform')) && +g.querySelector('circle').getAttribute('r') > 0)`);
+  assert.equal(geo, true, 'every dot group has a place and every circle a size');
+  // nothing turns by itself: the picture is still (no spin), and a drag with the mouse turns it
+  const cam = () => b.ev(`JSON.stringify(window.MEMBRANE_FIELD_VIEW.get('Scene:field').rx)`); const cam0 = await cam(); await sleep(700);
+  assert.equal(await cam(), cam0, 'no automatic rotation: the camera basis is the same');
+  assert.equal(await b.ev(`!!document.querySelector('#fieldmount [data-key="DomNode:f:spin"]')`), false, 'no spin button');
+  const mouse = (type, x, y, extra = {}) => b.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1, ...extra });
+  const svgBox = await b.ev(`(() => { const r = document.querySelector('#fieldmount .fsvg').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()`);
+  await mouse('mousePressed', svgBox[0] + 2, svgBox[1] + 2, { buttons: 1 }); await mouse('mouseMoved', svgBox[0] + 60, svgBox[1] + 2, { buttons: 1 }); await mouse('mouseReleased', svgBox[0] + 60, svgBox[1] + 2);
+  await sleep(300);
+  assert.notEqual(await cam(), cam0, 'a drag turns the camera');
 
   // 3. it grows: an entity written now appears (with its owner's line) within a few polls
   const before = await b.ev(circles);
@@ -146,8 +153,19 @@ try {
   assert.equal(await b.ev(`window.MEMBRANE_FIELD_VIEW.get('Dot:Zed:a')`), null, 'the dot left the page\'s engine');
   assert.equal(await b.ev(`window.MEMBRANE_FIELD_VIEW.get('DomNode:f:c:Zed:a')`), null, 'and its DomNode');
 
-  // 5. a click selects, and the panel lists the entity's edges (owner, children, refs) with their kind
+  // 4b. a REAL mouse click (press and release) on a dot's own place selects it (the hit circle is the target; a press on a dot must not be captured by the scene)
   await put(seat, 'Ant:11:leg');
+  const hit = await b.ev(`(() => { const r = document.querySelector('#fieldmount [data-key="DomNode:f:h:Ant:11"]').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  await mouse('mousePressed', hit[0], hit[1], { buttons: 1 }); await mouse('mouseReleased', hit[0], hit[1]);
+  const top = await b.ev(`document.elementFromPoint(${hit[0]}, ${hit[1]}).getAttribute('data-key').replace(/^DomNode:f:[ch]:/, '')`);   // the dot on top at that point (a newborn child sits next to its owner)
+  await sleep(50);
+  await b.until(`window.MEMBRANE_FIELD_VIEW.get('Scene:field').selected === ${JSON.stringify(top)} && !document.querySelector('#fieldmount .fside').hidden`, `a real click on the dot ${top} selects it`);
+  const hitKey = `DomNode:f:h:${top}`;
+  const hit2 = await b.ev(`(() => { const r = document.querySelector('#fieldmount [data-key="${hitKey}"]').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);   // it may have moved with the layout
+  await mouse('mousePressed', hit2[0], hit2[1], { buttons: 1 }); await mouse('mouseReleased', hit2[0], hit2[1]);
+  await b.until(`document.querySelector('#fieldmount .fside').hidden`, 'a second click deselects');
+
+  // 5. a click selects, and the panel lists the entity's edges (owner, children, refs) with their kind
   await b.ev(`${Q('#fieldmount [data-key="DomNode:f:c:Ant:11"]')}.dispatchEvent(new MouseEvent('click', {bubbles: true}))`);
   await b.until(`/^Ant:11 /.test(document.querySelector('#fieldmount .fside').textContent) && !document.querySelector('#fieldmount .fside').hidden`, 'the selection words');
   await b.until(`[...document.querySelectorAll('#fieldmount .fedges li')].some((li) => li.textContent === 'child · Ant:11:leg')`, 'the edge list of the selection (a child)');

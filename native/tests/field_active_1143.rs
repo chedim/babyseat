@@ -63,7 +63,7 @@ fn ids(a: &J) -> Vec<String> { a["nodes"].as_array().unwrap().iter().map(|n| n["
 fn store() -> std::path::PathBuf {
     let dir = tmp("s");
     let run = start(&dir, &[]);
-    for e in ["Zed:a", "Message:1", "Zed:a:note", "Span:1", "Zed:b", "SemText:1", "Zed:c", "Zed:c:x", "Zed:d", "Chat:message:7", "Chat:message:7:body", "Chat:main"] { put(run.port, e); }
+    for e in ["Zed:a", "Message:1", "Zed:a:note", "Span:1", "Zed:b", "SemText:1", "Zed:c", "Zed:c:x", "Zed:d", "Chat:message:7", "Chat:message:7:body", "Chat:main", "membrane::Chat:message:9", "membrane::Chat:message:9:turn:tool:toolu_x", "membrane::Chat:main"] { put(run.port, e); }
     std::thread::sleep(Duration::from_millis(300));
     drop(run);
     dir
@@ -128,6 +128,9 @@ fn chat_messages_and_their_bodies_are_hidden_by_the_eid_prefix_on_the_k_column()
     // a chat message and its body have cls = Chat (the eid's class), so the class list cannot hide them: the prefix does
     assert!(!got.iter().any(|i| i.starts_with("Chat:message:")), "{a}");
     assert!(got.contains(&"Chat:main".to_string()), "the chat itself stays: {a}");
+    // the stored form behind the `membrane::` namespace (the chat packs write it: `membrane::Chat:message:<id>:turn:tool:...`) is hidden by the same prefix; the namespaced chat stays
+    assert!(!got.iter().any(|i| i.starts_with("membrane::Chat:message:")), "{a}");
+    assert!(got.contains(&"membrane::Chat:main".to_string()), "the namespaced chat itself stays: {a}");
     assert_eq!(a["hidden_prefixes"], json!(["Chat:message:"]), "{a}");
     // n_total leaves them out too
     let n = a["n_total"].as_i64().unwrap();

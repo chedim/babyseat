@@ -54,6 +54,7 @@ function world(facts) {
 const rows = (...r) => ({ nodes: r.map(([id, cls, updated, parent]) => ({ id, cls, updated, parent: parent ?? null })), n_total: 500, hidden: ['Message', 'Span'], hidden_prefixes: ['Chat:message:'], m: 150 });
 const BASE = [['Chat:1', 'Chat', 100.1234], ['Chat:1:a', 'Chat', 101.2345, 'Chat:1'], ['Chat:1:b', 'Chat', 102.3456, 'Chat:1'], ['Goal:x', 'Goal', 103.4567], ['Help:cliff', 'Help', 104.5678]];
 const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+const at = (w, id) => { const m = /^translate\(([-0-9.e]+) ([-0-9.e]+)\)$/.exec(w.get('DomNode:f:g:' + id).transform || ''); return m ? [+m[1], +m[2]] : null; };
 const places = (w, ids) => ids.map((i) => w.dot(i).p);
 let n = 0;
 const scenario = (name, fn) => { fn(); n++; console.log('  ok', name); };
@@ -62,7 +63,7 @@ scenario('open draws the skeleton and asks for the window (150 tried, the fact s
   const w = world(); w.open();
   assert.equal(w.n('root').class, 'fieldview');
   assert.equal(w.n('svg').tag, 'svg'); assert.equal(w.n('svg').viewBox, '-100 -100 200 200');
-  assert.deepEqual([w.n('dots').tag, w.n('lines').tag, w.n('labels').tag], ['g', 'g', 'g']);
+  assert.deepEqual([w.n('dots').tag, w.n('lines').tag], ['g', 'g']);
   assert.equal(w.asked().url, '/ui/fieldvm/active?m=150', 'the first call: the tried window');
   const v = world(); v.open({ field_window: 40, field_poll_ms: 500 });
   assert.equal(v.asked().url, '/ui/fieldvm/active?m=40', 'the launch fact field_window');
@@ -73,8 +74,9 @@ scenario('rows become dots: a circle each, projected, sized by mass, a line to t
   const w = world(); w.open(); w.reply(200, rows(...BASE)); w.tick();
   for (const [id] of BASE) {
     const c = w.get('DomNode:f:c:' + id);
-    assert.equal(c.tag, 'circle', id); assert.equal(c.parent, 'DomNode:f:dots');
-    assert.equal(typeof c.cx, 'number'); assert.equal(typeof c.cy, 'number'); assert.ok(c.r > 0, id);
+    assert.equal(c.tag, 'circle', id); assert.equal(c.parent, 'DomNode:f:g:' + id); assert.equal(w.get('DomNode:f:g:' + id).parent, 'DomNode:f:dots');
+    assert.ok(at(w, id).every(Number.isFinite), 'the dot has a place: its group is translated'); assert.ok(c.r > 0, id);
+    const h = w.get('DomNode:f:h:' + id); assert.equal(h.tag, 'circle'); assert.equal(h.r, 7, 'an invisible hit circle'); assert.equal(h.fill, 'rgba(0,0,0,0)');
     assert.match(c.fill, /^rgba\(\d+,\d+,\d+,[0-9.]+\)$/);
   }
   assert.ok(w.get('DomNode:f:c:Chat:1').r > w.get('DomNode:f:c:Goal:x').r, 'mass (two children) makes the owner bigger');
@@ -143,21 +145,19 @@ scenario('the layout spreads the dots out and then goes quiet', () => {
   const frozen = places(w, ids); w.ticks(5);
   assert.deepEqual(places(w, ids), frozen, 'a quiet layout does not move');
   w.t += 2.5; w.tick(); w.reply(200, rows(['A:1:new', 'A', 200.5, 'A:1'], ...many));
-  assert.equal(w.get('Scene:field').heat, 1, 'a birth warms it again');
+  assert.equal(w.get('Scene:field').heat, 0.3, 'a birth warms it again, to birth_heat (0.3, a constant listed for decision), not back to the full heat of the first layout');
 });
 
-scenario('the camera: it spins, pauses, zooms; a spin changes the picture and not the places', () => {
-  const w = world(); w.open(); w.reply(200, rows(...BASE)); w.write('DomNode:f:spin', 'clicked', w.t); w.ticks(400); w.write('DomNode:f:spin', 'clicked', w.t);   // let the layout go quiet first
-  assert.equal(w.get('Scene:field').heat, 0);
-  const p0 = w.dot('Chat:1:a').p.slice(), x0 = w.get('DomNode:f:c:Chat:1:a').cx;
+scenario('the camera does not turn by itself: a settled scene writes no DomNode and only two getter values (writes counted), and a dot stays where it is between press and release', () => {
+  const w = world(); w.open(); w.reply(200, rows(...BASE)); w.ticks(400); w.ticks(2);
+  assert.equal(w.get('Scene:field').heat, 0, 'the layout is quiet');
+  assert.equal(w.get('Scene:field').spin, undefined, 'there is no spin');
+  assert.equal(w.get('DomNode:f:spin'), null, 'and no spin button');
+  const x0 = at(w, 'Chat:1:a'), n0 = w.log.length;
   w.ticks(30);
-  assert.notEqual(w.get('DomNode:f:c:Chat:1:a').cx, x0, 'the camera turned: the picture moved');
-  const b = w.get('Scene:field');
-  assert.ok(Math.abs(Math.hypot(...b.rx) - 1) < 1e-6 && Math.abs(Math.hypot(...b.rz) - 1) < 1e-6, 'the basis stays a basis');
-  w.write('DomNode:f:spin', 'clicked', w.t);
-  assert.equal(w.get('Scene:field').spin, false); assert.equal(w.n('spin').text, 'Spin');
-  const x1 = w.get('DomNode:f:c:Chat:1:a').cx; w.ticks(10);
-  assert.equal(w.get('DomNode:f:c:Chat:1:a').cx, x1, 'paused');
+  assert.deepEqual(at(w, 'Chat:1:a'), x0, 'nothing moves');
+  assert.deepEqual([...new Set(w.log.slice(n0).map((e) => e.eid + '.' + e.prop))], ['Scene:field.tick', 'Scene:field.info'], 'an idle tick writes only the clock and the (empty) info line, no DomNode');
+  assert.equal(w.log.length - n0, 60, `two writes per idle tick (${w.log.length - n0} in 30)`);
   const r1 = w.get('DomNode:f:c:Chat:1').r;
   w.write('DomNode:f:zin', 'clicked', w.t);
   assert.ok(w.get('DomNode:f:c:Chat:1').r > r1, 'nearer: bigger');
@@ -165,11 +165,13 @@ scenario('the camera: it spins, pauses, zooms; a spin changes the picture and no
   assert.ok(w.get('DomNode:f:c:Chat:1').r < r1, 'farther: smaller');
 });
 
-scenario('the pointer: a drag turns the camera, a wheel zooms, a hover does nothing', () => {
-  const w = world(); w.open(); w.reply(200, rows(...BASE)); w.write('DomNode:f:spin', 'clicked', w.t); w.ticks(400);   // quiet layout, paused spin
-  const cx = () => w.get('DomNode:f:c:Chat:1:a').cx, cy = () => w.get('DomNode:f:c:Chat:1:a').cy;
+scenario('the pointer: a drag turns the camera round the centre, a wheel zooms, a hover does nothing', () => {
+  const w = world(); w.open(); w.reply(200, rows(...BASE)); w.ticks(400);   // quiet layout
+  const cx = () => at(w, 'Chat:1:a')[0], cy = () => at(w, 'Chat:1:a')[1];
   const pt = (type, x, y, buttons = 1) => w.write('DomNode:f:svg', 'pointer', { type, x, y, w: 400, h: 400, buttons, time: w.t });
   const x0 = cx(), y0 = cy();
+  const len = () => { const b = w.get('Scene:field'), p = w.dot('Chat:1:a').p, d = (a) => a[0] * p[0] + a[1] * p[1] + a[2] * p[2]; return Math.hypot(d(b.rx), d(b.ry), d(b.rz)); };
+  const l0 = len();
   pt('pointerdown', 100, 100); assert.equal(cx(), x0, 'a press alone moves nothing');
   pt('pointermove', 140, 100); const x1 = cx();
   assert.notEqual(x1, x0, 'a horizontal drag turns the camera');
@@ -177,8 +179,11 @@ scenario('the pointer: a drag turns the camera, a wheel zooms, a hover does noth
   const b = w.get('Scene:field');
   assert.ok([b.rx, b.ry, b.rz].every((v) => Math.abs(Math.hypot(...v) - 1) < 1e-6), 'the basis stays unit');
   assert.ok(Math.abs(b.rx[0] * b.ry[0] + b.rx[1] * b.ry[1] + b.rx[2] * b.ry[2]) < 1e-2, 'and square');
+  assert.ok(Math.abs(len() - l0) < 1e-2, 'a rotation about the centre: the dot keeps its distance from it');
+  assert.deepEqual(w.dot('Chat:1:a').p.length, 3);
   pt('pointerup', 140, 130, 0);
-  const x2 = cx(); pt('pointermove', 300, 300); assert.equal(cx(), x2, 'after the release a move does nothing');
+  const x2 = cx(); w.ticks(20); assert.equal(cx(), x2, 'no inertia: after the release the picture stays');
+  pt('pointermove', 300, 300); assert.equal(cx(), x2, 'after the release a move does nothing');
   const r1 = w.get('DomNode:f:c:Chat:1').r;
   w.write('DomNode:f:svg', 'wheel', { dy: -200, x: 10, y: 10, w: 400, h: 400, time: w.t });
   assert.ok(w.get('DomNode:f:c:Chat:1').r > r1, 'wheel up: nearer');
@@ -199,6 +204,11 @@ scenario('a click on a dot selects it: its words show, its neighbours get a labe
   assert.equal(w.get('DomNode:f:c:Chat:1').stroke, 'currentColor');
   w.write('DomNode:f:c:Chat:1', 'clicked', w.t + 1);
   assert.ok(w.get('Scene:field').selected == null); assert.equal(w.n('side').hidden, true);
+  w.write('DomNode:f:h:Chat:1:a', 'clicked', w.t + 2);
+  assert.equal(w.get('Scene:field').selected, 'Chat:1:a', 'the invisible hit circle selects its dot too');
+  assert.equal(w.get('DomNode:f:c:Chat:1:a').stroke, 'currentColor');
+  w.write('DomNode:f:h:Chat:1:a', 'clicked', w.t + 3);
+  assert.ok(w.get('Scene:field').selected == null);
 });
 
 scenario('the click detail lists the EDGES of the selected entity (owner, children, refs), each with its kind, from the seat', () => {
@@ -263,14 +273,16 @@ scenario('a failed call keeps what is in view and says so; the next call goes on
   assert.equal(w.n('note').hidden, true, 'an answer clears the note');
 });
 
-scenario('speed: a hot step (layout + camera + draw) of 150 dots (the window tried) fits the 100 ms clock; 300 is printed', () => {
+scenario('work per tick (counted, no clock): a hot tick writes per dot a bounded number of values, a settled one none', () => {
   for (const N of [150, 300]) {
     const w = world(); w.open();
     const many = [['A:1', 'A', 100.1111]]; for (let i = 0; i < N - 1; i++) many.push([`B:${i}`, 'B', 101.01 + i * 0.3711, i % 7 ? null : 'A:1']);
     w.reply(200, rows(...many));
-    const t0 = performance.now(); w.ticks(10); const ms = (performance.now() - t0) / 10;
-    console.log(`    one hot tick of ${N} dots: ${ms.toFixed(1)} ms`);
-    if (N === 150) assert.ok(ms < 100, `a tick fits the 100 ms clock (${ms.toFixed(1)} ms)`);
+    w.ticks(2); const n0 = w.log.length; w.ticks(10); const per = (w.log.length - n0) / 10;
+    console.log(`    hot tick of ${N} dots: ${per.toFixed(0)} writes (${(per / N).toFixed(1)} per dot)`);
+    assert.ok(per / N <= 14, `a hot tick writes at most 14 values per dot (${(per / N).toFixed(1)})`);
+    w.ticks(400); const n1 = w.log.length; w.ticks(10);
+    assert.equal(w.log.length - n1, 20, 'a settled scene writes two getter values per tick, no DomNode');
   }
 });
 
@@ -285,7 +297,7 @@ scenario('the write STREAM: open asks for it; a frame draws a dot next to its ow
   assert.ok(dist(w.dot('Chat:1:c').p, w.dot('Chat:1').p) < 12);
   assert.equal(w.get('DomNode:f:c:Chat:1:c').tag, 'circle'); assert.equal(w.dot('Chat:1').mass, 3);
   assert.equal(w.n('count').text, '6 of 501 entities in view (the 150 most recently active)', 'the total grew by one');
-  assert.equal(w.get('Scene:field').heat, 1, 'the layout is warmed');
+  assert.ok(w.get('Scene:field').heat >= 0.3, 'the layout is warmed');
   w.ticks(60, 0.1); assert.equal(w.reqs().length, polls, 'no poll while the stream is open');
   assert.equal(w.get('Chunk:Fetch:wire:1'), null, 'a frame is let go once read');
 });
@@ -297,6 +309,8 @@ scenario('the stream: a frame of a known entity moves it to the front; hidden cl
   assert.equal(w.n('count').text, '5 of 500 entities in view (the 150 most recently active)', 'no new entity: the same count');
   w.frame({ eid: 'Chat:message:9', cls: 'Chat', ts: 301 }); w.frame({ eid: 'Chat:message:9:body', cls: 'Chat', ts: 301 }); w.frame({ eid: 'Msg:1', cls: 'Message', ts: 301 });
   assert.equal(w.dot('Chat:message:9'), null, 'a hidden eid prefix'); assert.equal(w.dot('Chat:message:9:body'), null); assert.equal(w.dot('Msg:1'), null, 'a hidden class');
+  w.frame({ eid: 'membrane::Chat:message:9:turn:tool:toolu_x', cls: 'Chat', ts: 301 }); w.frame({ eid: 'membrane::Chat:main', cls: 'Chat', ts: 301 });
+  assert.equal(w.dot('membrane::Chat:message:9:turn:tool:toolu_x'), null, 'the stored form behind the membrane:: namespace is hidden too'); assert.ok(w.dot('membrane::Chat:main'), 'a namespaced chat is not a message');
   w.frame({ eid: 'Goal:x', cls: 'Goal', prop: 'retire', ts: 302 });
   assert.equal(w.dot('Goal:x'), null, 'a retired entity leaves the view'); assert.equal(w.get('DomNode:f:c:Goal:x'), null);
   w.frame({ eid: 'Early:1', cls: 'Early', ts: 303 }); assert.ok(w.dot('Early:1'));

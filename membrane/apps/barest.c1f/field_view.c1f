@@ -17,7 +17,7 @@ IMPORT fetch 1
 -- THE LAYOUT is a force layout (graph.js's idea) in 3D: every Dot repels every other, an owner pulls its children (the ownership edge), a weak pull to the centre keeps the cloud together.
 -- Each Dot is its own setter (`Dot.go`, one per clock tick) so the work of a step is bounded per evaluation; the layout cools (`heat`) and goes quiet, and a birth or a leave warms it again.
 -- MASS = the number of inbound edges (the owner's children), the radius. THE CAMERA turns on the vertical axis by a small constant rotation per tick (no trig: the basis is rotated
--- and re-normalised); the camera is a drag (the shell writes `pointer` on the SVG), the wheel, and buttons (spin / pause, nearer, farther); a click on a dot selects it.
+-- and re-normalised); the camera is a drag (the shell writes `pointer` on the SVG), the wheel, and buttons (nearer, farther); NOTHING turns by itself (the operator: no automatic rotation), so a settled scene writes nothing per tick; a click on a dot selects it.
 -- THE CONSTANTS are flagged in docs/field-view-plan.md "Field view 3D": `window` (the launch fact `field_window`; 150 is the value TRIED, not decided), the poll period (`field_poll_ms`, 2000 tried),
 -- and the layout and camera numbers in `Scene.open` (tuned by eye on a seat with a few hundred entities).
 
@@ -36,10 +36,6 @@ Scene.open on-setter field-draw:
     ('DomNode:f:count').tag = 'span'
     ('DomNode:f:count').class = 'fcount'
     ('DomNode:f:count').role = 'status'
-    ('DomNode:f:spin').parent = 'DomNode:f:head'
-    ('DomNode:f:spin').tag = 'button'
-    ('DomNode:f:spin').type = 'button'
-    ('DomNode:f:spin').text = 'Pause'
     ('DomNode:f:zin').parent = 'DomNode:f:head'
     ('DomNode:f:zin').tag = 'button'
     ('DomNode:f:zin').type = 'button'
@@ -73,9 +69,6 @@ Scene.open on-setter field-draw:
     ('DomNode:f:dots').parent = 'DomNode:f:svg'
     ('DomNode:f:dots').tag = 'g'
     ('DomNode:f:dots').class = 'fdots'
-    ('DomNode:f:labels').parent = 'DomNode:f:svg'
-    ('DomNode:f:labels').tag = 'g'
-    ('DomNode:f:labels').class = 'flabels'
     ('DomNode:f:legend').parent = 'DomNode:f:body'
     ('DomNode:f:legend').tag = 'ul'
     ('DomNode:f:legend').class = 'flegend'
@@ -100,13 +93,11 @@ Scene.open on-setter field-draw:
     this.ry = [0.0, 1.0, 0.0]
     this.rz = [0.0, 0.0, 1.0]
     this.zoom = 1.0
-    this.spin = True
     this.focal = 300.0
-    this.turn_c = 0.99995
-    this.turn_s = 0.01
     this.drag = 0.01
     this.wheel = 0.001
     this.heat = 1.0
+    this.birth_heat = 0.3
     this.rep = 8000.0
     this.rest = 16.0
     this.pull = 0.08
@@ -161,7 +152,7 @@ Fetch.mv on-setter field-rows:
       ('Dot:' + str(prop(r, 'id'))).raw = r
     FOR d IN gone:
       (d.eid).leave = True
-    ('Scene:field').heat = 1.0 if len(gone) + len(born) > 0 else prop('Scene:field', 'heat')
+    ('Scene:field').heat = max(prop('Scene:field', 'heat'), prop('Scene:field', 'birth_heat')) if len(gone) + len(born) > 0 else prop('Scene:field', 'heat')
     ('Scene:field').left = len(gone)
   ELSE WHEN this.eid == 'Fetch:map':
     ('Scene:field').note = 'The seat did not give the active entities: ' + str(prop(this.mv, 'why')) + '. The view keeps what it has and asks again.'
@@ -170,6 +161,8 @@ Fetch.mv on-setter field-rows:
 Dot.leave on-setter dot-leave:
   WHEN this.leave:
     ('DomNode:f:c:' + this.rid).retire = True
+    ('DomNode:f:h:' + this.rid).retire = True
+    ('DomNode:f:g:' + this.rid).retire = True
     ('DomNode:f:l:' + this.rid).retire = True
     ('DomNode:f:t:' + this.rid).retire = True
     (this.eid).retire = True
@@ -186,7 +179,7 @@ Chunk.act getter:
     sc = Scene:field
     id = str(prop(this.fw, 'eid'))
     have = prop('Dot:' + id, 'raw')
-    skip = (str(prop(this.fw, 'cls')) in sc.hidden) or len([x for x in sc.hidden_prefixes if startswith(id, x)]) > 0
+    skip = (str(prop(this.fw, 'cls')) in sc.hidden) or len([x for x in sc.hidden_prefixes if startswith(id, x) or startswith(id, 'membrane::' + x)]) > 0
     {'what': 'retire' if prop(this.fw, 'prop') == 'retire' else ('skip' if skip else ('touch' if have != None else 'new')), 'id': id, 'cls': str(prop(this.fw, 'cls')), 'ts': num(prop(this.fw, 'ts') or 0), 'have': have != None, 'parent': prop(have, 'parent'), 'owner': ([prop(o, 'r') for o in sort_by([{'r': d.rid, 'n': len(d.rid)} for d in instances('Dot') if startswith(id, d.rid + ':')], 'n', True)] or [None])[0], 'kids': [{'eid': d.eid, 'rid': d.rid, 'cls': d.kind, 'updated': prop(d.raw, 'updated')} for d in instances('Dot') if startswith(d.rid, id + ':') and (d.parent_id == None or len(d.parent_id) < len(id))], 'out': [prop(x, 'e') for x in head(sort_by([{'e': d.eid, 'u': num(prop(d.raw, 'updated') or 0)} for d in instances('Dot')], 'u'), max(0, len(instances('Dot')) + 1 - sc.window))]}
 Chunk.act on-setter field-frame-retire:
   WHEN prop(this.act, 'what') == 'retire' and prop(this.act, 'have'):
@@ -204,7 +197,7 @@ Chunk.act on-setter field-frame-new:
     FOR e IN prop(this.act, 'out'):
       (e).leave = True
     ('Scene:field').total = (prop('Scene:field', 'total') or 0) + 1
-    ('Scene:field').heat = 1.0
+    ('Scene:field').heat = max(prop('Scene:field', 'heat'), prop('Scene:field', 'birth_heat'))
 
 Scene.note on-setter field-note:
   ALWAYS:
@@ -215,7 +208,6 @@ Scene.note on-setter field-note:
 Dot.rid getter: str(prop(this.raw, 'id') or '')
 Dot.kind getter: str(prop(this.raw, 'cls') or '')
 Dot.parent_id getter: prop(this.raw, 'parent')
-Dot.age getter: clock - num(prop(this.raw, 'updated') or 0)
 -- MASS: the inbound edges (the entities that sit under it)
 Dot.kids getter: [d.eid for d in instances('Dot') if d.parent_id == this.rid]
 Dot.mass getter: len(this.kids)
@@ -227,45 +219,54 @@ Dot.raw on-setter field-born:
     jit = [num('0.' + head(u, 2)) - 0.5, num('0.' + head(tail(u, 4), 2)) - 0.5, num('0.' + tail(u, 2)) - 0.5]
     pp = prop('Dot:' + str(prop(this.raw, 'parent')), 'p') if prop(this.raw, 'parent') != None else None
     this.p = (pp + jit * [12.0]) if pp != None else (jit * [60.0])
-    base = 'DomNode:f:c:' + str(prop(this.raw, 'id'))
-    (base).parent = 'DomNode:f:dots'
-    (base).tag = 'circle'
+    ('DomNode:f:g:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:dots'
+    ('DomNode:f:g:' + str(prop(this.raw, 'id'))).tag = 'g'
+    ('DomNode:f:c:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:g:' + str(prop(this.raw, 'id'))
+    ('DomNode:f:c:' + str(prop(this.raw, 'id'))).tag = 'circle'
+    ('DomNode:f:h:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:g:' + str(prop(this.raw, 'id'))
+    ('DomNode:f:h:' + str(prop(this.raw, 'id'))).tag = 'circle'
+    ('DomNode:f:h:' + str(prop(this.raw, 'id'))).r = 7
+    ('DomNode:f:h:' + str(prop(this.raw, 'id'))).fill = 'rgba(0,0,0,0)'
     ('DomNode:f:l:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:lines'
     ('DomNode:f:l:' + str(prop(this.raw, 'id'))).tag = 'line'
-    ('DomNode:f:t:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:labels'
+    ('DomNode:f:t:' + str(prop(this.raw, 'id'))).parent = 'DomNode:f:g:' + str(prop(this.raw, 'id'))
     ('DomNode:f:t:' + str(prop(this.raw, 'id'))).tag = 'text'
     ('DomNode:f:t:' + str(prop(this.raw, 'id'))).text = head(str(prop(this.raw, 'id')), 40)
     ('DomNode:f:t:' + str(prop(this.raw, 'id'))).hidden = True
-    ('DomNode:f:l:' + str(prop(this.raw, 'id'))).hidden = True
+    ('DomNode:f:l:' + str(prop(this.raw, 'id'))).hidden = pp == None
 
 -- ---- the projection: the camera's basis (rx, ry the screen, rz the depth) applied to the place, with a perspective ----
-Dot.depth getter: dot(Scene:field.rz, this.p) if this.p != None else None
 Dot.scr getter:
   WHEN this.p == None: None
   ELSE:
     sc = Scene:field
     k = sc.zoom * sc.focal / (sc.focal + dot(sc.rz, this.p))
     a = max(0.2, min(1.0, 0.65 - dot(sc.rz, this.p) / 200.0))
-    sel = sc.selected == this.rid
-    {'x': dot(sc.rx, this.p) * k, 'y': dot(sc.ry, this.p) * k, 'r': (1.4 + 0.9 * min(this.mass, 8)) * k, 'fill': 'rgba(' + prop(([h for h in sc.hues if prop(h, 'cls') == this.kind] or [{'rgb': '120,120,120'}])[0], 'rgb') + ',' + str(a) + ')', 'stroke': 'currentColor' if sel else None, 'sw': 0.8 if sel else None}
+    {'x': dot(sc.rx, this.p) * k, 'y': dot(sc.ry, this.p) * k, 'r': (1.4 + 0.9 * min(this.mass, 8)) * k, 'fill': 'rgba(' + prop(([h for h in sc.hues if prop(h, 'cls') == this.kind] or [{'rgb': '120,120,120'}])[0], 'rgb') + ',' + str(a) + ')'}
 
+-- the dot's group is moved by ONE write (`transform`), the circle, its invisible hit circle and its label sit in it at 0,0; the circle's size and colour are written only when they change
 Dot.scr on-setter field-draw-dot:
   WHEN this.scr != None:
-    base = 'DomNode:f:c:' + this.rid
-    (base).cx = prop(this.scr, 'x')
-    (base).cy = prop(this.scr, 'y')
-    (base).r = prop(this.scr, 'r')
-    (base).fill = prop(this.scr, 'fill')
-    (base).stroke = prop(this.scr, 'stroke')
-    (base).stroke-width = prop(this.scr, 'sw')
-    ('DomNode:f:t:' + this.rid).x = prop(this.scr, 'x') + prop(this.scr, 'r') + 1.5
-    ('DomNode:f:t:' + this.rid).y = prop(this.scr, 'y')
+    ('DomNode:f:g:' + this.rid).transform = 'translate(' + str(prop(this.scr, 'x')) + ' ' + str(prop(this.scr, 'y')) + ')'
+    ('DomNode:f:c:' + this.rid).r = prop(this.scr, 'r')
+    ('DomNode:f:c:' + this.rid).fill = prop(this.scr, 'fill')
+-- the selected dot is outlined: written when the selection changes, not per tick
+Dot.sel getter: Scene:field.selected == this.rid
+Dot.sel on-setter field-draw-sel:
+  WHEN this.raw != None:
+    ('DomNode:f:c:' + this.rid).stroke = 'currentColor' if this.sel else None
+    ('DomNode:f:c:' + this.rid).stroke-width = 0.8 if this.sel else None
 
 -- a label only for the selected dot and the dots joined to it
 Dot.show getter: Scene:field.selected != None and (this.rid == Scene:field.selected or this.parent_id == Scene:field.selected or prop('Dot:' + str(Scene:field.selected), 'parent_id') == this.rid)
 Dot.show on-setter field-label:
   WHEN this.raw != None:
     ('DomNode:f:t:' + this.rid).hidden = not this.show
+-- the label's offset is written only while it is shown
+Dot.lab getter: prop(this.scr, 'r') + 1.5 if this.show and this.scr != None else None
+Dot.lab on-setter field-label-place:
+  WHEN this.lab != None:
+    ('DomNode:f:t:' + this.rid).x = this.lab
 
 -- the line to the owner, drawn when the owner is here
 Dot.seg getter:
@@ -273,9 +274,12 @@ Dot.seg getter:
   ELSE:
     ps = prop('Dot:' + str(this.parent_id), 'scr')
     {'x1': prop(this.scr, 'x'), 'y1': prop(this.scr, 'y'), 'x2': prop(ps, 'x'), 'y2': prop(ps, 'y')} if ps != None else None
-Dot.seg on-setter field-draw-line:
+Dot.linked getter: this.seg != None
+Dot.linked on-setter field-line-shown:
   WHEN this.raw != None:
-    ('DomNode:f:l:' + this.rid).hidden = this.seg == None
+    ('DomNode:f:l:' + this.rid).hidden = not this.linked
+Dot.seg on-setter field-draw-line:
+  WHEN this.raw != None and this.seg != None:
     ('DomNode:f:l:' + this.rid).x1 = prop(this.seg, 'x1')
     ('DomNode:f:l:' + this.rid).y1 = prop(this.seg, 'y1')
     ('DomNode:f:l:' + this.rid).x2 = prop(this.seg, 'x2')
@@ -317,7 +321,7 @@ Scene.legend on-setter field-legend:
 -- forces on a Dot: every other Dot pushes it away (the weight rep / (d^2 + 1)^2 along the line: the whole push is a few vector operations over the lists of every place, taken once per tick),
 -- its owner and its children pull it to `rest` apart (the spring), a pull to the middle; the step is capped and scaled by the heat.
 Scene.tick on-setter field-step:
-  WHEN this.open:
+  WHEN this.open and this.heat > 0.0 and not prop('Conn:page', 'hidden'):
     ps = [d.p for d in instances('Dot') if d.p != None]
     this.xs = [p[0] for p in ps]
     this.ys = [p[1] for p in ps]
@@ -341,14 +345,6 @@ Dot.go on-setter field-force:
     drawn = [dot(kw, [g[0] for g in toward]), dot(kw, [g[1] for g in toward]), dot(kw, [g[2] for g in toward])] if len(toward) > 0 else [0.0, 0.0, 0.0]
     f = pushed + pulled + drawn - this.p * [Scene:field.centre]
     this.p = this.p + f * [Scene:field.heat * min(1.0, 4.0 / max(norm(f), 0.01))]
-
--- ---- the camera: the basis turns by the small constant (c, s) about the vertical axis each tick while `spin` ----
-Scene.tick on-setter field-turn:
-  WHEN this.open and this.spin:
-    nx = unit(this.rx * [this.turn_c] + this.rz * [this.turn_s])
-    nz = unit(this.rz * [this.turn_c] - this.rx * [this.turn_s])
-    this.rx = nx
-    this.rz = nz
 
 -- ---- the pointer (the shell writes `pointer` and `wheel` on the SVG's DomNode): a drag with a button held turns the camera, a wheel zooms ----
 -- a drag of d pixels turns by the angle a = d * drag (radians, small-angle: cos = 1 - a^2/2, sin = a, then the basis is re-normalised); a wheel of dy zooms by 1 - dy * wheel, between 0.25 and 8
@@ -375,9 +371,7 @@ DomNode.wheel on-setter field-wheel:
 
 -- ---- the controls and the selection ----
 DomNode.clicked on-setter field-click:
-  WHEN this.eid == 'DomNode:f:spin':
-    ('Scene:field').spin = not prop('Scene:field', 'spin')
-  ELSE WHEN this.eid == 'DomNode:f:zin':
+  WHEN this.eid == 'DomNode:f:zin':
     ('Scene:field').zoom = min(prop('Scene:field', 'zoom') * 1.25, 8.0)
   ELSE WHEN this.eid == 'DomNode:f:zout':
     ('Scene:field').zoom = max(prop('Scene:field', 'zoom') / 1.25, 0.25)
@@ -389,9 +383,8 @@ DomNode.clicked on-setter field-click:
     ('Scene:field').selected = this.target
   ELSE WHEN startswith(this.eid, 'DomNode:f:c:'):
     ('Scene:field').selected = None if prop('Scene:field', 'selected') == after(this.eid, 'DomNode:f:c:') else after(this.eid, 'DomNode:f:c:')
-Scene.spin on-setter field-spin-label:
-  ALWAYS:
-    ('DomNode:f:spin').text = 'Pause' if this.spin else 'Spin'
+  ELSE WHEN startswith(this.eid, 'DomNode:f:h:'):
+    ('Scene:field').selected = None if prop('Scene:field', 'selected') == after(this.eid, 'DomNode:f:h:') else after(this.eid, 'DomNode:f:h:')
 -- a new window is asked for at the next tick (the poll is not held by the last answer)
 Scene.window on-setter field-window:
   WHEN this.open:
@@ -404,7 +397,7 @@ Scene.count_text on-setter field-count:
     ('DomNode:f:count').text = this.count_text
 Scene.info getter:
   WHEN this.selected == None: None
-  ELSE WHEN prop('Dot:' + str(this.selected), 'rid') != None: prop('Dot:' + str(this.selected), 'rid') + ' · ' + prop('Dot:' + str(this.selected), 'kind') + ' · ' + str(prop('Dot:' + str(this.selected), 'mass')) + ' under it · changed ' + before(str(prop('Dot:' + str(this.selected), 'age')), '.') + ' s ago'
+  ELSE WHEN prop('Dot:' + str(this.selected), 'rid') != None: prop('Dot:' + str(this.selected), 'rid') + ' · ' + prop('Dot:' + str(this.selected), 'kind') + ' · ' + str(prop('Dot:' + str(this.selected), 'mass')) + ' under it · changed ' + before(str(clock - num(prop(prop('Dot:' + str(this.selected), 'raw'), 'updated') or 0)), '.') + ' s ago'
   ELSE: str(this.selected) + ' (not in view)'
 Scene.info on-setter field-info:
   ALWAYS:
