@@ -7,7 +7,7 @@
 //   4. a turn that errors shows its error as text; a seat WITHOUT a backend answers with its own error and the page shows that text;
 //   5. a read that hangs or fails (the stream dropped, the seat away) never wedges the view: after it the finished turn is shown (the cause of the "Waiting for a turn…" that never ended: a poll
 //      with no answer held `polling` for ever; every call now carries a timeout);
-//   6. sessions: new, switch (the chat follows, a message of one session is not in the other), a refusal is text;
+//   6. ONE chat: no sessions column or New session, no /session list call, the chat has the full width;
 //   7. the field view opens lazily, a click on a node slides the detail panel over the chat (id, class, properties, edges), a click outside / Esc / Close closes it, a draft typed in the chat survives;
 //   8. no script error. SHOTS=<dir> saves a screenshot of each view.
 import { spawn } from 'node:child_process';
@@ -124,7 +124,6 @@ try {
   await b.until(`/^connected · idle$/.test(${status})`, 'the status line says connected and idle');
   assert.equal(await b.ev(`window.MEMBRANE_PAGE.clockId !== null`), true, 'the page runs the clock');
   await b.shot('chat-empty');
-  await b.until(`${Q(K('DomNode:shell:s:main'))}.getAttribute('aria-current') === 'true'`, 'Main chat is the current session');
 
   // 2. a message: ONE POST for three Enters; the answer replaces "Waiting for a turn…"; idle again
   await b.type('hello e2e');
@@ -132,7 +131,7 @@ try {
   await b.until(`${textOf('[data-key$=":me"]')} === 'hello e2e'`, 'the user bubble');
   await sleep(300);
   assert.equal(b.posts.length, 1, 'ONE POST');
-  assert.deepEqual(JSON.parse(b.posts[0]), { text: 'hello e2e' }, 'the main chat names no session');
+  assert.deepEqual(JSON.parse(b.posts[0]), { text: 'hello e2e' }, 'a send names no session');
   await b.until(`/^(Waiting for a turn…|Working on it…)$/.test(${textOf('[data-key$=":ans"]')})`, 'pending');
   await b.until(`/a turn is running/.test(${status})`, 'the status line says a turn is running');
   seat.go('hello e2e');
@@ -181,34 +180,20 @@ try {
   await b.until(`/timeout after 2 s/.test(${textOf('.pollnote')})`, 'a hung read is aborted by its timeout and said in text', 15000);
   b.hook = null; await b.release();
 
-  // 6. sessions: new, switch, a refusal is text
-  await b.ev(click(K('DomNode:shell:newsession')));
-  await b.until(`document.querySelectorAll('.sessionlist li').length === 2`, 'a new session in the list');
-  const sid = await b.ev(`window.MEMBRANE_PAGE.get('Focus:session').sid`);
-  assert.match(sid, /^ses_/); assert.equal(await b.ev(`${Q(K('DomNode:shell:s:' + sid))}.getAttribute('aria-current')`), 'true', 'the new session is the current one');
-  await b.until(`document.querySelectorAll('[data-key$=":me"]').length === 0`, 'the new session has no turns');
-  b.posts.length = 0;
-  await b.type('in the session'); await b.enter();
-  await b.until(`${textOf('[data-key$=":me"]')} === 'in the session'`, 'the message shows in the session');
-  assert.deepEqual(JSON.parse(b.posts[0]), { text: 'in the session', sid });
-  seat.go('in the session');
-  await b.until(`${answers}[0] === 'Final answer to: in the session'`, 'answered in the session');
-  await b.ev(click(K('DomNode:shell:s:main')));
-  await b.until(`document.querySelectorAll('[data-key$=":me"]').length === 5 && ![...document.querySelectorAll('[data-key$=":me"]')].some((e) => e.textContent === 'in the session')`, 'the main chat does not show the session\'s message');
-  await b.ev(click(K('DomNode:shell:s:' + sid)));
-  await b.until(`${textOf('[data-key$=":me"]')} === 'in the session'`, 'back to the session: its message');
-  await b.shot('chat-sessions');
+  // 6. ONE chat: no sessions column, no New session; the history is every turn of the seat, the thread keeps its 5 turns
+  assert.equal(await b.ev(`!!document.querySelector('.sessions') || !!${Q(K('DomNode:shell:newsession'))}`), false, 'no sessions UI');
+  assert.equal(await b.ev(`document.querySelectorAll('[data-key$=":me"]').length`), 5);
+  assert.ok(!b.calls.some((c) => c.startsWith('GET /session') && !c.startsWith('GET /session/status')), `the page lists no sessions (${[...new Set(b.calls)].join(', ')})`);
+  assert.equal(await b.ev(`${Q('.chatview')}.parentElement.getBoundingClientRect().width > 900`), true, 'the chat has the full width');
 
   // 7. the field: lazy, the detail panel over the chat, closed by click-out / Esc / Close; the chat is covered, not unmounted
   for (const e of ['Zed:a', 'Zed:a:x', 'Zed:b']) await call(seat, 'entity_write', { spec: e, prop: 'note', value: 'x'.repeat(450) });
-  await b.ev(click(K('DomNode:shell:s:main')));
   await b.until(`document.querySelectorAll('[data-key$=":me"]').length === 5`, 'back in the main chat');
   await b.type('a draft that must survive');
   assert.equal(await b.ev(`!!${Q(K('DomNode:f:root'))}`), false, 'the field view is not drawn until it is shown');
   await b.ev(click(K('DomNode:shell:nav:field')));
   await b.until(`document.querySelectorAll('.fdots circle').length >= 3`, 'the field draws');
   assert.equal(await b.ev(`${Q(K('DomNode:shell:slot:chat'))}.hidden`), true);
-  assert.equal(await b.ev(`${Q(K('DomNode:shell:sessions'))}.hidden`), true, 'the sessions belong to the chat');
   await b.shot('field');
   assert.equal(await b.ev(`${Q('.panel')}.getAttribute('data-open')`), 'false');
   //   a REAL mouse press and release on a dot selects it (the press must not be captured by the scene), and a drag that moved does not select the dot it ends on

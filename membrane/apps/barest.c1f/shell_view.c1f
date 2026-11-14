@@ -2,13 +2,11 @@ PACK shell_view 1
 IMPORT dom 1
 IMPORT fetch 1
 -- THE BAREST PAGE'S SHELL, A VIEW PACK (#1143, operator 2026-11-14: "rewrite the new ui completely into c1f running under wasm vm"). It owns the whole page: the layout, the navigation,
--- the session list, the status line, the errors as text and the theme. It runs in the PAGE's field engine (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f,
+-- the status line, the errors as text and the theme. It runs in the PAGE's field engine (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f,
 -- and does not run it). The page (ui/index.html + ui/boot.js) is a bootstrap: it starts the engine, feeds the entities below and gives the shell one DOM mount.
---   Shell:main     {view, sid, theme, open}: the nav's current view, the active session, the theme, `open` draws the page. The bootstrap writes `view` ('chat') and `sid` ('main') first, `open` last.
---   Focus:session {sid}: the session the chat shows ('main' = the chat with no session). The chat view reads it (chat_view.c1f); the shell writes it when a session is picked.
+--   Shell:main     {view, theme, open}: the nav's current view, the theme, `open` draws the page. The bootstrap writes `view` ('chat') first, `open` last. There is ONE chat (no sessions).
 --   Nav:<name>     one view of the page: {title, order} from the view pack that registers it, `active` from the shell, `filled` from the view pack once it has drawn into its slot.
---   SessionRow:<sid> one session of the seat's list (`GET /session`): `raw` is its row.
---   Fetch:sessions / Fetch:newsession / Fetch:status   the three calls (the page's Fetch): the list, a new session (POST /session), the status line's poll (GET /session/status).
+--   Fetch:status   the status line's poll (the page's Fetch, GET /session/status).
 -- THE VIEW-PACK CONTRACT (docs/ui-rebuild-plan.md "The shell and the view-pack contract"): a pack that is a view of the page
 --   1. registers itself when the shell opens:  `Shell.open on-setter <name>-register: WHEN this.open:` writes `('Nav:<name>').title = '<Title>'` and `('Nav:<name>').order = <n>`;
 --   2. draws into its slot: the root DomNode of the view has `parent = 'DomNode:shell:slot:<name>'`; it draws when `Nav:<name>.active` first becomes true (a setter on `Nav.active`: lazy), and writes
@@ -22,8 +20,6 @@ IMPORT fetch 1
 -- The shell knows no view by name except Settings, whose placeholder (the slot's text 'Settings') it draws itself until a view pack fills the slot.
 
 Shell.tick getter: clock
--- the class of the session the chat shows is declared here (a write to a class no pack declares is dropped)
-Focus.kind getter: 'session'
 
 -- ---- the page: the skeleton ----
 Shell.open on-setter shell-draw:
@@ -59,25 +55,6 @@ Shell.open on-setter shell-draw:
     ('DomNode:shell:body').parent = 'DomNode:shell:root'
     ('DomNode:shell:body').tag = 'div'
     ('DomNode:shell:body').class = 'shell-body'
-    ('DomNode:shell:sessions').parent = 'DomNode:shell:body'
-    ('DomNode:shell:sessions').tag = 'section'
-    ('DomNode:shell:sessions').class = 'sessions'
-    ('DomNode:shell:sessions').aria-label = 'Sessions'
-    ('DomNode:shell:newsession').parent = 'DomNode:shell:sessions'
-    ('DomNode:shell:newsession').tag = 'button'
-    ('DomNode:shell:newsession').type = 'button'
-    ('DomNode:shell:newsession').class = 'newsession'
-    ('DomNode:shell:newsession').text = 'New session'
-    ('DomNode:shell:sessionlist').parent = 'DomNode:shell:sessions'
-    ('DomNode:shell:sessionlist').tag = 'ul'
-    ('DomNode:shell:sessionlist').class = 'sessionlist'
-    ('DomNode:shell:sli:main').parent = 'DomNode:shell:sessionlist'
-    ('DomNode:shell:sli:main').tag = 'li'
-    ('DomNode:shell:s:main').parent = 'DomNode:shell:sli:main'
-    ('DomNode:shell:s:main').tag = 'button'
-    ('DomNode:shell:s:main').type = 'button'
-    ('DomNode:shell:s:main').text = 'Main chat'
-    ('DomNode:shell:s:main').aria-current = 'true' if this.sid == 'main' else None
     ('DomNode:shell:views').parent = 'DomNode:shell:body'
     ('DomNode:shell:views').tag = 'main'
     ('DomNode:shell:views').class = 'views'
@@ -122,7 +99,6 @@ Shell.open on-setter shell-draw:
     this.status_ms = ([b.shell_status_ms for b in instances('Boot') if b.shell_status_ms != None] or [3000])[0]
     this.seq = 1
     this.polling = True
-    ('Fetch:sessions').request = {'id': 'sessions-1', 'url': '/session'}
     ('Fetch:status').request = {'id': 'status-1', 'url': '/session/status'}
 
 -- ---- the navigation: one button and one slot per registered view ----
@@ -164,80 +140,18 @@ Nav.active on-setter shell-slot:
   WHEN this.active != None:
     ('DomNode:shell:slot:' + replace(this.eid, 'Nav:', '')).hidden = not this.active
     ('DomNode:shell:nav:' + replace(this.eid, 'Nav:', '')).aria-current = 'page' if this.active else None
-Nav.active on-setter shell-sessions-show:
-  WHEN this.eid == 'Nav:chat' and this.active != None:
-    ('DomNode:shell:sessions').hidden = not this.active
 Nav.filled on-setter shell-filled:
   WHEN this.filled == True:
     ('DomNode:shell:slot:' + replace(this.eid, 'Nav:', '') + ':empty').hidden = True
 
--- ---- the sessions ----
--- the list is asked for when the page opens and after a new session (a session made elsewhere shows after a reload)
-
--- the receipts, read once: ok = the call went and the seat said 2xx; `list` the session rows; `why` what the line says (the seat's own message, else the status, else the network's reason)
+-- the receipt, read once: ok = the call went and the seat said 2xx; `why` what the line says (the seat's own message, else the status, else the network's reason)
 Fetch.sv getter:
   rq = this.request_result
   bd = json(str(prop(rq, 'body') or ''))
   jb = {} if bd is Error else bd
   jd = jb if jb is Dict else {}
   hs = prop(rq, 'http_status')
-  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'list': jb if jb is List else None, 'sid': str(prop(jd, 'id') or ''), 'busy': 'busy' in str(prop(rq, 'body') or ''), 'why': (str(prop(prop(jd, 'error'), 'message') or prop(jd, 'error')) if (prop(jd, 'error') != None) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
-
-Fetch.sv on-setter shell-sessions-done:
-  WHEN this.eid == 'Fetch:sessions' and prop(this.sv, 'ok') and prop(this.sv, 'list') != None:
-    ids = [str(prop(s, 'id')) for s in prop(this.sv, 'list')]
-    FOR s IN prop(this.sv, 'list'):
-      ('SessionRow:' + str(prop(s, 'id'))).born = True
-      ('SessionRow:' + str(prop(s, 'id'))).raw = s
-    FOR x IN [x for x in instances('SessionRow') if not (x.sid in ids)]:
-      ('DomNode:shell:sli:' + x.sid).retire = True
-      ('DomNode:shell:s:' + x.sid).retire = True
-      (x.eid).retire = True
-    ('Shell:main').sessions_error = ''
-  ELSE WHEN this.eid == 'Fetch:sessions':
-    ('Shell:main').sessions_error = 'The sessions could not be listed: ' + str(prop(this.sv, 'why')) + '.'
-
-SessionRow.sid getter: replace(this.eid, 'SessionRow:', '')
-SessionRow.raw on-setter shell-session-draw:
-  WHEN this.raw != None:
-    ('DomNode:shell:sli:' + this.sid).parent = 'DomNode:shell:sessionlist'
-    ('DomNode:shell:sli:' + this.sid).tag = 'li'
-    ('DomNode:shell:s:' + this.sid).parent = 'DomNode:shell:sli:' + this.sid
-    ('DomNode:shell:s:' + this.sid).tag = 'button'
-    ('DomNode:shell:s:' + this.sid).type = 'button'
-    ('DomNode:shell:s:' + this.sid).title = this.sid
-    ('DomNode:shell:s:' + this.sid).text = str(prop(this.raw, 'title') or this.sid)
-    ('DomNode:shell:s:' + this.sid).aria-current = 'true' if prop('Shell:main', 'sid') == this.sid else None
-
--- a click on a session button (or Main chat) picks it; the chat view follows `Focus:session`
-DomNode.clicked on-setter shell-session-click:
-  WHEN startswith(this.eid, 'DomNode:shell:s:'):
-    ('Shell:main').sid = replace(this.eid, 'DomNode:shell:s:', '')
-Shell.sid on-setter shell-session-pick:
-  WHEN this.sid != None:
-    ('Focus:session').sid = this.sid
-    ('DomNode:shell:s:main').aria-current = 'true' if this.sid == 'main' else None
-    FOR x IN instances('SessionRow'):
-      ('DomNode:shell:s:' + x.sid).aria-current = 'true' if x.sid == this.sid else None
-
--- New session: POST /session; the new one is picked when the seat answers, a failure is the line's text
-DomNode.clicked on-setter shell-session-new:
-  WHEN this.eid == 'DomNode:shell:newsession' and not prop('Shell:main', 'creating'):
-    n = (prop('Shell:main', 'seq') or 0) + 1
-    ('Shell:main').seq = n
-    ('Shell:main').creating = True
-    ('Shell:main').create_error = ''
-    ('Fetch:newsession').request = {'id': 'new-' + str(n), 'url': '/session', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': '{}'}
-Fetch.sv on-setter shell-session-created:
-  WHEN this.eid == 'Fetch:newsession' and prop(this.sv, 'ok') and prop(this.sv, 'sid') != '':
-    n = (prop('Shell:main', 'seq') or 0) + 1
-    ('Shell:main').seq = n
-    ('Shell:main').creating = False
-    ('Shell:main').sid = prop(this.sv, 'sid')
-    ('Fetch:sessions').request = {'id': 'sessions-' + str(n), 'url': '/session'}
-  ELSE WHEN this.eid == 'Fetch:newsession':
-    ('Shell:main').creating = False
-    ('Shell:main').create_error = 'A new session could not be made: ' + str(prop(this.sv, 'why')) + '.'
+  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'busy': 'busy' in str(prop(rq, 'body') or ''), 'why': (str(prop(prop(jd, 'error'), 'message') or prop(jd, 'error')) if (prop(jd, 'error') != None) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
 
 -- ---- the status line: the seat answers (connected) or not, and whether a turn is running; a poll of /session/status ----
 Shell.tick on-setter shell-poll:
@@ -252,7 +166,7 @@ Fetch.sv on-setter shell-status-done:
     ('Shell:main').last_poll = clock
     ('Shell:main').conn = 'connected' if prop(this.sv, 'ok') else 'the seat is not answering: ' + str(prop(this.sv, 'why'))
     ('Shell:main').busy_status = prop(this.sv, 'busy') == True and prop(this.sv, 'ok') == True
--- a turn the chat view still waits for counts too (a message of the chat with no session is not in the seat's session status)
+-- a turn the chat view still waits for counts too (the status route lists sessions' turns only; the one chat's are the chat view's rows)
 Shell.working getter: this.busy_status == True or len([r for r in instances('ChatRow') if r.done == False]) > 0
 Shell.line getter: str(this.conn or 'connecting') + (' · a turn is running' if this.working else ' · idle')
 Shell.line on-setter shell-line:
@@ -260,11 +174,9 @@ Shell.line on-setter shell-line:
     ('DomNode:shell:status').text = this.line
     ('DomNode:shell:status').data-ok = '1' if this.conn == 'connected' else '0'
 
--- ---- the errors, as text (nothing fails silently): the packs that did not load, the sessions' own failures ----
+-- ---- the errors, as text (nothing fails silently): the packs that did not load ----
 Shell.problem getter:
   WHEN this.load_errors != None and len(str(this.load_errors)) > 2: 'These view packs did not load: ' + str(this.load_errors)
-  ELSE WHEN this.create_error: this.create_error
-  ELSE WHEN this.sessions_error: this.sessions_error
   ELSE: ''
 -- (what was known before the page opened is shown when it opens)
 Shell.open on-setter shell-problem-open:
