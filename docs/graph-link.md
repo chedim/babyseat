@@ -1,6 +1,6 @@
 # The graph link: joining the seat's graph and the page's graph (design, 2026-11-14, #1143)
 
-DESIGN, with section 15 BUILT (slice 1). Nothing else here is built; every number, default, new builtin and new native piece is a DECISION for the operator (list at the end; "(D<n>)" points at it).
+Status: a DESIGN with ONE built piece. Built and in the release: slice 1 (section 15): the page tells the seat what it loaded and what it can do (`Vm:<ns>.caps`, `<ns>::Page:main.report`; `membrane/packs/link.c1f`, `membrane/apps/barest.c1f/link_view.c1f`, `Help:page`), so the model reads `Vm:*` and `Page:main`. In progress, not in this tree: slice 2, the link engine and the seat side (branches `w116-linkengine`, `w117-linkseat`). Everything else here is design, not built; every number, default, new builtin and new native piece is a DECISION for the operator (list at the end; "(D<n>)" points at it).
 Where I disagree with the operator's sketch I say so in a line starting "Challenge".
 
 ## 0. The problem, as the code has it
@@ -16,12 +16,12 @@ reports no UI entities.
 
 - It is a LITERAL PREFIX that PACKS write into ids. The engine never adds it. There is no namespace table, no per-seat or per-person value: it is the fixed text `membrane::`.
   `grep` of `native/src` finds it only in strings: `fields.rs:49` (`LLM_CALL`), `learn.rs:122` (a candidate id), comments. Packs that write it: `legacy_import.c1f` (`membrane::Legacy:seat`, `membrane::Chat:session[...]`),
-  `door_state.c1f:7,22,62` (`membrane::presence`), `default_banner.c1f:4,22,29` (`membrane::Banner:owner:main`), `chat*.c1f` (`membrane::Chat:...`), `surface.json:127,211,524`.
+  `door_state.c1f:7,22,62` (`membrane::presence`), `default_banner.c1f:4,22,29` (`membrane::Banner:admin:main`), `chat*.c1f` (`membrane::Chat:...`), `surface.json:127,211,524`.
 - The engine knows `::` in exactly three places, all about the CLASS, not ownership: `host.rs:53` `class_of_eid` (after `ns::`, up to the next colon: `membrane::Chat:main` is `Chat`), `fields.rs:1595` (the same for a constructor)
-  and `infer.rs:350`. The lexer treats `ns::Name` as one entity literal (`expr.rs:281`, `syntax.rs:68` `name_colon`). Ids are exact strings: `membrane::Banner:owner:main` and `Banner:owner:main` are TWO different entities in `Core::docs`.
+  and `infer.rs:350`. The lexer treats `ns::Name` as one entity literal (`expr.rs:281`, `syntax.rs:68` `name_colon`). Ids are exact strings: `membrane::Banner:admin:main` and `Banner:admin:main` are TWO different entities in `Core::docs`.
 - "Bare reads back as `membrane::`" is NOT an engine feature. It is a pack hack: `door_tools.c1f:56` `mc_w_id` (and `:203` `mc_r_id` for reads) uses the `membrane::` twin when only that row exists and the bare one does not (docs/cliffvm.md:150).
   `Legacy:seat` read back as `membrane::Legacy:seat` because `legacy_import.c1f:39` WROTE it with the prefix; `instances('Legacy')` returns the eid as stored.
-  The `Banner:owner:main` / `membrane::Banner:owner:main` pair is that same bare-twin rule: one entity, two spellings an operator or model may type; `default_banner.c1f:29` creates only the prefixed one.
+  The `Banner:admin:main` / `membrane::Banner:admin:main` pair is that same bare-twin rule: one entity, two spellings an operator or model may type; `default_banner.c1f:29` creates only the prefixed one.
 - `docs/chat-keys.md:19`: "`membrane::` is the namespace the chat packs always wrote; kept." It is history from the Python seat (`membrane::pack:<name>`, docs/cliffvm.md:358), not a design.
 - A namespace name is limited by the lexer: `name_char` (`expr.rs:218`) is alphanumeric or `_`. A hyphen (`page-7a`) cannot be written in an unquoted entity literal (`page-7a::Shell:main` would lex as a subtraction). Challenge: name pages `p7a` / `page_7a` (D1).
 
@@ -144,7 +144,7 @@ The protocol is frames; the transport carries them.
 
 - **Identity includes placement.** Moving ownership is a new id; references, `$ref` values (`vm.rs` `ref_in`), packs' text and the model's notes hold the old one. Nothing migrates; say so in the help.
 - **Cross-graph references.** A `$ref` to a foreign id from a local entity: the gc ref index (`vm.rs:611-617`) treats only local ids; a `$ref` into another VM neither holds nor resolves. Decide: a foreign `$ref` is a plain value that reads as `pending` until subscribed (D23).
-- **Two spellings** of one backend entity (`Banner:owner:main` and `membrane::...`): the wire qualifies a bare id with the sender's name, so the page sees `membrane::X` for a bare backend `X` and cannot tell it is the twin of `membrane::X` if both exist. Keep the door's twin rule (`mc_w_id`) as is; add none to the link.
+- **Two spellings** of one backend entity (`Banner:admin:main` and `membrane::...`): the wire qualifies a bare id with the sender's name, so the page sees `membrane::X` for a bare backend `X` and cannot tell it is the twin of `membrane::X` if both exist. Keep the door's twin rule (`mc_w_id`) as is; add none to the link.
 - **Many tabs:** one root and one subscription set each; the seat's cost is O(links x changed subscribed nodes); `max_links` (D8). A reload is a new page id (new root, old one retired by `bye` or `lease_s`); a stable id per browser (localStorage) would reuse the root but two tabs would collide (D2).
 - **Hidden tabs and resync storms:** after a seat restart every page resubscribes at once; jitter the resubscribe by a per-page random delay (D24). The replicas are only the working set, so a storm is bounded by subscribed nodes, not the graph.
 - **Large values:** `refused: too large`; a chat body, a `Pack.text`, a `Command` output must never arrive by default. **Chat bodies never replicate by default** (policy, D11).
