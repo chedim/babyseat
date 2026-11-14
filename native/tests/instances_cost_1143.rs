@@ -1,10 +1,9 @@
-//! `instances('<Class>')` costs one pass over the loaded entities (#1143, 2026-11-14 measurement of the session route): the pass must not allocate a class list per entity.
+//! `instances('<Class>')` costs one pass over the loaded entities, and only when something it can hold changed (#1143, 2026-11-14 measurement of the session route). The tests count walks, never milliseconds.
 //! Found on an imported store: a trivial request evaluated eight getters of `instances('Boot')` and each took about 5 ms with 30,000 loaded entities (the messages and their
 //! children), so a request for ONE row cost 50-60 ms and a session fetched row by row 45-64 ms a row. The bound below is a TEST bound between "a compare per entity" and
 //! "a Vec<String> built per entity" (not a product constant).
 use membrane_vm::host::{Host, Options};
 use serde_json::json;
-use std::time::Instant;
 
 fn host(pack: &str) -> Host {
     let mut o = Options::new(None);
@@ -15,28 +14,36 @@ fn host(pack: &str) -> Host {
     h
 }
 
+/// Work, not clock: the walks over the loaded entities are counted (`Host::inst_scans`). A Boot arriving changes the answer of `instances('Boot')`: one walk. An entity of another class
+/// arriving changes nothing it can be in: no walk, however many entities are loaded or arrive. (Before: any arrival dropped every kept answer, so a request that was born,
+/// `Request`, made every `instances('Boot')` of the request walk the field again, 10 ms each at 27,000 entities: a 404 took 45 ms, 12 s on a seat with 400,000 entities and a poll queue.)
 #[test]
-fn instances_of_a_class_does_not_build_a_class_list_per_loaded_entity() {
-    let h = host("PACK sem 1\nProbe.n getter: len(instances('Boot'))\nProbe.m getter: len(instances('Chat'))\n");
+fn an_arrival_of_another_class_does_not_walk_the_field_again() {
+    let h = host("PACK sem 1\nProbe.n getter: len(instances('Boot')) + len(prop('Probe:a', 'tick') or [])\n");
     h.born("Probe:a", "Probe", Default::default(), "person");
-    for i in 0..20_000 {
-        // the shape of a stored message's children: a parents list of two kinds, never the class asked for in the first place
+    for i in 0..2_000 {
         h.born(&format!("Chat:message:{i}:turn:tool:{i}"), "Chat", json!({"parents": ["cls:chat", "cls:chatmessage"], "x": i}).as_object().unwrap().clone(), "person");
     }
-    h.pump();
     h.born("Boot:one", "Boot", json!({}).as_object().unwrap().clone(), "person");
     h.pump();
     assert_eq!(h.get("Probe:a", "n"), json!(1));
-    // each new Boot changes the class list read by `Probe.n`: one more pass over the loaded entities
-    let t = Instant::now();
+    let s0 = h.inst_scans();
     for i in 0..30 {
+        // a request is born, then the getter is asked again (its input `tick` moved)
+        h.born(&format!("Request:{i}"), "Request", json!({"route": "/x"}).as_object().unwrap().clone(), "person");
+        h.write("Probe:a", "tick", json!(vec![0; i + 1]), "person");
+        h.pump();
+    }
+    assert_eq!(h.get("Probe:a", "n"), json!(31), "the getter was asked again on every tick");
+    assert_eq!(h.inst_scans() - s0, 0, "30 arrivals of a class `instances('Boot')` cannot hold walked the field");
+    // a Boot arriving is the one thing that does change the answer: exactly one walk each
+    let s1 = h.inst_scans();
+    for i in 0..5 {
         h.born(&format!("Boot:b{i}"), "Boot", json!({}).as_object().unwrap().clone(), "person");
         h.pump();
     }
-    let per_pass_ms = t.elapsed().as_secs_f64() * 1000.0 / 30.0;
-    eprintln!("per pass over 20,000 entities: {per_pass_ms:.2} ms");
-    assert_eq!(h.get("Probe:a", "n"), json!(31));
-    assert!(per_pass_ms < 6.0, "one instances() pass over 20,000 entities took {per_pass_ms:.2} ms (a class list was built per entity)");
+    assert_eq!(h.get("Probe:a", "n"), json!(36));
+    assert_eq!(h.inst_scans() - s1, 5, "one walk per Boot that arrived");
 }
 
 /// The allocation-free class test keeps the old answers: the eid class when there is no `parents`, a kind by its last colon segment (any case), a single string, an entry with no colon.

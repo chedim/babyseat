@@ -127,9 +127,9 @@ Request.ss_delete_reply getter:
   ELSE WHEN this.ss_deleted == True: {'status': 200, 'body': True}
   ELSE: None
 
--- ---- GET /session/status: the truth per session, from the store: a session is busy while one of its turns runs ----------------------------------------
+-- ---- GET /session/status: the truth per session, from the store: a session is busy while one of its turns runs (the running turns are listed ONCE, not once per session: native/tests/status_work_1143.rs) ----------------------------------------
 -- (one SQL answer: an object keyed by session id, which a pack cannot build from rows)
-Request.ss_stat getter: sql('SELECT json_group_object(replace(s.k, \'membrane::Chat:session:\', \'\'), json(CASE WHEN EXISTS (SELECT 1 FROM c_field t WHERE t.cls = \'Chat\' AND t.k LIKE \'membrane::Chat:message:%:turn\' AND json_extract(t.body, \'$.props.sid\') = replace(s.k, \'membrane::Chat:session:\', \'\') AND json_extract(t.body, \'$.props.state\') = \'running\') THEN \'{"type":"busy"}\' ELSE \'{"type":"idle"}\' END)) AS status FROM c_field s WHERE s.cls = \'Chat\' AND s.k LIKE \'membrane::Chat:session:%\' AND s.k NOT LIKE \'membrane::Chat:session:%:%\'') if this.ss_route == 'status' else None
+Request.ss_stat getter: sql('SELECT json_group_object(replace(s.k, \'membrane::Chat:session:\', \'\'), json(CASE WHEN replace(s.k, \'membrane::Chat:session:\', \'\') IN (SELECT json_extract(t.body, \'$.props.sid\') FROM c_field t WHERE t.cls = \'Chat\' AND t.k LIKE \'membrane::Chat:message:%:turn\' AND json_extract(t.body, \'$.props.state\') = \'running\') THEN \'{"type":"busy"}\' ELSE \'{"type":"idle"}\' END)) AS status FROM c_field s WHERE s.cls = \'Chat\' AND s.k LIKE \'membrane::Chat:session:%\' AND s.k NOT LIKE \'membrane::Chat:session:%:%\'') if this.ss_route == 'status' else None
 Request.ss_status_reply getter:
   WHEN this.ss_stat == None: None
   ELSE:

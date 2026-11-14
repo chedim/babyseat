@@ -89,22 +89,29 @@ impl Ent {
     }
     /// Is `cls` in the class list (`class_names`)? The same answer, without building the list: `instances(...)` asks it of EVERY loaded entity, and a list of Strings per entity cost
     /// about 5 ms a pass at 30,000 entities (measured 2026-11-14, #1143).
-    pub fn in_classes(&self, cls: &str) -> bool {
-        // an entry's name is what follows its last colon: it is `cls` when the entry ENDS with it, after a colon or as the whole entry (no scan for the colon: an entry can be long)
-        fn named(p: &J, cls: &str) -> Option<bool> {
-            let s = p.as_str().filter(|s| !s.is_empty())?;
-            let (n, c) = (s.len(), cls.len());
-            Some(n >= c && s.as_bytes()[n - c..].eq_ignore_ascii_case(cls.as_bytes()) && (n == c || s.as_bytes()[n - c - 1] == b':'))
-        }
-        if cls.contains(':') { return self.class_names().iter().any(|c| c.eq_ignore_ascii_case(cls)); }
-        let (mut any, mut hit) = (false, false);
-        match self.props.get("parents") {
-            Some(J::Array(a)) => for p in a { if let Some(h) = named(p, cls) { any = true; hit |= h; } },
-            Some(p) => if let Some(h) = named(p, cls) { any = true; hit = h; },
-            None => {}
-        }
-        if any { hit } else { self.cls.eq_ignore_ascii_case(cls) }
+    pub fn in_classes(&self, cls: &str) -> bool { classes_hit(&self.cls, self.props.get("parents"), cls) }
+}
+
+/// `Ent::in_classes` on its two inputs, so the `instances` cache can ask it of an entity that is not (or no longer) in `docs`.
+fn classes_hit(ent_cls: &str, parents: Option<&J>, cls: &str) -> bool {
+    // an entry's name is what follows its last colon: it is `cls` when the entry ENDS with it, after a colon or as the whole entry (no scan for the colon: an entry can be long)
+    fn named(p: &J, cls: &str) -> Option<bool> {
+        let s = p.as_str().filter(|s| !s.is_empty())?;
+        let (n, c) = (s.len(), cls.len());
+        Some(n >= c && s.as_bytes()[n - c..].eq_ignore_ascii_case(cls.as_bytes()) && (n == c || s.as_bytes()[n - c - 1] == b':'))
     }
+    if cls.contains(':') {
+        let l = parents.map(parent_names).unwrap_or_default();
+        let l = if l.is_empty() { vec![ent_cls.to_string()] } else { l };
+        return l.iter().any(|c| c.eq_ignore_ascii_case(cls));
+    }
+    let (mut any, mut hit) = (false, false);
+    match parents {
+        Some(J::Array(a)) => for p in a { if let Some(h) = named(p, cls) { any = true; hit |= h; } },
+        Some(p) => if let Some(h) = named(p, cls) { any = true; hit = h; },
+        None => {}
+    }
+    if any { hit } else { ent_cls.eq_ignore_ascii_case(cls) }
 }
 
 #[derive(Clone)]
@@ -246,10 +253,11 @@ pub struct Core {
     /// `referencing(x, prop)`'s reverse index: prop -> target eid -> the entities whose prop holds it. Built per prop
     /// the first time it is asked for, then kept current on every write, load and removal.
     ref_ix: std::cell::RefCell<HashMap<String, HashMap<String, std::collections::BTreeSet<String>>>>,
-    /// `instances(<class>)`'s answer (the sorted eids) per class, lower-cased, with the generation it was made at: `inst_gen` moves when an entity arrives, leaves, changes its class
-    /// or its `parents` / `scratch`, so a request that asks a class eight times walks the loaded entities once (measured 2026-11-14: 3-5 ms a walk at 50,000 entities, #1143).
-    inst_gen: std::cell::Cell<u64>,
-    inst_cache: std::cell::RefCell<HashMap<String, (u64, std::sync::Arc<Vec<String>>)>>,
+    /// The walks `instances(<class>)` made over every loaded entity (the cache misses; `inst_scans()`).
+    inst_scans: std::cell::Cell<u64>,
+    /// `instances(<class>)`'s answer (the sorted eids) per class, lower-cased. An entity that arrives, leaves, changes its class or its `parents` / `scratch` forgets only the answers it can
+    /// be in (`inst_touch`): a request that is born (`Request`) leaves `instances('Boot')` alone, so the ten reads of it in a request cost no walk (measured 2026-11-14: 10 ms a walk at 27,000 entities, #1143).
+    inst_cache: std::cell::RefCell<HashMap<String, std::sync::Arc<Vec<String>>>>,
     seq: u64,
     pub learner: bool,
     pub trace: Option<Vec<String>>,
@@ -408,7 +416,7 @@ impl Core {
     pub fn new() -> Self {
         Core {
             why: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
-            inst_gen: Default::default(), inst_cache: Default::default(), docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
+            inst_scans: Default::default(), inst_cache: Default::default(), docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), queue_writes: true, dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
@@ -461,7 +469,8 @@ impl Core {
         for (k, v) in &props { self.set_refs(&eid, k, Some(v)); }
         if self.is_virtual_class(&cls) { self.virt_live.insert(eid.clone()); self.gc_candidates.borrow_mut().insert(eid.clone()); self.forget_collected(&eid); }
         let touched = std::cell::Cell::new(self.bump());
-        self.inst_gen.set(self.inst_gen.get() + 1);
+        if let Some(o) = self.docs.get(&eid) { self.inst_touch(&o.cls, o.props.get("parents")); }
+        self.inst_touch(&cls, props.get("parents"));
         self.docs.insert(eid, Ent { cls, props, pos, touched });
     }
 
@@ -474,7 +483,8 @@ impl Core {
         }
         // a position of one NaN: keep the mirror's (a sweep with no geometric trigger doesn't copy them)
         let keep_pos = matches!(&pos, Some(v) if v.len() == 1 && v[0].is_nan());
-        self.inst_gen.set(self.inst_gen.get() + 1);
+        if let Some(o) = self.docs.get(&eid) { self.inst_touch(&o.cls, o.props.get("parents")); }
+        self.inst_touch(&cls, props.as_ref().and_then(|p| p.get("parents")).or_else(|| self.docs.get(&eid).and_then(|o| o.props.get("parents"))));
         match (self.docs.get_mut(&eid), props) {
             (Some(e), None) => { e.cls = cls; if !keep_pos { e.pos = pos; } }   // positions only (an `around` sweep)
             (Some(e), Some(props)) if keep_pos => { e.cls = cls; e.props = props; }
@@ -522,7 +532,7 @@ impl Core {
     fn remove(&mut self, eid: &str) {
         if let Some(i) = self.at.remove(eid) { self.order[i] = None; }
         self.updated.remove(eid);
-        self.inst_gen.set(self.inst_gen.get() + 1);
+        if let Some(o) = self.docs.get(eid) { self.inst_touch(&o.cls, o.props.get("parents")); }
         if let Some(e) = self.docs.remove(eid) {
             self.reindex_entity(eid, Some(&e.props), None);
             for k in e.props.keys() { self.set_refs(eid, k, None); }
@@ -693,7 +703,9 @@ impl Core {
                 let old = self.docs.get(&w.eid).and_then(|e| e.props.get(&w.prop).cloned());
                 self.reindex(&w.eid, &w.prop, old.as_ref(), if w.new.is_null() { None } else { Some(&w.new) });
             }
-            if w.prop == "parents" || w.prop == "scratch" { self.inst_gen.set(self.inst_gen.get() + 1); }
+            if w.prop == "parents" || w.prop == "scratch" {
+                if let Some(o) = self.docs.get(&w.eid) { self.inst_touch(&o.cls, o.props.get("parents")); self.inst_touch(&o.cls, if w.prop == "parents" { Some(&w.new) } else { o.props.get("parents") }); }
+            }
             let e = self.docs.get_mut(&w.eid).unwrap();
             if w.prop == "position" {
                 e.pos = match &w.new { J::Array(a) => Some(a.iter().map(f).collect()), _ => None };
@@ -715,11 +727,21 @@ impl Core {
     }
 
     /// Drop an entity's mirror only (the learner's candidates): the class answers are made again.
-    pub fn drop_doc(&mut self, eid: &str) { self.inst_gen.set(self.inst_gen.get() + 1); self.docs.remove(eid); }
+    pub fn drop_doc(&mut self, eid: &str) { if let Some(o) = self.docs.get(eid) { self.inst_touch(&o.cls, o.props.get("parents")); } self.docs.remove(eid); }
 
     pub fn set_cls(&mut self, eid: &str, cls: String) {
-        self.inst_gen.set(self.inst_gen.get() + 1);
+        if let Some(o) = self.docs.get(eid) { self.inst_touch(&o.cls, o.props.get("parents")); self.inst_touch(&cls, o.props.get("parents")); }
         if let Some(e) = self.docs.get_mut(eid) { e.cls = cls; }
+    }
+
+    /// How many times `instances(<class>)` walked every loaded entity (the cache misses): a count of work, for the tests (no clock).
+    pub fn inst_scans(&self) -> u64 { self.inst_scans.get() }
+
+    /// An entity of this class list arrived, left or changed: forget the cached `instances(...)` answers it can be in (the root `entity`, its eid class, or any class it names), and only those.
+    fn inst_touch(&self, ent_cls: &str, parents: Option<&J>) {
+        let mut c = self.inst_cache.borrow_mut();
+        if c.is_empty() { return; }
+        c.retain(|k, _| !(k == "entity" || ent_cls.eq_ignore_ascii_case(k) || classes_hit(ent_cls, parents, k)));
     }
 
     pub fn queued(&self) -> usize { self.q.len() }
@@ -853,15 +875,15 @@ impl Core {
             let Some(V::Str(c)) = a.first() else { return Some(Err("instances(class): a class name".into())) };
             // `Entity` is the root every entity has: every LOADED entity (what the unload policy picks its coldest from)
             let key = c.to_ascii_lowercase();
-            let gen = self.inst_gen.get();
-            let hit = self.inst_cache.borrow().get(&key).filter(|(g, _)| *g == gen).map(|(_, v)| v.clone());
+            let hit = self.inst_cache.borrow().get(&key).cloned();
             let ids = match hit {
                 Some(v) => v,
                 None => {
                     let mut ids: Vec<String> = self.docs.iter().filter(|(_, e)| (c.eq_ignore_ascii_case("Entity") || e.cls == *c || e.in_classes(c)) && e.props.get("scratch") != Some(&serde_json::Value::Bool(true))).map(|(k, _)| k.clone()).collect();
                     ids.sort();
                     let v = std::sync::Arc::new(ids);
-                    self.inst_cache.borrow_mut().insert(key, (gen, v.clone()));
+                    self.inst_scans.set(self.inst_scans.get() + 1);
+                    self.inst_cache.borrow_mut().insert(key, v.clone());
                     v
                 }
             };

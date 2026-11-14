@@ -126,3 +126,17 @@ Private seat on a fresh store, session `ses_2de37...` imported through `legacy_i
 | whole session again | 3,800 | 3,550 |
 
 Where the time goes: (1) every request evaluated eight getters of `instances('Boot')`, each a walk over all loaded entities building a class list per entity (fixed: `Core::inst_cache`, `Ent::in_classes`); (2) a page request pays a floor of about 330 ms for the SQL that lists the session's message keys (`ml_rows`, `hs_rows`): `json_extract` of `sid` and `at` parses the whole body of every message, and a message body is 234 KB on average (3.3 MB at most) because the store keeps the value of every cached getter (`oc_fin_parts`, `oc_rows`, `oc_arow`, `oc_parts`, `oc_tool_parts`, `history_view`, `tool_rows` each hold the tool outputs again: 310 of the 318 MB); (3) a message nobody has loaded costs about 13 ms to load (parse of that body, 17 child entities), so a whole session at first open is 17 s. The page's cockpit reads `?limit=40` (`CHAT_PAGE`); the embedded panel's first read and the mind loop's 3 s poll read the whole session.
+
+## 7. The slow demo seat: status, 404 and the idle burn (w87, #1143)
+
+Private seat, release build, imported 1,605 session headers + 200 sessions (27,332 loaded entities, 535 MB), the old store read through a `.backup` copy. Medians of 2-5 requests, ms; the machine was shared.
+
+| request | before | after |
+|---|---|---|
+| `GET /session/status` (80 KB, 1,605 sessions) | 14,600 | 50 |
+| `GET /nonexistent` (404) | 45 | 25 |
+| `GET /` | 50 | 25 |
+| evaluation self time of 11 requests (`Stats:eval.total_ms`) | 302 | 16 |
+
+What it was: (1) `/session/status` ran, per session, a subquery over every `Chat` row with `json_extract` of each turn's body (sessions x turns: 41 M row visits); it now lists the running turns once (`IN (SELECT ...)`: 1.94 M sqlite steps at 300 sessions became 16 k; `native/tests/status_work_1143.rs` counts the steps and asks that doubling the store does not quadruple them). While it ran the single sql thread was busy, so every other query waited. (2) Every request is a born `Request` entity, and a birth dropped EVERY kept `instances(<class>)` answer: the 30-40 getters of a request that read `instances('Boot')` (`ui_root`, `cookie_name`, `fv_seat`, `ha_pending`, `wg_all`, ... on the live seat, 6-25 ms per nine requests each) each walked all loaded entities again. An entity's arrival now drops only the answers it can be in (`Core::inst_touch`); `native/tests/instances_cost_1143.rs` counts walks (30 `Request` births: 30 walks before, 0 now). (3) The "idle" 100% CPU of the demo seat was not idle: its Firefox tab holds six connections and polls `/session/status` (`panel.js`) and the history routes; every poll was a request that cost the two things above, and a 51 s status poll queued the next ones (the `/` at 3.5 s and the 404 at 12 s were waiting in that queue, not slow themselves). A seat with no page open idles at 0% CPU and 20 evaluations per ten seconds (the banner's clock).
+
