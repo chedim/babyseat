@@ -179,3 +179,13 @@ Stays launch-only (no edit control, "restart needed", shown with the launch line
 9. Item E: record who changed a setting (yes/no).
 10. Item F: mint tokens from the window, or keep the command line only.
 11. `legacy_page` has no default (unset imports nothing on open): the window cannot show an editable number until the operator names one.
+
+## Built: the server side (`membrane/packs/settings.c1f`, tests `native/tests/settings_1143.rs`, model page `Help:settings`)
+
+Operator answers of 2026-11-14 applied: the dead settings and the six `chat_*` view constants are not rows; no author is recorded and no token is minted by the window; Access and Limits are shown read-only; the window cannot set a SQL source to `rw`; a number outside its range is refused with the reason.
+
+**Contract for the view** (the c1f view is built separately): the window lists `instances('Setting')`, groups by `group`, sorts by `order`. A row holds `label`, `help`, `kind` (`text` | `number` | `list` | `allowlist` | `readonly`), `live` (`live` | `restart`), `default`, `min`, `max`, `whole`, `unit`, `how`, and the getter `current`. A change is ONE write, `Setting:<group>.<key>.set = <value>`, as `POST /mcp` `entity_write` (owner-checked: a person who is not the owner gets the door's 403 text `for the owner`, shown as it is). Read back `refused` (the reason as text, empty after a good write) and `applied` (when). A refused write writes nothing else. `readonly` rows have no edit control and say in `how` what changes them.
+
+**Owners.** `model.chat` writes `Minds:seat.loops` (what the chat already reads); `home.allow` writes `HaAllow:<name>` (an entry the new list leaves out is retired); `chat.max_steps`, `chat.timeout`, `map.hidden`, `map.hidden_prefix`, `map.window` and `map.poll_ms` are owned by the row itself (`value`, journalled, so they survive a restart): the readers (`chat_turn.c1f`, `door_fieldvm.c1f`) read `Setting:*.current` first, then the launch fact, then the pack's own default (which a seat without this pack still uses). `GET /ui/fieldvm/active` with no `m` uses `map.window` when one was chosen (400 as before when none was); the snapshot's `field_window` / `field_poll_ms` read the same rows.
+
+**Privilege.** The pack is granted privilege in `boot.c1f` (as `door_tools` and `unload` are) because it writes `Minds` and `HaAllow`, classes of packs the barest seat does not load; the surface snapshot shows the grant.

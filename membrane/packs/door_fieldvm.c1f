@@ -57,7 +57,7 @@ FieldVm.snapshot getter:
   WHEN this.rows != None and len(this.rows) > 0:
     pk = json(prop(this.rows[0], 'packs'))
     bt = ([b for b in instances('Boot')] or [None])[0]
-    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars'), 'field_window': prop(bt, 'field_window'), 'field_poll_ms': prop(bt, 'field_poll_ms')}}], 'views': {'chat': prop(prop(bt, 'ui_views'), 'chat') or 'legacy', 'field': prop(prop(bt, 'ui_views'), 'field') or 'legacy'}}
+    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars'), 'field_window': prop('Setting:map.window', 'current') or prop(bt, 'field_window'), 'field_poll_ms': prop('Setting:map.poll_ms', 'current') or prop(bt, 'field_poll_ms')}}], 'views': {'chat': prop(prop(bt, 'ui_views'), 'chat') or 'legacy', 'field': prop(prop(bt, 'ui_views'), 'field') or 'legacy'}}
   ELSE: None
 
 Request.o_fieldvm getter: this.route in ['/ui/fieldvm', '/ui/fieldvm/active', '/ui/fieldvm/events', '/ui/fieldvm/edges']
@@ -67,15 +67,16 @@ Request.fv_body getter: this.fv_seat.snapshot if this.fv_seat != None else None
 -- THE ACTIVE WINDOW (#1143, the field view pack apps/barest.c1f/field_view.c1f; docs/field-view-plan.md slices 1-2, operator 2026-11-14): `GET /ui/fieldvm/active?m=<n>` answers
 -- `{nodes: [{id, cls, updated, parent}], n_total, hidden, m}`: the `m` entities written most recently (the `updated` column, newest first) whose class is not hidden, and how many there are in all.
 -- It reads the COLUMNS `k`, `cls`, `updated` of `c_field` and never a body, so an entity nobody loaded stays unloaded. `parent` is the nearest colon-prefix owner that is in the window too
--- (null otherwise): the ownership edge. `m` has NO default here (400 without it): the window's size is the view's launch fact (`field_window`). The hidden classes are the launch fact
+-- (null otherwise): the ownership edge. `m` has no default of its own (400 without it, unless a window was chosen): the page names it from `field_window`, and a request that names none gets `Setting:map.window` (packs/settings.c1f), the live owner of that number (the launch fact `field_window` is its default). The hidden classes are the live setting `Setting:map.hidden` (default: the launch fact
 -- `map_hidden` (a JSON list, or comma-separated text); without it: Message, SemText, Span, Request, DomNode, View, Fetch (operator 2026-11-14).
-Request.fa_m getter: num(concat([r[1] for r in this.qpairs if r[0] == 'm'], [''])[0])
+Request.fa_m_q getter: num(concat([r[1] for r in this.qpairs if r[0] == 'm'], [''])[0])
+Request.fa_m getter: this.fa_m_q if len([r for r in this.qpairs if r[0] == 'm']) > 0 else num(prop('Setting:map.window', 'current'))
 Request.fa_hide_fact getter: prop(this.facts, 'map_hidden')
-Request.fa_hidden getter: ([strip(x) for x in this.fa_hide_fact] if this.fa_hide_fact is List else words(replace(str(this.fa_hide_fact), ',', ' '))) if this.fa_hide_fact != None else ['Message', 'SemText', 'Span', 'Request', 'DomNode', 'View', 'Fetch']
+Request.fa_hidden getter: [strip(x) for x in prop('Setting:map.hidden', 'current')] if prop('Setting:map.hidden', 'current') is List else ([strip(x) for x in this.fa_hide_fact] if this.fa_hide_fact is List else words(replace(str(this.fa_hide_fact), ',', ' '))) if this.fa_hide_fact != None else ['Message', 'SemText', 'Span', 'Request', 'DomNode', 'View', 'Fetch']
 -- the hidden EID PREFIXES (the launch fact `map_hidden_prefix`, a JSON list or comma text; default `Chat:message:`, operator 2026-11-14): a chat message and its body have `cls = Chat` (the eid's class),
 -- so the class list cannot hide them; the prefix is matched on the `k` column, never a body
 Request.fa_pre_fact getter: prop(this.facts, 'map_hidden_prefix')
-Request.fa_prefixes getter: ([strip(x) for x in this.fa_pre_fact] if this.fa_pre_fact is List else words(replace(str(this.fa_pre_fact), ',', ' '))) if this.fa_pre_fact != None else ['Chat:message:']
+Request.fa_prefixes getter: [strip(x) for x in prop('Setting:map.hidden_prefix', 'current')] if prop('Setting:map.hidden_prefix', 'current') is List else ([strip(x) for x in this.fa_pre_fact] if this.fa_pre_fact is List else words(replace(str(this.fa_pre_fact), ',', ' '))) if this.fa_pre_fact != None else ['Chat:message:']
 Request.fa_ok getter: this.fa_m != None and this.fa_m >= 1
 Request.fa_rows getter: sql("WITH w AS (SELECT k, cls, updated FROM c_field WHERE cls NOT IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM json_each(?) WHERE substr(k, 1, length(value)) = value) ORDER BY updated DESC, k LIMIT ?) SELECT w.k AS id, w.cls AS cls, w.updated AS updated, (SELECT p.k FROM w p WHERE p.k != w.k AND substr(w.k, 1, length(p.k) + 1) = p.k || ':' ORDER BY length(p.k) DESC LIMIT 1) AS parent FROM w ORDER BY w.updated DESC, w.k", this.fa_hidden, this.fa_prefixes, this.fa_m) if this.fa_ok else None
 Request.fa_total getter: sql("SELECT count(*) AS n FROM c_field WHERE cls NOT IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM json_each(?) WHERE substr(k, 1, length(value)) = value)", this.fa_hidden, this.fa_prefixes) if this.fa_ok else None

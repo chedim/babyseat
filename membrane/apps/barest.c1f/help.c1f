@@ -19,3 +19,4 @@ Boot.started on-setter seed-help:
     Help:sql.file = dir + '/help/sql.md'
     Help:legacy.file = dir + '/help/legacy.md'
     Help:ha.file = dir + '/help/ha.md'
+    Help:settings.file = dir + '/help/settings.md'

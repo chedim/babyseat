@@ -90,6 +90,7 @@
     "members": 4,
     "writes": [
       "Pack:door_tools.privileged",
+      "Pack:settings.privileged",
       "Pack:unload.privileged"
     ],
     "claims": [],
@@ -390,7 +391,7 @@
       "Request",
       "Wire"
     ],
-    "members": 38,
+    "members": 39,
     "writes": [
       "*.send",
       "FieldVm:seat.born",
@@ -1043,6 +1044,28 @@
     "boot_facts": [],
     "virtual": [
       "Span"
+    ]
+  },
+  "settings": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "Setting"
+    ],
+    "members": 7,
+    "writes": [
+      "*.[]",
+      "*.retire",
+      "HaAllow:*.entities",
+      "HaAllow:*.services",
+      "Setting:*.[]"
+    ],
+    "claims": [],
+    "boot_facts": [],
+    "resident": [
+      "Setting"
     ]
   },
   "sql": {

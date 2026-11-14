@@ -18,3 +18,4 @@ Boot.started on-setter grant-door-tools:
   ALWAYS:
     Pack:door_tools.privileged = True
     Pack:unload.privileged = True
+    Pack:settings.privileged = True   -- the settings pack writes the owners of a setting (the chat's `Minds:seat`, the Home allow-list `HaAllow:*`), classes of packs the barest seat does not load
