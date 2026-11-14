@@ -38,7 +38,7 @@ html, body { height: 100%; }
 /* the shell (shell_view.c1f): the bar, the nav, the slots, the errors */
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .bar h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: .01em; }
-.bar { order: 0; } .shell-error { order: 1; } .shell-body { order: 2; } .bar h1 { order: 0; } .nav { order: 1; } .conn { order: 2; } .theme { order: 3; }   /* the shell's children are made in the order the views register: the CSS fixes the page's order */
+.bar { order: 0; } .shell-error { order: 1; } .shell-body { order: 2; } .bar h1 { order: 0; } .nav { order: 1; } .conn { order: 2; } .theme { order: 3; } .signout { order: 4; }   /* the shell's children are made in the order the views register: the CSS fixes the page's order */
 .nav { display: flex; gap: 6px; }
 .nav button[aria-current="page"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .conn { font-size: 12px; color: var(--mute); margin-left: auto; }
@@ -191,3 +191,17 @@ code.md-code { font: .92em var(--mono); background: rgb(127 127 127 / .18); padd
 .md-more { margin-top: .4em; color: var(--mute); } .md-plain { white-space: pre-wrap; word-break: break-word; display: block; }
 .md-showall { padding: 2px 8px; font-size: 12px; margin-top: 4px; }
 @media (max-width: 520px) { .bubble { max-width: 100%; } .md-codebody { font-size: 12px; } }
+
+/* the sign-in screen (login_view.c1f): a centered card; the page has no cookie yet */
+.login { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.login-card { width: min(420px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.login-card h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: .01em; }
+.login-field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+.login-field input { background: var(--bg); border: 1px solid var(--edge); border-radius: 6px; padding: 10px 12px; font: 400 15px var(--mono); width: 100%; }
+.login-field input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.login-send { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); padding: 10px 14px; font-weight: 600; }
+.login-send:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.login-err { margin: 0; min-height: 1.45em; color: var(--note-ink); }
+.login-err:not(:empty) { background: var(--note); padding: 8px 12px; border-radius: 8px; }
+.login-help { margin: 0; color: var(--mute); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .login-card, .login-card * { transition: none !important; animation: none !important; } }

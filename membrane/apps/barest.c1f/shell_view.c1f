@@ -48,6 +48,13 @@ Shell.open on-setter shell-draw:
     ('DomNode:shell:theme').class = 'theme'
     ('DomNode:shell:theme').title = 'Switch between the system, light and dark theme'
     ('DomNode:shell:theme').text = 'Theme: system'
+    ('DomNode:shell:signout').parent = 'DomNode:shell:bar'
+    ('DomNode:shell:signout').tag = 'button'
+    ('DomNode:shell:signout').type = 'button'
+    ('DomNode:shell:signout').class = 'signout'
+    ('DomNode:shell:signout').title = 'Sign out of this seat (the page forgets its cookie and asks for the token again)'
+    ('DomNode:shell:signout').text = 'Sign out'
+    ('DomNode:shell:signout').hidden = True
     ('DomNode:shell:error').parent = 'DomNode:shell:root'
     ('DomNode:shell:error').tag = 'div'
     ('DomNode:shell:error').class = 'shell-error'
@@ -100,6 +107,7 @@ Shell.open on-setter shell-draw:
     this.seq = 1
     this.polling = True
     ('Fetch:status').request = {'id': 'status-1', 'url': '/session/status'}
+    ('Fetch:conf').request = {'id': 'conf-1', 'url': '/ui/conf'}
 
 -- ---- the navigation: one button and one slot per registered view ----
 Shell.nav_all getter: sort_by([{'name': replace(n.eid, 'Nav:', ''), 'title': n.title, 'order': n.order or 50} for n in instances('Nav') if n.title != None], 'order')
@@ -267,3 +275,20 @@ DomNode.clicked on-setter shell-panel-click:
 DomNode.key on-setter shell-panel-esc:
   WHEN startswith(this.eid, 'DomNode:shell:panel') and prop(this.key, 'key') == 'Escape' and prop('Panel:detail', 'open'):
     ('Panel:detail').open = False
+
+-- ---- SIGN OUT: a small button in the bar, drawn only when the seat says who the page is (`/ui/conf` `who`: a verified cookie or token; a seat with no auth says none, so no button) ----
+-- A click is `POST /ui/logout` (the seat clears the cookie); a 2xx loads the page again (the host's `reload` write), which then starts as the sign-in screen (login_view.c1f) or, on this machine, is given its cookie again.
+Fetch.sv on-setter shell-conf-done:
+  WHEN this.eid == 'Fetch:conf' and this.sv != None:
+    cj = json(str(prop(this.request_result, 'body') or ''))
+    ('DomNode:shell:signout').hidden = not (prop(this.sv, 'ok') and cj is Dict and prop(cj, 'who') != None)
+DomNode.clicked on-setter shell-signout-click:
+  WHEN this.eid == 'DomNode:shell:signout' and not prop('Shell:main', 'signing_out'):
+    ('Shell:main').signing_out = True
+    ('Fetch:logout').request = {'timeout_s': 15, 'id': 'logout-1', 'url': '/ui/logout', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': '{}'}
+Fetch.sv on-setter shell-signout-done:
+  WHEN this.eid == 'Fetch:logout' and this.sv != None:
+    ('Shell:main').signing_out = False
+    ('DomNode:shell:root').reload = True if prop(this.sv, 'ok') else None
+    ('DomNode:shell:error').hidden = prop(this.sv, 'ok') == True
+    ('DomNode:shell:error').text = '' if prop(this.sv, 'ok') else 'Sign out did not work: ' + str(prop(this.sv, 'why'))
