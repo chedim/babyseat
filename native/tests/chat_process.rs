@@ -1577,7 +1577,7 @@ fn admin_seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
 }
 
 #[test]
-fn the_turns_cli_reaches_the_mcp_door_with_the_owner_token_from_its_environment_and_never_through_argv() {
+fn the_turns_cli_reaches_the_mcp_door_with_the_admin_token_from_its_environment_and_never_through_argv() {
     let (mut run, port, dir) = admin_seat("chatadmin", &fake_with_headers(""));
     let tok = std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string();
     let id = send(port, "with a token");

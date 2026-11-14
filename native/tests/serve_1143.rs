@@ -93,7 +93,7 @@ fn help_names_every_option_and_where_the_defaults_live() {
 }
 
 #[test]
-fn it_finds_packs_apps_and_ui_next_to_its_own_binary_and_serves_the_page_and_the_door_with_the_owner_token() {
+fn it_finds_packs_apps_and_ui_next_to_its_own_binary_and_serves_the_page_and_the_door_with_the_admin_token() {
     let d = dist("a");
     let data = d.parent().unwrap().join("data");
     let claude = fake_claude(d.parent().unwrap());
