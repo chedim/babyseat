@@ -163,7 +163,7 @@ fn a_number_is_refused_with_the_reason_never_clamped_and_nothing_changes() {
     assert_eq!(cur(run.port, "chat.max_steps"), json!(2048));
     set(run.port, "map.window", json!(0));
     assert!(refused(run.port, "map.window").contains("at least"));
-    assert_eq!(cur(run.port, "map.window"), J::Null, "no window until one is chosen");
+    assert_eq!(cur(run.port, "map.window"), json!(150), "the default window stands");
 }
 
 #[test]
@@ -238,7 +238,10 @@ fn the_field_feed_honours_a_new_window_and_hidden_lists_as_they_are_written() {
     rpc(run.port, None, "entity_write", json!({"spec": "Qux:1", "prop": "n", "value": 1}));
     let feed = |q: &str| -> J { serde_json::from_str(&http(run.port, "GET", &format!("/ui/fieldvm/active{q}"), None, "").1).unwrap() };
     let ids = |j: &J| -> Vec<String> { j["nodes"].as_array().unwrap().iter().map(|n| n["id"].as_str().unwrap().to_string()).collect() };
-    assert_eq!(http(run.port, "GET", "/ui/fieldvm/active", None, "").0, 400, "no window chosen: the route still wants `m`");
+    assert_eq!(feed("")["m"], json!(150), "no `m` and nothing written: the default window of the setting");
+    assert!(!ids(&feed("?m=500")).iter().any(|i| i.starts_with("Setting:")), "the settings are hidden by default");
+    assert_eq!(cur(run.port, "map.hidden").as_array().unwrap().last().unwrap(), &json!("Setting"));
+    assert_eq!(cur(run.port, "map.poll_ms"), json!(2000));
     set(run.port, "map.window", json!(3));
     assert_eq!(feed("")["nodes"].as_array().unwrap().len(), 3, "the written window is the feed's size when the page names none");
     assert_eq!(feed("?m=5")["nodes"].as_array().unwrap().len(), 5, "a window the page names wins");

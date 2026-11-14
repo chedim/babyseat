@@ -88,7 +88,7 @@ Each slice ends with the golden boot test unchanged for an empty store (`tests/g
 
 ## Open decisions
 
-1. Which classes are hidden from the map by default (my pick: Message, SemText, Span, Request, DomNode, View, Fetch; the list is a launch fact, not code).
+1. Which classes are hidden from the map by default (my pick: Message, SemText, Span, Request, DomNode, View, Fetch, and since the settings pack Setting; the list is a launch fact, not code).
 2. The node cap and the edge cap for a store of Memo's size (the page sends 1,200 today; 6,000 edges is the old constant; neither is chosen for the new seat).
 3. What `mass` means without accretion: property count, inbound edges, or text length (my pick: inbound edges, since it is the same number as `degree`'s cousin and costs no new query).
 4. The 3D layout without vectors: class sectors plus hash direction, a force layout like `graph.js`, or leave 3D empty until a native recall; and what the octree levels mean for it.
