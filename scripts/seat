@@ -39,7 +39,7 @@ while read -r name; do
   case "$name" in ''|'#'*) continue ;; esac
   set -- "$@" "membrane/packs/$name.c1f"
 done < membrane/apps/barest.packs
-set -- "$@" membrane/apps/barest.c1f --store "$store" --port "$port"
+set -- "$@" membrane/apps/barest.c1f --store "$store" --port "$port" --ui-dir membrane/ui
 # the operator's facts, then the claude CLI's
 if [ -n "$facts" ]; then
   oldifs=$IFS; IFS='
