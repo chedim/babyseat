@@ -1,0 +1,214 @@
+[
+ {
+  "name": "the owner side of the link: the verdict of each subscription, the value only when allowed",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/link.c1f",
+   "membrane/packs/link_route.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "link_max_value": 100
+    }
+   },
+   {
+    "eid": "LinkAllow:setting",
+    "class": "LinkAllow",
+    "props": {
+     "prefixes": [
+      "Setting:"
+     ]
+    }
+   },
+   {
+    "eid": "Setting:a.ok",
+    "class": "Setting",
+    "props": {
+     "value": 5
+    }
+   },
+   {
+    "eid": "Setting:a.big",
+    "class": "Setting",
+    "props": {
+     "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   },
+   {
+    "eid": "Chat:main",
+    "class": "Chat",
+    "props": {
+     "title": "secret"
+    }
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_ok",
+    "class": "LinkPeer",
+    "props": {
+     "sid": "Setting:a.ok",
+     "wid": "membrane::Setting:a.ok",
+     "sprop": "value",
+     "ns": "pabcdef12",
+     "live": true,
+     "capped": false
+    }
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_big",
+    "class": "LinkPeer",
+    "props": {
+     "sid": "Setting:a.big",
+     "wid": "membrane::Setting:a.big",
+     "sprop": "value",
+     "ns": "pabcdef12",
+     "live": true,
+     "capped": false
+    }
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_chat",
+    "class": "LinkPeer",
+    "props": {
+     "sid": "Chat:main",
+     "wid": "membrane::Chat:main",
+     "sprop": "title",
+     "ns": "pabcdef12",
+     "live": true,
+     "capped": false
+    }
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_boot",
+    "class": "LinkPeer",
+    "props": {
+     "sid": "Boot:seat",
+     "wid": "membrane::Boot:seat",
+     "sprop": "door_secret_file",
+     "ns": "pabcdef12",
+     "live": true,
+     "capped": false
+    }
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_other",
+    "class": "LinkPeer",
+    "props": {
+     "sid": "p00000000::Shell:main",
+     "wid": "p00000000::Shell:main",
+     "sprop": "open",
+     "ns": "pabcdef12",
+     "live": true,
+     "capped": false
+    }
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_capped",
+    "class": "LinkPeer",
+    "props": {
+     "sid": "Setting:a.ok",
+     "wid": "membrane::Setting:a.ok",
+     "sprop": "value",
+     "ns": "pabcdef12",
+     "live": true,
+     "capped": true
+    }
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_off",
+    "class": "LinkPeer",
+    "props": {
+     "sid": "Setting:a.ok",
+     "wid": "membrane::Setting:a.ok",
+     "sprop": "value",
+     "ns": "pabcdef12",
+     "live": false,
+     "capped": false
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "LinkPeer:pabcdef12:k_ok",
+    "prop": "val",
+    "equals": 5
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_ok",
+    "prop": "why",
+    "none": true
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_ok",
+    "prop": "due",
+    "equals": true
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_ok",
+    "prop": "row",
+    "equals": {
+     "id": "membrane::Setting:a.ok",
+     "prop": "value",
+     "value": 5
+    }
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_big",
+    "prop": "why",
+    "contains": "too large (150 characters, the most is 100)"
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_big",
+    "prop": "row",
+    "equals": {
+     "id": "membrane::Setting:a.big",
+     "refused": "refused: too large (150 characters, the most is 100)"
+    }
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_chat",
+    "prop": "val",
+    "none": true
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_chat",
+    "prop": "why",
+    "contains": "never"
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_boot",
+    "prop": "why",
+    "contains": "allow-list"
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_boot",
+    "prop": "val",
+    "none": true
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_other",
+    "prop": "why",
+    "contains": "own entities"
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_capped",
+    "prop": "why",
+    "contains": "too many subscriptions"
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_off",
+    "prop": "due",
+    "equals": false
+   },
+   {
+    "eid": "LinkPeer:pabcdef12:k_off",
+    "prop": "val",
+    "none": true
+   }
+  ]
+ }
+]
