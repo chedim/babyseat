@@ -194,7 +194,7 @@ Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json
 Request.mc_r_val getter: prop(this.mc_r_id, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None else None
 Request.mc_r_text getter:
   WHEN this.mc_tool != 'entity_read' or this.mc_r_bad != None: None
-  ELSE WHEN this.mc_r_prop != None and this.mc_r_val == None: this.mc_r_id + ' has no ' + str(this.mc_r_prop)
+  ELSE WHEN this.mc_r_prop != None and this.mc_r_val == None: this.mc_r_id + ' has no ' + str(this.mc_r_prop) + (': ' + str(why(this.mc_r_val)) if why(this.mc_r_val) != None else '')
   ELSE WHEN this.mc_r_prop != None: str(this.mc_r_val)
   ELSE WHEN this.mc_r_rows == None: None
   ELSE WHEN len(this.mc_r_rows) == 0: 'no such entity: ' + this.mc_r_spec
