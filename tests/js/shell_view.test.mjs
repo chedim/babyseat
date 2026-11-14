@@ -52,7 +52,7 @@ const scenario = (name, fn) => { fn(); n++; console.log('  ok', name); };
 
 scenario('the skeleton: header, nav, status line, theme, one slot per view', () => {
   const w = world(); w.boot();
-  assert.equal(w.n('root').class, 'shell'); assert.equal(w.n('bar').tag, 'header'); assert.equal(w.n('title').text, 'Membrane seat');
+  assert.equal(w.n('root').class, 'shell'); assert.equal(w.n('bar').tag, 'header'); assert.equal(w.n('title').text, 'babyseat');
   assert.equal(w.n('nav').tag, 'nav'); assert.equal(w.n('nav')['aria-label'], 'Views');
   assert.equal(w.n('status').role, 'status'); assert.equal(w.n('status')['aria-live'], 'polite');
   assert.deepEqual(['chat', 'field', 'settings'].map((k) => w.get('DomNode:shell:nav:' + k).text), ['Chat', 'Field', 'Settings']);

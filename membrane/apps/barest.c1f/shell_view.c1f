@@ -31,7 +31,7 @@ Shell.open on-setter shell-draw:
     ('DomNode:shell:bar').class = 'bar'
     ('DomNode:shell:title').parent = 'DomNode:shell:bar'
     ('DomNode:shell:title').tag = 'h1'
-    ('DomNode:shell:title').text = 'Membrane seat'
+    ('DomNode:shell:title').text = 'babyseat'
     ('DomNode:shell:nav').parent = 'DomNode:shell:bar'
     ('DomNode:shell:nav').tag = 'nav'
     ('DomNode:shell:nav').class = 'nav'
