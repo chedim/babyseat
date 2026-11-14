@@ -1411,5 +1411,301 @@
     "equals": "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
    }
   ]
+ },
+ {
+  "name": "a seat bound to a specific address (--bind <lan-ip>) hands the CLI that address in its MCP url, not loopback",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude",
+     "chat_max_turns": 7,
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "192.168.1.50"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.22",
+    "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://192.168.1.50:4321/mcp\"}}}"
+   }
+  ]
+ },
+ {
+  "name": "a seat bound to the wildcard 0.0.0.0 hands the CLI loopback in its MCP url",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude",
+     "chat_max_turns": 7,
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "0.0.0.0"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.22",
+    "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\"}}}"
+   }
+  ]
+ },
+ {
+  "name": "a seat bound to the wildcard :: hands the CLI loopback in its MCP url",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude",
+     "chat_max_turns": 7,
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "::"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.22",
+    "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\"}}}"
+   }
+  ]
+ },
+ {
+  "name": "a seat bound to a specific IPv6 address hands the CLI that address in brackets",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude",
+     "chat_max_turns": 7,
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "fe80::1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.22",
+    "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://[fe80::1]:4321/mcp\"}}}"
+   }
+  ]
  }
 ]

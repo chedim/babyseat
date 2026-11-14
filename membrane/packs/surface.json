@@ -185,7 +185,7 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 55,
+    "members": 57,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",

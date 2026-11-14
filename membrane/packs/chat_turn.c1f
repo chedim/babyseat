@@ -59,10 +59,21 @@ ChatMessage.port getter:
 ChatMessage.owner_file getter:
   WHEN this.over: None
   ELSE: ([b.owner_token_file for b in instances('Boot') if b.owner_token_file != None] or [None])[0]
+-- THE DOOR'S ADDRESS (#1143): the CLI is always a child of the seat on the same machine, so its MCP url names the address the door actually listens on: the host of
+-- `Http:door.listen_result` when it is a specific address (`--bind <lan-ip>` has no listener on loopback), loopback when the bind is the wildcard (0.0.0.0, ::) or unstated.
+-- A specific IPv6 address is written in brackets.
+ChatMessage.mcp_host getter:
+  WHEN this.over: None
+  ELSE: ([prop(h.listen_result, 'host') for h in instances('Http') if prop(h.listen_result, 'host') != None] or ['127.0.0.1'])[0]
+ChatMessage.mcp_url getter:
+  WHEN this.over or this.port == None: None
+  ELSE WHEN this.mcp_host == '' or this.mcp_host == '0.0.0.0' or this.mcp_host == '::': 'http://127.0.0.1:' + str(this.port) + '/mcp'
+  ELSE WHEN ':' in this.mcp_host: 'http://[' + this.mcp_host + ']:' + str(this.port) + '/mcp'
+  ELSE: 'http://' + this.mcp_host + ':' + str(this.port) + '/mcp'
 ChatMessage.mcp_server getter:
   WHEN this.over or this.port == None: None
-  ELSE WHEN this.owner_file != None: {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'headers': {'Authorization': 'Bearer ${MEMBRANE_OWNER_TOKEN}'}}
-  ELSE: {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp'}
+  ELSE WHEN this.owner_file != None: {'type': 'http', 'url': this.mcp_url, 'headers': {'Authorization': 'Bearer ${MEMBRANE_OWNER_TOKEN}'}}
+  ELSE: {'type': 'http', 'url': this.mcp_url}
 -- what the run's `env_from` hands the child: the owner's token (a seat with a secret) and, in key mode, the API key (both named, never valued here). ONE key check: the key is named
 -- only when `key_set` (the launcher's fact: set AND non-empty) is true, the same test `plan` refuses on, so the driver's "environment variable ... is not set" can never be reached in key mode.
 ChatMessage.owner_env getter:
