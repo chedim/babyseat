@@ -70,6 +70,11 @@ fn class_rank_in(core: &Core, eid: &str, e: &crate::vm::Ent, names: &[String], g
     None
 }
 
+/// `x is <cls>` (#1143): the class list (`parents`, nearest first), an ancestor up the ISA chain, or the root `Entity`; false for an entity that is not loaded.
+pub(crate) fn entity_is(core: &Core, eid: &str, cls: &str) -> bool {
+    core.docs.get(eid).map_or(false, |e| cls == ROOT_CLASS || e.in_classes(cls) || has_kind(core, eid, &e.props, cls))
+}
+
 /// A kind among an entity's ISA parents: named by the parent's id (`cls:chatthing` is ChatThing, mirrored or not),
 /// or found up the chain (core.is_a).
 fn has_kind(core: &Core, eid: &str, props: &serde_json::Map<String, J>, cls: &str) -> bool {

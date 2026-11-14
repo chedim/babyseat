@@ -146,6 +146,9 @@ pub enum V {
     None,
     /// A null that says why: `pending: read(/a)`, `error: ...`, `absent ...` (nulls propagate like SQL's; operator 2026-11-12)
     Nil(String),
+    /// A FAILURE (#1143, docs/c1f-error.md): carries its reason, the remedy being part of the text. Not a null: `x == None` is False for it, it
+    /// propagates through every operation that uses it, and `x is Error` is the test. Stored, it is a plain null (the kind lives in `Core.why`).
+    Error(String),
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -181,6 +184,8 @@ pub enum Node {
     Comp(Box<Node>, String, Box<Node>, Option<Box<Node>>),
     /// `a if cond else b` (then, cond, else)
     If(Box<Node>, Box<Node>, Box<Node>),
+    /// `x is Kind`, `x is (A, B)` (every name must match), `x is not Kind`: the kind names are not evaluated (names, negated)
+    Is(Box<Node>, Vec<String>, bool),
     /// a block's local: `name = value` then the rest of the block, where `name` is bound
     Let(String, Box<Node>, Box<Node>),
     /// an unquoted entity literal: `Goal:board`, `membrane::Chat:message[id]:response` (its text, with each `[key]` evaluated and
@@ -203,7 +208,7 @@ impl Node {
             Node::Const(_) | Node::Name(_) => {}
             Node::List(v) | Node::And(v) | Node::Or(v) | Node::Call(_, v) => out.extend(v.drain(..)),
             Node::Dict(v) => out.extend(v.drain(..).map(|(_, n)| n)),
-            Node::Attr(a, _) | Node::Neg(a) | Node::Not(a) => b(a),
+            Node::Attr(a, _) | Node::Neg(a) | Node::Not(a) | Node::Is(a, _, _) => b(a),
             Node::Index(a, c) | Node::Bin(_, a, c) | Node::Let(_, a, c) => { b(a); b(c); }
             Node::Compare(a, ops) => { b(a); out.extend(ops.drain(..).map(|(_, n)| n)); }
             Node::Comp(e, _, i, c) => { b(e); b(i); if let Some(c) = c { b(c); } }
@@ -341,10 +346,15 @@ fn lex(s: &str, block: bool) -> Result<Vec<Tok>, Err> {
 
 struct P { t: Vec<Tok>, i: usize, depth: usize, block: bool }
 
+const IS_NAMES: &str = "`is` takes a kind or class name (Error, Int, Float, Text, Bool, List, Dict, or a class like Trip), or a list of them: `x is (Trip, Place)`";
+const IS_CHAIN: &str = "not allowed in an expression: `is` cannot chain with another comparison (write `(a == b) is Error`, or use `and`)";
+/// The kinds a VALUE can be, as `is` spells them (the casts' spellings, and `Error`); every other name on the right of `is` is a class.
+const VALUE_KINDS: &[&str] = &["Int", "Float", "Text", "Bool", "List", "Dict", "Error"];
+
 /// Names a local may not take: the builtins and host functions, `this`/`x`/`clock`, the constants and the pronouns.
 /// (keep in step with `call`: a test reads its arms)
 pub const RESERVED: &[&str] = &[
-    "Int", "Float", "Num", "Text", "Bool", "List", "Dict", "None", "True", "False", "this", "x", "clock",
+    "Int", "Float", "Num", "Text", "Bool", "List", "Dict", "Error", "None", "True", "False", "this", "x", "clock",
     "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words", "spans",
     "join", "head", "tail", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
     "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop", "why",
@@ -411,7 +421,7 @@ impl P {
             Tok::Name(x) if x == "not" => {
                 if matches!(self.t.get(self.i + 1), Some(Tok::Name(y)) if y == "in") { self.next(); Cmp::NotIn } else { return Ok(None); }
             }
-            Tok::Name(x) if x == "is" => return Err("not allowed in an expression: Is".into()),
+            Tok::Name(x) if x == "is" => return Err(IS_CHAIN.into()),
             _ => return Ok(None),
         };
         self.next();
@@ -419,10 +429,44 @@ impl P {
     }
     fn comparison(&mut self) -> Result<Node, Err> {
         let a = self.arith()?;
+        if self.is_kw("is") { return self.is_clause(a); }
         let mut ops = Vec::new();
         while let Some(c) = self.comp_op()? { let b = self.arith()?; ops.push((c, b)); }
         if ops.is_empty() { return Ok(a); }
         Ok(Node::Compare(Box::new(a), ops))
+    }
+    /// `is Kind`, `is not Kind`, `is (A, B)`: the right side is names, never evaluated. It does not chain with another comparison.
+    fn is_clause(&mut self, a: Node) -> Result<Node, Err> {
+        self.next();
+        let neg = if self.is_kw("not") { self.next(); true } else { false };
+        let mut names: Vec<String> = vec![];
+        let mut name = |p: &mut P| -> Result<(), Err> {
+            match p.next() {
+                Tok::Name(n) if n == "None" => Err("`is None` is not a test: write `x == None` for the null test".into()),
+                Tok::Name(n) if !KEYWORDS.contains(&n.as_str()) && n != "True" && n != "False" => { names.push(n); Ok(()) }
+                _ => Err(IS_NAMES.into()),
+            }
+        };
+        if self.is_p("(") {
+            self.next();
+            loop {
+                name(self)?;
+                if self.is_p(",") { self.next(); if self.is_p(")") { break; } continue; }
+                break;
+            }
+            if !self.is_p(")") { return Err(IS_NAMES.into()); }
+            self.next();
+        } else { name(self)?; }
+        if self.is_p(".") || self.is_p("(") || self.is_p("[") { return Err(IS_NAMES.into()); }
+        let mut seen: Vec<&String> = vec![];
+        for n in &names { if !seen.contains(&n) { seen.push(n); } }
+        if seen.len() > 1 && seen.iter().any(|n| VALUE_KINDS.contains(&n.as_str())) {
+            return Err(format!("`is ({})`: those kinds can never both match (a value is of one kind; only classes can be listed together)", names.join(", ")));
+        }
+        if matches!(self.peek(), Tok::P("==" | "!=" | "<" | "<=" | ">" | ">=")) || self.is_kw("in") || self.is_kw("is") || (self.is_kw("not") && matches!(self.t.get(self.i + 1), Some(Tok::Name(y)) if y == "in")) {
+            return Err(IS_CHAIN.into());
+        }
+        Ok(Node::Is(Box::new(a), names, neg))
     }
     fn arith(&mut self) -> Result<Node, Err> {
         let mut a = self.term()?;
@@ -668,6 +712,8 @@ pub trait World {
     fn refs(&self, _eid: &str, _prop: &str) -> Vec<String> { vec![] }
     /// A function the host runs (the seat's `recall(...)` and the other banner built-ins). None: not the host's.
     fn host(&self, _f: &str, _a: &[V]) -> Option<Result<V, Err>> { None }
+    /// Is the entity of this class: its `parents` (nearest first), an ancestor's, or the root `Entity`? (`x is Trip`)
+    fn is_class(&self, _eid: &str, _cls: &str) -> bool { false }
 }
 
 pub fn nullish(v: &V) -> bool { matches!(v, V::None | V::Nil(_)) }
@@ -706,13 +752,14 @@ pub fn overlay_nulls(v: &mut V, nulls: &[(String, String)]) {
     for (path, reason) in nulls { put(v, &path.split(PATH_SEP).collect::<Vec<_>>(), reason); }
 }
 
+fn shown_marker(key: &str, reason: &str) -> serde_json::Value { serde_json::Value::Object(std::iter::once((key.to_string(), serde_json::Value::String(reason.to_string()))).collect()) }
 /// A value as JSON text for a person or a model to read (`str` of a list or a dict, the clifflet's printout): like `to_json`, except that a reasoned null
 /// INSIDE a container is written `{"$null": "<reason>"}` so the reason is on the page. (`to_json`, what is stored and sent, keeps every null plain.)
 pub fn to_json_shown(v: &V) -> Result<serde_json::Value, Err> {
     use serde_json::Value as J;
     Ok(match v {
-        V::List(l) => J::Array(l.iter().map(|x| match x { V::Nil(r) => Ok(J::Object(std::iter::once(("$null".to_string(), J::String(r.clone()))).collect())), x => to_json_shown(x) }).collect::<Result<_, Err>>()?),
-        V::Dict(d) => J::Object(d.iter().map(|(k, x)| Ok((k.clone(), match x { V::Nil(r) => J::Object(std::iter::once(("$null".to_string(), J::String(r.clone()))).collect()), x => to_json_shown(x)? }))).collect::<Result<_, Err>>()?),
+        V::List(l) => J::Array(l.iter().map(|x| match x { V::Nil(r) => Ok(shown_marker("$null", r)), V::Error(r) => Ok(shown_marker("$error", r)), x => to_json_shown(x) }).collect::<Result<_, Err>>()?),
+        V::Dict(d) => J::Object(d.iter().map(|(k, x)| Ok((k.clone(), match x { V::Nil(r) => shown_marker("$null", r), V::Error(r) => shown_marker("$error", r), x => to_json_shown(x)? }))).collect::<Result<_, Err>>()?),
         v => to_json(v)?,
     })
 }
@@ -726,7 +773,7 @@ fn null_of(vals: &[&V], what: &str) -> Option<V> {
 
 pub fn truthy(v: &V) -> bool {
     match v {
-        V::None | V::Nil(_) => false,
+        V::None | V::Nil(_) | V::Error(_) => false,
         V::Bool(b) => *b,
         V::Int(i) => *i != 0,
         V::Float(f) => *f != 0.0,
@@ -880,10 +927,12 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
             };
             Ok(if ok { v.clone() } else { V::Nil(format!("not-a-type: {} expected, got {}", f.to_lowercase(), kind_of(v))) })
         }
+        // Error('reason') makes a failure: the remedy is part of the text (docs/c1f-error.md)
+        "Error" => { argn(1)?; Ok(V::Error(py_str(&a[0]))) }
         // None is a class like any other: None('why') constructs a null that carries its reason (None() says "null")
         "None" => Ok(V::Nil(match a.len() { 0 => "null".into(), 1 => py_str(&a[0]), _ => return Err("None: takes one reason".into()) })),
         // why(x): the reason a null carries as text (`absent ...`, `error: ...`, `pending: ...`, the text of None('...')); None when x is not a reasoned null
-        "why" => { argn(1)?; Ok(match &a[0] { V::Nil(r) => V::Str(r.clone()), _ => V::None }) }
+        "why" => { argn(1)?; Ok(match &a[0] { V::Nil(r) | V::Error(r) => V::Str(r.clone()), _ => V::None }) }
         "dot" => { argn(2)?; let (x, y) = (vec_of(&a[0])?, vec_of(&a[1])?); if x.len() != y.len() { return Err("dot: shapes not aligned".into()); } Ok(V::Float(x.iter().zip(&y).map(|(p, q)| p * q).sum())) }
         "norm" => { argn(1)?; Ok(V::Float(norm(&vec_of(&a[0])?))) }
         "distance" => { argn(2)?; Ok(V::Float(dist(&vec_of(&a[0])?, &vec_of(&a[1])?))) }
@@ -1117,12 +1166,12 @@ fn epoch_of(v: &V) -> Option<f64> {
 }
 
 fn text_of(v: &V) -> Result<String, Err> {
-    match v { V::Str(s) => Ok(s.clone()), V::None | V::Nil(_) => Ok(String::new()), V::Ent(e) => Ok(e.clone()), V::List(_) | V::Dict(_) => Err("expected text".into()), v => Ok(py_str(v)) }
+    match v { V::Str(s) => Ok(s.clone()), V::None | V::Nil(_) => Ok(String::new()), V::Error(r) => Err(r.clone()), V::Ent(e) => Ok(e.clone()), V::List(_) | V::Dict(_) => Err("expected text".into()), v => Ok(py_str(v)) }
 }
 
 pub fn py_str(v: &V) -> String {
     match v {
-        V::None | V::Nil(_) => "None".into(), V::Bool(b) => if *b { "True".into() } else { "False".into() },
+        V::None | V::Nil(_) => "None".into(), V::Error(r) => format!("Error: {r}"), V::Bool(b) => if *b { "True".into() } else { "False".into() },
         V::Int(i) => i.to_string(), V::Float(f) => format!("{:?}", f), V::Str(s) => s.clone(),
         V::Ent(e) => e.clone(), _ => format!("{:?}", v),
     }
@@ -1143,8 +1192,18 @@ fn pronoun(name: &str, w: &dyn World) -> Result<V, Err> {
     }
 }
 
+/// `v is <name>`: a value kind by its spelling, else a class of an entity.
+fn is_kind(v: &V, name: &str, w: &dyn World) -> bool {
+    match (name, v) {
+        ("Error", V::Error(_)) | ("Int", V::Int(_)) | ("Float", V::Float(_)) | ("Text", V::Str(_)) | ("Bool", V::Bool(_)) | ("List", V::List(_)) | ("Dict", V::Dict(_)) => true,
+        (n, _) if VALUE_KINDS.contains(&n) => false,
+        (cls, V::Ent(e)) => w.is_class(e, cls),
+        _ => false,
+    }
+}
+
 fn kind_of(v: &V) -> &'static str {
-    match v { V::None | V::Nil(_) => "none", V::Bool(_) => "bool", V::Int(_) => "int", V::Float(_) => "float", V::Str(_) => "text",
+    match v { V::None | V::Nil(_) => "none", V::Error(_) => "error", V::Bool(_) => "bool", V::Int(_) => "int", V::Float(_) => "float", V::Str(_) => "text",
               V::List(_) => "list", V::Dict(_) => "dict", V::Ent(_) => "entity" }
 }
 
@@ -1192,7 +1251,7 @@ fn ev_node(n: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> 
     match n {
         Node::Const(v) => Ok(v.clone()),
         Node::Name(s) => match env.get(s) { Some(v) => Ok(v.clone()), None => pronoun(s, w) },
-        Node::List(_) | Node::Dict(_) | Node::And(_) | Node::Or(_) | Node::Not(_) | Node::If(..) => ev_seq(n, env, w, m),
+        Node::List(_) | Node::Dict(_) | Node::And(_) | Node::Or(_) | Node::Not(_) | Node::If(..) | Node::Is(..) => ev_seq(n, env, w, m),
         Node::Attr(b, a) => ev_attr(b, a, env, w, m),
         Node::Index(b, i) => ev_index(b, i, env, w, m),
         Node::Bin(..) => ev_bin(n, env, w, m),
@@ -1215,6 +1274,7 @@ fn ev_seq(n: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
         Node::And(v) => { let mut last = V::Bool(true); for x in v { last = ev(x, env, w, m)?; if !truthy(&last) { return Ok(last); } } Ok(last) }
         Node::Or(v) => { let mut last = V::Bool(false); for x in v { last = ev(x, env, w, m)?; if truthy(&last) { return Ok(last); } } Ok(last) }
         Node::If(a, c, b) => if truthy(&ev(c, env, w, m)?) { ev(a, env, w, m) } else { ev(b, env, w, m) },
+        Node::Is(a, names, neg) => { let v = ev(a, env, w, m)?; Ok(V::Bool(names.iter().all(|n| is_kind(&v, n, w)) != *neg)) }
         _ => unreachable!(),
     }
 }
@@ -1374,7 +1434,7 @@ pub fn from_json(j: &serde_json::Value) -> V {
 pub fn to_json(v: &V) -> Result<serde_json::Value, Err> {
     use serde_json::Value as J;
     Ok(match v {
-        V::None | V::Nil(_) => J::Null,
+        V::None | V::Nil(_) | V::Error(_) => J::Null,
         V::Bool(b) => J::Bool(*b),
         V::Int(i) => J::from(*i),
         V::Float(f) => serde_json::Number::from_f64(*f).map(J::Number).ok_or("not a finite number")?,

@@ -297,6 +297,10 @@ impl<'a> expr::World for View<'a> {
     }
     fn refs(&self, eid: &str, prop: &str) -> Vec<String> { self.core.refs(eid, prop) }
     fn host(&self, f: &str, a: &[V]) -> Option<Result<V, String>> { self.core.native_call(f, a) }
+    fn is_class(&self, eid: &str, cls: &str) -> bool {
+        if !self.core.docs.contains_key(eid) && self.core.unloaded.contains_key(eid) { self.core.wanted.borrow_mut().insert(eid.to_string()); }
+        crate::fields::entity_is(self.core, eid, cls)
+    }
 }
 
 /// A view that records what an evaluation read: (eid, field) for every attribute, and (REFS, prop) for every
@@ -317,6 +321,11 @@ impl<'a> expr::World for Traced<'a> {
     fn refs(&self, eid: &str, prop: &str) -> Vec<String> {
         self.reads.borrow_mut().push((REFS.to_string(), format!("{}\u{0}{}", prop, eid)));   // per (prop, target)
         self.inner.refs(eid, prop)
+    }
+    /// `x is Class` reads the entity's `parents`: the getter that asked is dirty when they change
+    fn is_class(&self, eid: &str, cls: &str) -> bool {
+        self.reads.borrow_mut().push((eid.to_string(), "parents".to_string()));
+        self.inner.is_class(eid, cls)
     }
     /// The host's functions run on live rounds only: a silent compute (rebuild, birth) never calls out, its value
     /// is None until the next live round reads its inputs again.

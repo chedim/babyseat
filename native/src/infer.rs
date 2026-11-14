@@ -272,7 +272,7 @@ fn attr_ty(base: &Ty, name: &str, env: &Env) -> Ty {
 pub fn infer_expr(n: &Node, env: &Env) -> Ty {
     match n {
         Node::Const(v) => match v {
-            V::None | V::Nil(_) => Ty::none(), V::Bool(_) => Ty::bool(), V::Int(_) => Ty::int(), V::Float(_) => Ty::float(), V::Str(_) => Ty::text(),
+            V::None | V::Nil(_) => Ty::none(), V::Error(_) => Ty::none(), V::Bool(_) => Ty::bool(), V::Int(_) => Ty::int(), V::Float(_) => Ty::float(), V::Str(_) => Ty::text(),
             V::List(_) => Ty::list(Ty::any()), V::Dict(_) => Ty::dict(), V::Ent(_) => Ty::entity("*"),
         },
         Node::Name(s) => match env.vars.get(s) { Some(t) => t.clone(), None if s == "clock" => Ty::num(), None => Ty::any() },
@@ -319,6 +319,7 @@ pub fn infer_expr(n: &Node, env: &Env) -> Ty {
             r.null_if(t.null)
         }
         Node::Not(a) => { infer_expr(a, env); Ty::bool() }
+        Node::Is(a, _, _) => { infer_expr(a, env); Ty::bool() }
         Node::And(v) => {
             let ts: Vec<Ty> = v.iter().map(|x| infer_expr(x, env)).collect();
             let mut r = ts.last().cloned().unwrap_or_else(Ty::never);
@@ -668,7 +669,7 @@ fn walk_reads(n: &Node, env: &Env, out: &mut Vec<Read>) {
             }
         }
         Node::Bin(_, a, b) => { walk_reads(a, env, out); walk_reads(b, env, out); }
-        Node::Neg(a) | Node::Not(a) => walk_reads(a, env, out),
+        Node::Neg(a) | Node::Not(a) | Node::Is(a, _, _) => walk_reads(a, env, out),
         Node::Compare(a, ops) => { walk_reads(a, env, out); for (_, x) in ops { walk_reads(x, env, out); } }
         Node::Let(name, v, rest) => { walk_reads(v, env, out); let t = infer_expr(v, env); walk_reads(rest, &env.bind(name, t), out); }
         Node::If(a, c, b) => { walk_reads(a, env, out); walk_reads(c, env, out); walk_reads(b, env, out); }

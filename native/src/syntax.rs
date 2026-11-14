@@ -241,6 +241,7 @@ pub fn parse_full(src: &str) -> Result<Pack, String> {
             let class = it.next().ok_or(format!("line {}: {} needs a class name (one class per line: `{} Request`)", n + 1, word, word))?;
             if it.next().is_some() { return Err(format!("line {}: {} takes one class per line: `{} {}`, then another line for the next class", n + 1, word, word, class)); }
             if !class.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { return Err(format!("line {}: {} {}: a class name is letters, digits and underscores", n + 1, word, class)); }
+            reserved_class(class, n + 1)?;
             let mine = if word == "VIRTUAL" { &mut pack.virtuals } else { &mut pack.residents };
             if !mine.iter().any(|c| c == class) { mine.push(class.to_string()); }
             body.push('\n');
@@ -256,6 +257,11 @@ pub fn parse_full(src: &str) -> Result<Pack, String> {
     pack.setters = setters;
     pack.getters = getters;
     Ok(pack)
+}
+
+/// `Error` is the kind of a failure (`x is Error`), so no class may carry the name (#1143).
+fn reserved_class(cls: &str, at: usize) -> Result<(), String> {
+    if cls.eq_ignore_ascii_case("Error") { Err(format!("line {at}: `Error` is reserved as the kind of a failure (`x is Error`): a class may not be called Error")) } else { Ok(()) }
 }
 
 /// Parse a pack: its setters and its getters (`<Class>.<field> getter: <expr>`, the expression on the header line
@@ -306,6 +312,7 @@ pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
                 if !in_getter { close(&mut out, &mut branches)?; }
                 if let Some(g) = getters.last() { if g.expr.trim().is_empty() { return Err(format!("getter {}.{} has no expression", g.cls, g.prop)); } }
                 let (cls, prop) = path.trim().split_once('.').ok_or(format!("line {}: expected `<Class>.<field> getter:`", at))?;
+                reserved_class(cls, at)?;
                 if when == Some("") { return Err(format!("line {}: the getter arm `WHEN` has no condition (or no `:` after it)", at)); }
                 getters.push(Getter { cls: cls.into(), prop: prop.into(), expr: expr.trim().into(), arms: 1, ..Default::default() });
                 arms.push((when.map(|w| w.to_string()), at));
@@ -318,6 +325,7 @@ pub fn parse_pack(src: &str) -> Result<(Vec<OnSet>, Vec<Getter>), String> {
             let head = line.strip_suffix(':').ok_or(format!("line {}: a setter header ends with `:`", at))?;
             let (path, name) = head.split_once(" on-setter ").ok_or(format!("line {}: expected `<Class>.<field> on-setter <name>:`", at))?;
             let (cls, prop) = path.trim().split_once('.').ok_or(format!("line {}: expected `<Class>.<field>`", at))?;
+            reserved_class(cls, at)?;
             let name = name.trim();
             if name.is_empty() || name.contains(char::is_whitespace) { return Err(format!("line {}: the setter needs a one-word name", at)); }
             out.push(OnSet { name: name.into(), cls: cls.into(), prop: prop.into(), ..Default::default() });
