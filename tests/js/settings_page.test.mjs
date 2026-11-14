@@ -128,6 +128,7 @@ try {
   await b.until(`/whole number/.test(${textOf(K('chat.max_steps', 'state'))})`, 'a step count is whole');
 
   // 4. a text row with the Save button: the chat model
+  assert.equal(await b.ev(textOf('.setchoice')), 'gpt', 'the seat\'s model list is buttons under the box (the box stays a text input)');
   await b.fill(K('model.chat', 'in'), 'claude-agent:sonnet'); await b.press(K('model.chat', 'save'));
   await b.until(`${textOf(K('model.chat', 'state'))} === 'Applied.' && ${textOf(K('model.chat', 'now'))} === 'In force: claude-agent:sonnet'`, 'the model applied');
   assert.equal(await rpc('entity_read', { spec: 'Minds:seat', prop: 'loops' }), 'claude-agent:sonnet', 'the chat\'s own reader holds it');

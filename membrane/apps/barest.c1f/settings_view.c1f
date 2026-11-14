@@ -263,9 +263,9 @@ SetRow.view on-setter set-draw-field:
   WHEN this.view != None and prop(this.view, 'edit') and (prop(this.view, 'kind') == 'text' or prop(this.view, 'kind') == 'number'):
     b = 'DomNode:set:' + prop(this.view, 'id')
     (b + ':in').parent = b + ':form'
-    (b + ':in').tag = 'select' if len(prop(this.view, 'choices')) > 0 else 'input'
+    (b + ':in').tag = 'input'
     -- (a number is typed in a TEXT input: a number input would hold back a 2.5 or a 0 with the browser's own bubble, before the seat could say why; the seat's reason is the only refusal)
-    (b + ':in').type = None if len(prop(this.view, 'choices')) > 0 else 'text'
+    (b + ':in').type = 'text'
     (b + ':in').class = 'setinput'
     (b + ':in').aria-label = prop(this.view, 'label')
     (b + ':in').before = b + ':unit'
@@ -274,20 +274,22 @@ SetRow.view on-setter set-draw-field:
     (b + ':unit').class = 'setunit'
     (b + ':unit').text = str(prop(this.view, 'unit') or '')
     (b + ':unit').hidden = not prop(this.view, 'unit')
-    (b + ':unit').before = b + ':save'
--- the select's options: the current one first when it is not in the list; the one in force is the selected one
-SetRow.view on-setter set-draw-options:
+    (b + ':unit').before = (b + ':choices') if len(prop(this.view, 'choices')) > 0 else (b + ':save')
+-- the seat's model list: a button each, under the box; a click puts that name in the box (nothing is saved by it). The box stays a TEXT input: a model name outside the list can be typed
+-- (a select would take that away), and the list is only a help.
+SetRow.view on-setter set-draw-choices:
   WHEN this.view != None and prop(this.view, 'edit') and len(prop(this.view, 'choices')) > 0:
     b = 'DomNode:set:' + prop(this.view, 'id')
-    opts = distinct(concat([prop(this.view, 'cur')], prop(this.view, 'choices')))
-    FOR o IN opts:
-      (b + ':o:' + o).parent = b + ':in'
-      (b + ':o:' + o).tag = 'option'
-      (b + ':o:' + o).value = o
-      (b + ':o:' + o).text = o if o != '' else 'the seat default'
-      (b + ':o:' + o).selected = o == prop(this.view, 'cur')
-    FOR x IN [x for x in instances('DomNode') if startswith(x.eid, b + ':o:') and not (replace(x.eid, b + ':o:', '') in opts)]:
-      (x.eid).retire = True
+    (b + ':choices').parent = b + ':form'
+    (b + ':choices').tag = 'div'
+    (b + ':choices').class = 'setchoices'
+    (b + ':choices').before = b + ':save'
+    FOR o IN prop(this.view, 'choices'):
+      (b + ':c:' + o).parent = b + ':choices'
+      (b + ':c:' + o).tag = 'button'
+      (b + ':c:' + o).type = 'button'
+      (b + ':c:' + o).class = 'setchoice'
+      (b + ':c:' + o).text = o
 
 -- a list or an allow-list: the entries (below), an Add button
 SetRow.view on-setter set-draw-lines:
@@ -307,13 +309,9 @@ SetRow.view on-setter set-draw-lines:
 -- ---- the draft: what the person is typing. It follows `current`: a changed value in force replaces it (an applied Save, or a change made elsewhere); an unsaved edit stays otherwise ----
 -- (an entry's key `u` is `i<its text>` for one that was read, `n<counter>` for one that was added; a colon in it is turned into `_`, so a node id parses)
 SetRow.cur on-setter set-sync-text:
-  WHEN this.raw != None and (this.kind == 'text' or this.kind == 'number') and len(this.choices) == 0:
+  WHEN this.raw != None and (this.kind == 'text' or this.kind == 'number'):
     this.draft = '' if this.cur == None else str(this.cur)
     ('DomNode:set:' + this.rid + ':in').value = '' if this.cur == None else str(this.cur)
--- a select shows the one in force by its option's `selected`, never by a write of the select's value (the options may not be made yet)
-SetRow.cur on-setter set-sync-choice:
-  WHEN this.raw != None and (this.kind == 'text' or this.kind == 'number') and len(this.choices) > 0:
-    this.draft = '' if this.cur == None else str(this.cur)
 SetRow.cur on-setter set-sync-list:
   WHEN this.raw != None and this.kind == 'list':
     this.draft = [{'u': 'i' + replace(str(x), ':', '_'), 'a': str(x), 'b': '', 'c': ''} for x in distinct(this.cur or [])]
@@ -396,6 +394,10 @@ DomNode.clicked on-setter set-clicked:
     n = (prop(r, 'nu') or 0) + 1
     (r).nu = n
     (r).draft = concat(prop(r, 'draft') or [], [{'u': 'n' + str(n), 'a': '', 'b': '', 'c': ''}])
+  ELSE WHEN startswith(this.eid, 'DomNode:set:') and startswith(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'c:'):
+    r = 'SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')
+    (r).draft = after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'c:')
+    ('DomNode:set:' + before(replace(this.eid, 'DomNode:set:', ''), ':') + ':in').value = after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'c:')
   ELSE WHEN startswith(this.eid, 'DomNode:set:') and startswith(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e') and tail(this.eid, 2) == ':x':
     r = 'SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')
     u = head(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e'), len(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e')) - 2)
