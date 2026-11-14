@@ -1,0 +1,357 @@
+PACK shell_view 1
+IMPORT dom 1
+IMPORT fetch 1
+-- THE BAREST PAGE'S SHELL, A VIEW PACK (#1143, operator 2026-11-14: "rewrite the new ui completely into c1f running under wasm vm"). It owns the whole page: the layout, the navigation,
+-- the session list, the status line, the errors as text and the theme. It runs in the PAGE's field engine (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f,
+-- and does not run it). The page (ui/index.html + ui/boot.js) is a bootstrap: it starts the engine, feeds the entities below and gives the shell one DOM mount.
+--   Shell:main     {view, sid, theme, open}: the nav's current view, the active session, the theme, `open` draws the page. The bootstrap writes `view` ('chat') and `sid` ('main') first, `open` last.
+--   Focus:session {sid}: the session the chat shows ('main' = the chat with no session). The chat view reads it (chat_view.c1f); the shell writes it when a session is picked.
+--   Nav:<name>     one view of the page: {title, order} from the view pack that registers it, `active` from the shell, `filled` from the view pack once it has drawn into its slot.
+--   SessionRow:<sid> one session of the seat's list (`GET /session`): `raw` is its row.
+--   Fetch:sessions / Fetch:newsession / Fetch:status   the three calls (the page's Fetch): the list, a new session (POST /session), the status line's poll (GET /session/status).
+-- THE VIEW-PACK CONTRACT (docs/ui-rebuild-plan.md "The shell and the view-pack contract"): a pack that is a view of the page
+--   1. registers itself when the shell opens:  `Shell.open on-setter <name>-register: WHEN this.open:` writes `('Nav:<name>').title = '<Title>'` and `('Nav:<name>').order = <n>`;
+--   2. draws into its slot: the root DomNode of the view has `parent = 'DomNode:shell:slot:<name>'`; it draws when `Nav:<name>.active` first becomes true (a setter on `Nav.active`: lazy), and writes
+--      `('Nav:<name>').filled = True` so the shell's placeholder text goes away;
+--   3. stops its own periodic work while `prop('Nav:<name>', 'active') == False` (a view the person is not looking at does not tick).
+--   4. (optional) opens the shared SLIDE-OVER DETAIL PANEL: `Panel:detail` {owner, title, sub, note, rows, open}. The opener writes `owner` (its name), `title`, `sub`, `rows` (a list of
+--      {key, label, text, target?, head?}, shown in the order of the keys: a `head` row is a section heading, a row with `target` is a link, a long `text` is cut and expandable) and `open = True` in ONE setter; the shell draws it,
+--      sliding in from the right over the views, with a scrim over the rest of the page. A click on the scrim, on Close or Esc writes `open = False`; a click on a link row writes `picked = <target>`.
+--      A view reacts with its own setters on `Panel.open` / `Panel.picked` where `this.owner` is its name (the field view clears its selection on close and re-selects on a pick). A view that
+--      wants other content draws it itself into `DomNode:shell:panel:extra` (a DomNode parent) and writes `rows = []`.
+-- The shell knows no view by name except Settings, whose placeholder (the slot's text 'Settings') it draws itself until a view pack fills the slot.
+
+Shell.tick getter: clock
+-- the class of the session the chat shows is declared here (a write to a class no pack declares is dropped)
+Focus.kind getter: 'session'
+
+-- ---- the page: the skeleton ----
+Shell.open on-setter shell-draw:
+  WHEN this.open:
+    ('DomNode:shell:root').tag = 'div'
+    ('DomNode:shell:root').class = 'shell'
+    ('DomNode:shell:bar').parent = 'DomNode:shell:root'
+    ('DomNode:shell:bar').tag = 'header'
+    ('DomNode:shell:bar').class = 'bar'
+    ('DomNode:shell:title').parent = 'DomNode:shell:bar'
+    ('DomNode:shell:title').tag = 'h1'
+    ('DomNode:shell:title').text = 'Membrane seat'
+    ('DomNode:shell:nav').parent = 'DomNode:shell:bar'
+    ('DomNode:shell:nav').tag = 'nav'
+    ('DomNode:shell:nav').class = 'nav'
+    ('DomNode:shell:nav').aria-label = 'Views'
+    ('DomNode:shell:status').parent = 'DomNode:shell:bar'
+    ('DomNode:shell:status').tag = 'span'
+    ('DomNode:shell:status').class = 'conn'
+    ('DomNode:shell:status').role = 'status'
+    ('DomNode:shell:status').aria-live = 'polite'
+    ('DomNode:shell:status').text = 'connecting'
+    ('DomNode:shell:theme').parent = 'DomNode:shell:bar'
+    ('DomNode:shell:theme').tag = 'button'
+    ('DomNode:shell:theme').type = 'button'
+    ('DomNode:shell:theme').class = 'theme'
+    ('DomNode:shell:theme').title = 'Switch between the system, light and dark theme'
+    ('DomNode:shell:theme').text = 'Theme: system'
+    ('DomNode:shell:error').parent = 'DomNode:shell:root'
+    ('DomNode:shell:error').tag = 'div'
+    ('DomNode:shell:error').class = 'shell-error'
+    ('DomNode:shell:error').role = 'alert'
+    ('DomNode:shell:body').parent = 'DomNode:shell:root'
+    ('DomNode:shell:body').tag = 'div'
+    ('DomNode:shell:body').class = 'shell-body'
+    ('DomNode:shell:sessions').parent = 'DomNode:shell:body'
+    ('DomNode:shell:sessions').tag = 'section'
+    ('DomNode:shell:sessions').class = 'sessions'
+    ('DomNode:shell:sessions').aria-label = 'Sessions'
+    ('DomNode:shell:newsession').parent = 'DomNode:shell:sessions'
+    ('DomNode:shell:newsession').tag = 'button'
+    ('DomNode:shell:newsession').type = 'button'
+    ('DomNode:shell:newsession').class = 'newsession'
+    ('DomNode:shell:newsession').text = 'New session'
+    ('DomNode:shell:sessionlist').parent = 'DomNode:shell:sessions'
+    ('DomNode:shell:sessionlist').tag = 'ul'
+    ('DomNode:shell:sessionlist').class = 'sessionlist'
+    ('DomNode:shell:sli:main').parent = 'DomNode:shell:sessionlist'
+    ('DomNode:shell:sli:main').tag = 'li'
+    ('DomNode:shell:s:main').parent = 'DomNode:shell:sli:main'
+    ('DomNode:shell:s:main').tag = 'button'
+    ('DomNode:shell:s:main').type = 'button'
+    ('DomNode:shell:s:main').text = 'Main chat'
+    ('DomNode:shell:s:main').aria-current = 'true' if this.sid == 'main' else None
+    ('DomNode:shell:views').parent = 'DomNode:shell:body'
+    ('DomNode:shell:views').tag = 'main'
+    ('DomNode:shell:views').class = 'views'
+    ('DomNode:shell:scrim').parent = 'DomNode:shell:root'
+    ('DomNode:shell:scrim').tag = 'div'
+    ('DomNode:shell:scrim').class = 'scrim'
+    ('DomNode:shell:scrim').data-open = 'false'
+    ('DomNode:shell:panel').parent = 'DomNode:shell:root'
+    ('DomNode:shell:panel').tag = 'aside'
+    ('DomNode:shell:panel').class = 'panel'
+    ('DomNode:shell:panel').role = 'dialog'
+    ('DomNode:shell:panel').aria-label = 'Details'
+    ('DomNode:shell:panel').tabindex = '-1'
+    ('DomNode:shell:panel').data-open = 'false'
+    ('DomNode:shell:panel').aria-hidden = 'true'
+    ('DomNode:shell:panelhead').parent = 'DomNode:shell:panel'
+    ('DomNode:shell:panelhead').tag = 'header'
+    ('DomNode:shell:panelhead').class = 'panelhead'
+    ('DomNode:shell:paneltitle').parent = 'DomNode:shell:panelhead'
+    ('DomNode:shell:paneltitle').tag = 'h2'
+    ('DomNode:shell:panelclose').parent = 'DomNode:shell:panelhead'
+    ('DomNode:shell:panelclose').tag = 'button'
+    ('DomNode:shell:panelclose').type = 'button'
+    ('DomNode:shell:panelclose').aria-label = 'Close the details'
+    ('DomNode:shell:panelclose').text = 'Close'
+    ('DomNode:shell:panelsub').parent = 'DomNode:shell:panel'
+    ('DomNode:shell:panelsub').tag = 'p'
+    ('DomNode:shell:panelsub').class = 'panelsub'
+    ('DomNode:shell:panelnote').parent = 'DomNode:shell:panel'
+    ('DomNode:shell:panelnote').tag = 'p'
+    ('DomNode:shell:panelnote').class = 'panelnote'
+    ('DomNode:shell:panelnote').hidden = True
+    ('DomNode:shell:panelrows').parent = 'DomNode:shell:panel'
+    ('DomNode:shell:panelrows').tag = 'ul'
+    ('DomNode:shell:panelrows').class = 'panelrows'
+    ('DomNode:shell:panel:extra').parent = 'DomNode:shell:panel'
+    ('DomNode:shell:panel:extra').tag = 'div'
+    ('DomNode:shell:panel:extra').class = 'panelextra'
+    -- the Settings slot is the shell's own placeholder until a view pack registers over it
+    ('Nav:settings').title = 'Settings'
+    ('Nav:settings').order = 90
+    this.status_ms = ([b.shell_status_ms for b in instances('Boot') if b.shell_status_ms != None] or [3000])[0]
+    this.seq = 1
+    this.polling = True
+    ('Fetch:sessions').request = {'id': 'sessions-1', 'url': '/session'}
+    ('Fetch:status').request = {'id': 'status-1', 'url': '/session/status'}
+
+-- ---- the navigation: one button and one slot per registered view ----
+Shell.nav_all getter: sort_by([{'name': replace(n.eid, 'Nav:', ''), 'title': n.title, 'order': n.order or 50} for n in instances('Nav') if n.title != None], 'order')
+-- each row knows the button after it (the next of a greater `order`), so a view that registers late still lands in its place
+Shell.nav_rows getter: [{'name': prop(r, 'name'), 'title': prop(r, 'title'), 'order': prop(r, 'order'), 'next': ([prop(x, 'name') for x in this.nav_all if prop(x, 'order') > prop(r, 'order')] or [None])[0]} for r in this.nav_all]
+Shell.nav_rows on-setter shell-nav-draw:
+  WHEN this.open:
+    FOR r IN this.nav_rows:
+      ('DomNode:shell:nav:' + prop(r, 'name')).parent = 'DomNode:shell:nav'
+      ('DomNode:shell:nav:' + prop(r, 'name')).tag = 'button'
+      ('DomNode:shell:nav:' + prop(r, 'name')).type = 'button'
+      ('DomNode:shell:nav:' + prop(r, 'name')).text = prop(r, 'title')
+      ('DomNode:shell:nav:' + prop(r, 'name')).before = ('DomNode:shell:nav:' + prop(r, 'next')) if prop(r, 'next') != None else None
+      ('DomNode:shell:slot:' + prop(r, 'name')).parent = 'DomNode:shell:views'
+      ('DomNode:shell:slot:' + prop(r, 'name')).tag = 'section'
+      ('DomNode:shell:slot:' + prop(r, 'name')).class = 'slot'
+      ('DomNode:shell:slot:' + prop(r, 'name')).aria-label = prop(r, 'title')
+      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').parent = 'DomNode:shell:slot:' + prop(r, 'name')
+      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').tag = 'p'
+      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').class = 'empty'
+      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').text = prop(r, 'title')
+      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').hidden = prop('Nav:' + prop(r, 'name'), 'filled') == True
+
+-- a view that registers is active or not at once (the slot is hidden by `active`, nothing else)
+Nav.title on-setter nav-registered:
+  WHEN this.title != None and prop('Shell:main', 'view') != None:
+    (this.eid).active = prop('Shell:main', 'view') == replace(this.eid, 'Nav:', '')
+
+-- a click on a nav button picks the view; the shell marks every Nav active or not
+DomNode.clicked on-setter shell-nav-click:
+  WHEN startswith(this.eid, 'DomNode:shell:nav:'):
+    ('Shell:main').view = replace(this.eid, 'DomNode:shell:nav:', '')
+Shell.view on-setter shell-switch:
+  WHEN this.open:
+    FOR n IN instances('Nav'):
+      (n.eid).active = (replace(n.eid, 'Nav:', '') == this.view)
+Nav.active on-setter shell-slot:
+  WHEN this.active != None:
+    ('DomNode:shell:slot:' + replace(this.eid, 'Nav:', '')).hidden = not this.active
+    ('DomNode:shell:nav:' + replace(this.eid, 'Nav:', '')).aria-current = 'page' if this.active else None
+Nav.active on-setter shell-sessions-show:
+  WHEN this.eid == 'Nav:chat' and this.active != None:
+    ('DomNode:shell:sessions').hidden = not this.active
+Nav.filled on-setter shell-filled:
+  WHEN this.filled == True:
+    ('DomNode:shell:slot:' + replace(this.eid, 'Nav:', '') + ':empty').hidden = True
+
+-- ---- the sessions ----
+-- the list is asked for when the page opens and after a new session (a session made elsewhere shows after a reload)
+
+-- the receipts, read once: ok = the call went and the seat said 2xx; `list` the session rows; `why` what the line says (the seat's own message, else the status, else the network's reason)
+Fetch.sv getter:
+  rq = this.request_result
+  bd = json(str(prop(rq, 'body') or ''))
+  jb = {} if bd is Error else bd
+  jd = jb if jb is Dict else {}
+  hs = prop(rq, 'http_status')
+  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'list': jb if jb is List else None, 'sid': str(prop(jd, 'id') or ''), 'busy': 'busy' in str(prop(rq, 'body') or ''), 'why': (str(prop(prop(jd, 'error'), 'message') or prop(jd, 'error')) if (prop(jd, 'error') != None) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+
+Fetch.sv on-setter shell-sessions-done:
+  WHEN this.eid == 'Fetch:sessions' and prop(this.sv, 'ok') and prop(this.sv, 'list') != None:
+    ids = [str(prop(s, 'id')) for s in prop(this.sv, 'list')]
+    FOR s IN prop(this.sv, 'list'):
+      ('SessionRow:' + str(prop(s, 'id'))).born = True
+      ('SessionRow:' + str(prop(s, 'id'))).raw = s
+    FOR x IN [x for x in instances('SessionRow') if not (x.sid in ids)]:
+      ('DomNode:shell:sli:' + x.sid).retire = True
+      ('DomNode:shell:s:' + x.sid).retire = True
+      (x.eid).retire = True
+    ('Shell:main').sessions_error = ''
+  ELSE WHEN this.eid == 'Fetch:sessions':
+    ('Shell:main').sessions_error = 'The sessions could not be listed: ' + str(prop(this.sv, 'why')) + '.'
+
+SessionRow.sid getter: replace(this.eid, 'SessionRow:', '')
+SessionRow.raw on-setter shell-session-draw:
+  WHEN this.raw != None:
+    ('DomNode:shell:sli:' + this.sid).parent = 'DomNode:shell:sessionlist'
+    ('DomNode:shell:sli:' + this.sid).tag = 'li'
+    ('DomNode:shell:s:' + this.sid).parent = 'DomNode:shell:sli:' + this.sid
+    ('DomNode:shell:s:' + this.sid).tag = 'button'
+    ('DomNode:shell:s:' + this.sid).type = 'button'
+    ('DomNode:shell:s:' + this.sid).title = this.sid
+    ('DomNode:shell:s:' + this.sid).text = str(prop(this.raw, 'title') or this.sid)
+    ('DomNode:shell:s:' + this.sid).aria-current = 'true' if prop('Shell:main', 'sid') == this.sid else None
+
+-- a click on a session button (or Main chat) picks it; the chat view follows `Focus:session`
+DomNode.clicked on-setter shell-session-click:
+  WHEN startswith(this.eid, 'DomNode:shell:s:'):
+    ('Shell:main').sid = replace(this.eid, 'DomNode:shell:s:', '')
+Shell.sid on-setter shell-session-pick:
+  WHEN this.sid != None:
+    ('Focus:session').sid = this.sid
+    ('DomNode:shell:s:main').aria-current = 'true' if this.sid == 'main' else None
+    FOR x IN instances('SessionRow'):
+      ('DomNode:shell:s:' + x.sid).aria-current = 'true' if x.sid == this.sid else None
+
+-- New session: POST /session; the new one is picked when the seat answers, a failure is the line's text
+DomNode.clicked on-setter shell-session-new:
+  WHEN this.eid == 'DomNode:shell:newsession' and not prop('Shell:main', 'creating'):
+    n = (prop('Shell:main', 'seq') or 0) + 1
+    ('Shell:main').seq = n
+    ('Shell:main').creating = True
+    ('Shell:main').create_error = ''
+    ('Fetch:newsession').request = {'id': 'new-' + str(n), 'url': '/session', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': '{}'}
+Fetch.sv on-setter shell-session-created:
+  WHEN this.eid == 'Fetch:newsession' and prop(this.sv, 'ok') and prop(this.sv, 'sid') != '':
+    n = (prop('Shell:main', 'seq') or 0) + 1
+    ('Shell:main').seq = n
+    ('Shell:main').creating = False
+    ('Shell:main').sid = prop(this.sv, 'sid')
+    ('Fetch:sessions').request = {'id': 'sessions-' + str(n), 'url': '/session'}
+  ELSE WHEN this.eid == 'Fetch:newsession':
+    ('Shell:main').creating = False
+    ('Shell:main').create_error = 'A new session could not be made: ' + str(prop(this.sv, 'why')) + '.'
+
+-- ---- the status line: the seat answers (connected) or not, and whether a turn is running; a poll of /session/status ----
+Shell.tick on-setter shell-poll:
+  WHEN this.open and not this.polling and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= this.status_ms / 1000:
+    n = (this.seq or 0) + 1
+    this.seq = n
+    this.polling = True
+    ('Fetch:status').request = {'id': 'status-' + str(n), 'url': '/session/status'}
+Fetch.sv on-setter shell-status-done:
+  WHEN this.eid == 'Fetch:status':
+    ('Shell:main').polling = False
+    ('Shell:main').last_poll = clock
+    ('Shell:main').conn = 'connected' if prop(this.sv, 'ok') else 'the seat is not answering: ' + str(prop(this.sv, 'why'))
+    ('Shell:main').busy_status = prop(this.sv, 'busy') == True and prop(this.sv, 'ok') == True
+-- a turn the chat view still waits for counts too (a message of the chat with no session is not in the seat's session status)
+Shell.working getter: this.busy_status == True or len([r for r in instances('ChatRow') if r.done == False]) > 0
+Shell.line getter: str(this.conn or 'connecting') + (' · a turn is running' if this.working else ' · idle')
+Shell.line on-setter shell-line:
+  WHEN this.open:
+    ('DomNode:shell:status').text = this.line
+    ('DomNode:shell:status').data-ok = '1' if this.conn == 'connected' else '0'
+
+-- ---- the errors, as text (nothing fails silently): the packs that did not load, the sessions' own failures ----
+Shell.problem getter:
+  WHEN this.load_errors != None and len(str(this.load_errors)) > 2: 'These view packs did not load: ' + str(this.load_errors)
+  ELSE WHEN this.create_error: this.create_error
+  ELSE WHEN this.sessions_error: this.sessions_error
+  ELSE: ''
+-- (what was known before the page opened is shown when it opens)
+Shell.open on-setter shell-problem-open:
+  WHEN this.open:
+    ('DomNode:shell:error').hidden = this.problem == ''
+    ('DomNode:shell:error').text = this.problem
+Shell.problem on-setter shell-problem:
+  WHEN this.open:
+    ('DomNode:shell:error').hidden = this.problem == ''
+    ('DomNode:shell:error').text = this.problem
+
+-- ---- the theme: system (the browser's own), light, dark; the page's <html> element is the host's DomNode:page:html ----
+DomNode.clicked on-setter shell-theme-click:
+  WHEN this.eid == 'DomNode:shell:theme':
+    ('Shell:main').theme = {'system': 'light', 'light': 'dark', 'dark': 'system'}[prop('Shell:main', 'theme') or 'system']
+Shell.theme on-setter shell-theme:
+  WHEN this.theme != None:
+    ('DomNode:page:html').data-theme = None if this.theme == 'system' else this.theme
+    ('DomNode:shell:theme').text = 'Theme: ' + this.theme
+
+-- ---- the slide-over detail panel (any view opens it: see the contract above) ----
+-- long values are cut to `max_chars` (the Boot fact `shell_panel_chars`; 200 is the value TRIED, not decided) and expand on a click (`expanded` holds the keys)
+Shell.open on-setter shell-panel-config:
+  WHEN this.open:
+    ('Panel:detail').max_chars = ([b.shell_panel_chars for b in instances('Boot') if b.shell_panel_chars != None] or [200])[0]
+Panel.open on-setter shell-panel-open:
+  WHEN this.open != None:
+    ('DomNode:shell:scrim').data-open = 'true' if this.open else 'false'
+    ('DomNode:shell:panel').data-open = 'true' if this.open else 'false'
+    ('DomNode:shell:panel').aria-hidden = 'false' if this.open else 'true'
+    ('DomNode:shell:panel').focused = this.open == True
+    this.expanded = [] if this.open else this.expanded
+Panel.title on-setter shell-panel-title:
+  WHEN this.title != None:
+    ('DomNode:shell:paneltitle').text = this.title
+Panel.sub on-setter shell-panel-sub:
+  WHEN this.sub != None:
+    ('DomNode:shell:panelsub').text = this.sub
+Panel.note on-setter shell-panel-note:
+  WHEN this.note != None:
+    ('DomNode:shell:panelnote').hidden = this.note == ''
+    ('DomNode:shell:panelnote').text = this.note
+-- the rows as drawn: a long text is cut unless its key is expanded
+Panel.sorted getter: sort_by([{'key': str(prop(r, 'key')), 'label': prop(r, 'label'), 'head': prop(r, 'head') == True, 'target': prop(r, 'target'), 'long': prop(r, 'head') != True and prop(r, 'target') == None and len(str(prop(r, 'text') or '')) > this.max_chars, 'open': str(prop(r, 'key')) in (this.expanded or []), 'text': (str(prop(r, 'text') or '') if (prop(r, 'head') == True or prop(r, 'target') != None or len(str(prop(r, 'text') or '')) <= this.max_chars or str(prop(r, 'key')) in (this.expanded or [])) else head(str(prop(r, 'text')), this.max_chars - 1) + '…')} for r in (this.rows or [])], 'key') if this.max_chars != None else []
+-- the rows are shown in the order of their keys (an opener names them so: the DOM order of rows that arrive at different times is then the same as of rows that arrive together); each knows the row after it
+Panel.shown getter: [{'key': prop(r, 'key'), 'label': prop(r, 'label'), 'head': prop(r, 'head'), 'target': prop(r, 'target'), 'long': prop(r, 'long'), 'open': prop(r, 'open'), 'text': prop(r, 'text'), 'next': ([prop(x, 'key') for x in this.sorted if prop(x, 'key') > prop(r, 'key')] or [None])[0]} for r in this.sorted]
+Panel.shown on-setter shell-panel-rows:
+  WHEN this.shown != None:
+    FOR r IN this.shown:
+      ('DomNode:shell:panel:r:' + prop(r, 'key')).parent = 'DomNode:shell:panelrows'
+      ('DomNode:shell:panel:r:' + prop(r, 'key')).tag = 'li'
+      ('DomNode:shell:panel:r:' + prop(r, 'key')).class = 'head' if prop(r, 'head') else ('link' if prop(r, 'target') != None else 'prop')
+      ('DomNode:shell:panel:r:' + prop(r, 'key')).target = prop(r, 'target')
+      ('DomNode:shell:panel:r:' + prop(r, 'key')).before = ('DomNode:shell:panel:r:' + prop(r, 'next')) if prop(r, 'next') != None else None
+    -- (a heading or link is its own text; a property row's text is its children's: writing `text` there would wipe them)
+    FOR r IN [r for r in this.shown if prop(r, 'head') or prop(r, 'target') != None]:
+      ('DomNode:shell:panel:r:' + prop(r, 'key')).text = prop(r, 'text') or prop(r, 'label')
+    FOR r IN [r for r in this.shown if not prop(r, 'head') and prop(r, 'target') == None]:
+      b = 'DomNode:shell:panel:r:' + prop(r, 'key')
+      ('DomNode:shell:panel:kk:' + prop(r, 'key')).parent = b
+      ('DomNode:shell:panel:kk:' + prop(r, 'key')).tag = 'span'
+      ('DomNode:shell:panel:kk:' + prop(r, 'key')).class = 'k'
+      ('DomNode:shell:panel:kk:' + prop(r, 'key')).text = prop(r, 'label')
+      ('DomNode:shell:panel:vv:' + prop(r, 'key')).parent = b
+      ('DomNode:shell:panel:vv:' + prop(r, 'key')).tag = 'pre'
+      ('DomNode:shell:panel:vv:' + prop(r, 'key')).class = 'v'
+      ('DomNode:shell:panel:vv:' + prop(r, 'key')).text = prop(r, 'text')
+      ('DomNode:shell:panel:xx:' + prop(r, 'key')).parent = b
+      ('DomNode:shell:panel:xx:' + prop(r, 'key')).tag = 'button'
+      ('DomNode:shell:panel:xx:' + prop(r, 'key')).type = 'button'
+      ('DomNode:shell:panel:xx:' + prop(r, 'key')).class = 'more'
+      ('DomNode:shell:panel:xx:' + prop(r, 'key')).text = 'Show less' if prop(r, 'open') else 'Show all'
+      ('DomNode:shell:panel:xx:' + prop(r, 'key')).hidden = not prop(r, 'long')
+    own = concat(concat(['DomNode:shell:panel:r:' + prop(r, 'key') for r in this.shown], ['DomNode:shell:panel:kk:' + prop(r, 'key') for r in this.shown]), concat(['DomNode:shell:panel:vv:' + prop(r, 'key') for r in this.shown], ['DomNode:shell:panel:xx:' + prop(r, 'key') for r in this.shown]))
+    FOR x IN [x for x in instances('DomNode') if (startswith(x.eid, 'DomNode:shell:panel:r:') or startswith(x.eid, 'DomNode:shell:panel:kk:') or startswith(x.eid, 'DomNode:shell:panel:vv:') or startswith(x.eid, 'DomNode:shell:panel:xx:')) and not (x.eid in own)]:
+      (x.eid).retire = True
+
+-- a click on the scrim or Close, or Esc anywhere in the panel, closes it; a link row is a pick; a Show all button expands its row
+DomNode.clicked on-setter shell-panel-click:
+  WHEN this.eid == 'DomNode:shell:scrim' or this.eid == 'DomNode:shell:panelclose':
+    ('Panel:detail').open = False
+  ELSE WHEN startswith(this.eid, 'DomNode:shell:panel:xx:'):
+    k = replace(this.eid, 'DomNode:shell:panel:xx:', '')
+    cur = prop('Panel:detail', 'expanded') or []
+    ('Panel:detail').expanded = [x for x in cur if x != k] if k in cur else concat(cur, [k])
+  ELSE WHEN startswith(this.eid, 'DomNode:shell:panel:r:') and this.target != None:
+    ('Panel:detail').picked = this.target
+DomNode.key on-setter shell-panel-esc:
+  WHEN startswith(this.eid, 'DomNode:shell:panel') and prop(this.key, 'key') == 'Escape' and prop('Panel:detail', 'open'):
+    ('Panel:detail').open = False

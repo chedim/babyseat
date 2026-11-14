@@ -114,7 +114,7 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 43,
+    "members": 45,
     "writes": [
       "membrane:*.mention",
       "membrane:*.queued",
@@ -390,7 +390,7 @@
       "Request",
       "Wire"
     ],
-    "members": 38,
+    "members": 42,
     "writes": [
       "*.send",
       "FieldVm:seat.born",
@@ -402,6 +402,7 @@
       "/ui/fieldvm",
       "/ui/fieldvm/active",
       "/ui/fieldvm/edges",
+      "/ui/fieldvm/entity",
       "/ui/fieldvm/events"
     ],
     "boot_facts": [

@@ -19,7 +19,7 @@ All routes are GET, all answered by `Request.r_map` (`door_map.c1f:43-52`). Old 
 
 Already filled, not part of this plan: `/membrane/work-graph` (the markers drawn into the 3D scene, `ui/fieldview.js:149`; `door_decisions.c1f:12`, `111-120`: Goals, Tasks, waits, cards) and `entity-history` / `item-chat` (`door_decisions.c1f:13-14`).
 
-A second, newer reader exists: the barest app's graph (`membrane/apps/barest.c1f/ui/app.js`, `graph.js`) does NOT call the map routes. It lists entities with the MCP tool `entity_query` (`ui/mcp.js:45`, 100 per page, cap 600) and `entity_read` (`mcp.js:56`), and derives edges itself: ownership from the eid's `:` prefix and references from `$ref` values (`app.js:20-52`). That is the existing proof that the entity graph alone can draw a field.
+A second, newer reader exists: the barest app's graph (the former `ui/app.js`, `graph.js`, deleted when the page became c1f packs) does NOT call the map routes. It lists entities with the MCP tool `entity_query` (`ui/mcp.js:45`, 100 per page, cap 600) and `entity_read` (`mcp.js:56`), and derives edges itself: ownership from the eid's `:` prefix and references from `$ref` values (`app.js:20-52`). That is the existing proof that the entity graph alone can draw a field.
 
 ## 2. What the entity graph can feed
 

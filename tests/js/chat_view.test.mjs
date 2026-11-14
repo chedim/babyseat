@@ -18,7 +18,7 @@ const PACK = read('../../membrane/apps/barest.c1f/chat_view.c1f');
 const T0 = 1_000_000;
 function world(facts) {
   const f = new Field();
-  f.set_pack('dom', DOM); f.set_pack('fetch', FETCH); f.set_pack('chat_view', PACK);
+  f.set_pack('dom', DOM); f.set_pack('fetch', FETCH); f.set_pack('shell_view', read('../../membrane/apps/barest.c1f/shell_view.c1f')); f.set_pack('chat_view', PACK);
   assert.deepEqual(JSON.parse(f.pack_errors()), {}, 'chat_view loads once dom and fetch are there');
   const w = { f, t: T0, log: [] };
   w.flush = () => { const o = JSON.parse(f.drain()); w.log.push(...o.writes); return o.writes; };
@@ -252,6 +252,22 @@ scenario('polls pause while the page is hidden', () => {
   w.tick(10); assert.equal(w.reqs('history').length, 1, 'hidden: no poll, however late');
   w.feed('Conn:page', 'Conn', { hidden: false });
   w.tick(0.1); assert.equal(w.reqs('history').length, 2, 'visible again: the poll that was due goes');
+});
+
+// 7c2. a call cannot wedge the view: every call carries a timeout; a poll that fails (or times out: the host's receipt) is said in text, the poll is armed again and the finished turn is read
+scenario('a poll that never answers is aborted by its timeout, said in text, and the next poll reads the finished turn', () => {
+  const w = world(); w.open();
+  assert.equal(w.asked('history').timeout_s, 10, 'the first load has a timeout (10 s tried; the fact chat_poll_timeout_s says otherwise)');
+  w.reply('history', 200, page([{ ...MSGS[3] }]));                                      // a queued turn
+  assert.match(w.get('DomNode:chat:row:1003-4:ans').text, /Waiting for a turn/);
+  w.tick(0.8); assert.equal(w.asked('history').timeout_s, 10, 'a poll has it too');
+  w.fail('history', 'timeout after 10 s');                                              // the host aborted the hung poll
+  assert.match(w.n('pollnote').text, /did not answer the last read of the turns \(timeout after 10 s\)/); assert.equal(w.n('pollnote').hidden, false);
+  w.tick(0.8); assert.equal(w.reqs('history').length, 3, 'armed again');
+  w.reply('history', 200, page([{ ...MSGS[3], state: 'done', response: 'finished', turn: { state: 'done', started: 1, ended: 2 } }]));
+  assert.equal(w.get('DomNode:chat:row:1003-4:ans').text, 'finished', 'the turn the seat finished is shown');
+  assert.equal(w.n('pollnote').hidden, true, 'the line goes with the good answer');
+  const d = world(); d.feed('Boot:seat', 'Boot', { chat_poll_timeout_s: 3 }); d.open(); assert.equal(d.asked('history').timeout_s, 3);
 });
 
 // 7d. two identical tool calls are two lines (each call has an id from the history route)
