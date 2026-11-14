@@ -31,7 +31,7 @@ dependencies = ["babyseat==0.7.53"]
 Homepage = "https://github.com/chedim/membrane"
 
 [project.scripts]
-membrane = "membrane.cli:main"
+membrane = "membrane.launcher:main"
 
 [tool.setuptools]
 packages = ["membrane"]

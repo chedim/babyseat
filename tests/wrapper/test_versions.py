@@ -69,6 +69,8 @@ class TestTheVersionIsOneVersion(unittest.TestCase):
         self.assertEqual(shim["name"], "membrane-seat")
         self.assertEqual(shim["version"], _pyproject_version())
         self.assertEqual(shim["dependencies"], [f"babyseat=={_pyproject_version()}"])
+        # the shim re-writes the wrapper's `membrane` command (the RECORD-overlap trick): it points at the launcher that exists
+        self.assertEqual(shim["scripts"], {"membrane": "membrane.launcher:main"})
 
 
 if __name__ == "__main__":
