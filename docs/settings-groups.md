@@ -24,12 +24,11 @@ over the one place the value lives, so nothing drifts. `kind` is `text | number 
 | Chat | `chat.max_steps` (fact `chat_max_turns`, default 2048, 1 to 100000), `chat.timeout` (fact `chat_turn_timeout_s`, default 21600 s, 1 to 604800) | the row's own `value` (journalled, survives a restart) | live |
 | Map | `map.hidden`, `map.hidden_prefix` (lists), `map.window` (default 150, 1 to 10000), `map.poll_ms` (default 2000, 200 to 600000); `map.fade_s` (read-only) | the row's own `value` | live; the Map rows are hidden in the window while the field view is disabled |
 | Home | `home.allow` (one `HaAllow:<name>` entry per name: `services`, `entities`; default deny) | `HaAllow:<name>` | live |
-| Import | `import.history` (fact `legacy_path`), `import.sources` (`SqlSource:<name>`: `ro` or `rw`), `import.page` | the launch, `SqlSource` | read-only, restart |
+| Import | `import.history` (fact `legacy_path`), `import.sources` (`SqlSource:<name>`: `ro` or `rw`) | the launch, `SqlSource` | read-only, restart |
 | Access | `access.token_life` (fact `admin_token_ttl_s`, 30 days), `access.token_file` (path only), `access.mode` (tokens required / open), `access.port` | the launch | read-only, restart |
 | Limits | `limits.command_timeout_s` (120), `effect_workers` (4), `warm_rows` (1000), `memory_budget_mb`, `unload_soft`, `unload_hard`, `unload_batch`, `eval_stats` (on), `eval_stats_window_s` (10) | the launch | read-only, restart |
 
-The access rows `access.owner` and `access.people` of the first build are removed with the owner concept (branch `w112-admin`, in progress). `import.page` is the launch fact of the lazy history open; the lazy open is going away and
-the row with it (the history cutover imports everything in the background: docs/migration-design.md).
+The first build's rows `access.owner`, `access.people` (the owner concept) and `import.page` (the lazy history open) are gone: the cutover imports everything in the background (docs/migration-design.md).
 
 `Setting` is in the default hidden classes of the map (Message, SemText, Span, Request, DomNode, View, Fetch, Setting). The settings pack is granted privilege in `boot.c1f` (as `door_tools` and `unload` are) because it writes
 `Minds` and `HaAllow`, classes of packs the barest seat does not always load; the surface snapshot shows the grant.

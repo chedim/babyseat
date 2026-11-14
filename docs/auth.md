@@ -57,3 +57,8 @@ The key travels like the admin token: the run's `env_from` hands the seat's valu
 in anything the child prints (only values of 16 or more characters: a shorter one is no credential). In key mode the credentials the CLI would rank above the key (`ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` / `_FOUNDRY`,
 `CLAUDE_CODE_OAUTH_TOKEN`) are removed from the child's environment, so a stored login cannot answer. With no key and no opt-in the turn is refused with the way to set it; no `claude` process starts.
 `GET /membrane/options` shows the mode (`background.chat_auth`).
+
+## Environment variables: what a pack may read
+
+A pack reads the seat's environment through ONE entity, `Environment:host` (docs/cliffvm.md, "The environment"; `Help:environment` for the model): its properties are the variables. Only a short default list (`HOME`, `USER`, `LANG`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `TMPDIR`, `CLAUDE_BIN`, `MEMBRANE_DATA_DIR`) and the names in the launch fact `env_allow` carry their value.
+A name holding KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL reads the text `set` when set, never its value, and `env_allow` refuses such a name. So `ANTHROPIC_API_KEY` is visible to a pack only as `set`; the key itself still reaches only the claude child.

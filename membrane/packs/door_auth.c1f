@@ -3,7 +3,7 @@ IMPORT door 1
 -- `Person` stays declared for ONE reader: legacy_persons.c1f (the imported history names the owners of its old sessions). The door makes no `Person` any more.
 RESIDENT Person
 -- THE PAGE'S OWN TOKEN (operator decisions 2026-11-13: the released seat's two auth modes are a JWT and the loopback admin cookie; the seat-token
--- mode and the LAN guard are dropped). docs/release-parity.md section 3; the released shape is `ui_serve.py` `intercept`.
+-- mode and the LAN guard are dropped). docs/auth.md; the released shape is `ui_serve.py` `intercept`.
 --   * a JWT (Bearer, Basic password or the seat's cookie) is verified by the door before any pack sees the request (`authed`, `sub`, `claims`);
 --   * the page fetched from THIS machine (a loopback peer with no forwarding header) is given the ADMIN cookie: a token whose `sub` is `admin`,
 --     signed by the door with its own secret (`Request.mint`, a driver verb: the pack never holds the secret), HttpOnly, SameSite=Strict;

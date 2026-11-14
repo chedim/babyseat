@@ -77,7 +77,7 @@ docs/graph-link.md); see docs/ui-rebuild-plan.md "The shell and the view-pack co
 (`membrane/apps/field.c1f/field_view.c1f`, docs/field-view-plan.md) is built and DISABLED: that folder is not in the dist, and the default launch does not load it, so the page has no Field tab and makes no field request.
 The chat reads `/membrane/chat/messages` (history) and the message's event stream; the model reads and writes the graph through `POST /mcp`.
 
-**The barest packs** (`membrane/apps/barest.packs`, one shipped pack name per line in load order; `cliffvm serve`, `scripts/seat` and `seat_process.rs` read it): `boot entity stats door door_auth fs proc fetch router sql store door_tools semtext mentions chat chat_turn door_session
+**The barest packs** (`membrane/apps/barest.packs`, one shipped pack name per line in load order; `cliffvm serve`, `scripts/seat` and `seat_process.rs` read it): `boot entity environment stats door door_auth fs proc fetch router sql store door_tools semtext mentions chat chat_turn door_session
 legacy_import legacy_cutover door_fieldvm door_state door_models ha settings link`, each a single-file app (the first, `boot`, is the root of trust), then `launcher` (serve only), then the app folder `barest.c1f`. The other packs in `membrane/packs/`
 (`door_self`, `door_voice`, `door_decisions`, `decisions`, `dev`, `banner`, `attention`, `memory`, `methods`, `peer`, `turn`, `messages`, `about`, `mcp`, `ported`, `chat_oai`, `legacy_persons`, ...) are Python-era packs kept for their tests and
 are NOT loaded: a request carries none of their getters, and the seat seeds no `Command:git` or `File:operator-ledger`.
@@ -301,6 +301,15 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
   removal, a pack waiting for an import), `native/tests/privilege_1143.rs` (rule B, grant, revoke, granted_by, cleanup, replay) and the two
   direct-write tests in `pack_entities.rs`.
 
+## The environment: `Environment:host` (#1143, operator 2026-11-14)
+
+At the start the host (`host.rs` `boot_environment`, one call in `cli.rs` `run`, before `started`) writes ONE entity, `Environment:host`, whose PROPERTIES ARE the environment variables (property name = variable name; unset = absent, a reasoned null). Class `Environment`,
+declared RESIDENT by `membrane/packs/environment.c1f` (a pack of the barest set: without it the write would be dropped, and a host with no such pack writes nothing). It is STORED and written by a JOURNALLED outside write (`host:environment`): a replay of a run's
+journal gives the value the boot saw; a restart rewrites it (a variable no longer set is cleared). THE SECRET RULE (docs/auth.md): only the default names (`HOME`, `USER`, `LANG`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `TMPDIR`, `CLAUDE_BIN`, `MEMBRANE_DATA_DIR`) and those of the
+fact `env_allow` carry their value; a name holding KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL (any case) reads the text `set` when set and non-empty, never its value, and `env_allow` refuses such a name (said on stderr, no value); every other variable is absent. Help: `Help:environment`.
+Tests: `environment_host_1143.rs`, `environment_process_1143.rs` (the real binary; the secret values are searched in every reply, the store, WAL, journal, stdout, stderr and `ps`). The history cutover reads `Environment:host.MEMBRANE_DATA_DIR` (`legacy_cutover.c1f`).
+Journal across restarts: the stored journal (`c_journal`) holds ALL outside writes, in order, across restarts: the line key continues from the highest stored key at open (`Host::open` reads `MAX(k)`, one index lookup; the in-memory `journal` copy holds only this run's lines). Before this the key was the in-memory count, restarting at 0, so a restart replaced the earlier run's first lines and a replay lost the births. The journal now only grows (an idle restart of the barest seat adds about 8 lines, 1 KB; the first boot is about 400 lines, 60 KB); nothing replays it at startup (the rows of `c_field` are the state), only `migrate`'s one-time `updated` backfill reads it. Test: `journal_restart_1143.rs`.
+
 ## Eval accounting: `Stats:eval` (#1143)
 
 Which getters and setters burn the time is a question the VM answers about itself (`native/src/stats.rs`). Always on (the boot fact `eval_stats`, default on; `--fact eval_stats=false` turns it off and there is no entity), the VM counts per **(kind, class, property, pack)** the evaluations, their **self time** (the run's own clock time, minus what it waited in host calls such as `sql(...)`, which is counted apart as `wait_ms`, minus the runs nested in it) and their **steps**. The table is a fixed `Vec` (2048 slots, 1024 keys; a key past that is counted in one `(other)` row); counting a known key allocates nothing.
@@ -331,6 +340,7 @@ entity (a kind stamp came after the birth), and `--fact name=value` (any Boot fa
   The #1101 `call` tool, aliases and the enter/exit context stack are out (skipped by decision).
 - `POST /membrane/chat/message {text}` -> 202 `{id}` (`<epoch ms>-<request n>`); the message is `membrane::Chat:main:message:<id>` (`<id>` = `<ms>-<request n padded to 8 digits>`; a message that names a `sid` in the body is `membrane::Chat:session:<sid>:message:<id>`, and every message has a time row `membrane::Chat:main:time:<id>:<where>`: docs/chat-keys.md; kind
   ChatMessage: text, at, tools_run), written `queued` after its birth, which starts the turn.
+  `POST /membrane/chat/message/<id>/abort` is Stop: the running turn ends as an error that keeps the answer so far plus a stopped line and its CLI is killed (a message with nothing running: 200 `true`; an unknown id: 404; `chat.c1f`, `chat_turn.c1f`).
   `GET /membrane/chat/message/<id>[?sid=<sid>]` (the id is inside its chat) -> `{id, text, state (queued | running | done | error), response, tools, turn: {state, started, ended}}`: poll it.
   THE TURN is the entity `<message>:turn` (ChatTurn: `state` written running, then done/error; `status` a getter over it, `queued` while
   there is none: a first value written with the birth and the start's write would be two writes in one round, which the loop guard refuses; `started`, `ended` = the clock; `queued_at`; `message`).
