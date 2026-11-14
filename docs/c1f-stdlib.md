@@ -65,6 +65,10 @@ pack holds only the offsets.
   class can no longer make a getter compute from a stale input. Strings in dict literals and list elements are data, never reads
   (a string is a name only as the last argument of a call). A cycle keeps the level it reached (its closing edge reads the
   previous value). Never name a property `this`.
+- Lists are vectors: `+ - * /` on lists are element-wise and return floats; a length-1 list or a number broadcasts, so
+  `[1] * N` is the vector `[N]` (not N ones) and `[x + 1 for x in [1] * N]` is `[N + 1.0]`; lengths that do not match (neither 1)
+  are an error. There is no list repetition and no `range`: no construct builds a list of N copies (open decision).
+  Pinned by `native/tests/vector_arith_1143.rs`, shown in `Help:c1f`.
 - `concat` joins lists (`+` is vector addition); there is no `int()` yet; `clock` is epoch seconds.
 - A class a shipped pack declares is owned: other packs `IMPORT` it.
 

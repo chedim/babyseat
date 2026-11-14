@@ -321,6 +321,8 @@ pub struct Fields {
     /// entities whose getters are registered; `primed` once the start-up rebuild ran
     known: std::collections::HashSet<String>,
     primed: bool,
+    /// getters a pack load changed or added since the last prime: `sync` computes them for the entities that exist
+    fresh: Vec<usize>,
     /// cliffhanglet packs loaded at runtime (name -> its setters and getters), after the built-in goal graph
     packs: std::collections::BTreeMap<String, crate::syntax::Pack>,
     /// class -> the pack that owns it; pack -> the packs it imports; packs that aren't active, and why
@@ -390,7 +392,7 @@ impl Fields {
     pub fn goalgraph() -> Self {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], unload_asked: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
-            known: Default::default(), primed: false, late: vec![], flips: Default::default(), class_deferred: Default::default(), recon: Default::default(), in_run: false, packs: Default::default(),
+            known: Default::default(), primed: false, fresh: vec![], late: vec![], flips: Default::default(), class_deferred: Default::default(), recon: Default::default(), in_run: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
         f.packs.insert("goalgraph".into(), gg);
@@ -674,10 +676,40 @@ impl Fields {
         v
     }
 
+    /// The getters of the field are now `gs` (a pack was loaded or removed). A getter the new set carries unchanged keeps what the field learned of it (its
+    /// values, its inputs): only the getters this load changed or added are computed again (`fresh`, by `sync`). "Unchanged" is by property name: the getters of
+    /// one property stack their arms across classes, so every getter of a name whose set of getters moved counts as changed. The first set (nothing primed
+    /// yet) starts from nothing, as before. An idle seat evaluates no getter, and neither does a seat whose pack load touched none of the getters it reads.
     pub fn set_getters(&mut self, gs: Vec<Getter>) {
-        self.glevel = levels(&gs);
+        let glevel = levels(&gs);
+        if !self.primed || self.getters.is_empty() {
+            self.glevel = glevel;
+            self.getters = gs;
+            self.deps.clear(); self.reads.clear(); self.dirty.clear(); self.known.clear(); self.primed = false; self.fresh.clear();
+            return;
+        }
+        let same_prop = |a: &[Getter], b: &[Getter], prop: &str| -> bool {
+            let (mut x, mut y): (Vec<&Getter>, Vec<&Getter>) = (a.iter().filter(|g| g.prop == prop).collect(), b.iter().filter(|g| g.prop == prop).collect());
+            x.sort_by(|p, q| p.cls.cmp(&q.cls)); y.sort_by(|p, q| p.cls.cmp(&q.cls));
+            x == y
+        };
+        // new index -> old index, for the getters that stay
+        let mut map: std::collections::HashMap<usize, usize> = Default::default();   // old -> new
+        let mut fresh: Vec<usize> = vec![];
+        for (n, g) in gs.iter().enumerate() {
+            let old = self.getters.iter().position(|o| o.cls == g.cls && o.prop == g.prop);
+            match old {
+                Some(o) if same_prop(&self.getters, &gs, &g.prop) => { map.insert(o, n); }
+                _ => fresh.push(n),
+            }
+        }
+        for set in self.deps.values_mut() { *set = std::mem::take(set).into_iter().filter_map(|(e, gi)| map.get(&gi).map(|n| (e, *n))).collect(); }
+        self.deps.retain(|_, s| !s.is_empty());
+        self.reads = std::mem::take(&mut self.reads).into_iter().filter_map(|((e, gi), v)| map.get(&gi).map(|n| ((e, *n), v))).collect();
+        self.dirty = std::mem::take(&mut self.dirty).into_iter().filter_map(|(_, e, gi)| map.get(&gi).map(|n| (glevel[*n], e, *n))).collect();
+        self.glevel = glevel;
         self.getters = gs;
-        self.deps.clear(); self.reads.clear(); self.dirty.clear(); self.known.clear(); self.primed = false;
+        self.fresh = fresh;
     }
 
     /// Register entities the getters haven't seen: the first time, a silent rebuild (no setters run); after that,
@@ -685,6 +717,7 @@ impl Fields {
     fn sync(&mut self, core: &mut Core, now: f64, seq: &mut i64) {
         if self.getters.is_empty() { return; }
         if !self.primed { self.prime(core, now, seq); return; }
+        if !self.fresh.is_empty() { let only = std::mem::take(&mut self.fresh); self.prime_getters(core, &only, now, seq); }
         if core.docs.len() == self.known.len() { return; }   // nothing new (a removal is rare: its next birth registers at the scan after)
         let mut new: Vec<String> = core.docs.keys().filter(|k| !self.known.contains(*k)).cloned().collect();
         if new.is_empty() { return; }
@@ -991,7 +1024,13 @@ impl Fields {
     fn prime(&mut self, core: &mut Core, now: f64, seq: &mut i64) {
         self.primed = true;
         self.known = core.docs.keys().cloned().collect();
-        let mut order: Vec<usize> = (0..self.getters.len()).collect();
+        let all: Vec<usize> = (0..self.getters.len()).collect();
+        self.prime_getters(core, &all, now, seq);
+    }
+
+    /// Compute `only` (getter indices) for the entities that exist, silently; a value that differs from the stored one is dirty, so this round writes it live.
+    fn prime_getters(&mut self, core: &mut Core, only: &[usize], now: f64, seq: &mut i64) {
+        let mut order: Vec<usize> = only.to_vec();
         order.sort_by_key(|&i| self.glevel[i]);
         for gi in order {
             let cls = self.getters[gi].cls.clone();

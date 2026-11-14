@@ -114,6 +114,23 @@ N.count getter: len(words(this.name))
 N.largest getter: max([this.a, this.b])
 ```
 
+Lists are vectors: `+ - * /` on a list work element by element and give floats, never repetition or joining. A one-element
+list or a number stretches to the other operand's length, so `[1] * 5` is the vector `[5.0]` (NOT five ones) and
+`[x + 1 for x in [1] * 5]` is `[6.0]`. Two lists of different lengths (neither of length 1) are an error. To join lists use
+`concat`. There is no construct yet that builds a list of N copies.
+
+```c1f
+-- given V:a {"n": 5}
+-- reads V:a.scaled = [5.0, 10.0]
+-- reads V:a.stretched = [6.0]
+-- reads V:a.summed = [4.0, 6.0]
+-- reads V:a.joined = [1, 2, 3]
+V.scaled getter: [1, 2] * this.n
+V.stretched getter: [x + 1 for x in [1] * this.n]
+V.summed getter: [1, 2] + [3, 4]
+V.joined getter: concat([1, 2], [3])
+```
+
 Builtins: `len abs min max lower strip replace startswith lines words join head sort_by before after pluck distinct concat json str num
 prop why instances referencing`, plus the readers `sql read listdir stat`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
 refused when the pack loads:
