@@ -392,7 +392,7 @@
       "FvFile",
       "Request"
     ],
-    "members": 40,
+    "members": 42,
     "writes": [
       "FieldVm:seat.born",
       "FvDir:*.path",
@@ -801,6 +801,34 @@
     ],
     "claims": [],
     "boot_facts": []
+  },
+  "link": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "Page",
+      "Vm"
+    ],
+    "members": 8,
+    "writes": [
+      "*.retire",
+      "Vm:*.connected_at",
+      "Vm:*.page",
+      "Vm:*.seen"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "link_stale_s",
+      "started"
+    ],
+    "virtual": [
+      "Page"
+    ],
+    "resident": [
+      "Vm"
+    ]
   },
   "mcp": {
     "imports": [],
