@@ -261,15 +261,28 @@ scenario('a list editor (a row of kind list; the Map lists are not shown in this
   assert.deepEqual(JSON.parse(w.asked('setw:chat.timeout').body).params.arguments.value, ['Message', 'Fetch']);
 });
 
-scenario('the chat model: a select when the seat gives its model list (the one in force selected), else a text input; a change is saved like any text', () => {
-  const w = world().open((rows) => { byId(rows, 'model.chat').choices = ['claude', 'claude-agent:opus', 'local:qwen']; byId(rows, 'model.chat').current = 'claude-agent:opus'; });
-  assert.equal(w.n('model.chat', 'in').tag, 'select');
-  assert.deepEqual(['claude-agent:opus', 'claude', 'local:qwen'].map((o) => w.get('DomNode:set:model.chat:o:' + o).text), ['claude-agent:opus', 'claude', 'local:qwen'], 'the model in force first, then the seat\'s list');
-  assert.equal(w.get('DomNode:set:model.chat:o:claude-agent:opus').selected, true); assert.equal(w.get('DomNode:set:model.chat:o:claude').selected, false);
-  assert.equal(w.n('model.chat', 'in').parent, 'DomNode:set:model.chat:form');
-  w.write('DomNode:set:model.chat:in', 'value', 'local:qwen');
+scenario('the chat model with a model list: still a TEXT input (a name outside the list can be typed), the list is buttons that fill it; typed text survives a re-read and is what Save sends', () => {
+  const rows = (r) => { byId(r, 'model.chat').choices = ['claude', 'gpt']; byId(r, 'model.chat').current = 'claude'; };
+  const w = world().open(rows);
+  assert.equal(w.n('model.chat', 'in').tag, 'input'); assert.equal(w.n('model.chat', 'in').type, 'text'); assert.equal(w.n('model.chat', 'in').value, 'claude');
+  assert.deepEqual(['claude', 'gpt'].map((o) => w.get('DomNode:set:model.chat:c:' + o).text), ['claude', 'gpt']);
+  assert.equal(w.get('DomNode:set:model.chat:c:gpt').tag, 'button'); assert.equal(w.get('DomNode:set:model.chat:c:gpt').type, 'button');
+  // type a name that is not in the list, then the rows are read again (the shell's tab refresh, or a late answer), then Save
+  w.type('model.chat', 'in', 'claude-agent:sonnet');
+  w.click('DomNode:shell:nav:chat'); w.click('DomNode:shell:nav:settings'); w.reply('settings', 200, w.rows(rows));
+  assert.equal(w.get('SetRow:model.chat').draft, 'claude-agent:sonnet', 'a re-read does not take the typed text away');
+  assert.equal(w.n('model.chat', 'in').value, 'claude-agent:sonnet');
   w.submit('model.chat');
-  assert.equal(JSON.parse(w.asked('setw:model.chat').body).params.arguments.value, 'local:qwen');
+  assert.equal(JSON.parse(w.asked('setw:model.chat').body).params.arguments.value, 'claude-agent:sonnet');
+  w.reply('setw:model.chat', 200, MCP_OK());
+  // a button fills the box (nothing is saved by it)
+  w.reply('settings', 200, w.rows(rows));
+  w.click('DomNode:set:model.chat:c:gpt');
+  assert.equal(w.n('model.chat', 'in').value, 'gpt'); assert.equal(w.get('SetRow:model.chat').draft, 'gpt');
+  const n0 = w.log.filter((x) => x.eid === 'Fetch:setw:model.chat' && x.prop === 'request' && !x.born).length;
+  w.submit('model.chat');
+  assert.equal(JSON.parse(w.asked('setw:model.chat').body).params.arguments.value, 'gpt');
+  assert.equal(w.log.filter((x) => x.eid === 'Fetch:setw:model.chat' && x.prop === 'request' && !x.born).length, n0 + 1);
 });
 
 scenario('re-showing the tab reads the rows again; a draft that was typed stays unless the value in force changed; a failed read is text with Try again', () => {
