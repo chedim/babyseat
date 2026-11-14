@@ -891,11 +891,13 @@
       "Request.m1_rows": "Any",
       "Request.m_session": "List(Text)",
       "Request.ml_all": "List(Dict)?",
+      "Request.ml_ask": "Bool",
       "Request.ml_assts": "List(Dict)",
       "Request.ml_before": "Text?",
       "Request.ml_cut": "Dict?",
       "Request.ml_cut_id": "Text?",
       "Request.ml_flat": "List(Any)",
+      "Request.ml_lazy": "Bool",
       "Request.ml_limit": "Num",
       "Request.ml_older": "List(Dict)",
       "Request.ml_on": "Bool",
@@ -1342,6 +1344,7 @@
   },
   "legacy_import": {
     "getters": {
+      "LegacySeat.beat": "Num?",
       "LegacySeat.converter": "Int",
       "LegacySeat.hbad": "Text?",
       "LegacySeat.hl": "Dict?",
@@ -1352,6 +1355,7 @@
       "LegacySeat.pg": "Any",
       "LegacySeat.pgq": "Any",
       "LegacySeat.run_left": "Any",
+      "LegacySeat.waiting": "List(Text)",
       "LegacySeat.want": "Text",
       "LegacySession.kind": "Text"
     },
@@ -1371,14 +1375,18 @@
       "LegacySeat.refused": "Text?",
       "LegacySeat.run_done": "Num?",
       "LegacySeat.run_error": "Num?",
-      "LegacySeat.run_total": "Int",
+      "LegacySeat.run_total": "Num?",
       "LegacySeat.running": "Bool",
       "LegacySeat.tick": "Num",
       "SqlQuery.run": "Dict",
       "SqlQuery.source": "Text",
-      "SqlQuery.sql": "Text"
+      "SqlQuery.sql": "Text",
+      "membrane.open": "Any"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Legacy"
+    ]
   },
   "legacy_persons": {
     "getters": {},

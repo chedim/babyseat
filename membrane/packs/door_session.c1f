@@ -210,7 +210,7 @@ ChatMessage.oc_rows getter: concat([this.oc_urow], [this.oc_arow] if this.oc_aro
 
 -- GET /session/<sid>/message[?limit=N&before=<message id>]: the rows oldest first; `limit` the newest N rows, `before` only the messages older than the one that row belongs to
 Request.ml_on getter: this.ss_route == 'message' and this.method == 'GET' and this.ss_view != None
-Request.ml_rows getter: sql('SELECT k, json_extract(body, \'$.props.at\') AS at FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ? AND json_extract(body, \'$.props.sid\') = ?', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.ss_sid) if this.ml_on else []
+Request.ml_rows getter: sql('SELECT k, json_extract(body, \'$.props.at\') AS at FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ? AND json_extract(body, \'$.props.sid\') = ?', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.ss_sid) if this.ml_on and not this.ml_lazy else []
 Request.ml_all getter: sort_by(sort_by([{'eid': prop(r, 'k'), 'id': replace(prop(r, 'k'), 'membrane::Chat:message:', ''), 'at': prop(r, 'at'), 'n': num(after(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-'))} for r in this.ml_rows], 'n'), 'at') if this.ml_rows != None else None
 Request.ml_limit getter: num(([q[1] for q in this.qpairs if q[0] == 'limit'] or ['0'])[0]) or 0
 Request.ml_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [''])[0]
@@ -223,8 +223,13 @@ Request.ml_take getter: tail(this.ml_older, this.ml_limit) if this.ml_limit > 0 
 Request.ml_users getter: [{'at': r['at'], 'n': r['n'], 'h': 0, 'row': prop(r['eid'], 'oc_urow')} for r in this.ml_take]
 Request.ml_assts getter: [{'at': r['at'], 'n': r['n'], 'h': 1, 'row': prop(r['eid'], 'oc_arow')} for r in this.ml_take if prop(r['eid'], 'oc_arow') != None]
 Request.ml_flat getter: [x['row'] for x in sort_by(sort_by(sort_by(concat(this.ml_users, this.ml_assts), 'h'), 'n'), 'at')]
+-- THE LAZY HISTORY (#1143): a session imported as a header only (packs/legacy_import.c1f: its ledger `Legacy:session:<sid>` is pending or importing) gets its messages the first time it is opened:
+-- `ml_ask` is true for an authed list request where the launch fact `legacy_page` (user rows per query, no default) is told; legacy_import's setter on it writes the ledger's `open` (and the reply waits (`ml_lazy`) until the ledger says done or error. A session with no ledger is native: nothing is written, nothing waits.
+Request.ml_ask getter: this.ml_on and len([b for b in instances('Boot') if b.legacy_page != None]) > 0 and prop('membrane::Legacy:session:' + this.ss_sid, 'state') != None
+Request.ml_lazy getter: this.ml_ask and prop('membrane::Legacy:session:' + this.ss_sid, 'state') in ['pending', 'importing']
 Request.ml_reply getter:
   WHEN this.ss_view == None: this.ss_missing
+  ELSE WHEN this.ml_lazy: None
   ELSE WHEN this.ml_all == None: None
   ELSE WHEN len([x for x in this.ml_users if x['row'] == None]) > 0: None
   ELSE WHEN this.ml_before != '' and this.ml_cut == None: {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}

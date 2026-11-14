@@ -4,7 +4,10 @@ IMPORT sql 1
 IMPORT semtext 1
 IMPORT chat 1
 IMPORT chat_turn 1
+IMPORT door 1
 IMPORT door_session 1
+RESIDENT Legacy
+-- (`RESIDENT Legacy`: the seat and the ledgers are always loaded, a getter lists them with `instances`: the lazy path below.)
 -- THE CHAT HISTORY IMPORT (#1143, migration phase 1, operator 2026-11-14; docs/migration-design.md "Phase 1"). The ONLY thing migrated from the previous store is its chat history:
 -- sessions and messages. Nothing else is converted; the previous store is kept as the read-only source `SqlSource:legacy` (the launch fact `sql_sources`, packs/sql.c1f) that the model
 -- reads on demand (Help:legacy). No model runs during the import: the messages are born finished, `queued` is never written, no turn starts.
@@ -13,6 +16,7 @@ IMPORT door_session 1
 -- The writes (each is a driver-style request with an `id`: a new `id` runs again, the same value is not a new request):
 --   Legacy:seat.list   = {id}                          the HEADERS of every old session: a `ChatSession` + its ledger (pending) each, so the page's session list shows them all at once
 --   Legacy:seat.import = {id, sessions: [sid...] | 'all', page: <n>}   the headers, then the messages of the named sessions (or every one not yet done), `page` old user rows per query
+-- THE LAZY PATH (the launch fact `legacy_page`, no default): after `list`, a session's messages are imported the first time it is opened (packs/door_session.c1f writes the ledger's `open`); see "the lazy path" below.
 -- `page` has NO default (a request without it is refused with the reason in `refused`). A `done` session is never imported twice; an `error` or `importing` one resumes from its ledger `cursor` when named
 -- again (or in an `all`). One session at a time, one page per round: a page's entities and its ledger write are ONE cascade (one commit), so a stop between two pages loses nothing and repeats nothing.
 -- THE MAPPING (old row -> new entities). A session `{s: {id, title, owner, time: {created, updated}, ...}}` is `Chat:session:<sid>` (the id is kept) with `stitle`, `born`, `upd` (epoch ms, as they were),
@@ -94,6 +98,32 @@ LegacySeat.hl on-setter legacy-start:
     FOR s IN head(todo, 1):
       SqlQuery:legacy:msgs.run = {'id': this.iid + ':' + s + ':' + str(prop('membrane::Legacy:session:' + s, 'cursor') or 0), 'args': [s, prop('membrane::Legacy:session:' + s, 'cursor') or 0, this.psize]}
 
+-- ---- the lazy path: one session when its messages are first wanted (the page's message list, packs/door_session.c1f, writes the ledger's `open`) ---------------------------------------------
+-- The launch fact `legacy_page` is the page size (user rows per query; it has no default: without it a session is never opened lazily). `open` marks a session as wanted; the seat runs the wanted sessions one at a time
+-- with the pages above, and only when no run is going (an eager `import`, or another open): a getter lists the wanted ones, so two opens in one round cannot lose each other. A half-done session resumes from its `cursor`.
+LegacySeat.waiting getter: [replace(l.eid, 'membrane::Legacy:session:', '') for l in instances('Legacy') if l.open != None and l.state in ['pending', 'importing'] and replace(l.eid, 'membrane::Legacy:session:', '') != this.cur]
+-- `beat` is the clock while a wanted session waits and the seat is idle: the start below is tried at every beat, so a start that the engine refused for being in the same round as the end of a run (a field write of `running` in
+-- that round) is tried again at the next one. The seat starts the first wanted session; a run that ends picks the next wanted one itself (legacy-page).
+LegacySeat.beat getter: clock if len(this.waiting) > 0 and this.running != True and len([b for b in instances('Boot') if b.legacy_page != None]) > 0 else None
+LegacySeat.beat on-setter legacy-open-start:
+  WHEN this.beat != None:
+    page = [b.legacy_page for b in instances('Boot') if b.legacy_page != None][0]
+    sid = this.waiting[0]
+    rid = 'open:' + str(clock)
+    this.iid = rid
+    this.psize = page
+    this.run_total = 1
+    this.run_done = 0
+    this.run_error = 0
+    this.queue = []
+    this.cur = sid
+    this.after = prop('membrane::Legacy:session:' + sid, 'cursor') or 0
+    this.running = True
+    SqlQuery:legacy:msgs.run = {'id': rid + ':' + sid + ':' + str(prop('membrane::Legacy:session:' + sid, 'cursor') or 0), 'args': [sid, prop('membrane::Legacy:session:' + sid, 'cursor') or 0, page]}
+Request.ml_ask on-setter legacy-open-ask:
+  WHEN this.ml_ask:
+    ('membrane::Legacy:session:' + this.ss_sid).open = this.eid
+
 LegacySeat.want getter: str(this.iid) + ':' + str(this.cur) + ':' + str(this.after)
 LegacySeat.pgq getter: prop('SqlQuery:legacy:msgs', 'run_result')
 LegacySeat.pg getter:
@@ -106,9 +136,13 @@ LegacySeat.pg on-setter legacy-page:
     led = 'membrane::Legacy:session:' + this.cur
     ok = prop(this.pg, 'status') == 'ok'
     rows = (prop(this.pg, 'rows') or []) if ok else []
-    fin = (not ok) or len(rows) < this.psize
-    nxt = (this.queue[0] if len(this.queue) > 0 else None) if fin else this.cur
-    nafter = (((prop('membrane::Legacy:session:' + this.queue[0], 'cursor') or 0) if len(this.queue) > 0 else 0)) if fin else (rows[-1]['n'] if len(rows) > 0 else 0)
+    -- a session ends on an EMPTY page, never on a short one: the page that writes the last entities is not the page that writes `done`. A reader (the page's message list, packs/door_session.c1f) reads the store (`sql`)
+    -- the moment `done` is written, and the store has this cascade's entities only after its commit: with `done` in the same cascade it could read the session's last page as missing.
+    fin = (not ok) or len(rows) == 0
+    -- a session someone opened (`waiting`, the lazy path below) goes before the rest of an eager run's queue
+    wnt = fin and len(this.waiting) > 0 and len([b for b in instances('Boot') if b.legacy_page != None]) > 0
+    nxt = ((this.waiting[0] if wnt else (this.queue[0] if len(this.queue) > 0 else None)) if fin else this.cur)
+    nafter = (((prop('membrane::Legacy:session:' + nxt, 'cursor') or 0) if nxt != None else 0)) if fin else (rows[-1]['n'] if len(rows) > 0 else 0)
     FOR r IN rows:
       u = json(prop(r, 'ub'))
       ag = json(prop(r, 'agg'))
@@ -140,7 +174,8 @@ LegacySeat.pg on-setter legacy-page:
     (led).imported_at = clock if (fin and ok) else prop(led, 'imported_at')
     this.run_done = (this.run_done or 0) + (1 if (fin and ok) else 0)
     this.run_error = (this.run_error or 0) + (1 if (fin and not ok) else 0)
-    this.queue = tail(this.queue, max(0, len(this.queue) - 1)) if fin else this.queue
+    this.queue = tail(this.queue, max(0, len(this.queue) - 1)) if (fin and not wnt) else this.queue
+    this.run_total = (this.run_total or 0) + (1 if wnt else 0)
     this.cur = nxt
     this.after = nafter
     this.running = nxt != None
