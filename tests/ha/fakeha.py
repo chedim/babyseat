@@ -34,14 +34,129 @@ class UpdateFailed(Exception):
     pass
 
 
+class HomeAssistantError(Exception):
+    pass
+
+
+class ServiceNotFound(HomeAssistantError):
+    pass
+
+
+class SupportsResponse:
+    """HA's enum: NONE (no data back), OPTIONAL (the caller may ask for it), ONLY (the data is the point)."""
+    NONE, OPTIONAL, ONLY = "none", "optional", "only"
+
+
+class Context:
+    def __init__(self, user_id=None):
+        self.user_id = user_id
+
+
+class ServiceCall:
+    def __init__(self, domain, service, data, context=None, return_response=False):
+        self.domain, self.service, self.data = domain, service, dict(data or {})
+        self.context, self.return_response = context or Context(), return_response
+
+
+class FakeState:
+    def __init__(self, entity_id, state, attributes=None, last_changed=None):
+        import datetime
+        self.entity_id, self.state, self.attributes = entity_id, state, dict(attributes or {})
+        self.last_changed = last_changed or datetime.datetime(2026, 11, 14, 12, 0, 0, tzinfo=datetime.timezone.utc)
+
+
+class FakeStates:
+    def __init__(self):
+        self._s = {}
+
+    def set(self, entity_id, state, attributes=None):
+        self._s[entity_id] = FakeState(entity_id, state, attributes)
+
+    def get(self, entity_id):
+        return self._s.get(entity_id)
+
+    def async_all(self):
+        return list(self._s.values())
+
+
+class FakeServices:
+    """The service registry: `register(domain, service, handler, supports)` for the services HA has; `calls` is what was called, in order."""
+
+    def __init__(self):
+        self._reg = {}
+        self.calls = []
+
+    def register(self, domain, service, handler, supports=SupportsResponse.NONE):
+        self._reg.setdefault(domain, {})[service] = (handler, supports)
+
+    def async_register(self, domain, service, handler, schema=None, supports_response=SupportsResponse.NONE):
+        self.register(domain, service, handler, supports_response)
+
+    def async_remove(self, domain, service):
+        self._reg.get(domain, {}).pop(service, None)
+
+    def has_service(self, domain, service):
+        return service in self._reg.get(domain, {})
+
+    def supports_response(self, domain, service):
+        if not self.has_service(domain, service):
+            raise ServiceNotFound(f"Service {domain}.{service} not found")
+        return self._reg[domain][service][1]
+
+    def async_services(self):
+        return {d: {s: object() for s in svcs} for d, svcs in self._reg.items()}
+
+    async def async_call(self, domain, service, service_data=None, blocking=False, context=None, target=None, return_response=False):
+        if not self.has_service(domain, service):
+            raise ServiceNotFound(f"Service {domain}.{service} not found")
+        handler, sup = self._reg[domain][service]
+        if return_response and sup == SupportsResponse.NONE:
+            raise HomeAssistantError(f"Service {domain}.{service} does not support responses")
+        if not return_response and sup == SupportsResponse.ONLY:
+            raise HomeAssistantError(f"Service {domain}.{service} requires a response")
+        data = dict(service_data or {})
+        if target:
+            data.update(target)
+        self.calls.append({"domain": domain, "service": service, "data": dict(service_data or {}), "target": target, "blocking": blocking,
+                           "return_response": return_response})
+        res = handler(ServiceCall(domain, service, data, context, return_response))
+        if hasattr(res, "__await__"):
+            res = await res
+        return res if return_response else None
+
+
+class FakeRegistryEntry:
+    def __init__(self, entity_id, unique_id, config_entry_id):
+        self.entity_id, self.unique_id, self.config_entry_id = entity_id, unique_id, config_entry_id
+        self.domain = entity_id.split(".", 1)[0]
+
+
+class FakeEntityRegistry:
+    def __init__(self):
+        self.entries = {}
+
+    def add(self, entity_id, unique_id, config_entry_id):
+        self.entries[entity_id] = FakeRegistryEntry(entity_id, unique_id, config_entry_id)
+
+    def async_remove(self, entity_id):
+        self.entries.pop(entity_id, None)
+
+
 class FakeConfigEntry:
-    def __init__(self, data=None, options=None, version=1, minor_version=3, domain="membrane", entry_id="e1", unique_id="membrane"):
+    def __init__(self, data=None, options=None, version=1, minor_version=4, domain="membrane", entry_id="e1", unique_id="membrane"):
         self.data, self.options = dict(data or {}), dict(options or {})
         self.version, self.minor_version, self.domain = version, minor_version, domain
         self.entry_id, self.unique_id = entry_id, unique_id
         self.runtime_data = None
         self.reauth_started = 0
         self.unloaders = []
+        self.tasks = []
+
+    def async_create_background_task(self, hass, coro, name=None):
+        import asyncio
+        t = asyncio.ensure_future(coro)
+        self.tasks.append(t)
+        return t
 
     def async_start_reauth(self, hass, context=None, data=None):
         self.reauth_started += 1
@@ -90,6 +205,11 @@ class FakeHass:
         self.config_entries = FakeConfigEntries()
         self.session = session
         self.users = {}
+        self.states = FakeStates()
+        self.services = FakeServices()
+        self.registry = FakeEntityRegistry()
+        self.exposed = set()                      # the entity ids exposed to Assist
+        self.descriptions = {}                    # the services' descriptions, as async_get_all_descriptions answers
         self.auth = types.SimpleNamespace(async_get_user=self._get_user)
         self.tasks = []
 
@@ -158,6 +278,9 @@ class DataUpdateCoordinator:
         except UpdateFailed as e:
             raise ConfigEntryNotReady(str(e)) from e
 
+    async def async_request_refresh(self):
+        await self.async_refresh()
+
     async def async_refresh(self):
         try:
             self.data = await self._async_update_data()
@@ -217,10 +340,26 @@ def load(monkeypatch, session=None):
         "homeassistant": ha,
         "homeassistant.config_entries": _mod("homeassistant.config_entries", ConfigFlow=ConfigFlow, ConfigEntry=FakeConfigEntry,
                                              ConfigFlowResult=dict),
-        "homeassistant.core": _mod("homeassistant.core", HomeAssistant=FakeHass, callback=lambda f: f),
-        "homeassistant.const": _mod("homeassistant.const", Platform=types.SimpleNamespace(CONVERSATION="conversation")),
+        "homeassistant.core": _mod("homeassistant.core", HomeAssistant=FakeHass, callback=lambda f: f, ServiceCall=ServiceCall,
+                                   SupportsResponse=SupportsResponse, ServiceResponse=dict),
+        "homeassistant.const": _mod("homeassistant.const", Platform=types.SimpleNamespace(
+            CONVERSATION="conversation", SENSOR="sensor", BINARY_SENSOR="binary_sensor", SELECT="select")),
         "homeassistant.exceptions": _mod("homeassistant.exceptions", ConfigEntryAuthFailed=ConfigEntryAuthFailed,
-                                         ConfigEntryNotReady=ConfigEntryNotReady),
+                                         ConfigEntryNotReady=ConfigEntryNotReady, HomeAssistantError=HomeAssistantError,
+                                         ServiceNotFound=ServiceNotFound),
+        "homeassistant.components.sensor": _mod("homeassistant.components.sensor", SensorEntity=_Entity,
+                                                SensorDeviceClass=types.SimpleNamespace(TIMESTAMP="timestamp")),
+        "homeassistant.components.binary_sensor": _mod("homeassistant.components.binary_sensor", BinarySensorEntity=_Entity,
+                                                       BinarySensorDeviceClass=types.SimpleNamespace(RUNNING="running", CONNECTIVITY="connectivity")),
+        "homeassistant.components.select": _mod("homeassistant.components.select", SelectEntity=_Entity),
+        "homeassistant.components.homeassistant": _mod("homeassistant.components.homeassistant"),
+        "homeassistant.components.homeassistant.exposed_entities": _mod(
+            "homeassistant.components.homeassistant.exposed_entities",
+            async_should_expose=lambda h, assistant, entity_id: entity_id in h.exposed),
+        "homeassistant.helpers.entity_registry": _mod(
+            "homeassistant.helpers.entity_registry", async_get=lambda h: h.registry,
+            async_entries_for_config_entry=lambda reg, entry_id: [e for e in reg.entries.values() if e.config_entry_id == entry_id]),
+        "homeassistant.helpers.service": _mod("homeassistant.helpers.service", async_get_all_descriptions=_descriptions),
         "homeassistant.components": comps,
         "homeassistant.components.conversation": _mod(
             "homeassistant.components.conversation", ConversationEntity=ConversationEntity, ConversationInput=ConversationInput,
@@ -229,11 +368,12 @@ def load(monkeypatch, session=None):
         "homeassistant.helpers": helpers,
         "homeassistant.helpers.aiohttp_client": _mod("homeassistant.helpers.aiohttp_client",
                                                      async_get_clientsession=lambda h: h.session),
-        "homeassistant.helpers.update_coordinator": _mod("homeassistant.helpers.update_coordinator",
-                                                         DataUpdateCoordinator=DataUpdateCoordinator, UpdateFailed=UpdateFailed),
+        "homeassistant.helpers.update_coordinator": _mod("homeassistant.helpers.update_coordinator", DataUpdateCoordinator=DataUpdateCoordinator,
+                                                         UpdateFailed=UpdateFailed, CoordinatorEntity=_CoordinatorEntity),
         "homeassistant.helpers.entity_platform": _mod("homeassistant.helpers.entity_platform", AddConfigEntryEntitiesCallback=object),
     }
     comps.conversation = mods["homeassistant.components.conversation"]
+    helpers.entity_registry = mods["homeassistant.helpers.entity_registry"]
     try:
         import voluptuous  # noqa: F401
     except ImportError:
@@ -249,6 +389,29 @@ def load(monkeypatch, session=None):
     monkeypatch.setitem(sys.modules, "cc_membrane", pkg)
     spec.loader.exec_module(pkg)
     return pkg, hass
+
+
+class _Entity:
+    """What SensorEntity / BinarySensorEntity / SelectEntity share: attributes the component sets, written state counted."""
+    hass = None
+    entity_id = None
+    writes = 0
+
+    def async_write_ha_state(self):
+        self.writes += 1
+
+
+class _CoordinatorEntity(_Entity):
+    def __init__(self, coordinator):
+        self.coordinator = coordinator
+
+    @property
+    def available(self):
+        return self.coordinator.last_update_success
+
+
+async def _descriptions(hass):
+    return hass.descriptions
 
 
 class _Marker:

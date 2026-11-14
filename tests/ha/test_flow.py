@@ -82,10 +82,10 @@ def test_one_entry_per_home_assistant(ha, run):
         assert e.reason == "already_configured"
 
 
-def test_the_flow_is_version_1_minor_3(ha):
+def test_the_flow_is_version_1_minor_4(ha):
     pkg, hass = ha
     mod, _ = _flow(pkg, hass)
-    assert (mod.MembraneConfigFlow.VERSION, mod.MembraneConfigFlow.MINOR_VERSION) == (1, 3)
+    assert (mod.MembraneConfigFlow.VERSION, mod.MembraneConfigFlow.MINOR_VERSION) == (1, 4)
 
 
 # ---- async_migrate_entry: the entries the old component made ----------------------------------------------------------------
@@ -104,7 +104,7 @@ def test_a_connect_entry_keeps_its_url_and_password_and_loses_what_has_no_place_
                                         "seats": [{"id": "seat-4096", "host": "seat", "serve_port": 4096, "token": "old-seat-token", "url": "http://seat:4096"}],
                                         "active": "seat-4096"})
     _migrate(pkg, hass, e)
-    assert (e.version, e.minor_version) == (1, 3)
+    assert (e.version, e.minor_version) == (1, 4)
     assert e.data == {"serve_url": "http://seat:4096", "serve_user": "opencode", "serve_pass": "old-seat-token"}
     assert e.options == {}
 
@@ -126,12 +126,12 @@ def test_an_inside_entry_has_no_seat_to_connect_to_and_is_left_for_reauth(ha):
                                options={"seats": [{"id": "inside", "inside": True}], "active": "inside"})
     _migrate(pkg, hass, e)
     assert e.data == {"serve_url": "", "serve_user": "opencode", "serve_pass": ""}
-    assert e.minor_version == 3
+    assert e.minor_version == 4
 
 
 def test_a_migrated_entry_is_not_migrated_twice(ha):
     pkg, hass = ha
-    e = fakeha.FakeConfigEntry(minor_version=3, data={"serve_url": "http://x", "serve_user": "opencode", "serve_pass": "t"})
+    e = fakeha.FakeConfigEntry(minor_version=4, data={"serve_url": "http://x", "serve_user": "opencode", "serve_pass": "t"})
     _migrate(pkg, hass, e)
     assert hass.config_entries.updated == []
 
@@ -145,3 +145,19 @@ def test_the_strings_cover_every_step_and_error_the_flow_can_show_and_the_transl
     src = (CC / "config_flow.py").read_text()
     for key in s["config"]["error"]:
         assert f'"{key}"' in src, key
+
+
+def test_services_yaml_and_the_strings_describe_exactly_the_two_services_the_component_registers(ha):
+    import re
+    yaml_text = (CC / "services.yaml").read_text()
+    top = re.findall(r"(?m)^([a-z_]+):\s*$", yaml_text)
+    assert top == ["send_message", "ask"]
+    s = json.loads((CC / "strings.json").read_text())
+    assert sorted(s["services"]) == sorted(top)
+    for name in top:
+        assert set(s["services"][name]["fields"]) == {"text", "session"}
+        block = yaml_text.split(f"{name}:\n", 1)[1].split("\n  fields:", 1)[1]
+        assert re.findall(r"(?m)^    ([a-z_]+):\s*$", block)[:2] == ["text", "session"]
+    pkg, hass = ha
+    services = importlib.import_module("cc_membrane.services")
+    assert (services.SERVICE_SEND, services.SERVICE_ASK) == tuple(top)

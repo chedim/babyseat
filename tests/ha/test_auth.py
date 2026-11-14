@@ -40,7 +40,7 @@ def test_setup_checks_the_health_with_the_token_as_the_basic_password_and_loads_
         assert (user, pw) == ("opencode", "tok-1")
         return e
     e = _with_seat(run, hass, "tok-1", body)
-    assert hass.config_entries.forwarded == [["conversation"]]
+    assert hass.config_entries.forwarded == [["conversation", "sensor", "binary_sensor", "select"]]
     assert e.runtime_data.client.url.startswith("http://127.0.0.1")
 
 

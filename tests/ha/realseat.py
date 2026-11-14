@@ -66,7 +66,11 @@ class RealSeat:
         self.child = subprocess.Popen(
             [str(self.bin), "run", str(packs / "boot.c1f"), str(packs), "--store", str(d / "field.sqlite3"), "--port", "0", "--ui-dir", str(d),
              "--fact", f"chat_claude_bin={claude}", "--fact", "seat_cwd=/srv/seat", "--fact", "seat_project=membrane", "--fact", "seat_version=1.0",
-             "--fact", f"door_secret_file={d / 'door.secret'}", "--fact", f"seat_data_dir={d}"],
+             "--fact", f"door_secret_file={d / 'door.secret'}", "--fact", f"seat_data_dir={d}",
+             # a launcher's seat that answers through the claude CLI only (scripts/seat-full's defaults): the models the seat-model select lists
+             "--fact", 'cloud_models=[{"name":"claude","backend":"claude-agent"},{"name":"claude-agent:sonnet","backend":"claude-agent"}]',
+             "--fact", "router_on=false", "--fact", "seat_backend=http://127.0.0.1:1",
+             "--fact", 'minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude"}'],
             cwd=d, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         line = self.child.stdout.readline()          # "...:<port>"
         self.port = int(line.rsplit(":", 1)[1].strip())
@@ -82,6 +86,27 @@ class RealSeat:
                            capture_output=True, text=True, timeout=30)
         assert r.returncode == 0, r.stderr
         return r.stdout.strip()
+
+    def owner_token(self) -> str:
+        """The owner's token, the file the seat writes at boot (docs/auth.md): the model's own tools carry it."""
+        t = time.time()
+        while True:
+            try:
+                tok = (self.dir / "owner.token").read_text().strip()
+                if tok:
+                    return tok
+            except OSError:
+                pass
+            assert time.time() - t < 30, "the seat made no owner token"
+            time.sleep(0.05)
+
+    def tool(self, name: str, **args):
+        """One call of the model's tool on /mcp (the owner's token): -> the reply text. `tool("entity_write", spec=..., prop=..., value=...)` is the model writing."""
+        import json, urllib.request
+        req = urllib.request.Request(self.url + "/mcp", method="POST", headers={"Authorization": "Bearer " + self.owner_token(), "Content-Type": "application/json"},
+                                     data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}).encode())
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read())["result"]["content"][0]["text"]
 
     def mint_at(self, exp_offset: float, sub="ha") -> str:
         """A token signed with the seat's own secret whose `exp` is now + `exp_offset` seconds (negative: long past; the door's leeway is 30 s,

@@ -148,7 +148,7 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 
 ### 1.8 Home Assistant's own calls
 
-Scoping and design for migrating all of Home Assistant support to c1f (inventory, auth, platforms, slices, decisions): [hass-plan.md](hass-plan.md). It finds that HA never calls `:11500` (row 76's HA caller is the model server's `/api/tags`).
+Scoping and design for migrating all of Home Assistant support to c1f (inventory, auth, platforms, slices, decisions): [hass-plan.md](hass-plan.md). It finds that HA never calls `:11500` (row 76's HA caller is the model server's `/api/tags`). **Slice 2 (2026-11-14, built):** the released `/membrane/ha/*` routes (`subscriptions`, `states`, `catalog`, `token`, `mqtt`) are NOT ported as they were; the seat acts on Home Assistant by a pull queue instead (D-act B), so the routes on cliffvm are `GET` and `POST /membrane/ha/calls`, `POST /membrane/ha/catalog` (the released catalog route, a new body) and `GET /membrane/ha/metrics`, all the owner's (`membrane/packs/ha.c1f`, docs/home-assistant.md). `subscriptions`, `states`, `token` and `mqtt` answer 404: the model reads a state with a `HaCall` read, no token goes to the seat, MQTT is not built.
 
 | # | method path | caller | shape pointer | cliffvm | evidence |
 |---|---|---|---|---|---|

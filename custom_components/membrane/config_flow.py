@@ -23,7 +23,7 @@ def clean_url(url: str) -> str:
 
 class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
-    MINOR_VERSION = 3               # connect-only: the entry is {serve_url, serve_user, serve_pass} (async_migrate_entry)
+    MINOR_VERSION = 4               # connect-only: the entry is {serve_url, serve_user, serve_pass}; 1.4: the old sensors and select are gone (async_migrate_entry)
 
     async def _check(self, url: str, token: str, user: str = DEFAULT_SERVE_USER) -> str:
         """"" when the seat answers its health with this token, else the error key."""
