@@ -137,6 +137,7 @@
   },
   "chat": {
     "getters": {
+      "Chat.seat_base": "Any",
       "Chat.seat_model": "Any",
       "Chat.title": "Text",
       "ChatMessage.history_view": "Dict",
