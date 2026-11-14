@@ -1,0 +1,97 @@
+# Filling the field view from the entity graph (scoping note, #1143)
+
+**Important first.** Docs only; no code, no seat touched. The map routes answer the empty shapes on purpose (`membrane/packs/door_map.c1f:11-17`, release-parity rows 61-68). This note says what could fill them from what the new seat already holds, in which order, and what stays empty. Seven numbered decisions at the end need the operator's word; nothing here sets a threshold or a default.
+
+## 1. Who reads which shape
+
+All routes are GET, all answered by `Request.r_map` (`door_map.c1f:43-52`). Old shapes are the v0.7.53 ones (`membrane/fieldmap.py`, `membrane/field3d.py` at tag `v0.7.53`; read only).
+
+| route | reader | shape expected | today |
+|---|---|---|---|
+| `/membrane/map/field?m=` | 2D panel `ui/field.js:512` (m default 1200, `field.js:367`) | `{axes:[{id,label,group}], nodes:[{id,kind,label,mass,contest,deg,v:[one value per axis]}], edges:[{s,rel,t,n}], kinds, kind_counts, explained}` (`fieldmap.py:73-150`); axes drive the X/Y pickers (`field.js:181-188`, `583-607`, `679`), `kinds`/`kind_counts` the legend (`606`, `695`) | `{axes:[],nodes:[],edges:[]}` (`door_map.c1f:44`); the panel prints "the field is empty" (`field.js:523-524`) |
+| `/membrane/field/entity?eid=` | card drawer `field.js:673`, `1024` | `{eid,kind,surface,tier,n,accr,mass_eff,coherence,first_ts,last_ts,activity,conflicts,evidence:[{text,stream,role,ts,score}],near:[{eid,sim}],relations:[{subj,rel,obj,n}],changes?,followed_by?,suggested?,worldline?}` (`fieldmap.py:153-182`; `field.js:268-277`) | 503 "the field is not loaded" |
+| `/membrane/map/distance?eid=` | entity axis `field.js:975` | `{eid: distance}` per node (`fieldmap.py:204-225`) | 503 |
+| `/membrane/map/field3d?axes=` | 3D window `ui/field3d.js:1153` | meta `{pid,axes,n_total,kinds,kind_counts,explained,max_level,per_level,tile_k,edges,shape,built_s,root,current}` (`field3d.py:163-176`) | empty projection, `n_total 0` (`door_map.c1f:37-38`) |
+| `/membrane/map/tile?pid&l&x&y&z` | `field3d.js:1221` | `{pid,l,x,y,z,nodes:[{id,k,l,m,c,p:[x,y,z],lv}],edges:[{s,t,rel,n}],more}` (`field3d.py:178-202`) | empty tile; other pid 410 |
+| `/membrane/map/locate?pid&eid&nb` | `field3d.js:1537`, `1622`; `home.js:3661` | `{pid, ...node, tile, neighbours:[node+rel,n,dir]}` | 404 "not in this projection" (tolerated) |
+| `/membrane/map/search?q&limit` | `field3d.js:1606` | `{q, hits:[...]}` | `hits: []` |
+| `/membrane/map/blurp` | `field3d.js:1092` | `{firings,counts,triggers}` | empty; off by default (row 67) |
+
+Already filled, not part of this plan: `/membrane/work-graph` (the markers drawn into the 3D scene, `ui/fieldview.js:149`; `door_decisions.c1f:12`, `111-120`: Goals, Tasks, waits, cards) and `entity-history` / `item-chat` (`door_decisions.c1f:13-14`).
+
+A second, newer reader exists: the barest app's graph (`membrane/apps/barest.c1f/ui/app.js`, `graph.js`) does NOT call the map routes. It lists entities with the MCP tool `entity_query` (`ui/mcp.js:45`, 100 per page, cap 600) and `entity_read` (`mcp.js:56`), and derives edges itself: ownership from the eid's `:` prefix and references from `$ref` values (`app.js:20-52`). That is the existing proof that the entity graph alone can draw a field.
+
+## 2. What the entity graph can feed
+
+The store is `c_field(k, body)` with `body = {cls, props}` and indexes on `(cls,k)` and `(updated,k)` (`native/src/host.rs:246`). The class list of an entity is `props.parents` (`entity.c1f:10`), queryable as `kind:<Class>` (`door_tools.c1f:216-230`).
+
+| shape field | feed | where |
+|---|---|---|
+| node `id`, `kind` | the eid; `cls` (first of `parents`) | `c_field.k`, `entity.c1f:10` |
+| node `label` | `Help:<t>` its topic; `Goal.display` (`banner.c1f` Goal block); `Banner:<owner>:<chat>` its chat; a Message/SemText its first sentence (`SemText.sentences`, `semtext.c1f:19`); otherwise the eid | getters |
+| node `mass` | no old accretion exists. Honest stand-ins: property count, number of inbound edges, or length of `text`. Not decided (decision 3) | getter |
+| `contest` | none; send 0 | |
+| `v` readings axes | `updated` (VM-provided, `entity.c1f:7-9`), `degree` (edge count), `depth` (colons in the eid), `age`; NO principal components and no `kind:<k>` directions: they need the 1024-float states, which are NOT converted (`docs/migration-design.md:187`, "recall tables, vectors: read in place") | getters |
+| edges `own` | eid prefix owner (`Chat:message[id]` under its chat), as `app.js:20-28` | getter over the id list |
+| edges `ref` | `$ref` values in properties (`semtext.c1f:23-27`; `mentions.c1f` mention edges between spans and entities); Goal `of`/`blocks` (`door_decisions.c1f:111-120`) | getter |
+| edges `rel` | the old relations, read in place: `c_relations` (`door_decisions.c1f:142`: `json_extract(body,'$.d.subj'/'obj'/'rel')`) | `sql()` |
+| `near` / `evidence` on a card | evidence: the Messages and SemText sentences that mention the entity (`mentions.c1f`, `item-chat` already does the lookup, `door_decisions.c1f:14`); near: other entities sharing mention edges. Cosine `sim` has no source until a native recall (decision 6) | getters + `sql()` |
+| Help | one node per `Help:<topic>` (`help.c1f`, nine topics), edges to the classes a page names; cheap, tiny, a good first slice | `help.c1f` |
+| Banner | `Banner:<owner>:<chat>` (`banner.c1f:3-12`): one node per person per chat, edge to its chat and to the entities its `ask_eids` (`banner.c1f:75`) recalled | getters |
+| Notes | there is no `Note` class in any pack: `Memory:seat.learn` writes a note EVENT through a driver (`memory.c1f:8-24`), so notes live in the old/driver store, not as entities. Leave out until they are entities (decision 5) | |
+| SemText / Span | the text is a child of its owner; `Span` is virtual, never stored (`semtext.c1f:28-34`): never draw spans | |
+
+The 3D positions `p` (a point on the sphere) were PCA coordinates (`field3d.py:100-121`) with a stable hash direction for entities the axes see nothing of (`field3d.py:92`). Without vectors the only available layout is categorical (class sector, hash direction, `updated`) or a force layout like `graph.js`; either is a NEW layout rule (decision 4).
+
+## 3. Proposed pack, shape by shape
+
+One pack `door_map` stays the owner of the routes; the content goes into a second pack `fieldmap` (`PACK fieldmap 1`, `IMPORT door_map 1`) so the empty arm of `r_map` is replaced by `WHEN this.fm_on` while the degraded answers remain the fallback (and the golden boot test keeps pinning them for an empty store). Only getters, `sql()` reads and existing builtins (`prop`, `pluck`, `concat`, `join`, `sql`, `instances`, `spans`); no new builtin; a write is only an effect (none needed: every route is a read).
+
+1. `Request.fm_rows getter`: ONE `sql()` over `c_field`: `SELECT k, cls, json_extract(body,'$.props.parents') AS parents, updated FROM c_field WHERE cls NOT IN (<hidden classes>) ORDER BY updated DESC LIMIT ?`. The hidden list and the limit are decisions 1 and 2. Selecting columns, never `body`, is the size rule (section 4).
+2. `Request.fm_edges_ref getter`: `c_relations` joined to the ids of `fm_rows` (`WHERE subj IN (...) AND obj IN (...)`, one query, same limit); plus the `own` edges computed in-pack from the eids with the ownership rule of `app.js:20-28`. Edge `n` is the old `n`, 1 for own.
+3. `Request.fm_2d getter`: `{axes, nodes, edges, kinds, kind_counts, explained: []}`: axes = the readings only (`updated`, `degree`, `depth`, `age`) with `group: 'readings'` (the panel already groups, `fieldmap.py:111-115`); `v` lists those values in axis order; `kinds` and `kind_counts` by class.
+4. `Request.fm_card getter` for `/membrane/field/entity`: `{eid, kind, surface, n, first_ts, last_ts, evidence, near, relations}`; the `CARD_FIELDS` with no source (`tier`, `accr`, `coherence`, `net_align`, `activity`, `conflicts`) are left OUT, not zero (`field.js:268-277` guards each with `||`; a smoke test for the drawer is part of the slice). `relations` is the `entity-history` query (`door_decisions.c1f:142`), reused.
+5. `Request.fm_3d` / `fm_tile` / `fm_locate`: one projection with one pid: `pid` is the hash of the row-count and the newest `updated` (so a changed field expires the old pid with the existing 410 arm, `door_map.c1f:41`, `48-52`); the octree is cut by `lv` = depth level of the (decision 4) layout; `tile_k` stays `mp_tile_k` (150, the released constant, `door_map.c1f:37`). `locate` is the `fm_rows` row by eid plus its neighbours from the edge query.
+6. `Request.fm_search getter`: `name~:`-style prefix and substring match on eid and label over `c_field.k` with `LIMIT ?` (the limit comes from the page, `limit=40`, `field3d.js:1606`). No ranking.
+7. `/membrane/map/distance`: stays 503. It is a vector distance; the page already falls back (`field.js:975-980` clears the entity axis).
+8. `/membrane/map/blurp`: stays the empty overlay (row 67).
+
+## 4. Size and performance on a Memo-sized store
+
+Memo's store is 1.37 GB with 25k messages. From the measurements already on disk: about 89% of a migrated store is recall data (`docs/migration-design.md:144`), and `c_field` rows were 109 MB of a 123 MB store on Throwy's copy (`:88`); a row that carries a vector is about 3.7 KB (`:176`). Boot is lazy by design (door up in 0.33 s / 26 MB at 50,000 synthetic rows, `docs/measurements-2026-11-14.md` R1); a map must not undo that.
+
+- **No `body` in the scan.** `door_tools.c1f:229` shows the cost to avoid: `json_extract(body, '$.cls')` inside the WHERE parses every row's JSON and does not use the `(cls,k)` index that `host.rs:246` builds on the `cls` COLUMN. Filter on the column `cls` and `updated`, and read `body` only for the one entity of a card.
+- **25k Message rows are the bulk and must not be nodes** by default: a graph of every message is the 1,200-node default (`field.js:367`) times twenty. Hidden classes: Message, SemText, Span (virtual anyway), Request, DomNode, View, Fetch (decision 1).
+- **Cap every route**: nodes by `m` (the page already sends it; `door_map.c1f:14-15` says it is ignored today), edges by the old `max_edges` idea (6000 in `fieldmap.py:74`, shown only as the shape of the cap; the number is decision 2), tiles by `tile_k`.
+- **One query per route, no per-row `sql()` in a getter**: a getter runs per entity, and `sql()` inside a list comprehension over 1,200 rows is 1,200 queries (the `banner.c1f:69-82` lines are one query per getter; keep that shape).
+- **Request getters are per request**: the 3D window calls field3d, then a tile per octant, then locate; recomputing `fm_rows` each time repeats the scan. Cache by a resident `FieldMap:seat` entity holding `pid`, rows and edges, rebuilt when the pid changes (an `on-setter`, the `Boot.started` seeding style of `help.c1f`). Cost of keeping it resident on 1.37 GB: unmeasured, to be measured on a COPY first (decision 7; no run on the operator's machine without asking).
+- **`c_relations` may be absent** in a fresh store (`door_decisions.c1f:131-141` checks `sqlite_master` first); do the same and degrade to ownership edges only.
+
+## 5. What stays empty
+
+- Principal-component axes, `kind:<k>` direction axes, `explained` (no vectors in the new store).
+- `distance`, the cosine `sim` in `near`, `tier/accr/coherence/net_align/activity/conflicts` of the card, `changes/followed_by/suggested/worldline`.
+- `blurp` overlay (off by default).
+- Notes (no entity class), spans (virtual), per-sentence recall ranking.
+- Everything that needs a native recall: it is the later phase the operator named (`door_map.c1f:11`); the map must not pre-empt it.
+
+## 6. Slice order
+
+1. **Help + class graph, 2D only** (smallest; no store scan): `Help:*`, the classes the packs declare and `parents` edges. Proves `fm_2d`, the axes picker and the empty-arm switch on a store with a few dozen nodes.
+2. **Entities from `c_field` by column**, ownership edges, 2D, with the hidden-class list and the cap; the `?m=` is honoured. Measure on a copy of Memo's store before going further.
+3. **Cards**: `/membrane/field/entity` from the entity's `props`, relations from `c_relations`, evidence from mentions.
+4. **Search + locate**, both on the same row query.
+5. **3D projection and tiles** with the chosen layout, pid/410 behaviour kept; the `FieldMap:seat` cache lands here, since the 3D window multiplies requests.
+6. **Banner and Goal nodes/edges** (Banner recalled entities, Goal `of`/`blocks`), once the map is stable.
+
+Each slice ends with the golden boot test unchanged for an empty store (`tests/golden/boot`) and a JS check that the panel draws (`tests/js/field_empty.test.mjs` is the empty-case pin).
+
+## Open decisions
+
+1. Which classes are hidden from the map by default (my pick: Message, SemText, Span, Request, DomNode, View, Fetch; the list is a launch fact, not code).
+2. The node cap and the edge cap for a store of Memo's size (the page sends 1,200 today; 6,000 edges is the old constant; neither is chosen for the new seat).
+3. What `mass` means without accretion: property count, inbound edges, or text length (my pick: inbound edges, since it is the same number as `degree`'s cousin and costs no new query).
+4. The 3D layout without vectors: class sectors plus hash direction, a force layout like `graph.js`, or leave 3D empty until a native recall; and what the octree levels mean for it.
+5. Notes: make them an entity class first (the model's `learn` writes one), or leave them out of the map for now.
+6. Whether the card's `near` may use mention-edge overlap (no cosine) under the label "nearest", or stays empty until recall.
+7. May I measure slice 2 on a COPY of Memo's store (one process, RAM checked first), and what resident-cache cost is acceptable.
