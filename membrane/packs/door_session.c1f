@@ -137,7 +137,10 @@ Request.ss_status_reply getter: {'status': 200, 'body': (json(prop(this.ss_stat[
 -- (packs/chat.c1f: ChatMessage, its body, its turn; `queued` starts the turn, chat_turn.c1f) with `sid` naming the session. The turn also carries `sid` (the status reads it).
 Request.sm_text getter: strip(join([str(prop(p, 'text') or '') for p in (prop(this.jbody, 'parts') or []) if prop(p, 'type') == 'text'], '\n'))
 Request.sm_post getter: (this.ss_route == 'prompt_async' or this.ss_route == 'message') and this.method == 'POST'
-Request.sm_go getter: this.sm_post and this.ss_view != None and this.sm_text != ''
+-- a streamed partial of the person's speech (`stream` named, `final: false`) is no turn: 204 at once, nothing stored; the final transcript carries the whole utterance and is the turn
+-- (the released seat coalesces the partials in its speaker lane for display; the answered text is the final one's)
+Request.sm_interim getter: str(prop(this.jbody, 'stream') or '') != '' and prop(this.jbody, 'final') == False
+Request.sm_go getter: this.sm_post and this.ss_view != None and this.sm_text != '' and not this.sm_interim
 -- the body's `model` ({providerID, modelID}, as the page sends it) is the session's from now on (the released handler: "THE MESSAGE'S PICK STICKS"); a message with none runs on the session's
 Request.sm_pick getter: strip(str(prop(prop(this.jbody, 'model'), 'modelID') or prop(prop(this.jbody, 'model'), 'id') or ''))
 Request.sm_pick_now getter: this.sm_pick or str(prop('membrane::Chat:session:' + str(this.ss_sid), 'smodel') or '')
@@ -159,6 +162,7 @@ Request.sm_meid getter: 'membrane::Chat:message:' + this.sm_id if this.sm_id != 
 Request.sm_reply getter:
   WHEN this.ss_view == None: this.ss_missing
   ELSE WHEN this.sm_text == '': {'status': 400, 'body': {'type': 'error', 'error': {'message': 'message needs a text part'}}}
+  ELSE WHEN this.sm_post and this.sm_interim: {'status': 204}
   ELSE WHEN this.sm_id == None: None
   ELSE WHEN this.ss_route == 'prompt_async': {'status': 204}
   ELSE WHEN prop(this.sm_meid, 'over') != True: None

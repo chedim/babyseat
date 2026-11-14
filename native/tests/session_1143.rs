@@ -666,3 +666,26 @@ fn a_model_the_seat_cannot_run_is_refused_in_the_turn_with_the_reason_and_the_cl
     assert!(argv_of(&dir, "quick refused").is_none(), "nothing was run");
     assert_eq!(api(port, "GET", "/session/status", J::Null).1[&sid], json!({"type": "idle"}));
 }
+
+// ---- voice: an interim transcript is no turn (#1143, step 2) -------------------------------------------------------------------------------------
+#[test]
+fn a_streamed_partial_transcript_is_answered_204_and_starts_no_turn_the_final_one_does() {
+    let (_run, port, dir) = seat_facts("ses-interim", STEPS, false, &CLAUDE_FACTS);
+    let sid = new_session(port, "V");
+    let post = |text: &str, fin: bool| api(port, "POST", &format!("/session/{sid}/prompt_async"), json!({"agent": "build", "voice": true, "stream": "u1", "final": fin, "parts": [{"type": "text", "text": text}]})).0;
+    assert_eq!(post("quick hel", false), 204);
+    assert_eq!(post("quick hello wor", false), 204);
+    std::thread::sleep(Duration::from_millis(700));
+    assert_eq!(rows(port, &sid).len(), 0, "no row for a partial");
+    assert!(argv_of(&dir, "quick hel").is_none() && argv_of(&dir, "quick hello wor").is_none(), "the CLI did not start for a partial");
+    assert_eq!(post("quick hello world", true), 204);
+    let r = finished(port, &sid, 2);
+    assert_eq!(r.len(), 2, "one turn, the final transcript's: {r:?}");
+    assert_eq!(r[0]["parts"][0]["text"], "quick hello world");
+    // the synchronous route also answers a partial at once with 204
+    let (st, _) = api(port, "POST", &format!("/session/{sid}/message"), json!({"voice": true, "stream": "u2", "final": false, "parts": [{"type": "text", "text": "quick again"}]}));
+    assert_eq!(st, 204);
+    // an ordinary message that carries `stream` without `final`, or `final: true`, is a turn
+    assert_eq!(api(port, "POST", &format!("/session/{sid}/prompt_async"), json!({"stream": "u3", "parts": [{"type": "text", "text": "quick plain"}]})).0, 204);
+    assert_eq!(finished(port, &sid, 4).len(), 4);
+}
