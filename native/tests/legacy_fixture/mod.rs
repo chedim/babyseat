@@ -50,3 +50,26 @@ pub fn make_legacy(path: &std::path::Path) -> Vec<(String, String)> {
     cx.execute("INSERT INTO c_entities VALUES ('membrane::node:x', '{}')", []).unwrap();
     sessions
 }
+
+/// a store with one BIG session `ses_big` of `users` questions (each answered by one assistant row, so 2 x `users` rows, plus 3 stray assistant rows with no user row) and `small` sessions
+/// of one question and its answer each: the shape of the real store at its worst (#1143: its biggest session has 8,024 rows)
+pub fn make_big_legacy(path: &std::path::Path, users: i64, small: i64) {
+    let cx = rusqlite::Connection::open(path).unwrap();
+    cx.execute_batch("CREATE TABLE c_sessions (k TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE c_messages (k TEXT PRIMARY KEY, body TEXT NOT NULL); BEGIN;").unwrap();
+    let put_s = |s: (String, String)| { cx.execute("INSERT INTO c_sessions VALUES (?1, ?2)", [&s.0, &s.1]).unwrap(); };
+    put_s(session("ses_big", "The long one", None, 1_790_000_000_000, 1_790_000_900_000));
+    for i in 0..small { put_s(session(&format!("ses_s{i:04}"), "small", None, 1_790_001_000_000 + i, 1_790_001_000_000 + i)); }
+    let put_m = |m: (String, String)| { cx.execute("INSERT INTO c_messages VALUES (?1, ?2)", [&m.0, &m.1]).unwrap(); };
+    for i in 0..users {
+        let (u, a) = (format!("msg_u{i:06}"), format!("msg_a{i:06}"));
+        put_m(user_row("ses_big", &u, 2 * i + 1, 1_790_000_000_000 + 10 * i, "a question"));
+        put_m(asst_row("ses_big", &a, 2 * i + 2, Some(&u), 1_790_000_000_005 + 10 * i, 1_790_000_000_008 + 10 * i, json!([text_part("an answer")]), None));
+    }
+    for j in 0..3 { put_m(asst_row("ses_big", &format!("msg_z{j}"), 2 * users + 1 + j, None, 1_790_000_800_000 + j, 1_790_000_800_001 + j, json!([text_part("stray")]), None)); }
+    for i in 0..small {
+        let sid = format!("ses_s{i:04}");
+        put_m(user_row(&sid, &format!("msg_u{i}"), 1, 1_790_001_000_000 + i, "hi"));
+        put_m(asst_row(&sid, &format!("msg_a{i}"), 2, Some(&format!("msg_u{i}")), 1_790_001_000_001 + i, 1_790_001_000_002 + i, json!([text_part("hello")]), None));
+    }
+    cx.execute_batch("COMMIT;").unwrap();
+}

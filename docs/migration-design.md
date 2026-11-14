@@ -44,7 +44,7 @@ A session with no `owner` (126 of 130 [copy]) belongs to the operator: `owner = 
 ### The ledger, and how a run goes
 
 `Legacy:seat` `{source: 'legacy', converter: 1 (the version stamp, written by the pack), running, import, list, run_total, run_done, run_error, run_left, refused}`. Two writes, each a driver-style request with an `id` (a new `id` is a new request):
-- `Legacy:seat.list = {id}`: the HEADERS of every old session (one query: key, body, row count, the unmapped assistant rows): a ChatSession and a `pending` ledger each. The page's `GET /session` lists all sessions at once. A session that already has a ledger is skipped (idempotent).
+- `Legacy:seat.list = {id}`: the HEADERS of every old session (one query, ONE pass over the rows: key, body, the row count of the session's key range, the unmapped assistant rows; see "The cost rule" below): a ChatSession and a `pending` ledger each. The page's `GET /session` lists all sessions at once. A session that already has a ledger is skipped (idempotent).
 - `Legacy:seat.import = {id, sessions: [sid...] | 'all', page: <n>}`: the headers, then the sessions NOT `done`, one at a time, `page` user rows per query (with what answered them: tools, texts and sums gathered by the query), ONE cascade per page:
   the page's entities and the ledger's `rows`, `cursor` (the last `n`), `state` are one commit. A stop between two pages loses and repeats nothing; naming the session again resumes at its `cursor`. `done` is never imported twice.
   `page` has NO default: a request without it is refused with the reason in `Legacy:seat.refused`. A page that fails (SQLite's words in `reason`) makes the session `error` and the import goes on to the next; a headers query that fails ends the import with the reason.
@@ -92,8 +92,29 @@ Reading: the page size changes nothing measurable between 20 and 100 (the cost i
 (the answering rows of one question are merged), 9 unmapped. The growth is 10 times the 12.7 MB of source text: the rows hold each text twice (message and its SemText body, as a native message does) and whatever the entities carry beside; not investigated further here.
 `c_journal` is 12 MB: the page receipts are journalled with their rows. The first open is not a lazy import: every session was already imported.
 
+### The cost rule, and the real-store measurement (2026-11-14, #1143)
+
+The first cut was quadratic in a session's size, which the Rosie copy (130 sessions, 226 rows at most) hid and the real main-seat store (1,605 sessions, 25,465 old message rows, the biggest sessions 8,024 / 3,595 / 2,808 rows) showed: the header import ran 4+ minutes at 100% of one core and had not finished. Three causes, three rules:
+1. **Headers are one pass.** The unmapped assistant rows (the `orphans` of a header) are found by a primary-key lookup per assistant row: its parent is the user row whose key is `<sid>|<info.parentID>` (`x.k = s.k||'|'||parentID`, checked on the real store: all 25,465 rows have `k = sid|mid`), not by a `NOT IN (SELECT ...)` re-evaluated per row. The orphan note stays on the pending ledger at the header, as before (no change of the mapping, the ids, or `rows + unmapped = old_rows`): on the real store the new header query returns byte-for-byte the same `nrows` and `orphans` as the old one for the 1,602 sessions the old one can finish on (the three biggest never finish on it).
+2. **A page reads the session once.** The page query materializes the page's user rows (`pu`, at most `page`) and then ONE pass over the session's rows keeps the answering rows of those mids (`ans`); the per-question sums, tools and texts are read from that small set, not from a pass over the whole session per question. A page costs about one pass over the session (the test: under 20 passes), not one pass per question.
+3. **A FOR copies the names bound above it, per turn.** A setter that binds a list of every session and then loops over it copies that list once per session (engine: `Fields::run_writes`). The headers setter therefore writes its loop list inline in the FOR line. (The engine copy itself is not changed here; it is listed under Risks.)
+
+Measured on the real store (read-only, immutable `ro` source, `native/tests/legacy_import_1143.rs` `measure_the_headers_and_the_biggest_session_of_a_real_store_read_only`, `LEGACY_REAL=<store file> LEGACY_PAGE=20 cargo test --release --features bin --test legacy_import_1143 measure_the_headers -- --ignored --nocapture`; release build; the seat that owned the store was stopped, another reader of the file was open; target = a fresh private store; two runs of the final code agree):
+
+| | before | after |
+|---|---|---|
+| headers query, all 1,605 sessions (driver receipt) | did not finish in 4+ min (the correlated orphan subquery) | 0.26 to 0.46 s |
+| `list` write to all 1,605 `ChatSession` + ledger entities, in total | 107 s with the header query already fixed (quadratic FOR copy) | 7.5 s |
+| first page (20 questions) of the biggest session (8,024 rows), the query alone (sqlite3 CLI, same file) | 29.4 s | 0.13 s |
+| the whole biggest session imported page by page (page 20) into a fresh store | not measured: about 200 pages of the 29 s and more, so well over an hour | 39 to 45 s (8,020 rows consumed + 4 unmapped = 8,024 old rows, 484 dropped parts) |
+| RSS of the process, peak | | 925 to 949 MB (the headers alone: 9 to 232 MB) |
+| growth of the target store for that one session | | 158 MB |
+
+The 1,605 sessions hold 24,033 of the 25,465 message rows (181 unmapped assistant rows among them); the other 1,432 rows belong to no session of `c_sessions` and are not imported. The whole-store import was NOT run on the real store (one session only, as asked): from the numbers above it is a few minutes of page queries and a store growth of roughly the same order per row, not measured. The tests that keep the rules (debug build, a synthetic old store with one session of thousands of questions and many small sessions; the bounds are TEST bounds between linear and quadratic, not product constants): headers cost at 2,000 vs 500 questions (ratio < 8; was 19), a page query costs under 20 passes over a 3,000-question session (was 206), the import of one big session at a fixed page grows with a ratio < 8 for 4x the questions, writing the headers of 600 vs 150 sessions (ratio < 8; was 10.5).
+
 ### Risks
 
+0. **Engine: a FOR copies the names bound above it, once per turn** (`Fields::run_writes`: `binds.to_vec()` per turn, and again at the start of each recursive call). Any setter that binds a big list and loops over it is quadratic in its length; the headers setter avoids it by writing the list inline in the FOR line, and a page setter binds at most `page` rows. Making the binds shared (not copied) is an engine change, not made here.
 1. The immutable source reads a snapshot: pointing it at the live file of a running Python seat reads stale or torn data (use the step 3 snapshot).
 2. A message page is evaluated by one setter (an evaluation step budget); the largest real row (a user row with 61 answering rows) imported at page sizes 20 and 100 in the measurement. A setter that FAILS (a budget trip, say) would leave the import `running` with no ledger step, and the run would not end by itself (a start of the seat does): listed as a risk, not covered by a test.
 3. Ids: the page's `before=<old message id>` of a bookmark does not match (the message ids are derived, `legacy_src.mid` holds the old one).

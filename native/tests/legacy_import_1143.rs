@@ -233,3 +233,157 @@ fn the_barest_seat_has_no_persons_and_still_imports_with_the_owner_named_on_the_
     assert!(h.get("Person:ada-lovelace", "name").is_null(), "no persons here: the name stays on the old row");
     assert_eq!(h.get("membrane::Legacy:session:ses_b", "state"), json!("done"));
 }
+
+/// the cost of the headers pass of a store whose one session has `users` questions: the `ms` the Sql driver's receipt says (a test bound, not a product constant)
+fn headers_ms(users: i64) -> (f64, usize) {
+    let d = tmp("perf");
+    make_big_legacy(&d.join("old.sqlite"), users, 100);
+    let h = host_at(&d);
+    legacy_source(&h, &d.join("old.sqlite"));
+    h.write("membrane::Legacy:seat", "list", json!({"id": "p"}), "person");
+    pump_until(&h, "the headers of the big store", |h| h.get("SqlQuery:legacy:sessions", "run_result")["id"] == json!("list:p"));
+    let r = h.get("SqlQuery:legacy:sessions", "run_result");
+    assert_eq!(r["status"], json!("ok"), "{r}");
+    (r["ms"].as_f64().unwrap(), r["rows"].as_array().unwrap().len())
+}
+
+#[test]
+fn the_headers_pass_grows_linearly_with_the_biggest_session_not_with_its_square() {
+    // 4x the messages of one session must cost far less than 16x (the correlated orphan subquery: quadratic, 11-14: an 8,024-row session ran for minutes). The bound 8 is a TEST bound between 4 (linear) and 16 (square).
+    let (small, n1) = headers_ms(500);
+    let (big, n2) = headers_ms(2000);
+    assert_eq!((n1, n2), (101, 101));
+    eprintln!("headers: 500 questions {small:.0} ms, 2000 questions {big:.0} ms, ratio {:.1}", big / small.max(1.0));
+    assert!(big < 8.0 * small.max(5.0), "headers cost {small} ms at 500 questions but {big} ms at 2000: super-linear");
+}
+
+/// the wall time of importing the one big session (of `users` questions) page by page, and its ledger
+fn import_big_s(users: i64, page: i64) -> f64 {
+    let d = tmp("perfimp");
+    make_big_legacy(&d.join("old.sqlite"), users, 0);
+    let h = host_at(&d);
+    legacy_source(&h, &d.join("old.sqlite"));
+    let t = Instant::now();
+    import(&h, json!({"id": "p", "sessions": ["ses_big"], "page": page}));
+    settled(&h);
+    let s = t.elapsed().as_secs_f64();
+    let l = "membrane::Legacy:session:ses_big";
+    assert_eq!(h.get(l, "state"), json!("done"), "{}", h.get(l, "reason"));
+    assert_eq!(h.get(l, "rows"), json!(2 * users), "every question and its answer");
+    assert_eq!(h.get(l, "old_rows"), json!(2 * users + 3));
+    assert_eq!(h.get(l, "unmapped"), json!(3), "the 3 stray rows are noted, on the ledger, when the session is done");
+    assert_eq!(h.get(l, "rows").as_i64().unwrap() + h.get(l, "unmapped").as_i64().unwrap(), 2 * users + 3, "rows + unmapped = old_rows");
+    assert_eq!(h.get(l, "unmapped_rows").as_array().unwrap().len(), 3);
+    s
+}
+
+#[test]
+fn the_import_of_one_big_session_grows_linearly_with_its_size_at_a_fixed_page() {
+    // at a fixed page size, 4x the questions must cost far less than 16x. A TEST bound between 4 (linear) and 16 (square).
+    let a = import_big_s(150, 25);
+    let b = import_big_s(600, 25);
+    eprintln!("import: 150 questions {a:.1} s, 600 questions {b:.1} s, ratio {:.1}", b / a);
+    assert!(b < 8.0 * a, "import cost {a} s at 150 questions but {b} s at 600: super-linear");
+}
+
+#[test]
+fn a_page_query_costs_a_few_passes_over_the_session_not_a_pass_per_question() {
+    // one page (25 questions) of a session of 3,000 questions: the page query may cost a few passes over the session's rows (the one-pass cost is measured here, on the same file, by a bare scan that reads the
+    // same json field of every row), never a pass per question of the page. A TEST bound (20 passes), not a product constant.
+    let d = tmp("perfpage");
+    let old = d.join("old.sqlite");
+    make_big_legacy(&old, 3000, 0);
+    let cx = rusqlite::Connection::open(&old).unwrap();
+    let pass = (0..3).map(|_| { let t = Instant::now(); let n: i64 = cx.query_row("SELECT count(*) FROM c_messages WHERE k >= 'ses_big|' AND k < 'ses_big}' AND json_extract(body,'$.row.info.parentID') IS NOT NULL", [], |r| r.get(0)).unwrap(); assert_eq!(n, 3000); t.elapsed().as_secs_f64() * 1000.0 }).fold(f64::MAX, f64::min);
+    let h = host_at(&d);
+    legacy_source(&h, &old);
+    h.write("SqlQuery:legacy:msgs", "run", json!({"id": "pg", "args": ["ses_big", 0, 25]}), "person");
+    pump_until(&h, "the page", |h| h.get("SqlQuery:legacy:msgs", "run_result")["id"] == json!("pg"));
+    let r = h.get("SqlQuery:legacy:msgs", "run_result");
+    assert_eq!(r["status"], json!("ok"), "{r}");
+    assert_eq!(r["rows"].as_array().unwrap().len(), 25);
+    let ms = r["ms"].as_f64().unwrap();
+    eprintln!("page query {ms:.0} ms, one pass over the session {pass:.1} ms, ratio {:.0}", ms / pass.max(0.1));
+    assert!(ms < 20.0 * pass.max(0.5), "a page of 25 questions cost {ms} ms; one pass over the session is {pass} ms");
+}
+
+fn rss_mb() -> f64 {
+    let o = std::process::Command::new("ps").args(["-o", "rss=", "-p", &std::process::id().to_string()]).output().unwrap();
+    String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().unwrap_or(0.0) / 1024.0
+}
+
+/// THE REAL-STORE MEASUREMENT (ignored: it reads a real store, read-only and immutable through the `ro` SqlSource: never written, never copied).
+/// `LEGACY_REAL=<path of the previous seat's store file>` `LEGACY_PAGE=<n>` (user rows per page; no default). Prints the headers pass for every session and the import of the BIGGEST
+/// session page by page into a fresh private store: time, RSS and store growth. Run on a stopped seat's store (the file must not change while it is open).
+#[test]
+#[ignore]
+fn measure_the_headers_and_the_biggest_session_of_a_real_store_read_only() {
+    let real = std::path::PathBuf::from(std::env::var("LEGACY_REAL").expect("LEGACY_REAL=<path of the previous store file>"));
+    let page: i64 = std::env::var("LEGACY_PAGE").expect("LEGACY_PAGE=<n>").parse().unwrap();
+    let size = std::fs::metadata(&real).unwrap().len();
+    let d = tmp("real");
+    let h = host_at(&d);
+    legacy_source(&h, &real);
+    let rss0 = rss_mb();
+    let t = Instant::now();
+    h.write("membrane::Legacy:seat", "list", json!({"id": "real"}), "person");
+    pump_until(&h, "the headers of the real store", |h| h.get("SqlQuery:legacy:sessions", "run_result")["id"] == json!("list:real"));
+    let wall = t.elapsed().as_secs_f64();
+    let r = h.get("SqlQuery:legacy:sessions", "run_result");
+    assert_eq!(r["status"], json!("ok"), "{}", r["head"]);
+    let rows = r["rows"].as_array().unwrap();
+    pump_until(&h, "the headers written", |h| h.get(&format!("membrane::Legacy:session:{}", rows[0]["k"].as_str().unwrap()), "state") == json!("pending"));
+    let wall_all = t.elapsed().as_secs_f64();
+    let (mut big, mut total, mut unm) = (String::new(), 0i64, 0i64);
+    let mut best = -1i64;
+    for x in rows {
+        let l = format!("membrane::Legacy:session:{}", x["k"].as_str().unwrap());
+        let (n, u) = (h.get(&l, "old_rows").as_i64().unwrap(), h.get(&l, "unmapped").as_i64().unwrap());
+        total += n; unm += u;
+        if n > best { best = n; big = x["k"].as_str().unwrap().to_string(); }
+    }
+    eprintln!("MEASURE headers: {} sessions, {total} old rows, {unm} unmapped; query {:.2} s (driver receipt ms {}), headers run + entities written {wall_all:.2} s (query seen after {wall:.2} s); RSS {:.0} -> {:.0} MB", rows.len(), r["ms"].as_f64().unwrap() / 1000.0, r["ms"], rss0, rss_mb());
+    let base = dir_bytes_of(&d);
+    let t = Instant::now();
+    let peak = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (p2, s2) = (peak.clone(), stop.clone());
+    let th = std::thread::spawn(move || { while !s2.load(Ordering::SeqCst) { p2.fetch_max(rss_mb() as u64, Ordering::SeqCst); std::thread::sleep(Duration::from_millis(100)); } });
+    import(&h, json!({"id": "big", "sessions": [big.clone()], "page": page}));
+    let tt = Instant::now();
+    while tt.elapsed() < Duration::from_secs(3000) {
+        h.pump();
+        if h.get("membrane::Legacy:seat", "running") == json!(false) && h.get("membrane::Legacy:seat", "cur").is_null() { break; }
+        if let Some(w) = h.waiter() { w.wait(Some(Duration::from_millis(20))); }
+    }
+    let secs = t.elapsed().as_secs_f64();
+    stop.store(true, Ordering::SeqCst);
+    th.join().unwrap();
+    let l = format!("membrane::Legacy:session:{big}");
+    eprintln!("MEASURE big session {big}: state {} old_rows {} rows {} unmapped {} dropped {}; import {secs:.1} s at page {page}; RSS peak {} MB; store growth {:.1} MB; source unchanged: {}", h.get(&l, "state"), h.get(&l, "old_rows"), h.get(&l, "rows"), h.get(&l, "unmapped"), h.get(&l, "dropped_parts"), peak.load(Ordering::SeqCst), (dir_bytes_of(&d) - base) as f64 / 1048576.0, std::fs::metadata(&real).unwrap().len() == size);
+    assert_eq!(h.get(&l, "state"), json!("done"), "{}", h.get(&l, "reason"));
+    assert_eq!(h.get(&l, "rows").as_i64().unwrap() + h.get(&l, "unmapped").as_i64().unwrap(), h.get(&l, "old_rows").as_i64().unwrap(), "rows + unmapped = old_rows");
+}
+fn dir_bytes_of(d: &std::path::Path) -> u64 { std::fs::read_dir(d.join(".membrane")).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("field.sqlite3")).map(|e| e.metadata().unwrap().len()).sum() }
+
+/// the wall time from the `list` write to the last session's header entity, for a store of `small` one-question sessions
+fn list_wall_s(small: i64) -> f64 {
+    let d = tmp("perflist");
+    make_big_legacy(&d.join("old.sqlite"), 1, small);
+    let h = host_at(&d);
+    legacy_source(&h, &d.join("old.sqlite"));
+    let t = Instant::now();
+    h.write("membrane::Legacy:seat", "list", json!({"id": "l"}), "person");
+    let last = format!("membrane::Legacy:session:ses_s{:04}", small - 1);
+    pump_until(&h, "every header written", |h| h.get(&last, "state") == json!("pending"));
+    t.elapsed().as_secs_f64()
+}
+
+#[test]
+fn writing_the_headers_grows_linearly_with_the_number_of_sessions() {
+    // 4x the sessions must cost far less than 16x (a TEST bound between 4 and 16)
+    let a = list_wall_s(150);
+    let b = list_wall_s(600);
+    eprintln!("list: 150 sessions {a:.2} s, 600 sessions {b:.2} s, ratio {:.1}", b / a);
+    assert!(b < 8.0 * a, "writing the headers cost {a} s for 150 sessions but {b} s for 600: super-linear");
+}
