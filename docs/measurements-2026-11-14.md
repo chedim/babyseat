@@ -9,7 +9,7 @@
 
 ## 1. Records found (read-only), each labelled
 
-Label: M = MEASURED with a stated method, R = RECALLED (a note, no method), U = UNVERIFIED (named in the brief, no source on disk). "mem/" = `~/.claude/projects/-Users-dmitrii-chechetkin-projects-membrane/memory/`.
+Label: M = MEASURED with a stated method, R = RECALLED (a note, no method), U = UNVERIFIED (named in the brief, no source on disk). "mem/" = `~/.claude/projects/<project>/memory/`.
 
 | # | record | where | label |
 |---|---|---|---|
