@@ -1219,6 +1219,14 @@
     "writes": {},
     "findings": []
   },
+  "environment": {
+    "getters": {},
+    "writes": {},
+    "findings": [],
+    "resident": [
+      "Environment"
+    ]
+  },
   "fetch": {
     "getters": {
       "Fetch.kind": "Text"
@@ -1375,11 +1383,13 @@
       "LegacySeat.cx_cwd": "Text",
       "LegacySeat.cx_data": "Text",
       "LegacySeat.cx_declared": "Any",
+      "LegacySeat.cx_env": "Text",
       "LegacySeat.cx_f0": "Any",
       "LegacySeat.cx_f1": "Any",
       "LegacySeat.cx_f2": "Any",
       "LegacySeat.cx_f3": "Any",
       "LegacySeat.cx_f4": "Any",
+      "LegacySeat.cx_f5": "Any",
       "LegacySeat.cx_fact": "Text?",
       "LegacySeat.cx_home": "Text",
       "LegacySeat.cx_named": "Any",
@@ -1392,6 +1402,7 @@
       "LegacySeat.cx_s2": "Any",
       "LegacySeat.cx_s3": "Any",
       "LegacySeat.cx_s4": "Any",
+      "LegacySeat.cx_s5": "Any",
       "LegacySeat.cx_state": "Any"
     },
     "writes": {

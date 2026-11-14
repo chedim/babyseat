@@ -20,3 +20,4 @@ Boot.started on-setter seed-help:
     Help:legacy.file = dir + '/help/legacy.md'
     Help:ha.file = dir + '/help/ha.md'
     Help:settings.file = dir + '/help/settings.md'
+    Help:environment.file = dir + '/help/environment.md'

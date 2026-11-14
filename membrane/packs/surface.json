@@ -646,6 +646,17 @@
     "claims": [],
     "boot_facts": []
   },
+  "environment": {
+    "imports": [],
+    "classes": [],
+    "members": 0,
+    "writes": [],
+    "claims": [],
+    "boot_facts": [],
+    "resident": [
+      "Environment"
+    ]
+  },
   "fetch": {
     "imports": [],
     "classes": [
@@ -745,7 +756,7 @@
       "LegacyCutover",
       "LegacySeat"
     ],
-    "members": 33,
+    "members": 36,
     "writes": [
       "SqlSource:legacy.mode",
       "SqlSource:legacy.path",
