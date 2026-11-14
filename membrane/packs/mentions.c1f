@@ -153,6 +153,7 @@ SemText.related getter:
   WHEN this.related_n == None or this.mentions == None: None
   ELSE:
     parts = [prop(m, 'edge_rows') for m in this.mentions]
-    hits = json('[' + join([p for p in parts if p != ''], ',') + ']')
+    hj = json('[' + join([p for p in parts if p != ''], ',') + ']')
+    hits = None if hj is Error else hj
     rows = [{'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'shared': len(g['rows']), 'score': dot([r['w'] for r in g['rows']], [1 for r in g['rows']])} for g in group_by(hits, 'key') if g['rows'][0]['text'] != this.eid]
     [{'semtext': r['text'], 'sentence_index': r['sent'], 'text': prop(prop(r['text'], 'sentences')[r['sent']], 'text'), 'shared': r['shared']} for r in head(sort_by(rows, 'score', True), this.related_n)]

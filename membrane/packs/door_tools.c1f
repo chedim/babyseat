@@ -29,7 +29,9 @@ Request.m_tools getter: ['POST']
 Pack.state getter: 'error' if this.error != None else ('loaded' if this.loaded == True else 'waiting')
 
 -- ---- the JSON-RPC request ---------------------------------------------------------------------------------------------------------------
-Request.mc_rpc getter: json(this.body or '')
+Request.mc_rpc getter:
+  mr = json(this.body or '')
+  None if mr is Error else mr
 Request.mc_ok getter: prop(this.mc_rpc, 'jsonrpc') == '2.0' and prop(this.mc_rpc, 'method') != None
 Request.mc_id getter: prop(this.mc_rpc, 'id')
 Request.mc_method getter: str(prop(this.mc_rpc, 'method') or '')
@@ -161,7 +163,7 @@ Request.cl_out getter:
   WHEN this.cl_final != None: this.cl_final
   ELSE WHEN this.cl_mode == 'error': {'text': 'the block did not load.\nas a value: ' + str(prop(this.cl_gp, 'error')) + '\nas writes: ' + str(prop(this.cl_sp, 'error')), 'err': True}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'failed') == True: {'text': 'Error: ' + str(prop(this.cl_shown, 'why')), 'err': True}
-  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'why') != None: {'text': 'error: ' + str(prop(this.cl_shown, 'why')), 'err': True}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'why') != None: {'text': 'null: ' + str(prop(this.cl_shown, 'why')), 'err': False}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'v') == None: {'text': 'null', 'err': False}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None: {'text': str(prop(this.cl_shown, 'v')), 'err': False}
   ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': 'ran the writes of the block\nreactions: ' + str(this.reactions) + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}

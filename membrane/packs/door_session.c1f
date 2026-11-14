@@ -122,7 +122,11 @@ Request.ss_delete_reply getter:
 -- ---- GET /session/status: the truth per session, from the store: a session is busy while one of its turns runs ----------------------------------------
 -- (one SQL answer: an object keyed by session id, which a pack cannot build from rows)
 Request.ss_stat getter: sql('SELECT json_group_object(replace(s.k, \'membrane::Chat:session:\', \'\'), json(CASE WHEN EXISTS (SELECT 1 FROM c_field t WHERE t.cls = \'Chat\' AND t.k LIKE \'membrane::Chat:message:%:turn\' AND json_extract(t.body, \'$.props.sid\') = replace(s.k, \'membrane::Chat:session:\', \'\') AND json_extract(t.body, \'$.props.state\') = \'running\') THEN \'{"type":"busy"}\' ELSE \'{"type":"idle"}\' END)) AS status FROM c_field s WHERE s.cls = \'Chat\' AND s.k LIKE \'membrane::Chat:session:%\' AND s.k NOT LIKE \'membrane::Chat:session:%:%\'') if this.ss_route == 'status' else None
-Request.ss_status_reply getter: {'status': 200, 'body': (json(prop(this.ss_stat[0], 'status')) if len(this.ss_stat) > 0 and prop(this.ss_stat[0], 'status') != None else {})} if this.ss_stat != None else None
+Request.ss_status_reply getter:
+  WHEN this.ss_stat == None: None
+  ELSE:
+    sj = json(prop(this.ss_stat[0], 'status')) if len(this.ss_stat) > 0 and prop(this.ss_stat[0], 'status') != None else {}
+    {'status': 200, 'body': (None if sj is Error else sj)}
 
 -- ---- the message the page sends ---------------------------------------------------------------------------------------------------------------
 -- POST /session/<sid>/prompt_async (204 at once) or /message (200 {info, parts} when the turn is over): the text parts are joined by newlines, the message is the chat's
@@ -261,7 +265,7 @@ ChatMessage.oc_fin on-setter oc-turn:
 -- tool starts, 8 result lines and 8 blocks in each are followed live (the final parts, at the end of the turn, are all of them), and a result shows no input (the final part has it). The state
 -- is on the turn's accumulator `Chunk:<command>:acc`: `tids` and `tnames` (the tools started so far, in order), `eo` (the text part is open).
 Chunk.starts getter: [{'id': prop(prop(v, 'content_block'), 'id'), 'name': replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '')} for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use']
-Chunk.uevs getter: [e for e in [json(l) for l in lines(str(this.data or ''))] if prop(e, 'type') == 'user']
+Chunk.uevs getter: [e for e in [json(l) for l in lines(str(this.data or ''))] if e is not Error and prop(e, 'type') == 'user']
 Chunk.ublocks getter: [{'b': (prop(prop(this.uevs[p[0]], 'message'), 'content') or [])[p[1]]} for p in [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [1, 0], [1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [2, 0], [2, 1], [2, 2], [2, 3], [2, 4], [2, 5], [2, 6], [2, 7], [3, 0], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [4, 0], [4, 1], [4, 2], [4, 3], [4, 4], [4, 5], [4, 6], [4, 7], [5, 0], [5, 1], [5, 2], [5, 3], [5, 4], [5, 5], [5, 6], [5, 7], [6, 0], [6, 1], [6, 2], [6, 3], [6, 4], [6, 5], [6, 6], [6, 7], [7, 0], [7, 1], [7, 2], [7, 3], [7, 4], [7, 5], [7, 6], [7, 7]] if p[0] < len(this.uevs) and p[1] < len(prop(prop(this.uevs[p[0]], 'message'), 'content') or [])]
 Chunk.results getter: [{'id': prop(x['b'], 'tool_use_id'), 'output': (prop(x['b'], 'content') if prop(x['b'], 'content') is Text else join([prop(c, 'text') for c in (prop(x['b'], 'content') if prop(x['b'], 'content') is List else [])], '\n'))} for x in this.ublocks if prop(x['b'], 'type') == 'tool_result']
 Chunk.oc_me getter: 'membrane::Chat:message:' + replace(str(this.cmd), 'membrane::Command:chat:', '')

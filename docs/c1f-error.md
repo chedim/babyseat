@@ -6,10 +6,10 @@ null with the kind in `Core.failed` beside `Core.why`, a setter writing an Error
 `why(x)` reading an Error, inference as a kind (`T|Error`), one `types.json` regenerate commit. Differences and open points:
 (1) the Error carries its reason only (no separate `source` field: a getter that reads an Error returns it unchanged, and `Why` names the getter);
 (2) the `error: ` prefix is gone from failure reasons (`budget exceeded (N steps)`, `timeout N ms (allowance M ms)`, `not-a-type: ...`, the key errors): the kind says it;
-(3) NOT converted, left for the operator: `json(text)` of bad text (about 17 pack lines read `json(x) or {}` / `json(x) != None` as "not JSON is fine"); refused
-writes stay `refused` receipt TEXT (they are not values); `run_cliff` still shows a null with a reason as `error: <reason>` (an Error shows `Error: <reason>`);
+(3) `json(text)` of bad text is now an Error (`not-json: ...`, follow-up 2026-11-13; the ~17 pack lines that read `json(x) or {}` / `json(x) != None` as "not JSON is fine" read a local and test `is Error`; the door answers a malformed body as before); refused
+writes stay `refused` receipt TEXT (they are not values); `run_cliff` shows a null with a reason as `null: <reason>` (not an error) and an Error as `Error: <reason>` (an error);
 (4) the cast union `Int(v) or Text(v)` no longer works (a failed cast is an Error and `or` never hides it): it is written `v if v is Int or v is Text else ...`;
-(5) `x is Num` is not a kind (Num is a cast spelling, not a value kind): it reads as a class name and is false for every value;
+(5) `Num` is now a value kind that Int and Float extend (follow-up 2026-11-13): `x is Num` is true for an Int or a Float, `x is (Int, Num)` holds for an Int, `x is (Float, Text)` stays a parse error; `Num` is reserved like `Error`;
 (6) a setter LOCAL or FOR list that is an Error stops the setter (a receipt), because a setter local holds JSON.
 
 **Important first (the original note).** This is a design note, no code. The kind is decided by the operator (2026-11-13): null = absent / not applicable (keeps its

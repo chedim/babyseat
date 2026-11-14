@@ -93,8 +93,7 @@ A bare line `name = expr` (no dotted target; a write always has one, like `this.
   `entity_read` and `run_cliff` print `Error: <reason>`); a setter or constructor that writes an Error is refused with a `refused` receipt and the old value stays; an
   Error inside a list or dict is kept inside one evaluation and is a plain null across a store. Made by: a failed cast (`not-a-type: ...`), a bad entity-literal key,
   a getter body that raised, the step budget, the self-time kill (the Trip), a timed-out `Command` (`proc.c1f`), and a pack's own `Error('reason')`. Still null:
-  a missing property, `.x` of an absent value, `pending: ...`, a collected virtual entity, `f of a null`. Unchanged: `json(text)` of bad text is a plain null
-  (a decision for the operator: ~17 pack lines read `json(x) or {}`). The name `Error` is reserved (no class, no local).
+  a missing property, `.x` of an absent value, `pending: ...`, a collected virtual entity, `f of a null`. `json(text)` of text that is not JSON is an Error (`not-json: ...`; the packs that meant "not JSON is fine" read `j = json(x)` then `{} if j is Error else j`). `Num` is a value kind that Int and Float extend: `x is Num` is true for an Int or a Float, `x is (Int, Num)` holds for an Int, `x is (Float, Text)` is a parse error. The names `Error` and `Num` are reserved (no class, no local).
 - a local that holds a reasoned null passes it on like any value; `Why(...)` (`why_chain`) lists the locals of the getter evaluation it explains
   (`locals: {name: value}`, a null shows its reason);
 - the loader refuses a local that shadows a property of `this` (a name the class reads or writes as `this.<name>`, or a setter trigger),

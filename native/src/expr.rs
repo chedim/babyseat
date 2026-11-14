@@ -346,10 +346,13 @@ fn lex(s: &str, block: bool) -> Result<Vec<Tok>, Err> {
 
 struct P { t: Vec<Tok>, i: usize, depth: usize, block: bool }
 
-const IS_NAMES: &str = "`is` takes a kind or class name (Error, Int, Float, Text, Bool, List, Dict, or a class like Trip), or a list of them: `x is (Trip, Place)`";
+const IS_NAMES: &str = "`is` takes a kind or class name (Error, Int, Float, Num, Text, Bool, List, Dict, or a class like Trip), or a list of them: `x is (Trip, Place)`";
 const IS_CHAIN: &str = "not allowed in an expression: `is` cannot chain with another comparison (write `(a == b) is Error`, or use `and`)";
 /// The kinds a VALUE can be, as `is` spells them (the casts' spellings, and `Error`); every other name on the right of `is` is a class.
-const VALUE_KINDS: &[&str] = &["Int", "Float", "Text", "Bool", "List", "Dict", "Error"];
+/// `Num` is the kind Int and Float extend: an Int is also a Num, a Float is also a Num.
+const VALUE_KINDS: &[&str] = &["Int", "Float", "Num", "Text", "Bool", "List", "Dict", "Error"];
+/// may these two value kinds both hold for one value? (the same kind, or Num with Int / Float)
+fn kinds_compatible(a: &str, b: &str) -> bool { a == b || (a == "Num" && matches!(b, "Int" | "Float")) || (b == "Num" && matches!(a, "Int" | "Float")) }
 
 /// Names a local may not take: the builtins and host functions, `this`/`x`/`clock`, the constants and the pronouns.
 /// (keep in step with `call`: a test reads its arms)
@@ -460,7 +463,8 @@ impl P {
         if self.is_p(".") || self.is_p("(") || self.is_p("[") { return Err(IS_NAMES.into()); }
         let mut seen: Vec<&String> = vec![];
         for n in &names { if !seen.contains(&n) { seen.push(n); } }
-        if seen.len() > 1 && seen.iter().any(|n| VALUE_KINDS.contains(&n.as_str())) {
+        let clash = seen.iter().enumerate().any(|(i, a)| seen[i + 1..].iter().any(|b| (VALUE_KINDS.contains(&a.as_str()) || VALUE_KINDS.contains(&b.as_str())) && !kinds_compatible(a, b)));
+        if clash {
             return Err(format!("`is ({})`: those kinds can never both match (a value is of one kind; only classes can be listed together)", names.join(", ")));
         }
         if matches!(self.peek(), Tok::P("==" | "!=" | "<" | "<=" | ">" | ">=")) || self.is_kw("in") || self.is_kw("is") || (self.is_kw("not") && matches!(self.t.get(self.i + 1), Some(Tok::Name(y)) if y == "in")) {
@@ -1135,7 +1139,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "epoch" => { argn(1)?; Ok(match &a[0] { V::Int(n) => V::Float(*n as f64), V::Float(f) => V::Float(*f), v => epoch_of(v).map(V::Float).unwrap_or(V::None) }) }
         // ---- time ----
         "localtime" => { argn(1)?; let ts = match &a[0] { V::Int(n) => *n as f64, V::Float(f) => *f, _ => return Err("localtime(ts): a number".into()) }; Ok(crate::clock::local(ts)) }
-        "json" => { argn(1)?; match &a[0] { V::Str(t) => serde_json::from_str::<serde_json::Value>(t).map(|j| from_json(&j)).or_else(|_| Ok::<V, String>(V::None)), V::None | V::Nil(_) => Ok(V::None), _ => Err("json(text): a string".into()) } }
+        "json" => { argn(1)?; match &a[0] { V::Str(t) => Ok(serde_json::from_str::<serde_json::Value>(t).map(|j| from_json(&j)).unwrap_or_else(|e| V::Error(format!("not-json: {e}")))), V::None | V::Nil(_) => Ok(V::None), _ => Err("json(text): a string".into()) } }
         "str" => { argn(1)?; Ok(V::Str(match &a[0] { V::Str(t) => t.clone(), V::List(_) | V::Dict(_) => to_json_shown(&a[0])?.to_string(), v => py_str(v) })) }
         "referencing" => {
             argn(2)?;
@@ -1199,7 +1203,7 @@ fn pronoun(name: &str, w: &dyn World) -> Result<V, Err> {
 /// `v is <name>`: a value kind by its spelling, else a class of an entity.
 fn is_kind(v: &V, name: &str, w: &dyn World) -> bool {
     match (name, v) {
-        ("Error", V::Error(_)) | ("Int", V::Int(_)) | ("Float", V::Float(_)) | ("Text", V::Str(_)) | ("Bool", V::Bool(_)) | ("List", V::List(_)) | ("Dict", V::Dict(_)) => true,
+        ("Num", V::Int(_) | V::Float(_)) | ("Error", V::Error(_)) | ("Int", V::Int(_)) | ("Float", V::Float(_)) | ("Text", V::Str(_)) | ("Bool", V::Bool(_)) | ("List", V::List(_)) | ("Dict", V::Dict(_)) => true,
         (n, _) if VALUE_KINDS.contains(&n) => false,
         (cls, V::Ent(e)) => w.is_class(e, cls),
         _ => false,

@@ -52,7 +52,9 @@ Decision.dm_e_blocks getter: [('{"from":"' + replace(this.eid, '"', "'") + '","t
 Decision.dm_e_led getter: [('{"from":"' + replace(this.eid, '"', "'") + '","to":"' + replace(str(t), '"', "'") + '","rel":"led_to"}') for t in (this.led_to or [])]
 Decision.dm_e_carried getter: [('{"from":"' + replace(this.eid, '"', "'") + '","to":"' + replace(str(t), '"', "'") + '","rel":"carried_by"}') for t in (this.carried_by or [])]
 Decision.dm_e_text getter: join(concat(this.dm_e_blocks, this.dm_e_led, this.dm_e_carried), ',')
-Request.dm_e_all getter: json('[' + join([d.dm_e_text for d in this.dm_cards if d.dm_e_text != ''], ',') + ']')
+Request.dm_e_all getter:
+  ej = json('[' + join([d.dm_e_text for d in this.dm_cards if d.dm_e_text != ''], ',') + ']')
+  None if ej is Error else ej
 Request.dm_rows getter: sort_by([{'sk': d.dm_sk, 'card': d.dm_card} for d in this.dm_cards], 'sk')
 Request.dm_board getter: {'cards': pluck(this.dm_rows, 'card'), 'edges': this.dm_e_all}
 
@@ -110,7 +112,9 @@ Request.wg_ids getter: pluck(this.wg_nodes, 'id')
 Request.wg_all getter: [x for x in concat(instances('Task'), instances('Wait'), instances('Decision')) if x.wg_drawn]
 Request.wg_blk_text getter: [join([('{"from":"' + replace(t.eid, '"', "'") + '","to":"' + replace(str(x), '"', "'") + '","rel":"blocks"}') for x in t.blocks], ',') for t in this.wg_all if len(t.blocks or []) > 0]
 Request.wg_of_text getter: [('{"from":"' + replace(t.eid, '"', "'") + '","to":"' + replace(str(t.goal), '"', "'") + '","rel":"of"}') for t in this.wg_all if t.goal]
-Request.wg_raw getter: json('[' + join(concat(this.wg_blk_text, this.wg_of_text), ',') + ']')
+Request.wg_raw getter:
+  wj = json('[' + join(concat(this.wg_blk_text, this.wg_of_text), ',') + ']')
+  None if wj is Error else wj
 Request.wg_edges getter: [e for e in this.wg_raw if e['from'] in this.wg_ids and e['to'] in this.wg_ids]
 Request.dm_graph getter: {'nodes': this.wg_nodes, 'edges': this.wg_edges, 'runs': [], 'rocket': False}
 
@@ -139,10 +143,10 @@ Request.dm_hist getter:
   WHEN this.dm_spec == '': {'ok': False, 'error': 'no entity matches ' + "''"}
   ELSE WHEN this.dm_hist_q == None or this.dm_rel_q == None: None
   ELSE WHEN len(this.dm_found) == 0 and len(this.dm_hist_q) == 0 and len(this.dm_rel_q) == 0: {'ok': False, 'error': 'no entity matches ' + "'" + this.dm_spec + "'"}
-  ELSE: {'ok': True, 'eid': this.dm_spec, 'cls': ([e.cls for e in this.dm_found] or [None])[0], 'properties': {}, 'changes': [json(prop(r, 'd')) for r in this.dm_hist_q], 'relations': this.dm_rels}
+  ELSE: {'ok': True, 'eid': this.dm_spec, 'cls': ([e.cls for e in this.dm_found] or [None])[0], 'properties': {}, 'changes': [(None if j is Error else j) for j in [json(prop(r, 'd')) for r in this.dm_hist_q]], 'relations': this.dm_rels}
 
 -- an item's chat: the Messages whose refers-to relation names the item
-Request.dm_rels getter: [json(prop(r, 'd')) for r in (this.dm_rel_q or [])]
+Request.dm_rels getter: [(None if j is Error else j) for j in [json(prop(r, 'd')) for r in (this.dm_rel_q or [])]]
 Request.dm_msg_ids getter: [x['subj'] for x in this.dm_rels if x['obj'] == this.dm_spec and x['rel'] == 'refers-to' and x['superseded'] != True]
 Request.dm_chat getter:
   WHEN this.dm_spec == '': {'ok': False, 'error': 'no entity matches ' + "''"}
@@ -150,7 +154,11 @@ Request.dm_chat getter:
   ELSE: {'ok': True, 'eid': this.dm_spec, 'messages': sort_by([{'id': m.eid, 'who': m.speaker or '', 'text': m.text or '', 'ts': m.ts or 0} for m in instances('Message') if m.eid in this.dm_msg_ids], 'ts')}
 
 -- ---- the writes -------------------------------------------------------------------------------------------------------------
-Request.dm_body getter: json(this.body or '') if this.method == 'POST' else None
+Request.dm_body getter:
+  WHEN this.method == 'POST':
+    db = json(this.body or '')
+    None if db is Error else db
+  ELSE: None
 Request.dm_obj getter: this.dm_body != None and startswith(str(this.dm_body), '{')
 Request.dm_card_id getter: str(prop(this.dm_body, 'card') or '') if this.dm_obj else ''
 Request.dm_c getter: ([d for d in instances('Decision') if d.eid == this.dm_card_id] or [None])[0]

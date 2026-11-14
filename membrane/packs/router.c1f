@@ -24,7 +24,8 @@ Router.refresh on-setter router-fetch:
 -- round, so the rows are carried in a property), then rows -> entities and the asker is told
 Fetch.request_result on-setter models-stamp:
   WHEN startswith(str(prop(this.request_result, 'id') or ''), 'Request:'):
-    this.tags_in = {'ask': prop(this.request_result, 'id'), 'rows': [r for r in (prop(json(str(prop(this.request_result, 'body') or '{}')), 'models') or []) if prop(r, 'name')]}
+    tj = json(str(prop(this.request_result, 'body') or '{}'))
+    this.tags_in = {'ask': prop(this.request_result, 'id'), 'rows': [r for r in ([] if tj is Error else (prop(tj, 'models') or [])) if prop(r, 'name')]}
 Fetch.tags_in on-setter models-upsert:
   WHEN this.tags_in != None:
     FOR r IN prop(this.tags_in, 'rows'):
