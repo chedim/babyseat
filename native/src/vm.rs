@@ -197,6 +197,8 @@ pub struct Core {
     /// why a null getter value is null: (eid, prop) -> reason. The value itself is stored as a plain JSON null; reading it back through
     /// an expression gives `V::Nil(reason)` so the reason travels (fields.rs writes it, `why_chain` reads it)
     pub why: std::collections::BTreeMap<(String, String), String>,
+    /// the (entity, property) whose `why` is an ERROR (a failure), not a null's note: reading it back gives `V::Error` (docs/c1f-error.md)
+    pub failed: std::collections::BTreeSet<(String, String)>,
     /// (entity, property) a getter computed as a plain null (no reason): that null is held, not absent (`View::attr`)
     pub nulled: std::collections::BTreeSet<(String, String)>,
     /// the reasoned nulls inside the list or dict the last `eval_traced` returned (`expr::nested_nulls`), for the getter that stores it
@@ -271,6 +273,12 @@ fn bget<'a>(b: &'a Binding, v: &str) -> Option<&'a String> {
     b.iter().find(|(k, _)| k == v).map(|(_, e)| e)
 }
 
+/// What a getter's null value says: a null's note (`absent`, `pending`, `None('why')`) or a FAILURE (`Error`, docs/c1f-error.md). Both are stored as a plain
+/// JSON null; the reason lives in `Core.why`, and an Error's kind in `Core.failed`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Note { Null(String), Error(String) }
+impl Note { pub fn reason(&self) -> &str { match self { Note::Null(r) | Note::Error(r) => r } } pub fn is_error(&self) -> bool { matches!(self, Note::Error(_)) } }
+
 struct View<'a> { core: &'a Core }
 
 impl<'a> expr::World for View<'a> {
@@ -291,7 +299,7 @@ impl<'a> expr::World for View<'a> {
             _ => { e.touched.set(self.core.bump()); match e.props.get(attr) {
                 Some(j) if !j.is_null() => { let mut v = expr::from_json(j); if matches!(v, V::List(_) | V::Dict(_)) { self.core.overlay_nested(eid, attr, &mut v); } v }
                 // a getter that computed None (`nulled`) is a plain null; a property the entity never had says `absent`, naming both
-                _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| V::Nil(r.clone())).unwrap_or_else(|| if self.core.nulled.contains(&(eid.to_string(), attr.to_string())) { V::None } else { V::Nil(format!("absent: {eid}.{attr}")) }),
+                _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| if self.core.failed.contains(&(eid.to_string(), attr.to_string())) { V::Error(r.clone()) } else { V::Nil(r.clone()) }).unwrap_or_else(|| if self.core.nulled.contains(&(eid.to_string(), attr.to_string())) { V::None } else { V::Nil(format!("absent: {eid}.{attr}")) }),
             } },
         }
     }
@@ -372,7 +380,7 @@ pub enum Step {
 impl Core {
     pub fn new() -> Self {
         Core {
-            why: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
+            why: Default::default(), failed: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
             docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), queue_writes: true, dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
@@ -624,7 +632,7 @@ impl Core {
         self.state.remove(eid);
         let lo = (eid.to_string(), String::new());
         let keys: Vec<(String, String)> = self.why.range(lo.clone()..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
-        for k in keys { self.why.remove(&k); }
+        for k in keys { self.why.remove(&k); self.failed.remove(&k); }
         let keys: Vec<(String, String)> = self.nulled.range(lo.clone()..).take_while(|(e, _)| e == eid).cloned().collect();
         for k in keys { self.nulled.remove(&k); }
         let keys: Vec<(String, String)> = self.locals.range(lo..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
@@ -779,8 +787,21 @@ impl Core {
     pub fn eval_json(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<J, String> {
         let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
         for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
-        let v = self.eval(src, &env)?;
-        expr::to_json(&v)
+        match self.eval(src, &env)? { V::Error(r) => Err(r), v => expr::to_json(&v) }
+    }
+
+    /// The value of an expression as the evaluator holds it: an Error stays one (the caller decides: a write of it is refused).
+    pub fn eval_value(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<V, String> {
+        let env = Self::env_of(vars, extra);
+        self.eval(src, &env)
+    }
+
+    /// Record why a getter's value is null (or that it is not): `why` the reason, `failed` whether it is a failure. Nested notes are the caller's.
+    pub fn note_why(&mut self, key: &(String, String), note: Option<&Note>) {
+        match note {
+            Some(n) => { self.why.insert(key.clone(), n.reason().to_string()); if n.is_error() { self.failed.insert(key.clone()); } else { self.failed.remove(key); } }
+            None => { self.why.remove(key); self.failed.remove(key); }
+        }
     }
 
     /// The engine's own built-ins that need the Core: `sql(query, args...)` (the store driver, store.rs). None: not one.
@@ -932,6 +953,7 @@ impl Core {
         match self.eval(src, &env)? {
             V::List(l) => l.into_iter().map(|v| match v { V::Ent(e) => Ok(Item::Ent(e)), v => expr::to_json(&v).map(Item::Val) }).collect(),
             V::None | V::Nil(_) => Ok(vec![]),
+            V::Error(r) => Err(r),
             other => Err(format!("not a list ({})", expr::to_json(&other).map(|j| j.to_string()).unwrap_or_else(|_| "an entity".into()))),
         }
     }
@@ -939,7 +961,7 @@ impl Core {
     /// A setter local's value: an entity (bound as one) or a value (a null stays null).
     pub fn eval_item(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<Item, String> {
         let env = Self::env_of(vars, extra);
-        match self.eval(src, &env)? { V::Ent(e) => Ok(Item::Ent(e)), v => expr::to_json(&v).map(Item::Val) }
+        match self.eval(src, &env)? { V::Ent(e) => Ok(Item::Ent(e)), V::Error(r) => Err(r), v => expr::to_json(&v).map(Item::Val) }
     }
 
     /// A write's target: an entity, or the id of one (a string).
@@ -952,7 +974,7 @@ impl Core {
         let env = Self::env_of(vars, extra);
         match self.eval(src, &env) {
             Ok(V::Ent(e)) | Ok(V::Str(e)) => Ok(e),
-            Ok(V::Nil(r)) => Err(r),
+            Ok(V::Nil(r)) | Ok(V::Error(r)) => Err(r),
             Ok(V::None) => Err("error: the target is null".into()),
             Ok(_) => Err("error: the target of a write is an entity or the id of one".into()),
             Err(e) => Err(format!("error: {}", e)),
@@ -966,6 +988,7 @@ impl Core {
         let mut out = vec![];
         for (name, node) in &args {
             let v = expr::eval(node, &env, &View { core: self }).map_err(|e| format!("{}({}: ...): {}", cls, name, e))?;
+            if let V::Error(r) = &v { return Err(format!("refused: {}({}: ...) is an Error ({}); an Error is never stored", cls, name, r)); }
             out.push((name.clone(), expr::to_json(&v).map_err(|e| format!("{}({}: ...): {}", cls, name, e))?));
         }
         Ok((cls, out))
@@ -1017,7 +1040,7 @@ impl Core {
 
     /// Evaluate and return what it read (#994 getters). `vars` bind names to entities, `extra` to values.
     pub fn eval_traced(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, serde_json::Value)], host: Option<&dyn Host>, asker: &str)
-        -> (Result<serde_json::Value, String>, Vec<(String, String)>, Option<String>, Vec<(String, V)>) {
+        -> (Result<serde_json::Value, String>, Vec<(String, String)>, Option<Note>, Vec<(String, V)>) {
         let mut env: HashMap<String, V> = vars.iter().map(|(k, e)| (k.to_string(), V::Ent(e.to_string()))).collect();
         for (k, v) in extra { env.insert(k.to_string(), expr::from_json(v)); }
         let mut tries = 0;
@@ -1025,7 +1048,7 @@ impl Core {
             let (r, reads, nil, locals) = {
                 let parsed = self.cache.get(src);
                 let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]), host, asker };
-                let mut nil: Option<String> = None;
+                let mut nil: Option<Note> = None;
                 let mut nested = vec![];
                 let mut locals = vec![];
                 let r = match &*parsed {
@@ -1033,7 +1056,7 @@ impl Core {
                         let n: &Node = node;
                         let (r, l) = expr::eval_locals(n, &env, &tv);
                         locals = l;
-                        r.and_then(|v| { if let V::Nil(why) = &v { nil = Some(why.clone()); } nested = expr::nested_nulls(&v); expr::to_json(&v) })
+                        r.and_then(|v| { match &v { V::Nil(why) => nil = Some(Note::Null(why.clone())), V::Error(why) => nil = Some(Note::Error(why.clone())), _ => {} } nested = expr::nested_nulls(&v); expr::to_json(&v) })
                     }
                     Err(e) => Err(e.clone()),
                 };

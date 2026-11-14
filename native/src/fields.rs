@@ -761,7 +761,7 @@ impl Fields {
             match core.docs.get(&trip).map(|t| t.props.get("active") == Some(&json!(true))) {
                 Some(true) => {
                     let reason = trip_reason(core, &trip);
-                    core.why.insert((eid.to_string(), g.prop.clone()), reason);
+                    core.note_why(&(eid.to_string(), g.prop.clone()), Some(&crate::vm::Note::Null(reason)));
                     core.locals.remove(&(eid.to_string(), g.prop.clone()));
                     return Some(J::Null);
                 }
@@ -787,8 +787,10 @@ impl Fields {
             let (mut reads_all, mut res) = (vec![], None);
             for (pack, when, expr) in &all_arms {
                 if let Some(c) = when {
-                    let (rc, rd, _, _) = core.eval_traced(c, &me(eid), &[("clock", json!(now))], host, &asker);
+                    let (rc, rd, cnil, _) = core.eval_traced(c, &me(eid), &[("clock", json!(now))], host, &asker);
                     reads_all.extend(rd);
+                    // a condition over an Error is that Error: the getter is it, no arm is chosen (the next arm would hide it)
+                    if let Some(n @ crate::vm::Note::Error(_)) = cnil { res = Some((Ok(J::Null), Some(n), vec![], Some(pack.clone()))); break; }
                     match rc {
                         Ok(v) if crate::expr::truthy(&crate::expr::from_json(&v)) => {}
                         Ok(_) => continue,
@@ -808,6 +810,7 @@ impl Fields {
         if locals.is_empty() { core.locals.remove(&key2); } else {
             core.locals.insert(key2.clone(), locals.iter().map(|(k, v)| (k.clone(), match v {
                 crate::expr::V::Nil(why) => J::String(format!("null ({why})")),
+                crate::expr::V::Error(why) => J::String(format!("Error ({why})")),
                 v => crate::expr::to_json(v).unwrap_or(J::Null),
             })).collect());
         }
@@ -820,7 +823,7 @@ impl Fields {
         match r {
             Ok(v) => {
                 self.clear_trip(core, &trip, seq, now);   // a fresh evaluation in time: the kill no longer applies
-                match &nil { Some(why) if v.is_null() => { core.why.insert(key2.clone(), why.clone()); core.nulled.remove(&key2); } _ => { core.why.remove(&key2); if v.is_null() { core.nulled.insert(key2); } else { core.nulled.remove(&key2); } } }   // a null remembers why
+                match &nil { Some(n) if v.is_null() => { core.note_why(&key2, Some(n)); core.nulled.remove(&key2); } _ => { core.note_why(&key2, None); if v.is_null() { core.nulled.insert(key2); } else { core.nulled.remove(&key2); } } }   // a null remembers why (and whether it is a failure)
                 { let nested = if v.is_array() || v.is_object() { std::mem::take(&mut core.nested_last) } else { vec![] }; core.set_nested(eid, &g.prop, nested); }
                 Some(v)
             }
@@ -828,14 +831,14 @@ impl Fields {
                 // killed by the time allowance: the one outcome that is not deterministic, so it is the one recorded (as a Trip entity)
                 let (n, m) = crate::expr::parse_timeout(&e).unwrap_or((0, 0));
                 self.write_trip(core, &trip, eid, &g.prop, n, m, now);
-                core.why.insert(key2, format!("error: {}", e));
+                core.note_why(&key2, Some(&crate::vm::Note::Null(format!("error: {}", e))));
                 Some(J::Null)
             }
             Err(e) => {
                 // an error is a null with the error as its reason (it no longer keeps a stale value); the receipt still says where
                 let reason = format!("error in getter {}.{}: {}; the value is null", g.cls, g.prop, e);
                 self.receipt(core, eid, &format!("getter:{}", g.prop), reason, J::Null, seq, now);
-                core.why.insert(key2, format!("error: {}", e));
+                core.note_why(&key2, Some(&crate::vm::Note::Null(format!("error: {}", e))));
                 Some(J::Null)
             }
         }
@@ -1421,7 +1424,15 @@ impl Fields {
                 self.receipt(core, eid, name, format!("refused: `{prop}` is provided by the VM (the reason an entity cannot be unloaded) and is read-only: no setter writes it"), J::Null, seq, now);
                 continue;
             }
-            let Ok(v) = core.eval_json(value, &vars, &extra) else { continue };
+            let v = match core.eval_value(value, &vars, &extra) {
+                Ok(crate::expr::V::Error(r)) => {
+                    // an Error is never stored: the write is refused, loudly, and the old value stays
+                    self.receipt(core, eid, name, format!("refused: {target}.{prop} = {r} (an Error is never stored: the write was not made; read it with `is Error` or `why(x)`, or fix what failed)"), J::Null, seq, now);
+                    continue;
+                }
+                Ok(v) => match crate::expr::to_json(&v) { Ok(j) => j, Err(_) => continue },
+                Err(_) => continue,
+            };
             if let Some(k) = claim { self.claimed.insert(k, (pack.to_string(), name.to_string())); }   // a write that was made: it is the first
             if target == LLM_CALL { self.calls.push(v); continue; }
             let tgt = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
