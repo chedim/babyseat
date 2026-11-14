@@ -73,11 +73,14 @@ fn store() -> std::path::PathBuf {
 fn the_active_route_answers_the_newest_entities_with_the_hidden_classes_left_out() {
     let dir = store();
     let run = start(&dir, &["warm_rows=0"]);
-    // no `m`: the route does not guess a window
-    assert_eq!(active(run.port, "").0, 400);
+    // no `m`: the window is the setting `map.window` (default 150); an `m` that is named but is not a number of at least 1 is still refused
+    let (st, d) = active(run.port, "");
+    assert_eq!((st, d["m"].clone()), (200, json!(150)), "{d}");
+    assert_eq!(active(run.port, "?m=0").0, 400);
+    assert!(!ids(&d).iter().any(|i| i.starts_with("Setting:")), "the settings are hidden by default: {:?}", ids(&d));
     let (st, a) = active(run.port, "?m=4");
     assert_eq!(st, 200, "{a}");
-    // the four newest of the classes that are not hidden by default (Message, SemText, Span, Request, DomNode, View, Fetch), newest first (the boot's own entities are among them)
+    // the four newest of the classes that are not hidden by default (Message, SemText, Span, Request, DomNode, View, Fetch, Setting), newest first (the boot's own entities are among them)
     let (_, all) = active(run.port, "?m=100");
     let all_ids = ids(&all);
     assert_eq!(ids(&a), all_ids[..4].to_vec(), "{a}");

@@ -673,6 +673,7 @@
       "Request.fa_hidden": "List(Text)",
       "Request.fa_hide_fact": "Any",
       "Request.fa_m": "Num?",
+      "Request.fa_m_q": "Num?",
       "Request.fa_ok": "Bool",
       "Request.fa_pre_fact": "Any",
       "Request.fa_prefixes": "List(Text)",
@@ -1702,6 +1703,29 @@
     "findings": [],
     "virtual": [
       "Span"
+    ]
+  },
+  "settings": {
+    "getters": {
+      "Boot.setting_keys": "List(Text)",
+      "Boot.setting_rows": "List(Dict)",
+      "Setting.boot_val": "Any",
+      "Setting.current": "Any",
+      "Setting.fact_val": "Any"
+    },
+    "writes": {
+      "*.[this.owner_prop]": "Any",
+      "*.retire": "Bool",
+      "HaAllow.entities": "Any",
+      "HaAllow.services": "Any",
+      "Setting.[kv[0]]": "Any",
+      "Setting.applied": "Num",
+      "Setting.refused": "Text?",
+      "Setting.value": "Any"
+    },
+    "findings": [],
+    "resident": [
+      "Setting"
     ]
   },
   "sql": {

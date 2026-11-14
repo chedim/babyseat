@@ -17,6 +17,7 @@ VIRTUAL Chunk
 --   chat_auth         how the CLI authenticates: `api_key` (the DEFAULT: the key of the seat's environment variable ANTHROPIC_API_KEY, handed to the CLI in ITS environment) or `login` (the
 --                     CLI's own login: an explicit opt-in, never chosen silently). Anything else is refused. The key is never read by a pack: the launcher tells only `anthropic_key_set`
 --                     (a yes or no), and the run's `env_from` hands the value to the child (the driver masks it in whatever the child prints), so it is in no property, argv, row or reply.
+--   (LIVE since the settings pack: `Setting:chat.max_steps` and `Setting:chat.timeout` (packs/settings.c1f) are the owners of the two values below: their `current` is read first, then the fact, then the default here, which a seat without that pack still uses)
 --   chat_turn_timeout_s the turn's time limit in seconds (a Command's timeout_s); default 21600 here (a threshold: flagged for the operator).
 --   chat_max_turns    the ceiling (the CLI's --max-turns); default 2048 here (a threshold: flagged for the operator).
 -- `env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is the CLI's own switch the Python rung set (no auto-memory keyed to the folder).
@@ -43,12 +44,12 @@ ChatMessage.auth_env getter:
   ELSE: ['env', '-u', 'ANTHROPIC_API_KEY', '-u', 'ANTHROPIC_AUTH_TOKEN', '-u', 'CLAUDE_CODE_USE_BEDROCK', '-u', 'CLAUDE_CODE_USE_VERTEX', '-u', 'CLAUDE_CODE_USE_FOUNDRY'] if this.auth == 'login' else ['env', '-u', 'ANTHROPIC_AUTH_TOKEN', '-u', 'CLAUDE_CODE_USE_BEDROCK', '-u', 'CLAUDE_CODE_USE_VERTEX', '-u', 'CLAUDE_CODE_USE_FOUNDRY', '-u', 'CLAUDE_CODE_OAUTH_TOKEN']
 ChatMessage.max_turns getter:
   WHEN this.over: None
-  ELSE: ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
+  ELSE: prop('Setting:chat.max_steps', 'current') or ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
 -- THE TURN HAS ITS OWN LIMIT (#1143): the default of a Command run (`command_timeout_s`, 120 s) is for a model's shell commands, not for a chat turn (its ceiling is
 -- `chat_max_turns`); the turn's run states `timeout_s` = the boot fact `chat_turn_timeout_s`, default 21600 (6 h; a threshold flagged for the operator).
 ChatMessage.turn_timeout_s getter:
   WHEN this.over: None
-  ELSE: ([b.chat_turn_timeout_s for b in instances('Boot') if b.chat_turn_timeout_s != None] or [21600])[0]
+  ELSE: prop('Setting:chat.timeout', 'current') or ([b.chat_turn_timeout_s for b in instances('Boot') if b.chat_turn_timeout_s != None] or [21600])[0]
 ChatMessage.port getter:
   WHEN this.over: None
   ELSE: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
