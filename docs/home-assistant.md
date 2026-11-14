@@ -34,7 +34,7 @@ The seat is `cliffvm` (docs/cliffvm.md): `scripts/seat-full` starts the whole se
 
 ## Mint a token, paste it
 
-Every route of a seat with a door secret needs a token, Home Assistant's calls too (docs/auth.md). On the seat's machine:
+Every route of a seat with a door secret needs a token, Home Assistant's calls too (docs/auth.md). Every valid token is the admin. The simplest token is the file `admin.token` in the seat's data folder (the seat prints its path when it starts; it is new at every start). Or, on the seat's machine, make one that lives as long as you choose:
 
 ```
 cliffvm token mint --sub ha --name "Home Assistant" --ttl 30d --secret-file <seat data dir>/door.secret
