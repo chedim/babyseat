@@ -151,17 +151,3 @@ Outside the database, in `<.membrane>/` (seen in directory listings, not opened)
 `voice/`, `self/`, the OLD journal dir `field/` (a backup since the SQLite move, `storekind.py` doc) and `.field.sqlite.writer.lock` (an `flock`, `cblstore.py:145`).
 
 Size drivers: events, entity_states, chunks, annotations, relations (each 48-87 MB) and every entity row carrying its 1024-float vector (about 3.7 KB per row).
-
-**What maps to cliffvm entities** (all as `c_field` rows, lazy class unless said):
-
-| old | new | note |
-|---|---|---|
-| session (`sessions`) | `membrane::Chat:session:<sid>` ChatSession (`stitle born upd`, `docs/cliffvm.md:468`) | + `owner` as `Person` link (section 5) |
-| message pair (`messages`) | user row to `ChatMessage` (`text at sid`), assistant row to `ChatTurn` + response + one `ChatTool` per `tool` part | old ids kept (`msg_<hex>`); new ids are `msg_<ms><n>00x` (`cliffvm.md:471`) |
-| `Component:*`, `node`, `symbols`, `files`, `shell`, `error`, ... (9,620 `class=Component`) | the same eid under its class | the bulk (8,352 are `node:*`); candidates for "not converted" (Decision 8) |
-| `Decision` (11), `Goal` (22), `Task` (101), `Config` (15), `Banner` (25), `Command` (15), `Message` (392), `Tool`, `Verb`, `Help`, `Register` | same class names where a pack declares them (`decisions.c1f`, `goalgraph.c1f`, `banner.c1f`) | decisions' edges live in `relations`/`entity_deltas`/`c_raw` (read in place, `release-parity.md:270`) |
-| persons | REGENERATED: `there is no Person in this release (docs/auth.md) | the old person rows are `Component:chat:<slug>` (5 [copy]) and `Config:voice:*`; they are touched by slug, not listed |
-| options, models | one read of `settings.json` / `models.json` into `Settings:seat` | `fs` driver exists |
-| `files` rows | `bg-usage` + `serve-absorb` carried; `router.json` regenerated (Decision 11) | dropping `serve-absorb` makes the seat absorb old opencode sessions AGAIN (duplicates) |
-| recall tables, vectors | NOT converted; read in place (Decision 10) | `release-parity.md` D8 |
-| old journals `field/`, logs, `.corrupt-*` copies | dropped (archived) | |
