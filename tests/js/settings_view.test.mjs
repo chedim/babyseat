@@ -344,4 +344,23 @@ scenario('an idle page does no work: ticks write nothing, a view with no poll', 
   assert.equal(w.get('Nav:settings').active, true);
 });
 
+// THE LINK (#1143, graph link slice 2): when the page's link is up (`Link:page.up`), a row reads what is in force from the SEAT'S OWN value, `membrane::Setting:<id>.current`, which the engine subscribes by dependency and the
+// link feeds (here the test plays the link: the foreign entity is fed as a plain local entity, which every engine reads normally and never subscribes). A write by another tab shows with NO request of this view.
+scenario('with the link up a row follows the seat\'s own value: a change elsewhere shows with no new request; with the link down the polled value stands', () => {
+  const w = world().open();
+  const asked = () => w.asked('settings').id, reads = () => w.log.filter((x) => x.eid === 'Fetch:settings' && x.prop === 'request').length;
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 2048 steps');
+  w.feed('membrane::Setting:chat.max_steps', 'Setting', { current: 5000 });
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 2048 steps', 'the link is not up: a value of the seat\'s is not read');
+  w.feed('Link:page', 'Link', { up: true });
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 5000 steps', 'up: the row shows the seat\'s value');
+  assert.equal(w.n('chat.max_steps', 'in').value, '5000', 'and an unedited box follows it');
+  const r0 = reads();
+  w.feed('membrane::Setting:chat.max_steps', 'Setting', { current: 6000 });
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 6000 steps', 'another tab wrote it: it shows');
+  assert.equal(reads(), r0, 'with no request of the view'); assert.equal(asked(), 'feed-1');
+  w.feed('Link:page', 'Link', { up: false });
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 2048 steps', 'link down: back to the last polled rows');
+});
+
 console.log(`settings_view: ${n} scenarios ok`);

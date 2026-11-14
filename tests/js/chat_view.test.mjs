@@ -183,6 +183,42 @@ scenario('polls: list period, active period, no overlap, and again after a send'
   w.tick(0.1); assert.equal(w.reqs('history').length, 4, 'a poll right after a send');
 });
 
+// 5b. THE DOORBELL (#1143, the graph link slice 2, docs/graph-link.md decision 10): with the link up the view subscribes ONE value, `membrane::Doorbell:chat.at`, and reads the history route ONLY when it changed:
+// no 700 ms / 3 s timer. (The test plays the link: the foreign entity is fed as a local one, which every engine reads and never subscribes.) Counted in requests, never time.
+scenario('with the link up the history is read only when the doorbell rings: no timer, one read per ring, none while hidden, the poll timers return when the link is down', () => {
+  const w = world(); w.open();
+  w.feed('Link:page', 'Link', { up: true });
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));               // a running turn: the active timer would poll at 700 ms
+  const reads = () => w.reqs('history').length;
+  assert.equal(reads(), 1);
+  for (let i = 0; i < 400; i++) w.tick(0.1);                       // 40 s of ticks
+  assert.equal(reads(), 1, 'no timer poll, running turn or not');
+  w.feed('membrane::Doorbell:chat', 'Doorbell', { at: 100 });      // the first value of the bell: one read (a message may have come between the load and the subscription)
+  w.tick(0.1); assert.equal(reads(), 2, 'a ring is one read'); assert.equal(w.asked('history').url, '/membrane/chat/messages?limit=10');
+  w.feed('membrane::Doorbell:chat', 'Doorbell', { at: 101 });
+  w.tick(0.1); assert.equal(reads(), 2, 'a ring while a read is out is not a second request');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  w.tick(0.1); assert.equal(reads(), 3, 'the ring that came meanwhile is read once the first is answered');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  for (let i = 0; i < 200; i++) w.tick(0.1);
+  assert.equal(reads(), 3, 'quiet again');
+  w.feed('Conn:page', 'Conn', { hidden: true });
+  w.feed('membrane::Doorbell:chat', 'Doorbell', { at: 102 });
+  w.tick(5); assert.equal(reads(), 3, 'hidden: nothing is read');
+  w.feed('Conn:page', 'Conn', { hidden: false });
+  w.tick(0.1); assert.equal(reads(), 4, 'visible again: the ring that was owed is read once');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  // a send reads at once (the person's own message), link or not
+  w.write('DomNode:chat:input', 'value', 'go');
+  w.write('DomNode:chat:input', 'key', { key: 'Enter', shift: false, ctrl: false, time: 1 });
+  w.reply('send', 202, { id: '3000-1' });
+  w.tick(0.1); assert.equal(reads(), 5, 'a read right after a send');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  // the link goes down: the timers are back (the active period while a turn runs)
+  w.feed('Link:page', 'Link', { up: false });
+  w.tick(0.8); assert.equal(reads(), 6, 'no link: the poll timers are the fallback');
+});
+
 // 6. "Load older turns": the button, `before`, the older rows ABOVE the loaded ones
 scenario('Load older turns uses before and puts the older turns above', () => {
   const w = world(); w.open();

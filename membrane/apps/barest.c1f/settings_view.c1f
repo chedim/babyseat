@@ -142,7 +142,11 @@ SettingsView.groups on-setter settings-groups:
 -- ---- one setting: everything shown is a getter of the seat's row and of the row's own state ----
 SetRow.rid getter: replace(this.eid, 'SetRow:', '')
 SetRow.kind getter: prop(this.raw, 'kind')
-SetRow.cur getter: prop(this.raw, 'current')
+-- WHAT IS IN FORCE (#1143, the graph link slice 2): when the page's link to the seat is up (`Link:page.up`, fieldvm.js `Link`), the row reads the seat's OWN value, `membrane::Setting:<id>.current` (the engine subscribes it
+-- because a getter reads it; the seat serves it: packs/link_route.c1f allows `Setting:`), so a write by another tab shows with no request of this view. Not up, or the seat's value not here yet (`pending`), the value of the
+-- last read of `GET /ui/settings` stands: that route stays the first read, the fallback and the answer of a Save.
+SetRow.live getter: prop('membrane::Setting:' + this.rid, 'current') if prop('Link:page', 'up') == True else None
+SetRow.cur getter: this.live if this.live != None else prop(this.raw, 'current')
 -- the row after this one in its group (the seat's `order`): a row is drawn when ITS answer lands, and the engine runs the rows' rules in the order of their ids, so the DOM order is not the feed's;
 -- each row says which row it sits above (`before`), as the shell's nav does
 SetRow.next_id getter: ([prop(x, 'rid') for x in sort_by([{'rid': r.rid, 'order': prop(r.raw, 'order'), 'g': prop(r.raw, 'group')} for r in instances('SetRow') if r.raw != None], 'order') if prop(x, 'g') == prop(this.raw, 'group') and prop(x, 'order') > prop(this.raw, 'order')] or [None])[0]
