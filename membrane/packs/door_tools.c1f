@@ -113,12 +113,20 @@ Request.mc_w_rcpt getter:
   WHEN not this.mc_w_effect: []
   ELSE WHEN this.mc_w_new != None: concat(concat(concat(concat(concat(concat(['receipt: ' + str({'id': prop(this.mc_w_new, 'id'), 'status': prop(this.mc_w_new, 'status'), 'rc': prop(this.mc_w_new, 'rc'), 'ok': prop(this.mc_w_new, 'status') == 'ok', 'started': prop(this.mc_w_new, 'started'), 'finished': prop(this.mc_w_new, 'finished'), 'ms': prop(this.mc_w_new, 'ms'), 'timeout_s': prop(this.mc_w_new, 'timeout_s'), 'killed': prop(this.mc_w_new, 'killed'), 'stdout_bytes': prop(this.mc_w_new, 'stdout_bytes'), 'stderr_bytes': prop(this.mc_w_new, 'stderr_bytes')})], ['stdout: ' + str(x) for x in [this.mc_w_pout] if x != None]), ['stderr: ' + str(x) for x in [this.mc_w_perr] if x != None]), ['full output: read ' + this.mc_w_id + '.output' for x in [this.mc_w_pout] if x != None and prop(x, 'stdout_head') != None]), ['full stderr: read ' + this.mc_w_id + '.errors' for x in [this.mc_w_perr] if x != None and prop(x, 'stderr_head') != None]), ['error: ' + str(prop(this.mc_w_new, 'head')) for x in [this.mc_w_new] if prop(x, 'status') == 'error' and prop(x, 'stdout_bytes') == None]), ['timeout: ' + str(this.mc_w_id) + ' timed out after ' + str(prop(x, 'timeout_s')) + ' s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}; the partial output is above and in ' + str(this.mc_w_id) + '.partial_output' for x in [this.mc_w_new] if prop(x, 'status') == 'timeout'])
   ELSE: ['pending: id: ' + str(prop(prop(this.mc_args, 'value'), 'id')) + ', status: running, started: ' + str(prop(prop(this.mc_w_id, 'running'), 'started') or this.mc_w_t0) + ', timeout_s: ' + str(prop(prop(this.mc_w_id, 'running'), 'timeout_s') or prop(this.mc_w_id, 'timeout_default')) + ', left: ' + str((prop(prop(this.mc_w_id, 'running'), 'timeout_s') or prop(this.mc_w_id, 'timeout_default')) + prop(prop(this.mc_w_id, 'running'), 'started') - this.mc_w_t0) + ' s; read ' + this.mc_w_id + '.' + this.mc_w_rprop + ' later']
+-- THE SIZE OF THE REACTIONS (design B2 of docs/reply-size.md, operator 2026-11-14): the model-facing reply lists IN FULL the reactions on the WRITTEN entity (the write's target)
+-- and its direct children (`<eid>:...`; for run_cliff the ones set by the block's own setter `run`), and every reaction that carries a reason (a null with `why`, an Error: its
+-- `failed` map), whatever the entity; every other reaction is one count per `<Class>.<prop>` (`cls` is the host's exact class field, no values). `reactions` itself is unchanged.
+Request.rx_marked getter: [{'r': r, 'full': (this.mc_tool == 'entity_write' and (prop(r, 'eid') == this.mc_w_id or startswith(str(prop(r, 'eid')), this.mc_w_id + ':'))) or (this.mc_tool == 'run_cliff' and prop(r, 'by') == 'run') or prop(r, 'why') != None or prop(r, 'prop') == 'failed'} for r in (this.reactions or [])]
+Request.rx_full getter: [m['r'] for m in this.rx_marked if m['full']]
+Request.rx_rest getter: [{'k': str(prop(m['r'], 'cls')) + '.' + str(prop(m['r'], 'prop'))} for m in this.rx_marked if not m['full']]
+Request.rx_groups getter: [str(g['key']) + ' x' + str(len(g['rows'])) for g in group_by(this.rx_rest, 'k')]
+Request.rx_lines getter: concat(['reactions: ' + str(this.rx_full)], ['other changes: ' + join(this.rx_groups, ', ') for x in [1] if len(this.rx_groups) > 0])
 Request.mc_w_text getter:
   WHEN this.mc_write == None: None
   ELSE WHEN this.mc_done != True: None
   ELSE WHEN this.refused != None: 'refused: ' + str(this.refused)
   ELSE WHEN this.mc_w_returned == None: None
-  ELSE: join(concat(concat([this.mc_w_head], this.mc_w_rcpt), ['reactions: ' + str(this.reactions)]), '\n')
+  ELSE: join(concat(concat([this.mc_w_head], this.mc_w_rcpt), this.rx_lines), '\n')
 
 -- ---- run_cliff: a clifflet, one call (docs/cliffvm.md, "run_cliff") ------------------------------------------------------------------------------
 -- The block is loaded as two scratch packs at once, `cliffg<n>` (the block as a getter: a value) and `cliffs<n>` (the block as an on-setter body: writes; privileged,
@@ -166,7 +174,7 @@ Request.cl_out getter:
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'why') != None: {'text': 'null: ' + str(prop(this.cl_shown, 'why')), 'err': False}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'v') == None: {'text': 'null', 'err': False}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None: {'text': str(prop(this.cl_shown, 'v')), 'err': False}
-  ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': 'ran the writes of the block\nreactions: ' + str(this.reactions) + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}
+  ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': 'ran the writes of the block\n' + join(this.rx_lines, '\n') + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}
   ELSE: None
 Request.cl_out on-setter cliff-finish:
   WHEN this.cl_out != None and this.cl_final == None and this.cl_mode == 'error':

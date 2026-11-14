@@ -253,7 +253,7 @@ What `entity_write` returns: the line `wrote <entity>.<prop>`, then for a write 
 seconds, `ms`, `stdout_bytes`, `stderr_bytes`) with a `stdout:` and a `stderr:` line (the whole text as `stdout`, or, past 16 KB, `stdout_head` and `stdout_tail` = the first and last 8192 characters
 with `full output: read Command:x.output`; the whole stderr is `Command:x.errors`), or, while the run is in flight, `pending: id: <id>, status: running, started: <seconds>, timeout_s: <limit>, left: <seconds>; read <entity>.<verb>_result later`;
 then the `reactions:` (every REAL change the engine made in the
-round of your write: a setter that fired, a getter that recomputed, each with `by` and, for a null, its `why`). The receipt always lives on the
+round of your write ON THE ENTITY YOU WROTE AND ITS CHILDREN `<eid>:...`: a setter that fired, a getter that recomputed, each with `by`, its `cls` and, for a null, its `why`; any change that carries a reason is listed in full on any entity) and an `other changes:` line that counts the changes on every other entity as `Class.prop xN` (no values: read the entity for one). The receipt always lives on the
 entity as `<verb>_result`. Add `wait` (seconds) to `entity_write` to hold the reply until the receipt arrives or that time has passed:
 `{spec: "Command:build", prop: "run", value: {id: "b1", args: []}, wait: 30}` answers with the program's stdout. Calls that wait run side by
 side with your other calls.

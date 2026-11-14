@@ -558,7 +558,7 @@
       "Request",
       "Return"
     ],
-    "members": 85,
+    "members": 90,
     "writes": [
       "*.[]",
       "*.go",

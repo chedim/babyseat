@@ -74,7 +74,7 @@ A block that runs past its step or time budget answers with that reason (`Error:
 ## Writes
 
 A block whose last line is a write (`<entity>.<prop> = value`) runs its lines as writes, like a setter body (locals feed the lines below). It answers
-with the `reactions:` of the round (each value the engine wrote because of the block, with the setter or getter that wrote it). A write that starts an
+with the `reactions:` of the round (the values the engine wrote on the entities the block wrote, in full, with the setter or getter that wrote it and, for a null, its `why`; every other entity's changes only as counts on an `other changes:` line, `Class.prop xN`, plus any change that carries a reason). A write that starts an
 effect (`Command:x.run = ...`) has its receipt in a LATER round: read `<entity>.<verb>_result` afterwards (`Help:c1f`, "Effects are writes"). A Command starts with ONE write, its `cmd` in the run value:
 
 A command that outlives its `timeout_s` (default 120 s; set your own estimate in the run value, `timeout_s: 600`) is killed, and its `output`, `errors`, `ok` and `rc` read as an Error whose reason tells you how to retry:
