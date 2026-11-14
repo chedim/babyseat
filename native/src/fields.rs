@@ -1537,7 +1537,17 @@ impl Fields {
             if !core.docs.contains_key(&tgt) {
                 // creation: `<Class>:<key>` of a class the pack owns or imports (a privileged pack: any class)
                 let Some((cls, _)) = tgt.split_once(':') else { continue };
-                if !self.is_privileged(pack) && (self.owner.get(cls).is_none() || self.may_write(pack, cls).is_err()) { continue; }
+                if !self.is_privileged(pack) {
+                    // loud, never silent: the receipt names the entity, the class and the pack (the same `refused` receipt as rule B)
+                    if self.owner.get(cls).is_none() {
+                        self.receipt(core, eid, name, format!("pack {} can't create {}: no loaded pack declares the class {} (a pack declares a class with a getter or a setter on it; or the pack needs privilege)", pack, tgt, cls), J::Null, seq, now);
+                        continue;
+                    }
+                    if let Err(why) = self.may_write(pack, cls) {
+                        self.receipt(core, eid, name, format!("can't create {}: {}", tgt, why), J::Null, seq, now);
+                        continue;
+                    }
+                }
                 core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
                 self.out.push(self.born_entry(core, &tgt, cls));
                 self.birth(core, &tgt, now, seq);
