@@ -214,7 +214,7 @@ Tests: `native/tests/multi_class_1143.rs`, `seat_process.rs` (`an_entity_carries
 
 **Retiring an entity** (`native/src/fields.rs` `retired`, `host.rs` `drain_apply`): a write of `retire = true` to ANY entity, by any writer (a pack's setter: the ordinary ownership rules
 apply; the model's `entity_write` as the privileged door), removes it: the engine forgets the entity (what read it recalculates), its stored row is deleted. It is derived when a setter wrote it,
-so never journalled, and a replay re-derives it; an outside write of `retire` is journalled and replayed like any. Test: `native/tests/host_loop.rs` (retire + replay), `seat_process.rs`.
+so never journalled, and a replay re-derives it; an outside write of `retire` is journalled and replayed like any. Test: `native/tests/host_loop.rs` (retire + replay), `seat_process.rs`. In the BROWSER VM the host does the same (`membrane/ui/fieldvm.js` `retire`, #1143): the entity leaves the page's engine and a DomNode's element leaves the page (`tests/js/fieldvm_retire.test.mjs`); the page has no store, so there is no row.
 
 **Not there yet**: the UI as c1f view packs; tokens and persons (no security, one superuser chat); the graph's own event stream (the graph still polls every 3 s, only while the tab is visible; the chat's stream is built); a message's class is `Chat` (its eid
 names it), so the viewer finds chat entities by the `membrane::Chat:message:` prefix, not by a `ChatMessage` kind; the viewer lists at most 600 entities and reads the

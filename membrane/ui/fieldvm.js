@@ -13,6 +13,7 @@
 // `key` {key, shift, ctrl, composing, time}; focus/blur -> `focused` (bool); scroll -> `scroll` {top, height, client}.
 // A pack writes `scroll` {top: n} or 'end' to scroll an element (applied after the round's other writes; the measured scroll is written back).
 // `before` (a sibling DomNode eid) puts a node above that sibling; writing it again moves the node. A round's DOM writes are applied together, in one frame.
+// A pack's `retire = true` on any entity removes it from the engine (as the seat's does); a DomNode's element leaves the page with the elements under it.
 // Explicit drivers, called by the mount: `run_clock(ms)` / `stop_clock()` tick the field; `track_hidden()` keeps `Conn:page.hidden` (bool).
 //
 // The page's own DOM links in too (`link`): each element of the page (open shadow roots included) is a
@@ -140,10 +141,25 @@ class Host {
   get(eid) { return JSON.parse(this.f.get(eid)); }
 
   flush() {
-    const out = JSON.parse(this.f.drain());
-    this.pending.push(...out.writes);
-    this.fetches(out.writes);                                     // W2: a write of Fetch:<x>.request / .abort
+    for (;;) {
+      const out = JSON.parse(this.f.drain());
+      this.pending.push(...out.writes);
+      this.fetches(out.writes);                                   // W2: a write of Fetch:<x>.request / .abort
+      const gone = out.writes.filter(w => w.prop === 'retire' && w.new === true).map(w => w.eid);
+      for (const eid of gone) this.retire(eid);                   // the seat's engine removes a retired entity (docs/cliffvm.md): so does the page's; what that changes is drained again
+      if (!gone.length) break;
+    }
     if (!this.frame) this.frame = this.schedule(() => this.apply());
+  }
+
+  /** `retire = true` (any writer): the entity leaves the engine; a DomNode's element leaves the page, and the nodes under it are forgotten (their entities are retired by the pack that made them). */
+  retire(eid) {
+    this.f.remove(eid, this.now());
+    this.pending = this.pending.filter(w => w.eid !== eid);       // a write the element was still owed is moot
+    const el = this.nodes.get(eid);
+    if (!el) return;
+    el.remove();
+    for (const [k, e] of this.nodes) if (!e.isConnected) this.nodes.delete(k);
   }
 
   /** One frame: make the new elements first, then set fields (a parent may be made in the same round). */

@@ -309,8 +309,8 @@ fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_owner() {
     assert!(about.starts_with("PACK about 1") && about.contains("IMPORT dom 1"), "{about}");
     assert_eq!(about, std::fs::read_to_string(format!("{}/../membrane/packs/about.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap(), "the file's text, whole");
     // no entity of a view class is mirrored yet; the one entity is `Boot:seat`, the chat view's settings (null: the pack's own default stands), and `views` is the per-view switch (default legacy)
-    assert_eq!(s["entities"], json!([{"eid": "Boot:seat", "cls": "Boot", "props": {"chat_page_size": null, "chat_poll_size": null, "chat_list_poll_ms": null, "chat_active_poll_ms": null, "chat_stick_px": null, "chat_tool_chars": null}}]), "{s}");
-    assert_eq!(s["views"], json!({"chat": "legacy"}), "no fact ui_views: every view is legacy");
+    assert_eq!(s["entities"], json!([{"eid": "Boot:seat", "cls": "Boot", "props": {"chat_page_size": null, "chat_poll_size": null, "chat_list_poll_ms": null, "chat_active_poll_ms": null, "chat_stick_px": null, "chat_tool_chars": null, "field_window": null, "field_poll_ms": null}}]), "{s}");
+    assert_eq!(s["views"], json!({"chat": "legacy", "field": "legacy"}), "no fact ui_views: every view is legacy");
     // the same through the page's prefix; read only
     let (st, s2) = api(&run, "GET", "/ui/serve/ui/fieldvm", J::Null);
     assert_eq!((st, s2["packs"].as_object().map(|m| m.len())), (200, Some(1)), "{s2}");
@@ -319,15 +319,16 @@ fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_owner() {
 
 #[test]
 fn the_browser_vm_snapshot_reports_the_view_switch_and_the_chat_settings_from_the_facts() {
-    let run = start_with(tmp("fieldvm-facts"), &["ui_views={\"chat\":\"pack\"}", "chat_page_size=5", "chat_active_poll_ms=100"]);
+    let run = start_with(tmp("fieldvm-facts"), &["ui_views={\"chat\":\"pack\",\"field\":\"pack\"}", "chat_page_size=5", "chat_active_poll_ms=100", "field_window=40", "field_poll_ms=800"]);
     let (st, s) = api(&run, "GET", "/ui/fieldvm", J::Null);
     assert_eq!(st, 200, "{s}");
-    assert_eq!(s["views"], json!({"chat": "pack"}), "the fact says which renderer owns the chat");
+    assert_eq!(s["views"], json!({"chat": "pack", "field": "pack"}), "the fact says which renderer owns the chat and the field");
     let p = &s["entities"][0]["props"];
     assert_eq!((p["chat_page_size"].clone(), p["chat_active_poll_ms"].clone(), p["chat_poll_size"].clone()), (json!(5), json!(100), J::Null), "a fact given rides as it is; one not given is null");
+    assert_eq!((p["field_window"].clone(), p["field_poll_ms"].clone()), (json!(40), json!(800)), "the field view's settings ride the same way");
     // a fact that is not a dict, or names another view, leaves the chat legacy
     let run = start_with(tmp("fieldvm-facts-odd"), &["ui_views=chat=pack"]);
-    assert_eq!(api(&run, "GET", "/ui/fieldvm", J::Null).1["views"], json!({"chat": "legacy"}));
+    assert_eq!(api(&run, "GET", "/ui/fieldvm", J::Null).1["views"], json!({"chat": "legacy", "field": "legacy"}));
 }
 
 // ---- the session's side reads the chat view asks beside the messages (tolerated when absent; answered now) -----------------------------------------------
