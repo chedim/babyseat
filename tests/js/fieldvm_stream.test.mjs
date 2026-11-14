@@ -3,9 +3,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { start } from '../../membrane/ui/fieldvm.js';
+import { start } from '../../membrane/apps/barest.c1f/ui/fieldvm.js';
 
-const ui = new URL('../../membrane/ui/', import.meta.url);
+const ui = new URL('../../membrane/apps/barest.c1f/ui/', import.meta.url);
 const wasm = readFileSync(fileURLToPath(new URL('fieldvm_core_bg.wasm', ui)));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ORIGIN = 'http://seat.test';

@@ -1,5 +1,5 @@
-//! membrane_vm: the cliffhanger VM, native (#971). Python sees one class, `Core`; values cross the
-//! boundary as JSON text (simple first; typed conversion later, where measurements say it matters).
+//! membrane_vm: the cliffhanger VM, native (#971): the engine behind the `cliffvm` seat and the browser build (wasm). `Core` takes and
+//! gives values as JSON text.
 
 pub mod adapters;
 pub mod learn;
@@ -23,12 +23,8 @@ pub mod stats;
 #[cfg(feature = "alloc-stats")]
 pub mod alloc_stats;
 
-#[cfg(feature = "python")]
-mod py;
 #[cfg(feature = "store")]
 pub mod store;
-#[cfg(feature = "python")]
-pub mod db;
 #[cfg(feature = "store")]
 pub mod sqlexec;
 #[cfg(feature = "store")]
@@ -53,7 +49,7 @@ pub mod spec;
 
 
 /// Parse and evaluate one expression against plain values (`env_json`: a JSON object), no entities. The result as
-/// JSON. For tests and tools; the Python binding's `evaluate` is the same.
+/// JSON. For tests and tools.
 pub fn evaluate_json(src: &str, env_json: &str) -> Result<String, String> {
     struct NoWorld;
     impl expr::World for NoWorld { fn attr(&self, _: &str, _: &str) -> expr::V { expr::V::None } }

@@ -39,7 +39,7 @@ const packs = readFileSync(path.join(repo, 'membrane/apps/barest.packs'), 'utf8'
 const port = 24000 + Math.floor(Math.random() * 900);
 const dir = mkdtempSync(path.join(tmpdir(), 'chat-scroll-'));
 const fake = path.join(dir, 'fake-claude'); writeFileSync(fake, FAKE); chmodSync(fake, 0o755);
-const seat = spawn(bin, ['run', ...packs, 'membrane/apps/barest.c1f', '--store', path.join(dir, 'field.sqlite3'), '--port', String(port), '--ui-dir', 'membrane/ui',
+const seat = spawn(bin, ['run', ...packs, 'membrane/apps/barest.c1f', '--store', path.join(dir, 'field.sqlite3'), '--port', String(port),
   '--fact', `chat_claude_bin=${fake}`, '--fact', 'chat_list_poll_ms=500', '--fact', 'chat_active_poll_ms=200'], { cwd: repo, stdio: 'ignore', env: { ...process.env, ANTHROPIC_API_KEY: 'sk-ant-harness-default-0000' } });
 const url = `http://127.0.0.1:${port}`;
 

@@ -1295,6 +1295,19 @@ impl Fields {
         true
     }
 
+    /// Unload many entities with ONE pass over each bookkeeping table (the same forgetting as `unload`, per entity). `unload` retains over the whole of `dirty`, `reads`, `deps`
+    /// and `layer_of` for each entity: a batch of N costs N passes (measured 2026-11-14 on a history import that unloads ~100 entities a page: the retains were the top of the
+    /// profile and a page took seconds). Here the passes are one, whatever N.
+    pub fn unload_many(&mut self, core: &mut Core, eids: &[String]) {
+        let gone: std::collections::HashSet<&str> = eids.iter().filter(|e| core.unload(e)).map(|e| e.as_str()).collect();
+        if gone.is_empty() { return; }
+        for e in &gone { self.known.remove(*e); }
+        self.dirty.retain(|(_, e, _)| !gone.contains(e.as_str()));
+        self.reads.retain(|(e, _), _| !gone.contains(e.as_str()));
+        for set in self.deps.values_mut() { set.retain(|(e, _)| !gone.contains(e.as_str())); }
+        self.layer_of.retain(|(e, _), _| !gone.contains(e.as_str()));
+    }
+
     pub fn react(&mut self, core: &mut Core, host: &dyn Host, w: Write, now: f64, seq: &mut i64) {
         self.new_round();
         self.visited.insert((w.eid.clone(), w.prop.clone()));   // the outside write starts the chain: returning to it is a loop

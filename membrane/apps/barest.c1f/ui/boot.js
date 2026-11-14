@@ -1,4 +1,4 @@
-// The page's bootstrap, the only JavaScript of the barest page besides the shared host (membrane/ui/fieldvm.js: the DOM mount, the event capture, Fetch/SSE, the clock).
+// The page's bootstrap, the only JavaScript of the barest page besides the shared host (fieldvm.js, next to this file: the DOM mount, the event capture, Fetch/SSE, the clock).
 // Everything the person sees is c1f: the view packs of this folder (shell_view.c1f, chat_view.c1f; field_view.c1f lives in the extra app apps/field.c1f) run in the page's field engine (WebAssembly).
 // This file starts the engine, hands it the seat's packs and facts (`GET /ui/fieldvm`), gives the shell its DOM mount and the page's <html> element, starts the clock, and says
 // in plain text when any of that fails (nothing fails silently).

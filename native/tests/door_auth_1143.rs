@@ -21,7 +21,7 @@ const DOOR: &str = include_str!("../../membrane/packs/door.c1f");
 const AUTH: &str = include_str!("../../membrane/packs/door_auth.c1f");
 const SECRET: &str = "0123456789abcdef0123456789abcdef";
 
-fn ui_dir() -> String { format!("{}/../membrane/ui", env!("CARGO_MANIFEST_DIR")) }
+fn ui_dir() -> String { format!("{}/../membrane/apps/barest.c1f/ui", env!("CARGO_MANIFEST_DIR")) }
 
 fn world() -> (Core, Fields, u64) {
     let mut f = Fields::goalgraph();

@@ -1,60 +1,37 @@
 [build-system]
-# the field engine (native/, Rust) is compiled into the package by setuptools-rust (setup.py): a wheel carries it,
-# a source install builds it (it needs a Rust toolchain; install.sh fetches one user-locally when it is missing)
-requires = ["setuptools>=77", "setuptools-rust>=1.10"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "babyseat"
-version = "0.7.53"
+version = "0.7.60"
 description = "babyseat (formerly membrane): a local-first seat for AI with a memory field (membrane) -- its own web UI (`babyseat`) or inside Home Assistant (HACS)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Dmitrii Chechetkin" }]
-dependencies = ["numpy>=1.26",
-                # the code tree's grammars (#622): code is parsed into nodes in the field
-                "tree-sitter>=0.25", "tree-sitter-bash>=0.25", "tree-sitter-javascript>=0.25",
-                "tree-sitter-python>=0.25",
-                # MCP servers and their tools as field entities (#963): the client side
-                "mcp>=2",
-                # the recall vote's time ballot (0.7.52): a date phrase placed from when it was said (BSD, pure Python)
-                "dateparser>=1.2"]
-
-[project.optional-dependencies]
-couchbase = ["couchbase>=4.6"]      # a Couchbase cluster for the field / peers; the default stores need none
-mdns = ["zeroconf"]                 # peers found on the LAN
-claude-agent = ["claude-agent-sdk"]  # Claude via the Agent SDK on the anthropic API key (#384, #413); membrane's tools only (#389)
-rerank = ["sentence-transformers"]  # the recall reranker (#680): bge-reranker-v2-m3 over the banner's top 20; torch, ~3.3 GB GPU memory loaded
-nlp = ["spacy>=3.8.18", "lemminflect"]             # living language (language.py); on by default: the seat installs spaCy and en_core_web_sm itself at boot
+# the seat is the `cliffvm` binary the wheel carries (native/, Rust); Python is only the launcher (membrane/launcher.py)
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/chedim/membrane"
 Issues = "https://github.com/chedim/membrane/issues"
 
 [project.scripts]
-membrane = "membrane.cli:main"
-babyseat = "membrane.cli:babyseat_main"   # #303: the brand's door = `membrane standalone`
+membrane = "membrane.launcher:main"
+babyseat = "membrane.launcher:main"
 
 [tool.setuptools]
 packages = ["membrane"]
 
 [tool.pytest.ini_options]
-# The seat's own suite. The homeassistant INTEGRATION's tests
-# (integrations/homeassistant/tests) are a separate suite with its own
-# conftest -- one that installs fake `homeassistant` and `aiohttp` packages
-# at import time; collected together the two conftests poison each other's
-# sys.modules (the CI exhibits: `cannot import name 'Event'`,
-# `No module named 'homeassistant.auth'`, a fake aiohttp under the
-# detached-seat tests). Give the root run tests/ only; the integration
-# tree runs as its own pytest process (its own CI step, its own box).
-testpaths = ["tests"]
-markers = [
-    "tokenless: sends no seat credential on purpose (proves the 401); the suite-wide client hook stays off",
-    "live_lane: boots real seats and runs REAL model turns through the operator's local ollama",
-]
+# the Home Assistant component's tests (fake HA, fake seat, a real cliffvm when built: CLIFFVM_BIN) and the wrapper's
+testpaths = ["tests/ha", "tests/wrapper"]
 
+# TODO(packaging, docs/python-retirement.md step 9): the wheel must carry the binary and the data as `membrane/dist/{bin/cliffvm,packs,apps,ui,help}`
+# (setup.py builds `native/` with setuptools-rust Binding.Exec and tags the wheel py3-none-<platform>); until then the data folders below
+# ship from the source tree and the launcher says "no binary for this platform" when it finds none.
 [tool.setuptools.package-data]
-membrane = ["skills/*/SKILL.md", "skills/*/*.md", "viewer.html", "three.min.js", "*.woff2",
-            "ui/*.html", "ui/*.js", "ui/*.mjs", "ui/*.svg", "ui/*.wasm", "packs/*.c1f", "CHANGELOG.md", "help/*.md", "doctrine.md"]
+membrane = ["packs/*.c1f", "packs/*.json", "apps/*.packs", "apps/*/*.c1f", "apps/*/help/*.md", "apps/*/ui/*",
+            "help/*.md", "CHANGELOG.md"]

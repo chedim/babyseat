@@ -59,8 +59,8 @@ cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--store <sqlite>]
 scripts/seat [--open] [--data-dir <dir>] [--port <n>] [--fact name=value ...]                                                    # the dev wrapper: the same, on this checkout's membrane/ folder
 ```
 
-`cliffvm serve` only FINDS things. The dist folder is the one above `bin/` (`<root>/bin/cliffvm`, `--root` names another; the repo's `membrane/` has the same shape: `packs/ apps/ ui/`); it reads
-`<root>/apps/barest.packs` (one pack per line, load order, the first is the root of trust), loads those packs from `<root>/packs/`, then the app `<root>/apps/barest.c1f`, with `--ui-dir <root>/ui`.
+`cliffvm serve` only FINDS things. The dist folder is the one above `bin/` (`<root>/bin/cliffvm`, `--root` names another; the repo's `membrane/` has the same shape: `packs/ apps/`); it reads
+`<root>/apps/barest.packs` (one pack per line, load order, the first is the root of trust), loads those packs from `<root>/packs/`, then `launcher.c1f`, then the app `<root>/apps/barest.c1f` (the page is that app's `ui/` folder).
 The data folder is `--data-dir`, else `$XDG_DATA_HOME/membrane`, else `~/Library/Application Support/membrane` (macOS) or `~/.local/share/membrane`; it holds `seat.sqlite` (the store), `door.secret`
 (made at the first run, mode 0600) and `owner.token` (new at every start, mode 0600). The claude CLI is `CLAUDE_BIN`, else `claude` on PATH. It tells the facts `door_secret_file`, `seat_data_dir`, `chat_claude_bin`,
 then yours (`--fact`, which win), and prints the URL, where the owner token is and a ready curl line once the door is up. The door binds 127.0.0.1 unless `--bind` says otherwise.
@@ -78,7 +78,7 @@ scripts/seat [--store ./.cliffvm/seat.sqlite] [--port 4096] [--open] [--fact nam
 `scripts/seat` is `cliffvm serve --root membrane` with the data in `./.cliffvm` (when no `--data-dir`/`--store` is named) and its own `--open`. `CLIFFVM` names the binary (else `native/target/release/cliffvm`, else PATH).
 
 **The dist folder** (`scripts/dist/build.sh [--bin <cliffvm>] [--out <dir>] [--target <triple>] [--archive <tar.gz>]`; default `dist/<version>`, the version of `native/Cargo.toml`):
-`bin/cliffvm  packs/  apps/{barest.packs, barest.c1f/}  ui/  help/  LICENSE  VERSION  MANIFEST.sha256` (a sha256 per file but itself, sorted; `scripts/dist/verify.sh <dir>` checks it; `scripts/dist/smoke.sh <dir>` starts
+`bin/cliffvm  packs/  apps/{barest.packs, barest.c1f/}  help/  LICENSE  VERSION  MANIFEST.sha256` (a sha256 per file but itself, sorted; `scripts/dist/verify.sh <dir>` checks it; `scripts/dist/smoke.sh <dir>` starts
 `serve --port 0` from the folder and reads `/global/health`; `scripts/dist/assemble_wheel_payload.sh <dist> <payload>` makes the folder the wheel wrapper packages as `membrane/dist/`).
 `.github/workflows/release-binaries.yml` builds it per platform on a tag `v*` or by hand, and publishes nothing. Tests: `native/tests/serve_1143.rs`, `native/tests/dist_1143.rs`.
 

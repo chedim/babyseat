@@ -125,6 +125,37 @@ class RealSeat:
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
+class ReleaseSeat(RealSeat):
+    """The same seat, started by the RELEASE LAUNCHER (`scripts/seat`: the shipped barest packs and app, the strict door, its own data folder, a free port): what a user runs.
+    Only the way it is started differs; the token helpers (`mint`, `owner_token`, `tool`) are the parent's. The launcher listens on 127.0.0.1 (it has no --bind)."""
+
+    def start(self) -> "ReleaseSeat":
+        d = self.dir
+        claude = d / "fake-claude"
+        claude.write_text(FAKE_CLAUDE)
+        claude.chmod(0o755)
+        env = dict(os.environ, ANTHROPIC_API_KEY="sk-ant-harness-default-0000", CLIFFVM=str(self.bin), CLAUDE_BIN=str(claude))
+        self.child = subprocess.Popen(["sh", str(ROOT / "scripts" / "seat"), "--data-dir", str(d), "--port", "0"], cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                                      stderr=subprocess.DEVNULL, text=True)
+        for line in self.child.stdout:                  # the launcher's own lines first, then the door's
+            if "door listening on" in line:
+                break
+        else:
+            raise AssertionError("the release launcher printed no door address")
+        self.port = int(line.rsplit(":", 1)[1].strip())
+        self.url = f"http://127.0.0.1:{self.port}"
+        return self
+
+
+@pytest.fixture
+def release_seat():
+    seat = ReleaseSeat().start()
+    try:
+        yield seat
+    finally:
+        seat.stop()
+
+
 @pytest.fixture
 def real_seat():
     seat = RealSeat().start()

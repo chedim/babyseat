@@ -30,14 +30,13 @@ fn copy_dir(from: &Path, to: &Path) {
         if p.is_dir() { copy_dir(&p, &t); } else { std::fs::copy(&p, &t).unwrap(); }
     }
 }
-/// a dist folder in a temp dir: bin/cliffvm (a copy of the built binary), packs/ and apps/ copied from the repo, ui/ linked (8 MB); nothing of the repo is named to the binary
+/// a dist folder in a temp dir: bin/cliffvm (a copy of the built binary), packs/ and apps/ copied from the repo; nothing of the repo is named to the binary
 fn dist(tag: &str) -> PathBuf {
     let d = tmp(tag).join("dist");
     std::fs::create_dir_all(d.join("bin")).unwrap();
     std::fs::copy(BIN, d.join("bin/cliffvm")).unwrap();
     copy_dir(&repo_membrane().join("packs"), &d.join("packs"));
     copy_dir(&repo_membrane().join("apps"), &d.join("apps"));
-    std::os::unix::fs::symlink(repo_membrane().join("ui").canonicalize().unwrap(), d.join("ui")).unwrap();
     d
 }
 fn fake_claude(dir: &Path) -> PathBuf {
@@ -142,7 +141,7 @@ fn root_names_a_folder_that_is_not_the_binarys_own_and_the_repo_tree_is_one() {
     let d = tmp("c");
     let data = d.join("data");
     let claude = fake_claude(&d);
-    // the repo's membrane/ has the dist's shape (packs/ apps/ ui/): the dev wrapper names it with --root
+    // the repo's membrane/ has the dist's shape (packs/ apps/): the dev wrapper names it with --root
     let run = start(Path::new(BIN), &["--port", "0", "--data-dir", data.to_str().unwrap(), "--root", repo_membrane().to_str().unwrap()], &[("CLAUDE_BIN", claude.to_str().unwrap())], &[]);
     assert!(get(run.port, "/global/health", &bearer(&data)).0.starts_with("HTTP/1.1 200"));
     let _ = std::fs::remove_dir_all(&d);
@@ -232,4 +231,75 @@ fn the_default_port_is_the_launcher_packs_not_the_binarys_and_editing_the_pack_c
     assert!(run.port != 0 && run.port != 4096, "the door listens where the pack says: {}", run.port);
     assert!(get(run.port, "/global/health", &bearer(&data)).0.starts_with("HTTP/1.1 200"));
     let _ = std::fs::remove_dir_all(d.parent().unwrap());
+}
+
+// ---- the old Python seat's store (the cutover pack, packs/legacy_cutover.c1f, reads the fact `legacy_path`; c1f cannot read the environment, so `serve` tells it) ----
+fn post(port: u16, path: &str, extra: &str, body: &str) -> String {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
+    s.write_all(format!("POST {path} HTTP/1.1\r\nHost: t\r\n{extra}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).unwrap();
+    let mut out = vec![];
+    let _ = s.read_to_end(&mut out);
+    let t = String::from_utf8_lossy(&out).to_string();
+    t.split_once("\r\n\r\n").map(|x| x.1.to_string()).unwrap_or_default()
+}
+/// `Boot:seat.legacy_path` as the seat holds it (None = no such property)
+fn legacy_fact(run: &Run, data: &Path) -> Option<String> {
+    let body = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_read", "arguments": {"spec": "Boot:seat", "prop": "legacy_path"}}}).to_string();
+    let r: serde_json::Value = serde_json::from_str(&post(run.port, "/mcp", &bearer(data), &body)).unwrap();
+    let t = r["result"]["content"][0]["text"].as_str().unwrap_or("").to_string();
+    if t.contains(" has no ") || t.is_empty() { None } else { Some(serde_json::from_str::<String>(&t).unwrap_or(t)) }
+}
+/// a fake old data dir: `<dir>/field.sqlite/field.sqlite3` is a file (not a real store: the seat only has to be TOLD where it is)
+fn fake_old_dir(parent: &Path, name: &str) -> PathBuf {
+    let d = parent.join(name);
+    std::fs::create_dir_all(d.join("field.sqlite")).unwrap();
+    std::fs::write(d.join("field.sqlite/field.sqlite3"), b"not a database").unwrap();
+    d
+}
+
+#[test]
+fn legacy_names_the_old_store_and_the_fact_reaches_the_seat() {
+    let d = dist("i");
+    let t = d.parent().unwrap();
+    let data = t.join("data");
+    let old = fake_old_dir(t, "old");
+    let run = start(&d.join("bin/cliffvm"), &["--port", "0", "--data-dir", data.to_str().unwrap(), "--legacy", old.to_str().unwrap()], &[("CLAUDE_BIN", "/usr/bin/true")], &["MEMBRANE_DATA_DIR"]);
+    assert_eq!(legacy_fact(&run, &data), Some(old.display().to_string()), "--legacy becomes the fact legacy_path");
+    drop(run);
+    let _ = std::fs::remove_dir_all(t);
+}
+
+#[test]
+fn the_old_membrane_data_dir_variable_is_passed_as_legacy_path_and_legacy_wins_over_it() {
+    let d = dist("j");
+    let t = d.parent().unwrap();
+    let data = t.join("data");
+    let from_env = fake_old_dir(t, "env-old");
+    let named = fake_old_dir(t, "named-old");
+    let run = start(&d.join("bin/cliffvm"), &["--port", "0", "--data-dir", data.to_str().unwrap()], &[("CLAUDE_BIN", "/usr/bin/true"), ("MEMBRANE_DATA_DIR", from_env.to_str().unwrap())], &[]);
+    assert_eq!(legacy_fact(&run, &data), Some(from_env.display().to_string()), "MEMBRANE_DATA_DIR is the Python seat's data dir: passed as legacy_path");
+    drop(run);
+    let run = start(&d.join("bin/cliffvm"), &["--port", "0", "--data-dir", data.to_str().unwrap(), "--legacy", named.to_str().unwrap()], &[("CLAUDE_BIN", "/usr/bin/true"), ("MEMBRANE_DATA_DIR", from_env.to_str().unwrap())], &[]);
+    assert_eq!(legacy_fact(&run, &data), Some(named.display().to_string()), "--legacy wins over the variable");
+    drop(run);
+    // an explicit `--fact legacy_path=` of the operator comes after both and wins
+    let run = start(&d.join("bin/cliffvm"), &["--port", "0", "--data-dir", data.to_str().unwrap(), "--legacy", named.to_str().unwrap(), "--fact", "legacy_path=/somewhere/else"], &[("CLAUDE_BIN", "/usr/bin/true")], &["MEMBRANE_DATA_DIR"]);
+    assert_eq!(legacy_fact(&run, &data), Some("/somewhere/else".to_string()));
+    drop(run);
+    let _ = std::fs::remove_dir_all(t);
+}
+
+#[test]
+fn with_no_legacy_and_no_variable_no_legacy_path_is_told_and_help_names_both() {
+    let d = dist("k");
+    let t = d.parent().unwrap();
+    let data = t.join("data");
+    let run = start(&d.join("bin/cliffvm"), &["--port", "0", "--data-dir", data.to_str().unwrap()], &[("CLAUDE_BIN", "/usr/bin/true")], &["MEMBRANE_DATA_DIR"]);
+    assert_eq!(legacy_fact(&run, &data), None, "nothing named: the cutover pack searches its own places");
+    drop(run);
+    let h = Command::new(BIN).args(["serve", "--help"]).output().unwrap();
+    let h = String::from_utf8_lossy(&h.stdout);
+    assert!(h.contains("--legacy") && h.contains("MEMBRANE_DATA_DIR") && h.contains("legacy_path"), "{h}");
+    let _ = std::fs::remove_dir_all(t);
 }

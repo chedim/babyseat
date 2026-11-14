@@ -9,7 +9,7 @@ name: release-binaries
 # containers so the glibc floor is 2.28, as the wheels of 0.7.5x were) and on musl (static, for Alpine / Home Assistant's container). Windows: none (the plan). Android/Termux: none.
 #
 # NOT here (a decision, listed in the packaging round's report): the wasm drift check. `native/build-web.sh` rewrites the committed browser wasm and its version hash; a job would run it
-# (rust wasm32-unknown-unknown + wasm-pack) and fail on `git diff --exit-code membrane/ui/fieldvm_core.js membrane/ui/fieldvm_core_bg.wasm membrane/ui/fieldvm_version.js`.
+# (rust wasm32-unknown-unknown + wasm-pack) and fail on `git diff --exit-code` on the files it writes (see native/build-web.sh; they live in the barest app's ui/ folder).
 # Whether the wasm build is byte-reproducible across machines is UNVERIFIED, so it is not switched on.
 
 on:
@@ -75,7 +75,7 @@ jobs:
         if: matrix.rosetta
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
-      - name: build the dist folder (release binary + packs + apps + ui + manifest)
+      - name: build the dist folder (release binary + packs + apps + manifest)
         run: sh scripts/dist/build.sh --target "${{ matrix.target }}" --archive "dist/babyseat-$VER-${{ matrix.target }}.tar.gz"
 
       - name: "what the binary needs (information)"

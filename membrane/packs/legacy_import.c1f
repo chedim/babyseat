@@ -31,6 +31,10 @@ RESIDENT Legacy
 LegacySeat.kind getter: 'legacy_seat'
 LegacySession.kind getter: 'legacy_session'
 LegacySeat.converter getter: 1
+-- THE KINDS of an old session (operator 2026-11-14): `chat` = a person's chat (the old `agent` is one of `chat_agents`) whose title is not `absorbed claude session`; `absorbed` = that title (a Claude Code session absorbed
+-- into the old field); `background` = every other agent (worker, watch, planner, worker-loops, field-call...). Only chats enter the thread; the others keep their header in the ledger as `skipped` (kind named) and the
+-- old store stays readable through `SqlSource:legacy`.
+LegacySeat.chat_agents getter: ['build', 'speaker']
 LegacySeat.opsub getter: str(prop(([b.facts for b in instances('Boot') if b.facts != None] or [{}])[0], 'operator') or 'owner')
 
 -- ---- start: the pack's own queries, the seat, and an import the last run left running is over (the ledger says where it was) ----------------------------------------
@@ -38,10 +42,13 @@ Boot.started on-setter legacy-seed:
   ALWAYS:
     membrane::Legacy:seat = LegacySeat(source: 'legacy')
     membrane::Legacy:seat.running = False
+    -- a stop in the middle of a run leaves its session as `cur`: the start ends that run (the ledgers say where it was), so the next request starts clean and resumes from the cursors
+    membrane::Legacy:seat.cur = None
+    membrane::Legacy:seat.queue = []
     SqlQuery:legacy:sessions.source = 'legacy'
-    SqlQuery:legacy:sessions.sql = "SELECT s.k AS k, s.body AS body, (SELECT count(*) FROM c_messages m WHERE m.k >= s.k||'|' AND m.k < s.k||'}') AS nrows, (SELECT json_group_array(json_object('mid', json_extract(a.body,'$.mid'), 'n', json_extract(a.body,'$.n'))) FROM c_messages a WHERE a.k >= s.k||'|' AND a.k < s.k||'}' AND json_extract(a.body,'$.row.info.role') != 'user' AND (json_extract(a.body,'$.row.info.role') != 'assistant' OR json_extract(a.body,'$.row.info.parentID') IS NULL OR NOT EXISTS (SELECT 1 FROM c_messages x WHERE x.k = s.k||'|'||json_extract(a.body,'$.row.info.parentID') AND json_extract(x.body,'$.row.info.role') = 'user'))) AS orphans FROM c_sessions s ORDER BY json_extract(s.body,'$.s.time.created'), s.k"
+    SqlQuery:legacy:sessions.sql = "SELECT s.k AS k, s.body AS body, (SELECT count(*) FROM c_messages m WHERE m.k >= s.k||'|' AND m.k < s.k||'}') AS nrows, (SELECT json_group_array(json_object('mid', json_extract(a.body,'$.mid'), 'n', json_extract(a.body,'$.n'))) FROM c_messages a WHERE a.k >= s.k||'|' AND a.k < s.k||'}' AND json_extract(a.body,'$.row.info.role') != 'user' AND (json_extract(a.body,'$.row.info.role') != 'assistant' OR json_extract(a.body,'$.row.info.parentID') IS NULL OR NOT EXISTS (SELECT 1 FROM c_messages x WHERE x.k = s.k||'|'||json_extract(a.body,'$.row.info.parentID') AND json_extract(x.body,'$.row.info.role') = 'user'))) AS orphans FROM c_sessions s ORDER BY json_extract(s.body,'$.s.time.updated') DESC, s.k"
     SqlQuery:legacy:msgs.source = 'legacy'
-    SqlQuery:legacy:msgs.sql = "WITH pu AS MATERIALIZED (SELECT k, body, json_extract(body,'$.mid') AS mid, json_extract(body,'$.n') AS n FROM c_messages WHERE k >= ?1||'|' AND k < ?1||'}' AND json_extract(body,'$.row.info.role') = 'user' AND json_extract(body,'$.n') > ?2 ORDER BY json_extract(body,'$.n') LIMIT ?3), ans AS MATERIALIZED (SELECT * FROM (SELECT body, json_extract(body,'$.row.info.parentID') AS pid FROM c_messages WHERE k >= ?1||'|' AND k < ?1||'}') WHERE pid IN (SELECT mid FROM pu)) SELECT *, sum(used) OVER () AS page_used, sum(dropped) OVER () AS page_dropped FROM (SELECT u.k AS k, u.n AS n, u.body AS ub, (SELECT json_object('na', count(*), 'tin', CAST(total(json_extract(a.body,'$.row.info.tokens.input')) AS INTEGER), 'tout', CAST(total(json_extract(a.body,'$.row.info.tokens.output')) AS INTEGER), 'tcr', CAST(total(json_extract(a.body,'$.row.info.tokens.cache.read')) AS INTEGER), 'tcw', CAST(total(json_extract(a.body,'$.row.info.tokens.cache.write')) AS INTEGER), 'cost', total(json_extract(a.body,'$.row.info.cost')), 't0', min(json_extract(a.body,'$.row.info.time.created')), 't1', max(json_extract(a.body,'$.row.info.time.completed')), 'err', json((SELECT json_extract(b.body,'$.row.info.error') FROM ans b WHERE b.pid = u.mid ORDER BY json_extract(b.body,'$.n') DESC LIMIT 1))) FROM ans a WHERE a.pid = u.mid) AS agg, (SELECT json_group_array(json(t)) FROM (SELECT p.value AS t FROM ans a, json_each(a.body,'$.row.parts') p WHERE a.pid = u.mid AND json_extract(p.value,'$.type') = 'tool' ORDER BY json_extract(a.body,'$.n'), p.key)) AS tools, (SELECT json_group_array(t) FROM (SELECT json_extract(p.value,'$.text') AS t FROM ans a, json_each(a.body,'$.row.parts') p WHERE a.pid = u.mid AND json_extract(p.value,'$.type') = 'text' ORDER BY json_extract(a.body,'$.n'), p.key)) AS texts, 1 + (SELECT count(*) FROM ans a WHERE a.pid = u.mid) AS used, (SELECT count(*) FROM ans a, json_each(a.body,'$.row.parts') p WHERE a.pid = u.mid AND json_extract(p.value,'$.type') NOT IN ('text','tool','step-start','step-finish')) AS dropped FROM pu u ORDER BY u.n)"
+    SqlQuery:legacy:msgs.sql = "WITH pu AS MATERIALIZED (SELECT k, body, json_extract(body,'$.mid') AS mid, json_extract(body,'$.n') AS n FROM c_messages WHERE k >= ?1||'|' AND k < ?1||'}' AND json_extract(body,'$.row.info.role') = 'user' AND json_extract(body,'$.n') < (CASE WHEN ?2 = 0 THEN 9223372036854775807 ELSE ?2 END) ORDER BY json_extract(body,'$.n') DESC LIMIT ?3), ans AS MATERIALIZED (SELECT * FROM (SELECT body, json_extract(body,'$.row.info.parentID') AS pid FROM c_messages WHERE k >= ?1||'|' AND k < ?1||'}') WHERE pid IN (SELECT mid FROM pu)) SELECT *, sum(used) OVER () AS page_used, sum(dropped) OVER () AS page_dropped FROM (SELECT u.k AS k, u.n AS n, u.body AS ub, (SELECT json_object('na', count(*), 'tin', CAST(total(json_extract(a.body,'$.row.info.tokens.input')) AS INTEGER), 'tout', CAST(total(json_extract(a.body,'$.row.info.tokens.output')) AS INTEGER), 'tcr', CAST(total(json_extract(a.body,'$.row.info.tokens.cache.read')) AS INTEGER), 'tcw', CAST(total(json_extract(a.body,'$.row.info.tokens.cache.write')) AS INTEGER), 'cost', total(json_extract(a.body,'$.row.info.cost')), 't0', min(json_extract(a.body,'$.row.info.time.created')), 't1', max(json_extract(a.body,'$.row.info.time.completed')), 'err', json((SELECT json_extract(b.body,'$.row.info.error') FROM ans b WHERE b.pid = u.mid ORDER BY json_extract(b.body,'$.n') DESC LIMIT 1))) FROM ans a WHERE a.pid = u.mid) AS agg, (SELECT json_group_array(json(t)) FROM (SELECT p.value AS t FROM ans a, json_each(a.body,'$.row.parts') p WHERE a.pid = u.mid AND json_extract(p.value,'$.type') = 'tool' ORDER BY json_extract(a.body,'$.n'), p.key)) AS tools, (SELECT json_group_array(t) FROM (SELECT json_extract(p.value,'$.text') AS t FROM ans a, json_each(a.body,'$.row.parts') p WHERE a.pid = u.mid AND json_extract(p.value,'$.type') = 'text' ORDER BY json_extract(a.body,'$.n'), p.key)) AS texts, 1 + (SELECT count(*) FROM ans a WHERE a.pid = u.mid) AS used, (SELECT count(*) FROM ans a, json_each(a.body,'$.row.parts') p WHERE a.pid = u.mid AND json_extract(p.value,'$.type') NOT IN ('text','tool','step-start','step-finish')) AS dropped FROM pu u ORDER BY u.n DESC)"
 
 -- ---- the headers ---------------------------------------------------------------------------------------------------------------------------------
 LegacySeat.list on-setter legacy-list:
@@ -62,8 +69,10 @@ LegacySeat.hl on-setter legacy-headers:
   WHEN this.hl != None:
     FOR x IN [{'sid': prop(r, 'k'), 's': prop(json(prop(r, 'body')), 's'), 'nrows': prop(r, 'nrows'), 'orph': json(prop(r, 'orphans') or '[]')} for r in prop(this.hl, 'rows') if prop('membrane::Legacy:session:' + prop(r, 'k'), 'state') == None and replace(prop(r, 'k'), ':', '') == prop(r, 'k')]:
       slug = join(words(replace(replace(replace(lower(str(prop(x['s'], 'owner') or '')), '.', ' '), '_', ' '), ',', ' ')), '-')
-      membrane::Chat:session[x['sid']] = ChatSession(stitle: prop(x['s'], 'title'), born: prop(prop(x['s'], 'time'), 'created'), upd: prop(prop(x['s'], 'time'), 'updated'), owner: 'Person:' + (slug if slug != '' else this.opsub), legacy_src: {'conv': this.converter, 'sid': x['sid'], 'at': prop(prop(x['s'], 'time'), 'created')})
-      membrane::Legacy:session[x['sid']] = LegacySession(state: 'pending', converter: this.converter, old_rows: x['nrows'], rows: 0, cursor: 0, unmapped: len(x['orph']), unmapped_rows: x['orph'], dropped_parts: 0)
+      sk = ('absorbed' if prop(x['s'], 'title') == 'absorbed claude session' else ('chat' if prop(x['s'], 'agent') in this.chat_agents else 'background'))
+      FOR cc IN ([1] if sk == 'chat' else []):
+        membrane::Chat:session[x['sid']] = ChatSession(stitle: prop(x['s'], 'title'), born: prop(prop(x['s'], 'time'), 'created'), upd: prop(prop(x['s'], 'time'), 'updated'), owner: 'Person:' + (slug if slug != '' else this.opsub), legacy_src: {'conv': this.converter, 'sid': x['sid'], 'at': prop(prop(x['s'], 'time'), 'created')})
+      membrane::Legacy:session[x['sid']] = LegacySession(session_kind: sk, state: 'pending' if sk == 'chat' else 'skipped', converter: this.converter, old_rows: x['nrows'], rows: 0, cursor: 0, unmapped: len(x['orph']), unmapped_rows: x['orph'], dropped_parts: 0)
 
 -- ---- the import: headers first, then the sessions one at a time -----------------------------------------------------------------------------------------
 LegacySeat.import on-setter legacy-import:
@@ -87,7 +96,7 @@ LegacySeat.hbad on-setter legacy-headers-failed:
 LegacySeat.hl on-setter legacy-start:
   WHEN this.hl != None and this.running == True and prop(this.hl, 'id') == 'import:' + str(this.iid) and this.cur == None:
     wanted = prop(this.import, 'sessions')
-    todo = [prop(r, 'k') for r in prop(this.hl, 'rows') if (wanted == 'all' or prop(r, 'k') in (wanted or [])) and prop('membrane::Legacy:session:' + prop(r, 'k'), 'state') != 'done' and replace(prop(r, 'k'), ':', '') == prop(r, 'k')]
+    todo = [prop(r, 'k') for r in prop(this.hl, 'rows') if (wanted == 'all' or prop(r, 'k') in (wanted or [])) and prop('membrane::Legacy:session:' + prop(r, 'k'), 'state') != 'done' and prop('membrane::Legacy:session:' + prop(r, 'k'), 'state') != 'skipped' and replace(prop(r, 'k'), ':', '') == prop(r, 'k')]
     this.run_total = len(todo)
     this.run_done = 0
     this.run_error = 0
@@ -126,50 +135,56 @@ Request.ml_ask on-setter legacy-open-ask:
 
 LegacySeat.want getter: str(this.iid) + ':' + str(this.cur) + ':' + str(this.after)
 LegacySeat.pgq getter: prop('SqlQuery:legacy:msgs', 'run_result')
+LegacySeat.pgrows getter: (prop(this.pgq, 'rows') or []) if prop(this.pgq, 'status') == 'ok' else []
 LegacySeat.pg getter:
   WHEN this.running != True or this.cur == None or this.pgq == None: None
-  ELSE WHEN prop(this.pgq, 'id') == this.want: this.pgq
+  -- (it reads `pgrows` so the rows are computed before the setter below runs: a getter is read at a lower level than the one that reads it)
+  ELSE WHEN prop(this.pgq, 'id') == this.want and this.pgrows != None: this.pgq
 
 -- ONE PAGE: the rows are user rows with what answered them (tools, texts, sums) gathered by the query; the entities and the ledger are written in this one cascade
 LegacySeat.pg on-setter legacy-page:
   WHEN this.pg != None:
     led = 'membrane::Legacy:session:' + this.cur
     ok = prop(this.pg, 'status') == 'ok'
-    rows = (prop(this.pg, 'rows') or []) if ok else []
     -- a session ends on an EMPTY page, never on a short one: the page that writes the last entities is not the page that writes `done`. A reader (the page's message list, packs/door_session.c1f) reads the store (`sql`)
     -- the moment `done` is written, and the store has this cascade's entities only after its commit: with `done` in the same cascade it could read the session's last page as missing.
-    fin = (not ok) or len(rows) == 0
+    fin = (not ok) or len(this.pgrows) == 0
     -- a session someone opened (`waiting`, the lazy path below) goes before the rest of an eager run's queue
     wnt = fin and len(this.waiting) > 0 and len([b for b in instances('Boot') if b.legacy_page != None]) > 0
     nxt = ((this.waiting[0] if wnt else (this.queue[0] if len(this.queue) > 0 else None)) if fin else this.cur)
-    nafter = (((prop('membrane::Legacy:session:' + nxt, 'cursor') or 0) if nxt != None else 0)) if fin else (rows[-1]['n'] if len(rows) > 0 else 0)
-    FOR r IN rows:
+    nafter = (((prop('membrane::Legacy:session:' + nxt, 'cursor') or 0) if nxt != None else 0)) if fin else (this.pgrows[-1]['n'] if len(this.pgrows) > 0 else 0)
+    -- NAMES BOUND ABOVE A FOR ARE COPIED FOR EVERY STATEMENT OF ITS BODY (engine: Fields::run_writes + scope): a bound `rows` of a page, or a bound `tools`, made each statement copy megabytes
+    -- (measured on the real store: 385 GB of allocation in 45 s, a page took seconds). So the page's rows are a getter read where they are used, and the row's tools and texts are read from `r` where they are used.
+    FOR r IN this.pgrows:
       u = json(prop(r, 'ub'))
       ag = json(prop(r, 'agg'))
-      tools = json(prop(r, 'tools') or '[]')
-      texts = json(prop(r, 'texts') or '[]')
       ui = prop(prop(u, 'row'), 'info')
       created = prop(prop(ui, 'time'), 'created')
       id = str(created) + '-' + tail('00000000' + str(prop(u, 'n')), 8)
       utext = join([str(prop(p, 'text')) for p in prop(prop(u, 'row'), 'parts') if prop(p, 'type') == 'text'], '\n')
       err = prop(ag, 'err')
-      said = join([t for t in texts if t != None and t != ''], '\n\n')
+      said = join([t for t in json(prop(r, 'texts') or '[]') if t != None and t != ''], '\n\n')
       answered = prop(ag, 'na') > 0
       bad = answered and err != None
       body = said if said != '' else (str(prop(prop(err, 'data'), 'message') or prop(err, 'name')) if bad else ('(no answer was recorded in the previous store)' if not answered else ''))
-      tid = [str(prop(t, 'callID') or prop(t, 'id')) for t in tools]
-      membrane::Chat:session[this.cur]:message[id] = ChatMessage(text: utext, at: created / 1000, pick: str(prop(prop(ui, 'model'), 'modelID') or ''), tools_run: [replace(str(prop(t, 'tool')), 'mcp__membrane__', '') for t in tools], tool_ids: join(tid, ' '), aborted: (bad and prop(err, 'name') == 'MessageAbortedError'), legacy_src: {'conv': this.converter, 'sid': this.cur, 'mid': prop(u, 'mid'), 'at': created, 'n': prop(u, 'n'), 'asst_at': prop(ag, 't0'), 'asst_done': prop(ag, 't1'), 'answers': prop(ag, 'na')})
+      m0 = 'membrane::Chat:session:' + this.cur + ':message:' + id
+      membrane::Chat:session[this.cur]:message[id] = ChatMessage(text: utext, at: created / 1000, pick: str(prop(prop(ui, 'model'), 'modelID') or ''), tools_run: [replace(str(prop(t, 'tool')), 'mcp__membrane__', '') for t in json(prop(r, 'tools') or '[]')], tool_ids: join([str(prop(t, 'callID') or prop(t, 'id')) for t in json(prop(r, 'tools') or '[]')], ' '), aborted: (bad and prop(err, 'name') == 'MessageAbortedError'), legacy_src: {'conv': this.converter, 'sid': this.cur, 'mid': prop(u, 'mid'), 'at': created, 'n': prop(u, 'n'), 'asst_at': prop(ag, 't0'), 'asst_done': prop(ag, 't1'), 'answers': prop(ag, 'na')})
       membrane::Chat:session[this.cur]:message[id]:body = SemText(text: utext)
       membrane::Chat:main:time[id]:session[this.cur] = ChatLine(chat: 'session:' + this.cur)
       membrane::Chat:session[this.cur]:message[id]:turn = ChatTurn(message: 'membrane::Chat:session:' + this.cur + ':message:' + id, queued_at: created / 1000, state: ('error' if (bad or not answered) else 'done'), ended: ((prop(ag, 't1') or prop(ag, 't0') or created) / 1000), usage: {'input_tokens': prop(ag, 'tin'), 'output_tokens': prop(ag, 'tout'), 'cache_creation_input_tokens': prop(ag, 'tcw'), 'cache_read_input_tokens': prop(ag, 'tcr')}, cost: prop(ag, 'cost'))
       membrane::Chat:session[this.cur]:message[id]:turn:response = ChatResponse(text: body, error: (bad or not answered))
       FOR b IN ([1] if (body != '' and not bad and answered) else []):
         membrane::Chat:session[this.cur]:message[id]:turn:response:body = SemText(text: body)
-      FOR t IN tools:
+      FOR t IN json(prop(r, 'tools') or '[]'):
         membrane::Chat:session[this.cur]:message[id]:turn:tool[str(prop(t, 'callID') or prop(t, 'id'))] = ChatTool(name: prop(t, 'tool'), input: prop(prop(t, 'state'), 'input'), result: str(prop(prop(t, 'state'), 'output') or prop(prop(t, 'state'), 'error') or ''))
-    (led).rows = (prop(led, 'rows') or 0) + ((rows[0]['page_used'] if len(rows) > 0 else 0))
-    (led).dropped_parts = (prop(led, 'dropped_parts') or 0) + ((rows[0]['page_dropped'] if len(rows) > 0 else 0))
-    (led).cursor = rows[-1]['n'] if len(rows) > 0 else (prop(led, 'cursor') or 0)
+        (m0 + ':turn:tool:' + str(prop(t, 'callID') or prop(t, 'id'))).unload = True
+      -- WHAT WAS WRITTEN LEAVES THE ENGINE AT ONCE (docs/cliffvm.md "Unload": the row is kept, a reference loads it back): the import is a long background job and a message's bodies are large, so the
+      -- memory stays a few batches whatever the store size. The host writes the rows first, then unloads (one `unload = true` per entity, the one primitive).
+      FOR x IN concat([m0, m0 + ':body', m0 + ':turn', m0 + ':turn:response', 'membrane::Chat:main:time:' + id + ':session:' + this.cur], ([m0 + ':turn:response:body'] if (body != '' and not bad and answered) else [])):
+        (x).unload = True
+    (led).rows = (prop(led, 'rows') or 0) + ((this.pgrows[0]['page_used'] if len(this.pgrows) > 0 else 0))
+    (led).dropped_parts = (prop(led, 'dropped_parts') or 0) + ((this.pgrows[0]['page_dropped'] if len(this.pgrows) > 0 else 0))
+    (led).cursor = this.pgrows[-1]['n'] if len(this.pgrows) > 0 else (prop(led, 'cursor') or 0)
     (led).state = ('error' if not ok else 'done') if fin else 'importing'
     (led).reason = None if ok else str(prop(this.pgq, 'head'))
     (led).imported_at = clock if (fin and ok) else prop(led, 'imported_at')

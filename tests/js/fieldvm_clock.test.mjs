@@ -3,9 +3,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { initSync, Field } from '../../membrane/ui/fieldvm_core.js';
+import { initSync, Field } from '../../membrane/apps/barest.c1f/ui/fieldvm_core.js';
 
-const ui = new URL('../../membrane/ui/', import.meta.url);
+const ui = new URL('../../membrane/apps/barest.c1f/ui/', import.meta.url);
 initSync({ module: readFileSync(fileURLToPath(new URL('fieldvm_core_bg.wasm', ui))) });
 
 const LONG = 'PACK long 1\nThing.big getter: ' + Array(600).fill('1').join(' + ') + '\n';

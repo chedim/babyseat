@@ -28,7 +28,7 @@ fn shipped(names: &[&str]) -> Vec<(String, String)> {
 }
 
 /// the barest chat's packs plus the session door
-const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f", "legacy_import.c1f", "legacy_persons.c1f", "router.c1f", "door_models.c1f"];
+const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f", "legacy_import.c1f", "legacy_cutover.c1f", "legacy_persons.c1f", "router.c1f", "door_models.c1f"];
 
 /// the seat's folder holds the fake claude; the binary is told its path as a fact
 fn seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) { seat_with(tag, script, false) }
@@ -353,4 +353,34 @@ fn opening_a_native_session_writes_no_ledger_when_the_page_fact_is_told() {
     let (st, rows) = api(port, "GET", &format!("/session/{sid}/message"), J::Null);
     assert_eq!((st, rows), (200, json!([])));
     assert!(read_prop(port, &format!("Legacy:session:{sid}"), "state").is_null() && read_prop(port, &format!("Legacy:session:{sid}"), "open").is_null(), "no ledger made for a native session");
+}
+
+#[test]
+fn the_cutover_shows_its_line_on_the_history_route_while_it_runs_the_newest_turns_are_there_first_and_the_line_is_gone_when_it_is_done() {
+    // the seat is started with the old store named (the fact the launcher's `--legacy <path>` tells) and nothing else: no `list`, no `import`, no open
+    let fx = tmp("legacy-cutover");
+    let old = fx.join("old.sqlite");
+    legacy_fixture::make_big_legacy(&old, 200, 3);   // 3 small sessions (the newest) and one of 200 questions
+    let fact = format!("legacy_path={}", old.display());
+    let (_run, port, dir) = seat_facts("legacy-cutover", NEVER, false, &[&fact, "legacy_batch=5"]);
+    let mut lines: Vec<String> = vec![];
+    let mut first_newest: Option<String> = None;
+    let (mut counts, mut last): (Vec<usize>, J) = (vec![], J::Null);
+    wait("the import to end", || {
+        let (st, h) = api(port, "GET", "/membrane/chat/messages?limit=1000", J::Null);
+        assert_eq!(st, 200, "{h}");
+        let n = h["messages"].as_array().unwrap().len();
+        counts.push(n);
+        if n > 0 && first_newest.is_none() { first_newest = h["messages"][n - 1]["id"].as_str().map(String::from); }
+        if let Some(l) = h["import"].as_str() { if lines.last().map(|x| x.as_str()) != Some(l) { lines.push(l.to_string()); } }
+        last = h;
+        (last["import"].is_null() && n == 203).then_some(())
+    });
+    assert!(!lines.is_empty() && lines.iter().all(|l| l.starts_with("Importing your earlier conversations: ") && l.ends_with("Older turns appear as this proceeds.")), "{lines:?}");
+    assert!(lines.iter().any(|l| l.contains(" of 4. ")), "the line counts the sessions: {lines:?}");
+    assert!(counts.windows(2).all(|w| w[0] <= w[1]), "turns only appear, none goes away: {counts:?}");
+    assert_eq!(first_newest.as_deref(), last["messages"][202]["id"].as_str(), "the first turns the page showed already held the newest one");
+    assert!(last["import"].is_null(), "the line is gone when the import is done");
+    assert_eq!(read_prop(port, "Legacy:cutover", "state"), json!("done"));
+    assert!(!dir.join("claude-was-run").exists());
 }

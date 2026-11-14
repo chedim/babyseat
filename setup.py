@@ -1,13 +1,12 @@
-"""The native field engine (native/, Rust + PyO3) as the `membrane.membrane_vm` extension, built by setuptools-rust.
-Everything else about the package is in pyproject.toml. One wheel per platform serves every Python >= 3.10 (PyO3's
-stable ABI, abi3-py310). On macOS the engine's vector top-k runs on Metal (the `metal` feature)."""
-import sys
+"""The wheel's build hook, left as the seam for the binary (#1143).
 
+Everything about the package is in pyproject.toml. The PyO3 extension is gone: the seat is the `cliffvm` binary (native/, Rust), and
+Python is only the launcher (membrane/launcher.py).
+
+TODO(packaging, docs/python-retirement.md step 9, docs/packaging-plan.md (d)): build native/ here with setuptools-rust
+`RustExtension(..., binding=Binding.Exec)` (cargo `--no-default-features --features bin`), put the binary and the packs/apps/ui/help
+folders in `membrane/dist/`, tag the wheel py3-none-<platform>, and make a platform with no binary FAIL LOUDLY ("no binary for this
+platform"); the sdist never builds with cargo (decision 4). Until that lands this builds a launcher-only wheel."""
 from setuptools import setup
-from setuptools_rust import Binding, RustExtension
 
-FEATURES = ["python"] + (["metal"] if sys.platform == "darwin" else [])
-
-setup(rust_extensions=[RustExtension("membrane.membrane_vm", path="native/Cargo.toml", binding=Binding.PyO3,
-                                     features=FEATURES, py_limited_api="cp310", debug=False)],
-      options={"bdist_wheel": {"py_limited_api": "cp310"}})        # the wheel's tag: cp310-abi3, every Python >= 3.10
+setup()

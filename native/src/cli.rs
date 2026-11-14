@@ -52,6 +52,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
                     "--data-dir" => s.data_dir = Some(val("--data-dir")?),
                     "--store" => s.store = Some(val("--store")?),
                     "--root" => s.root = Some(val("--root")?),
+                    "--legacy" => s.legacy = Some(val("--legacy")?),
                     "--fact" => s.facts.push(fact_arg(&val("--fact")?)?),
                     x if x.starts_with("--") => return Err(format!("serve: unknown option {x}")),
                     x => return Err(format!("serve: unexpected argument {x} (serve takes options only)")),
@@ -219,22 +220,24 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
 // It only FINDS things (the dist folder, the data folder, the claude CLI) and runs the barest seat there. Every app default (the minds, the models, the local backend, the
 // default port) is in the pack `packs/launcher.c1f`, not here; what is here is where files are.
 pub const SERVE_USAGE: &str = "\
-usage: cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--store <sqlite>] [--root <dist folder>] [--fact <name>=<value>]...
+usage: cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--store <sqlite>] [--root <dist folder>] [--legacy <path>] [--fact <name>=<value>]...
 
-Starts the barest seat: the packs listed in <root>/apps/barest.packs, the app <root>/apps/barest.c1f and the page <root>/ui, with the claude CLI as the only model.
+Starts the barest seat: the packs listed in <root>/apps/barest.packs, and the app <root>/apps/barest.c1f (the page is its ui/ folder), with the claude CLI as the only model.
   --port <n>         the door's port (0 = any free port). Default: the one launcher.c1f says (4096).
   --bind <addr>      the address the door opens on. Default 127.0.0.1 (this machine only); 0.0.0.0 opens it to the network.
   --data-dir <dir>   the seat's data: its store (seat.sqlite), the door's secret (door.secret, made at the first run, mode 0600) and the owner token (owner.token, new at every start, mode 0600).
                      Default: $XDG_DATA_HOME/membrane, else ~/Library/Application Support/membrane (macOS) or ~/.local/share/membrane.
   --store <sqlite>   the store file, instead of <data-dir>/seat.sqlite.
-  --root <dir>       the dist folder (has packs/ apps/ ui/). Default: the folder above the one this binary is in (bin/cliffvm); the repo's membrane/ folder has the same shape.
+  --root <dir>       the dist folder (has packs/ apps/). Default: the folder above the one this binary is in (bin/cliffvm); the repo's membrane/ folder has the same shape.
+  --legacy <path>     where the old Python seat's store is (a file, or a folder that holds it): told as the fact legacy_path, which the cutover pack (packs/legacy_cutover.c1f) imports from.
+                     Default: the old variable MEMBRANE_DATA_DIR when set (that seat's data dir), else the pack searches its own places.
   --fact <name>=<value>   a Boot fact, after the defaults so it wins (repeatable): JSON when the value parses, else text. Defaults: packs/launcher.c1f.
 
 The chat answers through the claude CLI: CLAUDE_BIN names it, else `claude` on PATH. It authenticates with ANTHROPIC_API_KEY from this environment (the default);
 the CLI's own login is an opt-in: --fact chat_auth=login. A local tool presents the owner token: curl -H \"Authorization: Bearer $(cat <data-dir>/owner.token)\" <url>/global/health";
 
 #[derive(Debug, PartialEq, Default)]
-pub struct ServeArgs { pub port: Option<u16>, pub bind: Option<String>, pub data_dir: Option<String>, pub store: Option<String>, pub root: Option<String>, pub facts: Vec<(String, J)> }
+pub struct ServeArgs { pub port: Option<u16>, pub bind: Option<String>, pub data_dir: Option<String>, pub store: Option<String>, pub root: Option<String>, pub legacy: Option<String>, pub facts: Vec<(String, J)> }
 
 fn fact_arg(v: &str) -> Result<(String, J), String> {
     let (k, x) = v.split_once('=').filter(|(k, _)| !k.is_empty()).ok_or_else(|| "--fact: name=value".to_string())?;
@@ -257,7 +260,7 @@ pub fn find_root(root: Option<&str>, exe: &std::path::Path) -> Result<std::path:
         None => std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf()).parent().and_then(|b| b.parent()).map(|p| p.to_path_buf()).unwrap_or_default(),
     };
     if dir.join("packs").is_dir() && dir.join("apps/barest.packs").is_file() { return Ok(std::fs::canonicalize(&dir).unwrap_or(dir)); }
-    Err(format!("no packs folder at {} (looked for {} and {}). Install the whole dist folder (bin/ packs/ apps/ ui/ together) or name it with --root <dir>.",
+    Err(format!("no packs folder at {} (looked for {} and {}). Install the whole dist folder (bin/ packs/ apps/ together) or name it with --root <dir>.",
         dir.display(), dir.join("packs").display(), dir.join("apps/barest.packs").display()))
 }
 
@@ -298,12 +301,15 @@ pub fn serve_plan(s: &ServeArgs, exe: &std::path::Path, env: &dyn Fn(&str) -> Op
         Some(c) => { facts.push(("chat_claude_bin".into(), json!(c))); notes.push(format!("cliffvm serve: claude CLI: {c}")); }
         None => notes.push("cliffvm serve: no claude CLI found: the chat answers through it. Name it with CLAUDE_BIN=/path/to/claude, or put `claude` on PATH, then restart.".into()),
     }
+    // the old Python seat's store: `--legacy <path>`, else the old variable MEMBRANE_DATA_DIR (that seat's data dir); c1f cannot read the environment, so it is told as the fact `legacy_path`
+    // (packs/legacy_cutover.c1f searches the place; a named path that holds no store is its error)
+    if let Some(l) = s.legacy.clone().or_else(|| env("MEMBRANE_DATA_DIR").filter(|v| !v.is_empty())) { facts.push(("legacy_path".into(), json!(l))); }
     facts.extend(s.facts.iter().cloned());
     let login = facts.iter().rev().find(|(k, _)| k == "chat_auth").map(|(_, v)| v == &json!("login")).unwrap_or(false);
     if !login && !env("ANTHROPIC_API_KEY").map_or(false, |k| !k.is_empty()) {
         notes.push("cliffvm serve: no ANTHROPIC_API_KEY in the environment: the chat refuses a message until you set it and restart (or opt into the claude CLI's login: --fact chat_auth=login).".into());
     }
-    Ok(ServePlan { run: RunArgs { apps, store, port: s.port, bind: s.bind.clone(), ui_dir: Some(root.join("ui").to_string_lossy().to_string()), facts }, data, notes })
+    Ok(ServePlan { run: RunArgs { apps, store, port: s.port, bind: s.bind.clone(), ui_dir: None, facts }, data, notes })
 }
 
 /// `serve`: tell what was found, run the seat, and once the door is up tell the URL and how a local tool uses the owner token.

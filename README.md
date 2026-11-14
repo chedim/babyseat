@@ -674,8 +674,8 @@ of the top 8.
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
 | [doctrine.md](doctrine.md) + [membrane/help/](membrane/help/) | **What the model is told.** The doctrine is the short core every turn carries; the long forms (packs, exec, cliffhanger, goals, watches, browser, the in-page field engine, clock, voice, restarts, consequences) are help topics shipped as field entities `membrane::help:<topic>` (the `help` seed pack: a release updates them, a seat's edits are kept as overlays), read by `help(topic)` |
 | [docs/cliffvm.md](docs/cliffvm.md) | **`cliffvm`: the field VM as a standalone app, no Python.** The binary, how to run a packs folder, the host loop and its journal, and what it does not do yet (the list of what `fields_live.py` still does). |
-| `scripts/seat` | **Run a seat**: the dev wrapper of `cliffvm serve` (the users' launcher: finds packs/apps/ui beside its binary, defaults in `membrane/packs/launcher.c1f`): the barest app, a graph viewer and one chat in the browser; see [Run a seat](docs/cliffvm.md). |
-| `scripts/dist/` | **The dist folder**: `build.sh` (release binary + packs + apps + ui + manifest -> `dist/<version>`), `verify.sh`, `smoke.sh`, `assemble_wheel_payload.sh` (what the wheel wrapper packages); CI: `.github/workflows/release-binaries.yml`. |
+| `scripts/seat` | **Run a seat**: the dev wrapper of `cliffvm serve` (the users' launcher: finds packs/apps beside its binary, defaults in `membrane/packs/launcher.c1f`): the barest app, a graph viewer and one chat in the browser; see [Run a seat](docs/cliffvm.md). |
+| `scripts/dist/` | **The dist folder**: `build.sh` (release binary + packs + apps + manifest -> `dist/<version>`), `verify.sh`, `smoke.sh`, `assemble_wheel_payload.sh` (what the wheel wrapper packages); CI: `.github/workflows/release-binaries.yml`. |
 | [docs/python-to-c1f.md](docs/python-to-c1f.md) | **The migration plan:** what stays Python (the package, VM initialization), what becomes native, what becomes `.c1f`, in order. |
 | [docs/cliffhanger-fields.md](docs/cliffhanger-fields.md) | **The field engine and `.c1f` packs.** Getters, setters, arms, FOR, built-ins, the store/fs/proc drivers, the banner and MCP as packs, the engine in the browser |
 | [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — the pointer to its own spec repo |
@@ -718,7 +718,7 @@ python experiments/variety_toy.py        # the variety toy: the gate's calibrati
 
 A working lab, used every day to build itself: this repo's own field holds
 about 14,000 entities, and its background mind digests, dreams and talks
-about its own work. Version **0.7.53**; API and flag surfaces may still
+about its own work. Version **0.7.60**; API and flag surfaces may still
 move. Licensing: **MIT** from 0.7.3 (see [LICENSE](LICENSE)); releases up to
 0.7.2 stay under PolyForm Noncommercial 1.0.0.
 

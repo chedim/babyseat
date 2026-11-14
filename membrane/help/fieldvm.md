@@ -1,4 +1,4 @@
-THE FIELD ENGINE IN THE PAGE: the babyseat page runs the same field engine as the seat, compiled to WebAssembly (membrane/ui/fieldvm.js). Every open page follows the seat: it loads the seat's packs and their entities, then applies each write as it happens.
+THE FIELD ENGINE IN THE PAGE: the babyseat page runs the same field engine as the seat, compiled to WebAssembly (fieldvm.js, in the page's folder). Every open page follows the seat: it loads the seat's packs and their entities, then applies each write as it happens.
 
 - HOW CODE REACHES IT: as a pack. A pack that has `IMPORT dom 1` is a view pack: it runs in the page, not on the seat. Load it like any pack, exec(action='load', ...) (help('packs')); every open page picks it up at once. (JS through exec lang='js' is the other path: help('browser').)
 - WHAT IT SEES: the page's whole DOM is in the field. Each element is `DomNode:page:#<id>` (`DomNode:page:<n>` without an id) with page=true, `tag`, `parent`, `id`, its own `text` and the allow-listed attributes; new elements are born, changes are written, removed ones leave. The chat is `DomNode:page:#chat`. A click on a node writes its `clicked`.

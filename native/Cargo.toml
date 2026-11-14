@@ -19,7 +19,6 @@ required-features = ["bin"]
 [dependencies]
 bytemuck = { version = "1.25.2", optional = true }
 pollster = { version = "1.0.1", optional = true }
-pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 serde_json = { version = "1", features = ["preserve_order"] }
 # the tokenizer (#1143): UAX #29 sentence and word boundaries, compiled in; no_std-capable, so wasm32 builds
@@ -40,10 +39,9 @@ libc = "0.2"
 opt-level = 3
 
 [features]
-default = ["python"]
-store = ["dep:rusqlite", "tls"]   # the native field store + the drivers + the door (one SQLite per process, #1111); no Python
-python = ["dep:pyo3", "store"]   # the seat: Python binding on top of the store
-bin = ["store"]   # the standalone app (`[[bin]]` below): the same engine with no Python at all (build it with --no-default-features --features bin: a Python extension is not a program)
+default = ["bin"]   # `cargo build` / `cargo test` build the seat; the browser build is `--no-default-features --features wasm` (build-web.sh)
+store = ["dep:rusqlite", "tls"]   # the native field store + the drivers + the door (one SQLite per process, #1111)
+bin = ["store"]   # the standalone app (`[[bin]]` below)
 wasm = ["dep:wasm-bindgen"]
 metal = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:objc2", "dep:objc2-foundation", "dep:objc2-metal"]
 alloc-stats = []   # a diagnostic, OFF by default: the counting global allocator (src/alloc_stats.rs) in the standalone app, one line to stderr per second

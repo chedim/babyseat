@@ -1,4 +1,4 @@
-//! The dist folder (#1143, docs/packaging-plan.md): `scripts/dist/build.sh` assembles `dist/<version>/{bin/cliffvm, packs/, apps/, ui/, help/, VERSION, MANIFEST.sha256}` from a release
+//! The dist folder (#1143, docs/packaging-plan.md): `scripts/dist/build.sh` assembles `dist/<version>/{bin/cliffvm, packs/, apps/, help/, VERSION, MANIFEST.sha256}` from a release
 //! build, and `cliffvm serve` run from THAT folder (the repo is not named to it) comes up. Built here from the test binary (a release build is CI's step).
 #![cfg(feature = "bin")]
 use std::io::{BufRead, BufReader, Read, Write};
@@ -48,7 +48,8 @@ fn the_build_makes_the_version_stamped_tree_with_a_manifest_that_lists_every_fil
     let list = std::fs::read_to_string(repo().join("membrane/apps/barest.packs")).unwrap();
     for name in list.lines().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')) { assert!(out.join("packs").join(format!("{name}.c1f")).is_file(), "pack {name}"); }
     assert!(out.join("packs/boot.json").is_file() && out.join("apps/barest.packs").is_file() && out.join("apps/barest.c1f/help.c1f").is_file());
-    assert!(out.join("ui/fieldvm_core_bg.wasm").is_file() && out.join("apps/barest.c1f/ui/index.html").is_file() && out.join("help/c1f.md").is_file() || out.join("help").is_dir());
+    assert!(out.join("apps/barest.c1f/ui/index.html").is_file() && out.join("apps/barest.c1f/ui/fieldvm_core_bg.wasm").is_file() && out.join("help/blurp.md").is_file(), "the page (with its wasm) and the help");
+    assert!(!out.join("ui").exists(), "the old shared ui folder is gone");
     assert!(!out.join("apps/field.c1f").exists(), "the full seat's app is not in the barest dist");
     // the manifest: every file but itself, a sha256 each, sorted; the stamp's file is in it
     let m = std::fs::read_to_string(out.join("MANIFEST.sha256")).unwrap();
@@ -101,7 +102,7 @@ fn serve_from_the_built_folder_finds_its_packs_there_and_not_in_the_repo() {
     let (h, b) = get(port, "/global/health", &format!("Authorization: Bearer {}\r\n", tok.trim()));
     assert!(h.starts_with("HTTP/1.1 200") && b.contains("healthy"), "{h} {b}");
     let (h, b) = get(port, "/", "");
-    assert!(h.starts_with("HTTP/1.1 200") && b.to_lowercase().contains("<html"), "the page comes from the dist's apps/ and ui/: {h}");
+    assert!(h.starts_with("HTTP/1.1 200") && b.to_lowercase().contains("<html"), "the page comes from the dist's apps/: {h}");
     let _ = child.kill(); let _ = child.wait();
     let _ = std::fs::remove_dir_all(&t);
 }
@@ -114,10 +115,10 @@ fn the_wheel_payload_is_the_dist_without_a_version_folder_and_names_its_interfac
     let payload = t.join("payload");
     let o = Command::new("sh").arg(repo().join("scripts/dist/assemble_wheel_payload.sh")).arg(&out).arg(&payload).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    // the wrapper packages `payload/` as `membrane/dist/` (package-data `dist/**`): bin/cliffvm, packs, apps, ui, help at the top, executable bit kept, the stamp and manifest beside them
+    // the wrapper packages `payload/` as `membrane/dist/` (package-data `dist/**`): bin/cliffvm, packs, apps, help at the top, executable bit kept, the stamp and manifest beside them
     use std::os::unix::fs::PermissionsExt;
     assert!(std::fs::metadata(payload.join("dist/bin/cliffvm")).unwrap().permissions().mode() & 0o111 != 0);
-    for d in ["packs", "apps", "ui", "help"] { assert!(payload.join("dist").join(d).is_dir(), "{d}"); }
+    for d in ["packs", "apps", "help"] { assert!(payload.join("dist").join(d).is_dir(), "{d}"); }
     assert_eq!(std::fs::read_to_string(payload.join("dist/VERSION")).unwrap().trim(), VERSION);
     let v = Command::new("sh").arg(repo().join("scripts/dist/verify.sh")).arg(payload.join("dist")).output().unwrap();
     assert!(v.status.success(), "{}", String::from_utf8_lossy(&v.stderr));

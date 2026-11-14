@@ -5,7 +5,7 @@
 # --out      the folder to make (default: <repo>/dist/<version>; <version> is native/Cargo.toml's package version). An existing folder is replaced only if it is empty or a dist (it has a VERSION file).
 # --archive  also pack the folder as <file.tar.gz> (the one top folder is the out folder's name)
 # The tree (what `cliffvm serve` finds by itself, relative to bin/cliffvm; the repo's membrane/ folder has the same shape, so `cliffvm serve --root membrane` is the dev run):
-#   bin/cliffvm  packs/*.c1f + boot.json ...  apps/barest.packs apps/barest.c1f/  ui/ (the page's shared assets, the browser wasm)  help/*.md  LICENSE  VERSION  MANIFEST.sha256
+#   bin/cliffvm  packs/*.c1f + boot.json ...  apps/barest.packs apps/barest.c1f/  help/*.md  LICENSE  VERSION  MANIFEST.sha256
 # MANIFEST.sha256 is `<sha256>  <path>` per file but itself, sorted by path (bytes): the same inputs give the same manifest; scripts/dist/verify.sh checks a folder against it.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
@@ -53,7 +53,7 @@ for f in "$mem"/packs/*.c1f "$mem"/packs/*.json; do cp "$f" "$tmp/packs/"; done
 # the barest app: the list of its packs and the app folder (the full seat's apps/field.c1f is not shipped)
 cp "$mem/apps/barest.packs" "$tmp/apps/"
 cp -R "$mem/apps/barest.c1f" "$tmp/apps/barest.c1f"
-cp -R "$mem/ui" "$tmp/ui"
+
 cp "$mem"/help/*.md "$tmp/help/"
 cp "$root/LICENSE" "$tmp/LICENSE"
 printf '%s\n' "$version" > "$tmp/VERSION"

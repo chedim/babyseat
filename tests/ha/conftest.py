@@ -17,4 +17,4 @@ def ha(monkeypatch):
     return fakeha.load(monkeypatch)
 
 
-from .realseat import real_seat  # noqa: E402,F401  (the fixture)
+from .realseat import real_seat, release_seat  # noqa: E402,F401  (the fixtures)

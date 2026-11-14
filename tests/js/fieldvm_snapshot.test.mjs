@@ -1,5 +1,5 @@
 // GET /ui/fieldvm on the release seat (scripts/seat) (membrane/packs/door_fieldvm.c1f): the browser VM's start snapshot, taken as the page takes it
-// (membrane/ui/fieldvm.js `connect()`: every pack of `snap.packs` into the page's field engine, then every entity of `snap.entities`). The page's own
+// (membrane/apps/barest.c1f/ui/fieldvm.js `connect()`: every pack of `snap.packs` into the page's field engine, then every entity of `snap.entities`). The page's own
 // engine (the wasm core) must accept what the seat sends: the view packs load once `dom` is there, with no error.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -7,14 +7,14 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { initSync, Field } from '../../membrane/ui/fieldvm_core.js';
+import { initSync, Field } from '../../membrane/apps/barest.c1f/ui/fieldvm_core.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const bin = process.env.CLIFFVM || path.join(repo, 'native/target/release/cliffvm');
 const port = 21000 + Math.floor(Math.random() * 1000);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 if (!existsSync(bin)) { console.log(`fieldvm snapshot: skipped, no cliffvm at ${bin} (build it, or set CLIFFVM)`); process.exit(0); }
-initSync({ module: readFileSync(path.join(repo, 'membrane/ui/fieldvm_core_bg.wasm')) });
+initSync({ module: readFileSync(path.join(repo, 'membrane/apps/barest.c1f/ui/fieldvm_core_bg.wasm')) });
 const data = mkdtempSync(path.join(tmpdir(), 'fieldvm-snap-'));
 const seat = spawn('sh', [path.join(repo, 'scripts/seat'), '--data-dir', path.join(data, 'd'), '--port', String(port)],
   { cwd: repo, stdio: 'ignore', env: { ...process.env, CLIFFVM: bin, CLAUDE_BIN: '/usr/bin/true' } });

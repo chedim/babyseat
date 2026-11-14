@@ -14,7 +14,7 @@ Request.m_post getter: this.method == 'POST'
 -- Minds seat answers 503 whatever the method (None: the family answers itself)
 Request.m_models getter: None if (this.m_minds and this.mind_seat == None) else (['GET', 'POST'] if (this.m_minds or this.m_opts) else ['GET'])
 Request.m_need getter: this.m_list or this.m_post or this.m_opts
-Request.m_ask getter: {'id': this.eid} if (this.o_models == True and this.m_need and this.models_asked != True) else None
+Request.m_ask getter: {'id': this.eid} if (this.entrant and this.o_models == True and this.m_need and this.models_asked != True) else None
 Request.m_ask on-setter models-ask:
   WHEN this.m_ask != None:
     this.models_asked = True

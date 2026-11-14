@@ -35,7 +35,7 @@ fn launch(dir: std::path::PathBuf, facts: &[&str], full: bool) -> Run {
     let mut child = if full {
         let d = dir.join("d");
         std::fs::create_dir_all(&d).unwrap();
-        Command::new(BIN).current_dir(&root).args(["run", "membrane/packs/boot.c1f", "membrane/packs", "--store", d.join("seat.sqlite").to_str().unwrap(), "--port", "0", "--ui-dir", "membrane/ui",
+        Command::new(BIN).current_dir(&root).args(["run", "membrane/packs/boot.c1f", "membrane/packs", "--store", d.join("seat.sqlite").to_str().unwrap(), "--port", "0",
                 "--fact", &format!("door_secret_file={}", d.join("door.secret").display()), "--fact", &format!("seat_data_dir={}", d.display()),
                 "--fact", r#"minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude","loops_auth":"chat","cortex_auth":"chat","workers_auth":"chat","think":"auto"}"#,
                 "--fact", "seat_backend=http://127.0.0.1:11434", "--fact", "router_on=false", "--fact", r#"cloud_models=[{"name":"claude","backend":"claude-agent"}]"#, "--fact", "chat_claude_bin=/usr/bin/true"])
