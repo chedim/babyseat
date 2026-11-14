@@ -9,7 +9,7 @@
 //   value, focused: a pack's write sets the element's value / focus (no echo; the user's caret is not clobbered)
 // Form tags and SVG (own namespace) are in the allow-list; style, event handlers and src are refused, and a refusal is
 // visible: the element carries `data-refused` and the DomNode's `refused` holds {name: reason}.
-// Events are written back: pointerdown/pointermove (button held)/pointerup -> `pointer` {type, x, y, w, h, buttons, time} (x, y in the element's box); wheel -> `wheel` {dy, x, y, w, h, time}; click -> `clicked` (time); input -> `value`; submit -> `submitted` (time); keydown ->
+// Events are written back: pointerdown/pointermove (button held)/pointerup -> `pointer` {type, x, y, w, h, buttons, time} (x, y in the element's box); wheel (on an `svg` element only: the browser scrolls everything else natively) -> `wheel` {dy, x, y, w, h, time}; click -> `clicked` (time); input -> `value`; submit -> `submitted` (time); keydown ->
 // `key` {key, shift, ctrl, composing, time}; focus/blur -> `focused` (bool); scroll -> `scroll` {top, height, client}.
 // A pack writes `scroll` {top: n} or 'end' to scroll an element (applied after the round's other writes; the measured scroll is written back).
 // `before` (a sibling DomNode eid) puts a node above that sibling; writing it again moves the node. A round's DOM writes are applied together, in one frame.
@@ -228,7 +228,8 @@ class Host {
 
   listen(el, eid) {
     el.addEventListener('click', ev => { ev.stopPropagation(); this.write(eid, 'clicked', this.now()); });
-    for (const t of EVENTS) el.addEventListener(t, ev => this.event(eid, ev, el));
+    const zoomSurface = el.tagName.toLowerCase() === 'svg';        // a wheel is the pack's only where it zooms (an SVG scene): everywhere else the browser scrolls natively, untouched
+    for (const t of EVENTS) if (t !== 'wheel' || zoomSurface) el.addEventListener(t, ev => this.event(eid, ev, el));
   }
 
   /** A DOM event of an element becomes a write on its DomNode (an unchanged value or flag is no write: no echo loop). */
@@ -413,7 +414,7 @@ class Host {
     }, true);
     for (const t of EVENTS) document.addEventListener(t, ev => {   // the page's own form elements: the same events as writes
       const el = ev.composedPath()[0], eid = this.els.get(el);
-      if (eid && this.page.has(eid)) this.event(eid, ev, el);
+      if (eid && this.page.has(eid) && (ev.type !== 'wheel' || el.tagName.toLowerCase() === 'svg')) this.event(eid, ev, el);
     }, true);
     this.watch(top.getRootNode() instanceof ShadowRoot ? top.getRootNode() : top);
     const now = this.now();
