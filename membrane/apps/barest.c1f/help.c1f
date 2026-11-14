@@ -17,3 +17,4 @@ Boot.started on-setter seed-help:
     Help:cliff.file = dir + '/help/cliff.md'
     Help:semtext.file = dir + '/help/semtext.md'
     Help:sql.file = dir + '/help/sql.md'
+    Help:legacy.file = dir + '/help/legacy.md'

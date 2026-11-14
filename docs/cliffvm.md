@@ -261,7 +261,7 @@ and the session's `voice`/`predict`/`todo`/`children`/`diff` reads (`[]`). The v
 SQLite file (the old store of the migration, the lexicon, a scratch database) is two kinds of entity and one driver verb.
 - `SqlSource:<name>` {`path`, `mode`}: `mode` is `ro` (the default) or `rw`. Written by the model with `entity_write` (the owner's tool; the tools pack imports `sql` as it imports `proc` and `fetch`, so the pack
   needs no grant beyond theirs) or pre-declared at launch by the fact `sql_sources`, a LIST `[{name, path, mode}]` (c1f cannot list a dict's keys; `keys()` is only a proposed builtin) that the `sql` pack turns
-  into the same entities. A `ro` source is opened with SQLite's **immutable** URI (`file:<path>?immutable=1`, read-only, `query_only`): no lock, nothing written beside the file, and **the file must not change while the
+  into the same entities (the fact SEEDS: a source that already has a path, written by the model or kept from an earlier run, is left alone, so a restart never undoes the model's choice; 2026-11-14, #1143). A `ro` source is opened with SQLite's **immutable** URI (`file:<path>?immutable=1`, read-only, `query_only`): no lock, nothing written beside the file, and **the file must not change while the
   seat runs** (a changed file is read as it was when the source opened, WAL files are ignored: a live database being written is read from a snapshot copy). `rw` opens an existing file read-write. The connection is
   opened lazily by the first run and opened again by the next run after `path` or `mode` was rewritten.
 - The seat's OWN store is never a source: a path that resolves to it (canonical path, symlinks, and the same device and inode for hard links) is refused with the reason in the receipt, whoever wrote the path.
@@ -280,6 +280,10 @@ SQLite file (the old store of the migration, the lexicon, a scratch database) is
   runs no effects) restores the rows and never asks the file again; a restart on the same store reads the rows from the entity's row. Deleting the source file changes neither.
 - Native only: the driver is under the `store` feature with the other drivers; the wasm build does not carry it (`wasm_check_1143`).
 - Not decided by the build (listed for the operator): a default `max_rows`, the 256-statement cache, whether an `rw` source may create a missing file, the worker slot a busy source holds.
+
+### The chat history import (`membrane/packs/legacy_import.c1f`, #1143, migration phase 1)
+The previous seat's chat history (sessions and messages) is imported from the read-only `SqlSource:legacy` by `Legacy:seat.list = {id}` (the headers) and `Legacy:seat.import = {id, sessions, page}` (the messages; `page` has no default), with a ledger entity `Legacy:session:<sid>` per old session. The
+whole description (mapping, owner rule, runbook, measured numbers, decisions) is `docs/migration-design.md` "Phase 1"; the model's own page is `Help:legacy`.
 
 ## The host loop (`native/src/host.rs`)
 

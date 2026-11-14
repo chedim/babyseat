@@ -1,11 +1,119 @@
 # Data migration of the release swap: v0.7.53 seat to the cliffvm seat (design note, #1143, 2026-11-14)
 
-Design only, no code. Sizes are `sum(length(body))` (characters, not bytes); class counts are exact for the 24 largest segments, approximate beyond. Step 4 of the agreed order (`docs/release-parity.md`, section 4). Sources: `PY53` = `git show v0.7.53:membrane/<file>` (the
+Sections 1 and the Phase 1 section below are the BUILT part (`membrane/packs/legacy_import.c1f`); sections 2 to 9 are the earlier whole-field design, kept for the record and **not built** (operator scope decision, 2026-11-14: only the chat history is migrated; the old field is kept as a read-only source the model pulls from on demand, `Help:legacy`). Sizes are `sum(length(body))` (characters, not bytes); class counts are exact for the 24 largest segments, approximate beyond. Step 4 of the agreed order (`docs/release-parity.md`, section 4). Sources: `PY53` = `git show v0.7.53:membrane/<file>` (the
 oracle tag), `N/` = `native/`, `P/` = `membrane/packs/`. Numbers marked **[copy]** were measured on a READ-ONLY COPY of a real seat's store:
 `rosetta-check/.membrane/field.sqlite/field.sqlite3.good-121525` (a 2026-11-11 12:15 snapshot of the Rosie seat, 615 MB, WAL empty), copied to the
 session scratchpad and opened with `immutable=1`. No live store was opened; the main seat's directory was only sized (`du`: 14 GB, includes its backups).
 
-## 0. Important first
+## Phase 1: history import (built 2026-11-14, #1143)
+
+**Scope (operator decisions 2026-11-14, fixed).** ONLY the chat history (sessions and messages) is migrated into the new field. Nothing else is converted: no entities, no recall data, no vectors, no goals, decisions or options, no
+second-phase converter. The old store is kept as a READ-ONLY file, declared as `SqlSource:legacy` (the Sql driver, `docs/cliffvm.md` "The Sql driver"), and the MODEL pulls from it on demand (`Help:legacy`). The old store is never written;
+the reverse of the whole migration is switching the seat back (nothing to build). No model runs during the import.
+
+**Where it lives.** `membrane/packs/legacy_import.c1f` (all rules, c1f; in `membrane/apps/barest.packs`), `membrane/packs/legacy_persons.c1f` (the Person entities of named owners: a seat with persons only), `Help:legacy`.
+Tests: `native/tests/legacy_import_1143.rs` (host level, a small fixture in `native/tests/legacy_fixture/`), `native/tests/legacy_routes_1143.rs` (the seat binary, the page's routes against `tests/golden/session/`, and the ignored
+real-store measurement). No new builtin, no host hook.
+
+### What is imported, and the mapping (old row to new entities)
+
+| old (`<store>`, tag v0.7.53) | new | notes |
+|---|---|---|
+| `c_sessions` row `ses_<hex>` or `xcl_<uuid>`, `{s: {id, title, owner, time: {created, updated}, ...}}` (`server.py:287-330`) | `membrane::Chat:session:<sid>` ChatSession `{stitle, born, upd (epoch ms, as they were), owner, legacy_src: {conv, sid, at}}` | the id is KEPT (a bookmark still opens); the rest of the old row (directory, slug, agent, tokens, summary, version) is not carried: the page's view reads the new seat's own facts |
+| (the same row) | `membrane::Legacy:session:<sid>` the LEDGER `{state, converter, old_rows, rows, cursor, unmapped, unmapped_rows, dropped_parts, imported_at, reason}` | one per old session, made with the header |
+| `c_messages` user row `{n, sid, mid, row: {info, parts}}`, key `<sid>\|<mid>` (`server.py:486-520`) plus the assistant rows whose `info.parentID` is its `mid` | ONE `membrane::Chat:message:<created ms>-<n>` ChatMessage `{text (the user text parts joined by newlines), at (created/1000), sid, pick (info.model.modelID), tool_ids, tools_run, aborted, legacy_src: {conv, sid, mid, at, n, asst_at, asst_done, answers}}` and its `:body` SemText | the id is derived from the user row (`info.time.created` and `n`): no alias table; `n` is unique in the real store (1,137 of 1,137) |
+| the answering assistant rows (in order of `n`) | `...:turn` ChatTurn `{message, queued_at, sid, state (done, or error: see below), ended (the last `time.completed`), usage {input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens} (SUMS over the answering rows), cost (sum)}` | `started` is NOT written (see below); `queued` is never written, so no turn starts |
+| the text parts of those rows, in order | `...:turn:response` ChatResponse `{text (joined by a blank line), error}` and, when there is text, its `:body` SemText | a turn whose last answering row has an `info.error` is `error`; its response is the text, else the error message |
+| each `tool` part | `...:turn:tool:<callID, else the part id>` ChatTool `{name, input (state.input), result (state.output, else state.error)}` | the tools in call order are `tool_ids`; a tool in `error` status shows as completed with its error text as the output (the page has no error status for a tool) |
+| a user row nobody answered (9 of 477 [copy]) | a ChatTurn in state `error` whose response says `(no answer was recorded in the previous store)` | visible, never a half-made message |
+| an assistant row whose parent is not a user row of its session (9 [copy]) | NOT a message: the ledger `unmapped` count and `unmapped_rows` `[{mid, n}]` | a visible note on the session, never silently dropped |
+| a part that is not text, tool or a step marker (19 `reasoning` parts [copy]) | NOT carried: the ledger `dropped_parts` counts them | `step-start` and `step-finish` carry only numbers that are in the turn's usage |
+| the user row's non-text parts (none in the copy) | not carried | counted nowhere yet: none exist |
+
+The invariant the tests keep: for every session `rows` (old rows consumed: user rows plus their answering rows) `+ unmapped = old_rows`; on the real copy 1,128 + 9 = 1,137.
+`mention` is NOT written on any imported body: the seat's mention rules run only where something writes `mention` (the chat does, on a NEW message), so the history makes no Word, Identifier or Path entities. Turning it on later is one write per body
+(Decision 3). The SemText bodies are made (the message text and the answer a second time, as a native message has them).
+
+### Owner mapping (migration decision 9, applied)
+
+A session with no `owner` (126 of 130 [copy]) belongs to the operator: `owner = 'Person:' + <the fact operator, else owner>`. A named owner is `Person:<slug(owner)>` with the slug of the Python seat's `speakers.slug`
+(lowercase, runs of non-alphanumerics to `-`): here lowercase and words joined by `-`, `.` `_` `,` read as spaces (c1f has no regex: other punctuation stays in the slug, Decision 6). The Person entity is made by
+`legacy_persons.c1f` (`{sub, name as written, imported: True}`) only when it is not there yet and only for a NAMED owner; the operator's own Person is born by the first verified request, as always. The barest seat has no persons: the
+`owner` text is on the session and nothing else is made. The copy has 3 named owners (`Dima`, `Dmitrii Chechetkin`, `Roomata Estorsky`) and one session whose owner is `owner` (the operator's sub): that one makes `Person:owner`.
+
+### The ledger, and how a run goes
+
+`Legacy:seat` `{source: 'legacy', converter: 1 (the version stamp, written by the pack), running, import, list, run_total, run_done, run_error, run_left, refused}`. Two writes, each a driver-style request with an `id` (a new `id` is a new request):
+- `Legacy:seat.list = {id}`: the HEADERS of every old session (one query: key, body, row count, the unmapped assistant rows): a ChatSession and a `pending` ledger each. The page's `GET /session` lists all sessions at once. A session that already has a ledger is skipped (idempotent).
+- `Legacy:seat.import = {id, sessions: [sid...] | 'all', page: <n>}`: the headers, then the sessions NOT `done`, one at a time, `page` user rows per query (with what answered them: tools, texts and sums gathered by the query), ONE cascade per page:
+  the page's entities and the ledger's `rows`, `cursor` (the last `n`), `state` are one commit. A stop between two pages loses and repeats nothing; naming the session again resumes at its `cursor`. `done` is never imported twice.
+  `page` has NO default: a request without it is refused with the reason in `Legacy:seat.refused`. A page that fails (SQLite's words in `reason`) makes the session `error` and the import goes on to the next; a headers query that fails ends the import with the reason.
+  A start of the seat ends a run the last process left `running` (the ledger says where it was).
+- Progress: `Legacy:seat.run_left`, `run_done`, `run_error`, `cur` (the session being read); the ledger entities (`entity_query kind:LegacySession` or `Legacy:session:<sid>`).
+- `started` is not written on the imported turns: a turn that has `started` makes the session-event setter (`oc_fin`, `door_session.c1f`) emit stream events and rewrite the session's `upd` when it is read. Without it the assistant row's `time.created` is the user row's (a 40 to 60 ms difference in
+  the copy); the true times are in `legacy_src`.
+
+### Lazy import (not built: needs a pack hook, Decision 2)
+
+"A session's messages arrive when it is first opened" needs the route that opens a session (`GET /session/<sid>/message`, `door_session.c1f` `ml_reply`) to WAIT for the import of a `pending` session. Smallest proposal: one arm in `ml_reply` (`WHEN the ledger of this sid is pending or importing: None`, the reply held, as it
+already waits for its rows) and one setter in `legacy_import.c1f` that writes `Legacy:seat.import = {id, sessions: [sid], page: <the fact legacy_page>}` on that request. It adds one fact (the page size, which has no default) and one line in another pack's reply. Until then the explicit request does the same by hand:
+`Legacy:seat.import = {id, sessions: ['<sid>'], page: <n>}`. The batch below is the cutover path.
+
+### Cutover runbook, phase 1 (with rollback)
+
+1. Announce; `GET /session/status` on the old seat all idle (the restart rule). Wait for the Python message store's flush (`FLUSH_MIN_S = 5.0`, `server.py:663`) plus a margin.
+2. Stop the Python seat (a clean exit checkpoints the WAL, `sqlitedb.py:286`). The immutable source ignores a WAL: the source MUST be a snapshot of a stopped store.
+3. Snapshot: `cp -c` (APFS clone) `<old>/field.sqlite/field.sqlite3` to `<.membrane>/legacy.v0753.sqlite3`, `chmod a-w`, record `shasum -a 256` and the row counts of `c_sessions` and `c_messages`.
+4. Start the new seat with the snapshot declared: `--fact sql_sources='[{"name": "legacy", "path": "<.membrane>/legacy.v0753.sqlite3", "mode": "ro"}]'` (a source the model rewrites later is kept: the fact only seeds a source that is not there; `Help:legacy`).
+5. Write `Legacy:seat.list = {id: 'c1'}` (the page lists every session at once), then `Legacy:seat.import = {id: 'c2', sessions: 'all', page: <n>}`. Watch `run_left`; read `GET /session` and a few sessions.
+6. Verify: `shasum` of the snapshot equals step 3 (the source was never written); every ledger `done` (`run_error` 0); for each session `rows + unmapped = old_rows`; the counts in this note (130 sessions, 1,137 rows, 477 messages).
+7. Rollback at any time: stop the new seat, start the Python seat on the original `.membrane`: it was never written. Messages born on the new seat after the swap are not in the old store (the reverse is not built: Decision 7 of the earlier design, still open for a later round if wanted).
+8. After the swap is stable, the snapshot stays (the model reads it); the ledger stays (an `error` session retries by naming it).
+
+### Measured (2026-11-14, the Rosie copy, debug build, a machine at load average about 10, port 0, no `claude`, source read-only)
+
+`LEGACY_COPY=<copy> LEGACY_PAGE=<n> cargo test --features bin --test legacy_routes_1143 measure -- --ignored --nocapture` (read-only on the copy: its size is unchanged and no WAL appeared; the target is a NEW store in a temp folder, not a copy of a seat's store, because no
+store of the new format exists for this seat yet).
+
+| | page 20 | page 100 |
+|---|---|---|
+| headers of all 130 sessions (the `list` write to all 130 in `GET /session`) | 5.8 s | 5.8 s |
+| import of all 130 sessions (messages) | 123.6 s | 126.0 s |
+| sessions done / error | 130 / 0 | 130 / 0 |
+| old rows / consumed by messages / noted unmapped | 1,137 / 1,128 / 9 | the same |
+| dropped parts (reasoning) | 19 | 19 |
+| rows served back by `GET /session/<sid>/message` for all sessions | 954 rows, 11.6 MB, 43.3 s for 130 requests | 954, 11.6 MB, 43.4 s |
+| first open of the biggest session (226 rows, 223 old rows) right after the import | 0.88 s | 0.89 s |
+| RSS of the seat process, base / peak | 13 MB / 721 MB | 13 MB / 739 MB |
+| growth of the target store | 123.1 MB (`c_field` 109.3 MB, `c_journal` 12.1 MB, the two indexes 1.2 MB) | 123.1 MB |
+| the previous store | unchanged (size) | unchanged |
+
+Reading: the page size changes nothing measurable between 20 and 100 (the cost is the per-message entities and the query scans, about 1 s per session in a DEBUG build on a loaded machine; a release build was not measured). 477 user rows became 477 messages, 660 assistant rows are 471 answers
+(the answering rows of one question are merged), 9 unmapped. The growth is 10 times the 12.7 MB of source text: the rows hold each text twice (message and its SemText body, as a native message does) and whatever the entities carry beside; not investigated further here.
+`c_journal` is 12 MB: the page receipts are journalled with their rows. The first open is not a lazy import: every session was already imported.
+
+### Risks
+
+1. The immutable source reads a snapshot: pointing it at the live file of a running Python seat reads stale or torn data (use the step 3 snapshot).
+2. A message page is evaluated by one setter (an evaluation step budget); the largest real row (a user row with 61 answering rows) imported at page sizes 20 and 100 in the measurement. A setter that FAILS (a budget trip, say) would leave the import `running` with no ledger step, and the run would not end by itself (a start of the seat does): listed as a risk, not covered by a test.
+3. Ids: the page's `before=<old message id>` of a bookmark does not match (the message ids are derived, `legacy_src.mid` holds the old one).
+4. `time.created` of an imported row can differ by 1 ms from the old one (`at` is seconds as a float; the exact value is in `legacy_src.at`).
+5. Message order is by the old `n` within the import and by `at` then `n` on the page: 19 pairs in the copy have a time that contradicts `n`; the page orders them by time.
+6. Store growth: see Measured.
+
+### Decisions (my pick in brackets; nothing is set without your word)
+
+1. `page` (user rows per query): no default. Measured at 20 and 100; [20 for the cutover: it is only a number of rows per query, not a limit of anything].
+2. Lazy import: build the two-line hook above [yes, after the cutover batch is proven], or keep the batch only.
+3. `mention` on the imported bodies: default none [none]: turning it on makes up to 400 transient spans per text and a Word entity per new lemma for 1,137 messages (the cost of a native message times 1,137, one write each); it can be done later body by body.
+4. Concurrency: one session at a time, one query at a time (the Sql driver serializes a source anyway) [keep]. 
+5. The message in the turn of a question nobody answered: `(no answer was recorded in the previous store)` as an error response [keep], or an empty done turn.
+6. `slug(owner)` here ignores punctuation other than `. _ ,` and whitespace [fine for the 3 real owners], or propose the builtin `slug(text)` / a regex.
+7. `started` left unwritten on imported turns (see above) [keep], or a one-line guard in `oc_fin` for imported messages.
+8. Keep the ids of the old messages reachable (`legacy_src.mid`) only as data [keep], or add a lookup route.
+9. The page's `Person` for the operator when a session names the owner `owner`: `Person:owner` is made with `imported: True` [fine].
+
+## 0. Important first (of the earlier whole-field design; the Phase 1 section above is the current plan)
 
 1. **The old store stays a read-only file; the new seat reads it through a read-only `SqlSource` (the Sql driver) and converts an entity the first time something
    touches it.** A converted row is an ordinary `c_field` row, so lazy load, `updated` and unload need no change. The native piece is built (2026-11-14,
@@ -60,7 +168,7 @@ Size drivers: events, entity_states, chunks, annotations, relations (each 48-87 
 | recall tables, vectors | NOT converted; read in place (Decision 10) | `release-parity.md` D8 |
 | old journals `field/`, logs, `.corrupt-*` copies | dropped (archived) | |
 
-## 2. Convert on touch, in cliffvm terms (b)
+## 2. Convert on touch, in cliffvm terms (b) - NOT BUILT: the earlier whole-field design (superseded by the 2026-11-14 scope: the old field is kept as a read-only source the model reads on demand)
 
 **Three paths, never mixed:** `--store new.sqlite` (the seat's, writable), `SqlSource:legacy` (`path` = `<old>/field.sqlite3`, `mode` `ro`: the Sql driver opens a NEW connection read-only with the immutable URI and `query_only`; declared by
 the launch fact `--fact sql_sources='[{"name": "legacy", "path": "<old>/field.sqlite3"}]'` or written by hand), and the vectors dir (untouched). **Immutable means the file must
@@ -106,7 +214,7 @@ RETIRED converted entity deletes its row (`host.rs` retire), and the next touch 
 **Failure.** A conversion that cannot parse the old body writes `state: failed` and the reason (an Error, `c1f-error.md`), and the read answers the Error: loud, not
 empty. A failed row is retried on the next touch.
 
-## 3. Reverse path: "reverse grind" (c)
+## 3. Reverse path: "reverse grind" (c) - NOT BUILT: the earlier whole-field design (superseded by the 2026-11-14 scope: the old field is kept as a read-only source the model reads on demand)
 
 `cliffvm legacy reverse --to <dir>` (a headless pack run, Rust only for the two connections): 1. copy the ORIGINAL old store directory to `<dir>` (APFS clone or
 `cp`; the original is never opened for writing); 2. for each ledger row `converted` whose entity changed (`updated > at`), render the entity back to its old
@@ -127,7 +235,7 @@ the old store had, decisions, goals, files rows. Lossy (stated, tested):
 
 Retention (Decision 13): the reverse output is a new directory; the first reverse can be re-run (idempotent: same input, same output).
 
-## 4. Converter version stamp and re-conversion (d)
+## 4. Converter version stamp and re-conversion (d) - NOT BUILT: the earlier whole-field design (superseded by the 2026-11-14 scope: the old field is kept as a read-only source the model reads on demand)
 
 Every converted entity carries `legacy_src: {coll, k, conv, sha}` and the ledger row carries the same `conv`; `LEGACY_CONV` is a constant in `legacy.c1f` (starts at 1,
 Decision 4). On a touch of an entity whose ledger `conv` < the pack's, or whose old body `sha` changed, the pack re-runs the converter and merges by the writers map
@@ -136,7 +244,7 @@ other writer touched (the person, a setter, the model) is kept. A prop the new c
 A bulk re-grind is `cliffvm legacy verify --reconvert` walking the ledger; the default is lazy (a re-conversion rides the next touch). Test: a v2 test pack changes one
 mapped prop; the converter-owned prop changes, the person-edited prop and a prop added by a setter survive.
 
-## 5. Legacy rows with no eid class (e) [copy: 10,749 entity rows]
+## 5. Legacy rows with no eid class (e) [copy: 10,749 entity rows] - NOT BUILT: the earlier whole-field design (superseded by the 2026-11-14 scope: the old field is kept as a read-only source the model reads on demand)
 
 The old eid's first segment is NOT always a class. Of the 10,623 `membrane::` rows: 37 (`Component`), 25 (`Banner`), 15 (`Config`), 15 (`Command`), 11 (`Decision`) carry a
 real class in the key; the rest start with a lowercase KIND (`node` 8,352; `symbols` 429; `msg` 392; `result` 343; `files` 206; `shell` 173; `error` 116; `task`, `verb`, `goal`,
@@ -155,7 +263,7 @@ for display. cliffvm derives the mode from the eid's first segment (`cliffvm.md:
 `Legacy` is a lazy class, hidden from the default entity views; the old key lives in `legacy_src.k`. A touch by the OLD eid (a pack, Memo, a bookmarked `entity_read`)
 computes `eid_of(old)` and goes the same way: no alias table (the function is pure and total).
 
-## 6. Cutover runbook (f)
+## 6. Cutover runbook (f) - NOT BUILT: the earlier whole-field design (superseded by the 2026-11-14 scope: the old field is kept as a read-only source the model reads on demand)
 
 The Python seat runs until the minute of cutover. **Rehearsal (any number of times, no downtime):** start cliffvm on a second port with `--store rehearsal.sqlite --fact sql_sources='[{"name": "legacy", "path": "<a clone of the old store>"}]'`; the source is read-only and
 immutable, so the rehearsal reads a clone (`cp -c`) and never the file the Python seat is writing. Delete `rehearsal.sqlite` afterwards (Decision 14: the final store starts EMPTY).
@@ -169,7 +277,7 @@ immutable, so the rehearsal reads a clone (`cp -c`) and never the file the Pytho
 
 Downtime = steps 1-4. Estimate, NOT measured: seconds for the flush wait, under a second for an APFS clone (minutes for a non-clone copy of 0.6 to several GB: measure before promising), under a second to boot. So about 1-3 minutes, dominated by waiting for idle turns. Dual-run soak is optional and not needed for data (rehearsal covers it).
 
-## 7. Risks and test plan (g)
+## 7. Risks and test plan (g) - NOT BUILT: the earlier whole-field design (superseded by the 2026-11-14 scope: the old field is kept as a read-only source the model reads on demand)
 
 Risks: (1) a new read path to a live WAL file: only `READ_ONLY` + `query_only` on a stopped-or-WAL store, proven by sha256 before/after; (2) id shapes (`msg_<hex>` kept vs new numeric ids; the page's
 ordering must use `at`/`n`, not the id); (3) the 5 s message flush (messages from the last 5 s) and a seat killed rather than stopped (the checkpoint did not run: copy `-wal` and `-shm` too, never delete them);
@@ -187,7 +295,7 @@ Tests (red first, `native/tests/legacy_1143.rs`):
 - counts: verify's `old N = converted + skipped + dropped` on the fixture and, `#[ignore]`, on the copy (10,749 + 1,137 + 130 + 3).
 - shape: the Python golden answers for the three session routes over a converted fixture.
 
-## 8. Build plan, red-test-first rounds (h)
+## 8. Build plan, red-test-first rounds (h) - NOT BUILT: the earlier whole-field design (superseded by the 2026-11-14 scope: the old field is kept as a read-only source the model reads on demand)
 
 | round | content | rounds |
 |---|---|---|
@@ -203,7 +311,7 @@ Tests (red first, `native/tests/legacy_1143.rs`):
 
 Total **12-18** (R1-R8 = 11-16, R9 +1-2). Nothing here touches the live seat; the first real use is the rehearsal in R8.
 
-## 9. Decisions for the operator (I chose none; my recommendation in brackets)
+## 9. Decisions for the operator (I chose none; my recommendation in brackets) - NOT BUILT: the earlier whole-field design (superseded by the 2026-11-14 scope: the old field is kept as a read-only source the model reads on demand)
 
 1. Legacy access: DECIDED (2026-11-14) a second read-only SQLite file as entities, `SqlSource:legacy` + `SqlQuery` (no builtin, no `--legacy` flag) vs `ATTACH` on the main connection vs copying tables in.
 2. The ledger as a host-created table `c_legacy_done` [yes] vs ledger rows as entities.

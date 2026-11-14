@@ -1,0 +1,12 @@
+PACK legacy_persons 1
+IMPORT legacy_import 1
+IMPORT door_auth 1
+-- THE PERSONS OF THE IMPORTED HISTORY (#1143, migration phase 1). A seat that has persons (packs/door_auth.c1f) loads this pack beside legacy_import: for each owner NAMED in the old sessions
+-- (`Legacy:seat.owners`, [slug, name as written]) it makes `Person:<slug>` {sub: slug, name, imported: True} when that person is not there yet. A person the door already verified is never touched.
+-- The owner of an ownerless session is the operator (`Person:<the fact operator, else owner>`), made by the first verified request as always, not here.
+LegacySeat.owners on-setter legacy-persons:
+  WHEN this.owners != None:
+    FOR o IN [p for p in this.owners if prop('Person:' + p[0], 'sub') == None]:
+      ('Person:' + o[0]).sub = o[0]
+      ('Person:' + o[0]).name = o[1]
+      ('Person:' + o[0]).imported = True

@@ -76,4 +76,4 @@ On a `ro` source the same INSERT comes back as `status: error` with SQLite's own
 ## Sources at launch
 
 A launch can declare sources up front with the fact `sql_sources`, a list: `--fact sql_sources='[{"name": "lex", "path": "/path/words.sqlite", "mode": "ro"}]'` makes `SqlSource:lex` as if you had written it
-(`mode` is optional). Writing the entities by hand needs no fact.
+(`mode` is optional). The fact SEEDS a source that is not there: a source that already has a path (you wrote it, or an earlier run kept it) is left as it is. Writing the entities by hand needs no fact.

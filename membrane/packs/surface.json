@@ -720,6 +720,64 @@
       "Intent"
     ]
   },
+  "legacy_import": {
+    "imports": [
+      "boot",
+      "sql",
+      "semtext",
+      "chat",
+      "chat_turn",
+      "door_session"
+    ],
+    "classes": [
+      "Boot",
+      "LegacySeat",
+      "LegacySession"
+    ],
+    "members": 15,
+    "writes": [
+      "*.cursor",
+      "*.dropped_parts",
+      "*.imported_at",
+      "*.reason",
+      "*.rows",
+      "*.state",
+      "SqlQuery:legacy:msgs.run",
+      "SqlQuery:legacy:msgs.source",
+      "SqlQuery:legacy:msgs.sql",
+      "SqlQuery:legacy:sessions.run",
+      "SqlQuery:legacy:sessions.source",
+      "SqlQuery:legacy:sessions.sql",
+      "membrane:*=ChatMessage()",
+      "membrane:*=ChatResponse()",
+      "membrane:*=ChatSession()",
+      "membrane:*=ChatTool()",
+      "membrane:*=ChatTurn()",
+      "membrane:*=LegacySession()",
+      "membrane:*=SemText()",
+      "membrane::Legacy:seat.running",
+      "membrane::Legacy:seat=LegacySeat()"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
+  "legacy_persons": {
+    "imports": [
+      "legacy_import",
+      "door_auth"
+    ],
+    "classes": [
+      "LegacySeat"
+    ],
+    "members": 1,
+    "writes": [
+      "Person:*.imported",
+      "Person:*.name",
+      "Person:*.sub"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
   "mcp": {
     "imports": [],
     "classes": [
