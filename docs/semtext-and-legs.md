@@ -36,6 +36,8 @@ There is no `origin` property. The owner chain says where a leg came from: `Chat
 `Command:tests › output` for a sensor. The per-stream statistics the old field kept (a background per origin, boilerplate frequency)
 are keyed by that chain (the owner's class or the path prefix), so a noisy command's legs never mix with the conversation's.
 
+Lexicon (synonyms, broader/narrower terms, idioms, base forms from WordNet, read in place): design note `docs/lexicon-design.md` (not built).
+
 ## Decisions to bring to the operator before building (each is a threshold or a rule)
 - Which spans get vectors: sentences only (words take their position from the legs that mention them).
 - When a word becomes an entity: pending mention edges until K distinct sentences, then the entity (the old nursery). K is a threshold.
