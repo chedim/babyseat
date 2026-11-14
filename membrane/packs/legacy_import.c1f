@@ -21,7 +21,7 @@ RESIDENT Legacy
 -- again (or in an `all`). One session at a time, one page per round: a page's entities and its ledger write are ONE cascade (one commit), so a stop between two pages loses nothing and repeats nothing.
 -- THE MAPPING (old row -> new entities). A session `{s: {id, title, owner, time: {created, updated}, ...}}` is `Chat:session:<sid>` (the id is kept) with `stitle`, `born`, `upd` (epoch ms, as they were),
 -- `owner` (`Person:<slug>`: a session with no owner is the operator's, the fact `operator` else `owner`; a named owner is `slug(owner)`: lowercase, words joined by `-`, `.` `_` `,` read as spaces; its Person entity is made by packs/legacy_persons.c1f where the seat has persons) and `legacy_src`.
--- A user row and the assistant rows that answer it (`info.parentID` = the user row's id, in order of `n`) are ONE `ChatMessage` `Chat:message:<ms>-<n>` (the user row's `time.created` and `n`: derived, no table; `at`, `sid`, `pick` =
+-- A user row and the assistant rows that answer it (`info.parentID` = the user row's id, in order of `n`) are ONE `ChatMessage` `Chat:session:<sid>:message:<ms>-<n>` (the user row's `time.created` and `n` padded to 8 digits: derived, no table; the session id is IN the key; a time row `Chat:main:time:<id>:session:<sid>` too (docs/chat-keys.md); a session whose old id holds a `:` is not imported (none in the previous stores seen); `at`, `pick` =
 -- `info.model.modelID`), its SemText body, its `ChatTurn` (state done, or error when the last answering row has an error; `ended`, `usage`, `cost`), its `ChatResponse` (the answer's text parts joined by blank lines)
 -- and one `ChatTool` per tool part (`name`, `input`, `result` = the part's `state.output`, else its `state.error`). `legacy_src` on the message, the turn and the session holds the old ids and times.
 -- WHAT IS NOT IN THE NEW ROWS, and where it is told: assistant rows with no user row of their session (`unmapped`, with their ids in `unmapped_rows`), parts that are neither text, tool nor a step marker (reasoning: `dropped_parts`),
@@ -60,7 +60,7 @@ LegacySeat.owners getter:
 -- headers quadratic in the number of sessions (measured 2026-11-14: 1,605 sessions took 107 s in a release build, 10x the time for 4x the sessions)
 LegacySeat.hl on-setter legacy-headers:
   WHEN this.hl != None:
-    FOR x IN [{'sid': prop(r, 'k'), 's': prop(json(prop(r, 'body')), 's'), 'nrows': prop(r, 'nrows'), 'orph': json(prop(r, 'orphans') or '[]')} for r in prop(this.hl, 'rows') if prop('membrane::Legacy:session:' + prop(r, 'k'), 'state') == None]:
+    FOR x IN [{'sid': prop(r, 'k'), 's': prop(json(prop(r, 'body')), 's'), 'nrows': prop(r, 'nrows'), 'orph': json(prop(r, 'orphans') or '[]')} for r in prop(this.hl, 'rows') if prop('membrane::Legacy:session:' + prop(r, 'k'), 'state') == None and replace(prop(r, 'k'), ':', '') == prop(r, 'k')]:
       slug = join(words(replace(replace(replace(lower(str(prop(x['s'], 'owner') or '')), '.', ' '), '_', ' '), ',', ' ')), '-')
       membrane::Chat:session[x['sid']] = ChatSession(stitle: prop(x['s'], 'title'), born: prop(prop(x['s'], 'time'), 'created'), upd: prop(prop(x['s'], 'time'), 'updated'), owner: 'Person:' + (slug if slug != '' else this.opsub), legacy_src: {'conv': this.converter, 'sid': x['sid'], 'at': prop(prop(x['s'], 'time'), 'created')})
       membrane::Legacy:session[x['sid']] = LegacySession(state: 'pending', converter: this.converter, old_rows: x['nrows'], rows: 0, cursor: 0, unmapped: len(x['orph']), unmapped_rows: x['orph'], dropped_parts: 0)
@@ -87,7 +87,7 @@ LegacySeat.hbad on-setter legacy-headers-failed:
 LegacySeat.hl on-setter legacy-start:
   WHEN this.hl != None and this.running == True and prop(this.hl, 'id') == 'import:' + str(this.iid) and this.cur == None:
     wanted = prop(this.import, 'sessions')
-    todo = [prop(r, 'k') for r in prop(this.hl, 'rows') if (wanted == 'all' or prop(r, 'k') in (wanted or [])) and prop('membrane::Legacy:session:' + prop(r, 'k'), 'state') != 'done']
+    todo = [prop(r, 'k') for r in prop(this.hl, 'rows') if (wanted == 'all' or prop(r, 'k') in (wanted or [])) and prop('membrane::Legacy:session:' + prop(r, 'k'), 'state') != 'done' and replace(prop(r, 'k'), ':', '') == prop(r, 'k')]
     this.run_total = len(todo)
     this.run_done = 0
     this.run_error = 0
@@ -150,7 +150,7 @@ LegacySeat.pg on-setter legacy-page:
       texts = json(prop(r, 'texts') or '[]')
       ui = prop(prop(u, 'row'), 'info')
       created = prop(prop(ui, 'time'), 'created')
-      id = str(created) + '-' + str(prop(u, 'n'))
+      id = str(created) + '-' + tail('00000000' + str(prop(u, 'n')), 8)
       utext = join([str(prop(p, 'text')) for p in prop(prop(u, 'row'), 'parts') if prop(p, 'type') == 'text'], '\n')
       err = prop(ag, 'err')
       said = join([t for t in texts if t != None and t != ''], '\n\n')
@@ -158,14 +158,15 @@ LegacySeat.pg on-setter legacy-page:
       bad = answered and err != None
       body = said if said != '' else (str(prop(prop(err, 'data'), 'message') or prop(err, 'name')) if bad else ('(no answer was recorded in the previous store)' if not answered else ''))
       tid = [str(prop(t, 'callID') or prop(t, 'id')) for t in tools]
-      membrane::Chat:message[id] = ChatMessage(text: utext, at: created / 1000, sid: this.cur, pick: str(prop(prop(ui, 'model'), 'modelID') or ''), tools_run: [replace(str(prop(t, 'tool')), 'mcp__membrane__', '') for t in tools], tool_ids: join(tid, ' '), aborted: (bad and prop(err, 'name') == 'MessageAbortedError'), legacy_src: {'conv': this.converter, 'sid': this.cur, 'mid': prop(u, 'mid'), 'at': created, 'n': prop(u, 'n'), 'asst_at': prop(ag, 't0'), 'asst_done': prop(ag, 't1'), 'answers': prop(ag, 'na')})
-      membrane::Chat:message[id]:body = SemText(text: utext)
-      membrane::Chat:message[id]:turn = ChatTurn(message: 'membrane::Chat:message:' + id, queued_at: created / 1000, sid: this.cur, state: ('error' if (bad or not answered) else 'done'), ended: ((prop(ag, 't1') or prop(ag, 't0') or created) / 1000), usage: {'input_tokens': prop(ag, 'tin'), 'output_tokens': prop(ag, 'tout'), 'cache_creation_input_tokens': prop(ag, 'tcw'), 'cache_read_input_tokens': prop(ag, 'tcr')}, cost: prop(ag, 'cost'))
-      membrane::Chat:message[id]:turn:response = ChatResponse(text: body, error: (bad or not answered))
+      membrane::Chat:session[this.cur]:message[id] = ChatMessage(text: utext, at: created / 1000, pick: str(prop(prop(ui, 'model'), 'modelID') or ''), tools_run: [replace(str(prop(t, 'tool')), 'mcp__membrane__', '') for t in tools], tool_ids: join(tid, ' '), aborted: (bad and prop(err, 'name') == 'MessageAbortedError'), legacy_src: {'conv': this.converter, 'sid': this.cur, 'mid': prop(u, 'mid'), 'at': created, 'n': prop(u, 'n'), 'asst_at': prop(ag, 't0'), 'asst_done': prop(ag, 't1'), 'answers': prop(ag, 'na')})
+      membrane::Chat:session[this.cur]:message[id]:body = SemText(text: utext)
+      membrane::Chat:main:time[id]:session[this.cur] = ChatLine(chat: 'session:' + this.cur)
+      membrane::Chat:session[this.cur]:message[id]:turn = ChatTurn(message: 'membrane::Chat:session:' + this.cur + ':message:' + id, queued_at: created / 1000, state: ('error' if (bad or not answered) else 'done'), ended: ((prop(ag, 't1') or prop(ag, 't0') or created) / 1000), usage: {'input_tokens': prop(ag, 'tin'), 'output_tokens': prop(ag, 'tout'), 'cache_creation_input_tokens': prop(ag, 'tcw'), 'cache_read_input_tokens': prop(ag, 'tcr')}, cost: prop(ag, 'cost'))
+      membrane::Chat:session[this.cur]:message[id]:turn:response = ChatResponse(text: body, error: (bad or not answered))
       FOR b IN ([1] if (body != '' and not bad and answered) else []):
-        membrane::Chat:message[id]:turn:response:body = SemText(text: body)
+        membrane::Chat:session[this.cur]:message[id]:turn:response:body = SemText(text: body)
       FOR t IN tools:
-        membrane::Chat:message[id]:turn:tool[str(prop(t, 'callID') or prop(t, 'id'))] = ChatTool(name: prop(t, 'tool'), input: prop(prop(t, 'state'), 'input'), result: str(prop(prop(t, 'state'), 'output') or prop(prop(t, 'state'), 'error') or ''))
+        membrane::Chat:session[this.cur]:message[id]:turn:tool[str(prop(t, 'callID') or prop(t, 'id'))] = ChatTool(name: prop(t, 'tool'), input: prop(prop(t, 'state'), 'input'), result: str(prop(prop(t, 'state'), 'output') or prop(prop(t, 'state'), 'error') or ''))
     (led).rows = (prop(led, 'rows') or 0) + ((rows[0]['page_used'] if len(rows) > 0 else 0))
     (led).dropped_parts = (prop(led, 'dropped_parts') or 0) + ((rows[0]['page_dropped'] if len(rows) > 0 else 0))
     (led).cursor = rows[-1]['n'] if len(rows) > 0 else (prop(led, 'cursor') or 0)

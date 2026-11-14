@@ -129,27 +129,27 @@ ChatMessage.plan getter:
   ELSE: None
 Chat.plan on-setter turn-start:
   WHEN prop(this.plan, 'refuse') != None:
-    membrane::Chat:message[this.mid]:turn.state = 'error'
-    membrane::Chat:message[this.mid]:turn.ended = clock
-    membrane::Chat:message[this.mid]:turn.error = prop(this.plan, 'refuse')
-    membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: prop(this.plan, 'refuse'), error: True)
+    membrane::Chat[this.cp]:turn.state = 'error'
+    membrane::Chat[this.cp]:turn.ended = clock
+    membrane::Chat[this.cp]:turn.error = prop(this.plan, 'refuse')
+    membrane::Chat[this.cp]:turn:response = ChatResponse(text: prop(this.plan, 'refuse'), error: True)
   ELSE WHEN prop(this.plan, 'argv') != None:
-    membrane::Chat:message[this.mid]:turn.state = 'running'
-    membrane::Chat:message[this.mid]:turn.started = clock
-    membrane::Command:chat[this.mid] = Command(cmd: prop(this.plan, 'argv'), env_from: this.owner_env)
-    membrane::Command:chat[this.mid].run = {'id': this.mid, 'args': [], 'partial': True, 'timeout_s': this.turn_timeout_s}
+    membrane::Chat[this.cp]:turn.state = 'running'
+    membrane::Chat[this.cp]:turn.started = clock
+    membrane::Command:chat[this.cp] = Command(cmd: prop(this.plan, 'argv'), env_from: this.owner_env)
+    membrane::Command:chat[this.cp].run = {'id': this.cp, 'args': [], 'partial': True, 'timeout_s': this.turn_timeout_s}
 
 -- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------
 -- `partial: True` makes the Command driver push what each read of stdout brings (whole lines) as an entity `Chunk:<command>:<n>` ({cmd, id, n, data});
 -- they are outside births of a VIRTUAL class (never stored, never journalled). The partial answer is the text deltas of the `stream_event` lines, the partial
 -- tools the tool_use blocks they start. The finished turn replaces them (the receipt below is the answer), and nothing retires the chunks: the engine collects
 -- them (docs/cliffvm.md, "Garbage collection"): while the command runs its in-flight effect holds them, and when its receipt is taken they are held by nothing.
-ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.mid
+ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.cp
 -- each chunk parses its OWN lines once (getters cached on the chunk) and hands what it said to the accumulator below, so a new chunk costs one parse, not a re-parse of everything before it
 Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if e is not Error and prop(e, 'type') == 'stream_event']
 Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
 Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
-ChatMessage.oai_acc getter: 'Chunk:Fetch:oai:' + this.mid + ':' + str(prop(this.turn_eid, 'round') or 0) + ':acc'
+ChatMessage.oai_acc getter: 'Chunk:Fetch:oai:' + this.cp + ':' + str(prop(this.turn_eid, 'round') or 0) + ':acc'
 ChatMessage.partial_text getter: '' if this.over else (str(prop('Chunk:' + this.cmd_eid + ':acc', 'text') or '') or str(prop(this.oai_acc, 'text') or ''))
 ChatMessage.partial_tools getter: [] if this.over else (words(str(prop('Chunk:' + this.cmd_eid + ':acc', 'tools') or '')) or words(str(prop(this.oai_acc, 'tools') or '')))
 -- THE PARTIAL ANSWER IS ACCUMULATED, NOT RE-JOINED (w28): the message used to list every live chunk at every birth (a scan of all the chunks, a dict and a sort per chunk, a join of all
@@ -162,7 +162,7 @@ Chunk.part on-setter partial-in:
     ('Chunk:' + this.cmd + ':acc').tools = (str(prop('Chunk:' + this.cmd + ':acc', 'tools') or '') + ' ' + str(prop(this.part, 'started') or '')) if prop(this.part, 'started') != '' else str(prop('Chunk:' + this.cmd + ':acc', 'tools') or '')
 
 -- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
-ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')
+ChatMessage.rr getter: prop('membrane::Command:chat:' + this.cp, 'run_result')
 ChatMessage.rc getter: prop(this.rr, 'rc')
 -- THE STREAM IS READ IN SMALL EVALUATIONS (#1143, a live turn that ended `error` with no cause): a long turn's stdout is a megabyte of lines, and one getter that parsed them all
 -- cost 11 ms against the old 10 ms self-time allowance (a Trip: its Error flowed on into `fail_why`; time no longer decides a value, but the stream is still read in small steps). The result line is read on its own (`rlines`, `finals`: one line parsed), and `evs` skips the
@@ -203,26 +203,26 @@ ChatMessage.tools_idlist getter: join([join([str(prop(b, 'id')) for b in (prop(p
 ChatMessage.over getter: this.tstate == 'done' or this.tstate == 'error'
 Chat.answer on-setter turn-finish:
   WHEN this.answer != None and not this.over:
-    membrane::Chat:message[this.mid]:turn.state = 'error' if this.fail_why != None else 'done'
-    membrane::Chat:message[this.mid]:turn.ended = clock
-    membrane::Chat:message[this.mid]:turn.error = this.fail_why
-    membrane::Chat:message[this.mid]:turn.usage = this.tokens
-    membrane::Chat:message[this.mid]:turn.cost = this.cost
-    membrane::Chat:message[this.mid]:turn.calls = this.calls
-    membrane::Chat:message[this.mid]:turn.duration = this.took
+    membrane::Chat[this.cp]:turn.state = 'error' if this.fail_why != None else 'done'
+    membrane::Chat[this.cp]:turn.ended = clock
+    membrane::Chat[this.cp]:turn.error = this.fail_why
+    membrane::Chat[this.cp]:turn.usage = this.tokens
+    membrane::Chat[this.cp]:turn.cost = this.cost
+    membrane::Chat[this.cp]:turn.calls = this.calls
+    membrane::Chat[this.cp]:turn.duration = this.took
     this.tools_run = this.tools_names
     this.tool_ids = this.tools_idlist
-    membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: this.answer, error: this.fail_why != None, rc: this.rc)
+    membrane::Chat[this.cp]:turn:response = ChatResponse(text: this.answer, error: this.fail_why != None, rc: this.rc)
     FOR t IN ([this.answer] if this.fail_why == None else []):
-      membrane::Chat:message[this.mid]:turn:response:body = SemText(text: t)
-      membrane::Chat:message[this.mid]:turn:response:body.mention = True
+      membrane::Chat[this.cp]:turn:response:body = SemText(text: t)
+      membrane::Chat[this.cp]:turn:response:body.mention = True
     FOR e IN [x for x in this.evl if prop(x, 'type') == 'assistant']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:
-        membrane::Chat:message[this.mid]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
+        membrane::Chat[this.cp]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
     FOR e IN [x for x in this.evl if prop(x, 'type') == 'user']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_result']:
         body = prop(b, 'content')
-        membrane::Chat:message[this.mid]:turn:tool[prop(b, 'tool_use_id')].result = body if body is Text else join([prop(c, 'text') for c in (body if body is List else [])], '\n')
+        membrane::Chat[this.cp]:turn:tool[prop(b, 'tool_use_id')].result = body if body is Text else join([prop(c, 'text') for c in (body if body is List else [])], '\n')
 
 
 -- ---- after the answer: the raw output is dropped ----------------------------------------------------------------------------------------------
@@ -233,7 +233,7 @@ Chat.answer on-setter turn-finish:
 ChatMessage.spent getter: this.over and this.rr != None and prop(this.rr, 'stdout') != None and this.said != None
 Chat.spent on-setter slim-run:
   WHEN this.spent == True:
-    membrane::Command:chat[this.mid].run_result = {'id': prop(this.rr, 'id'), 'status': prop(this.rr, 'status'), 'rc': this.rc, 'stderr': prop(this.rr, 'stderr')}
+    membrane::Command:chat[this.cp].run_result = {'id': prop(this.rr, 'id'), 'status': prop(this.rr, 'status'), 'rc': this.rc, 'stderr': prop(this.rr, 'stderr')}
 
 -- ---- the chat names its last finished turn -----------------------------------------------------------------------------------------------
 -- Any turn that ends (done or error: the answer, a refusal, an interruption) writes its eid to `last_turn` of its chat (`membrane::Chat:main`): the banner's
@@ -246,11 +246,11 @@ Chat.state on-setter last-turn:
 -- A turn whose state is `running` and that started before this run's start (`Boot.started`) lost its CLI with the old process (its Command never got a
 -- receipt, and a restore runs no setter): it becomes an error with a response that says so. A turn of this run started after `started`, so it is never listed.
 -- (the turns are a LAZY class: the store is asked, not the engine's `instances`, which lists only what is loaded.)
-Boot.interrupted getter: [replace(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), ':turn', '') for r in sql('SELECT k, json_extract(body, \'$.props.started\') AS started FROM c_field WHERE cls = \'Chat\' AND k LIKE \'%:turn\' AND json_extract(body, \'$.props.state\') = \'running\'') if prop(r, 'started') != None and prop(r, 'started') < this.started] if this.started != None else []
+Boot.interrupted getter: [head(replace(prop(r, 'k'), 'membrane::Chat:', ''), len(replace(prop(r, 'k'), 'membrane::Chat:', '')) - 5) for r in sql('SELECT k, json_extract(body, \'$.props.started\') AS started FROM c_field WHERE cls = \'Chat\' AND k LIKE \'membrane::Chat:%:message:%:turn\' AND json_extract(body, \'$.props.state\') = \'running\'') if prop(r, 'started') != None and prop(r, 'started') < this.started] if this.started != None else []
 Boot.interrupted on-setter turn-interrupted:
   WHEN len(this.interrupted) > 0:
     FOR i IN this.interrupted:
-      membrane::Chat:message[i]:turn.state = 'error'
-      membrane::Chat:message[i]:turn.ended = clock
-      membrane::Chat:message[i]:turn.error = 'interrupted: the seat stopped while this turn was running'
-      membrane::Chat:message[i]:turn:response = ChatResponse(text: 'interrupted: the seat stopped while this turn was running', error: True)
+      membrane::Chat[i]:turn.state = 'error'
+      membrane::Chat[i]:turn.ended = clock
+      membrane::Chat[i]:turn.error = 'interrupted: the seat stopped while this turn was running'
+      membrane::Chat[i]:turn:response = ChatResponse(text: 'interrupted: the seat stopped while this turn was running', error: True)

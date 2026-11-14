@@ -109,16 +109,18 @@
     ],
     "classes": [
       "Chat",
+      "ChatLine",
       "ChatMessage",
       "ChatResponse",
       "ChatTool",
       "ChatTurn",
       "Request"
     ],
-    "members": 46,
+    "members": 58,
     "writes": [
       "membrane:*.mention",
       "membrane:*.queued",
+      "membrane:*=ChatLine()",
       "membrane:*=ChatMessage()",
       "membrane:*=ChatTurn()",
       "membrane:*=SemText()",
@@ -527,7 +529,7 @@
       "Request",
       "SesBus"
     ],
-    "members": 110,
+    "members": 112,
     "writes": [
       "*.eo",
       "*.retire",
@@ -542,6 +544,7 @@
       "membrane:*.stitle",
       "membrane:*.stop",
       "membrane:*.upd",
+      "membrane:*=ChatLine()",
       "membrane:*=ChatMessage()",
       "membrane:*=ChatSession()",
       "membrane:*=ChatTurn()",
@@ -791,6 +794,7 @@
       "SqlQuery:legacy:sessions.source",
       "SqlQuery:legacy:sessions.sql",
       "membrane:*.open",
+      "membrane:*=ChatLine()",
       "membrane:*=ChatMessage()",
       "membrane:*=ChatResponse()",
       "membrane:*=ChatSession()",

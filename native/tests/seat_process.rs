@@ -193,8 +193,8 @@ fn a_message_posted_to_the_chat_is_answered_by_the_fake_and_found_through_the_mc
     assert_eq!(v["tools"], json!(["entity_query"]));
     // the viewer's reads: the message is an entity of kind ChatMessage; the query takes an offset, an exclusion and the properties
     // (the message's class is Chat, as its eid names it: the viewer finds the chat by the eid prefix, not by a ChatMessage kind)
-    let (msgs, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:message:", "k": 100}));
-    assert!(msgs.contains(&format!("membrane::Chat:message:{id} (Chat)")) && msgs.contains(&format!("membrane::Chat:message:{id}:turn:response (Chat)")), "{msgs}");
+    let (msgs, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:main:message:", "k": 100}));
+    assert!(msgs.contains(&format!("membrane::Chat:main:message:{id} (Chat)")) && msgs.contains(&format!("membrane::Chat:main:message:{id}:turn:response (Chat)")), "{msgs}");
     let (all, _) = call(port, "entity_query", json!({"q": "name~:membrane::", "k": 100}));
     let rows: Vec<&str> = all.lines().collect();
     assert!(rows.len() >= 4, "{all}");
@@ -210,7 +210,7 @@ fn a_message_posted_to_the_chat_is_answered_by_the_fake_and_found_through_the_mc
     assert!(no_req.lines().count() >= 4 && !no_req.lines().any(|l| l.ends_with("(Request)")), "{no_req}");
     let (n_all, _) = call(port, "entity_query", json!({"q": "kind!:Request & name~:membrane::", "count": true}));
     assert_eq!(n_all, format!("{} entity(ies)", rows.len()));
-    let (full, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:message:", "k": 100, "full": true}));
+    let (full, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:main:message:", "k": 100, "full": true}));
     assert!(full.contains(":response (Chat) {") && full.contains("Seat answer to: hello seat"), "{full}");
     assert!(terminate(&mut run));
 }
@@ -426,7 +426,7 @@ fn the_previous_turns_error_is_still_in_the_banner_after_a_restart_with_the_warm
     let dir = handover(&mut run);
     let (mut run2, port2) = seat_at(dir, false, &["warm_rows=0"]);
     let b = wait("the banner after the restart", || { let b = banner(port2); b.contains("CONVERSATION: main").then_some(b) });
-    wait("the error line", || banner(port2).contains(&format!("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:message:{id}:turn:response")).then_some(()));
+    wait("the error line", || banner(port2).contains(&format!("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:main:message:{id}:turn:response")).then_some(()));
     let _ = b;
     assert!(terminate(&mut run2));
 }
@@ -480,7 +480,7 @@ fn a_turn_is_an_entity_that_owns_its_answer_and_tools_and_retiring_it_retires_th
         let v: J = serde_json::from_str(&b).unwrap();
         (v["state"] == "done").then_some(v)
     });
-    let msg = format!("membrane::Chat:message:{id}");
+    let msg = format!("membrane::Chat:main:message:{id}");
     let turn = format!("{msg}:turn");
     assert_eq!(v["turn"]["state"], "done", "the page's view carries the turn: {v}");
     assert!(v["turn"]["started"].is_number() && v["turn"]["ended"].as_f64() >= v["turn"]["started"].as_f64(), "{v}");

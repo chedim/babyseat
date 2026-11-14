@@ -10,8 +10,12 @@ IMPORT semtext 1
 --   GET  /membrane/chat/message/<id>/events   the same message as an event stream (text/event-stream): one `message` event per change of
 --                                         `stream_view` (the partial answer and the tools' names as they are written), the last one when
 --                                         `state` is done or error, then the connection closes (docs/cliffvm.md, "The event stream")
--- The message is `membrane::Chat:message:<id>` (the kind ChatMessage; its eid names the class Chat, as the constructor rule says).
--- THE TURN is the entity under it, `membrane::Chat:message:<id>:turn` (ChatTurn {status: queued/running/done/error (a getter over `state`), started, ended, queued_at, message}),
+-- THE KEY (docs/chat-keys.md, operator 2026-11-14 "put session id in the key"): a message is `membrane::Chat:main:message:<id>` (the main chat) or
+-- `membrane::Chat:session:<sid>:message:<id>` (a session), the kind ChatMessage (its eid names the class Chat, as the constructor rule says). The session id is IN the key, so
+-- "the messages of session X" is a key-prefix range of the `(cls, k)` index (no body read). `<id>` is `<ms>-<n>` with n padded to 8 digits, so key order is time order inside a chat.
+-- A sid holds no `:` (a message or a history request that names one with a colon is refused). EVERY message also has a TIME ROW `membrane::Chat:main:time:<id>:<where>`
+-- (<where> = `main` or `session:<sid>`; the kind ChatLine, no properties): the keys of all the chats in ONE time order, for the history that reads every turn (no `sid`).
+-- THE TURN is the entity under it, `<message>:turn` (ChatTurn {status: queued/running/done/error (a getter over `state`), started, ended, queued_at, message}),
 -- the one run of the model that answers the message. It OWNS, by the colon path, its answer `...:turn:response` (ChatResponse {text, error})
 -- and each tool the model ran `...:turn:tool:<tool id>` (ChatTool {name, input, result}): retiring the turn (`retire = true`) retires them.
 -- packs/chat_turn.c1f runs the turn. The kinds are
@@ -19,7 +23,7 @@ IMPORT semtext 1
 -- from messages.c1f for that reason.
 -- The chat's banner is the instance `membrane::Banner:owner:main`, born at start by the app's default_banner pack (the model replaces its `text`); chat_turn.c1f reads its `text`. `queued` is written AFTER the message and its turn are born (a birth runs no setter): it is the event the turn (chat_turn.c1f) starts on.
 -- The id is the arrival time in milliseconds and the request's number: `<ms>-<n>`.
--- THE BODY (docs/semtext-and-legs.md): the message's words are ALSO a SemText, made explicitly, `membrane::Chat:message:<id>:body` (packs/semtext.c1f): its sentences, words,
+-- THE BODY (docs/semtext-and-legs.md): the message's words are ALSO a SemText, made explicitly, `<message>:body` (packs/semtext.c1f): its sentences, words,
 -- identifiers and paths are read from it, and `mention = True` asks the mention rules (packs/mentions.c1f, when loaded) to turn its words into entities. The message's
 -- `text` stays what it was (the page's API); the body holds the same string once more. The answer is a SemText the same way (chat_turn.c1f, `...:turn:response:body`); a tool's result is not.
 
@@ -28,8 +32,13 @@ Chat.title getter: 'main'
 Chat.seat_base getter: prop('Minds:seat', 'seat_default') or 'claude'
 -- the seat-wide pick (the page's "Which model?" form and the gear window post `loops`, packs/door_models.c1f: one runner, the chat's default too) wins over the launcher's
 Chat.seat_model getter: prop('Minds:seat', 'loops') or this.seat_base
-ChatMessage.mid getter: replace(this.eid, 'membrane::Chat:message:', '')
-ChatMessage.turn_eid getter: 'membrane::Chat:message:' + this.mid + ':turn'
+-- `mid` = the id inside its chat (`<ms>-<n>`, what the pages show); `cp` = the key below `membrane::Chat:` (`main:message:<id>` / `session:<sid>:message:<id>`): the handle that names the message
+-- everywhere else (`membrane::Chat[this.cp]:turn...`, `Command:chat:<cp>`). `sid` is the session it is in (None for the main chat): read from the key, never stored.
+ChatMessage.cp getter: replace(this.eid, 'membrane::Chat:', '')
+ChatMessage.mid getter: after(this.eid, ':message:')
+ChatMessage.sid getter: before(replace(this.eid, 'membrane::Chat:session:', ''), ':message:') if startswith(this.eid, 'membrane::Chat:session:') else None
+ChatLine.kind getter: 'line'
+ChatMessage.turn_eid getter: this.eid + ':turn'
 ChatMessage.tstate getter: prop(this.turn_eid, 'status')
 ChatMessage.resp_eid getter: this.turn_eid + ':response'
 ChatMessage.said getter: prop(this.resp_eid, 'text')
@@ -69,44 +78,52 @@ Request.cm_go getter: this.method == 'POST' and this.route == '/membrane/chat/me
 Request.cm_go on-setter chat-stamp:
   WHEN this.cm_go:
     this.cm_at = clock
--- an optional `sid` in the body names a session (packs/door_session.c1f, the page's session switcher): the message and its turn carry it, as the session API's own messages do
+-- an optional `sid` in the body names a session (packs/door_session.c1f, the page's session switcher): the message is born under it, `membrane::Chat:session:<sid>:message:<id>`
 Request.cm_sid getter: strip(str(prop(this.jbody, 'sid') or ''))
+Request.cm_sid_bad getter: replace(this.cm_sid, ':', '') != this.cm_sid
+-- the id: the arrival time in milliseconds, `-`, the request's number padded to 8 digits (so the key order is the time order)
 Request.cm_at on-setter chat-message-sid:
-  WHEN this.cm_at != None and this.cm_sid != '':
-    id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + replace(this.eid, 'Request:', '')
+  WHEN this.cm_at != None and this.cm_sid != '' and not this.cm_sid_bad:
+    id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + tail('00000000' + replace(this.eid, 'Request:', ''), 8)
     membrane::Chat:main = Chat(name: 'main')
-    membrane::Chat:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at, sid: this.cm_sid)
-    membrane::Chat:message[id]:body = SemText(text: this.cm_text)
-    membrane::Chat:message[id]:body.mention = True
-    membrane::Chat:message[id]:turn = ChatTurn(message: 'membrane::Chat:message:' + id, queued_at: this.cm_at, sid: this.cm_sid)
-    membrane::Chat:message[id].queued = True
+    membrane::Chat:session[this.cm_sid]:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
+    membrane::Chat:session[this.cm_sid]:message[id]:body = SemText(text: this.cm_text)
+    membrane::Chat:session[this.cm_sid]:message[id]:body.mention = True
+    membrane::Chat:session[this.cm_sid]:message[id]:turn = ChatTurn(message: 'membrane::Chat:session:' + this.cm_sid + ':message:' + id, queued_at: this.cm_at)
+    membrane::Chat:main:time[id]:session[this.cm_sid] = ChatLine(chat: 'session:' + this.cm_sid)
+    membrane::Chat:session[this.cm_sid]:message[id].queued = True
     this.cm_id = id
 Request.cm_at on-setter chat-message:
   WHEN this.cm_at != None and this.cm_sid == '':
-    id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + replace(this.eid, 'Request:', '')
+    id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + tail('00000000' + replace(this.eid, 'Request:', ''), 8)
     membrane::Chat:main = Chat(name: 'main')
-    membrane::Chat:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
-    membrane::Chat:message[id]:body = SemText(text: this.cm_text)
-    membrane::Chat:message[id]:body.mention = True
-    membrane::Chat:message[id]:turn = ChatTurn(message: 'membrane::Chat:message:' + id, queued_at: this.cm_at)
-    membrane::Chat:message[id].queued = True
+    membrane::Chat:main:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
+    membrane::Chat:main:message[id]:body = SemText(text: this.cm_text)
+    membrane::Chat:main:message[id]:body.mention = True
+    membrane::Chat:main:message[id]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + id, queued_at: this.cm_at)
+    membrane::Chat:main:time[id]:main = ChatLine(chat: 'main')
+    membrane::Chat:main:message[id].queued = True
     this.cm_id = id
 Request.cm_post getter:
   WHEN this.cm_text == '': {'status': 400, 'body': {'error': 'text required: {"text": "..."}'}}
+  ELSE WHEN this.cm_sid_bad: {'status': 400, 'body': {'error': 'sid must not contain a colon'}}
   ELSE WHEN this.cm_id == None: None
   ELSE: {'status': 202, 'body': {'id': this.cm_id}}
 
 -- ---- GET: one message --------------------------------------------------------------------------------------------------------------------
+-- the id is inside its chat: `?sid=<sid>` names the session (none: the main chat), as the history's
 Request.cm_gid getter: replace(replace(this.route, '/membrane/chat/message/', ''), '/events', '')
 Request.cm_events getter: startswith(this.route, '/membrane/chat/message/') and replace(this.route, '/events', '') != this.route
-Request.cm_view getter: prop('membrane::Chat:message:' + this.cm_gid, 'view')
+Request.cm_qsid getter: ([q[1] for q in this.qpairs if q[0] == 'sid'] or [''])[0]
+Request.cm_eid getter: ('membrane::Chat:session:' + this.cm_qsid + ':message:' + this.cm_gid if this.cm_qsid != '' else 'membrane::Chat:main:message:' + this.cm_gid) if replace(this.cm_qsid + this.cm_gid, ':', '') == this.cm_qsid + this.cm_gid else None
+Request.cm_view getter: prop(this.cm_eid, 'view') if this.cm_eid != None else None
 Request.cm_get getter: {'status': 200, 'body': this.cm_view} if this.cm_view != None else {'status': 404, 'body': {'error': 'no such message'}}
 
 -- the stream: an unknown message is a 404 like the poll route; a known one opens the stream (the door's `answer-stream` setter writes `stream`)
 Request.cm_stream getter: {'status': 200, 'stream': True} if this.cm_view != None else {'status': 404, 'body': {'error': 'no such message'}}
 -- the head is out (`stream_rc` 0) -> every change of the message's `stream_view` is one `message` event; the last one is followed by the close.
 -- `send` and `end` are written in this order in ONE setter, so the close never overtakes the last event.
-Request.ev_snap getter: prop('membrane::Chat:message:' + this.cm_gid, 'stream_view') if this.cm_events and this.stream_rc == 0 else None
+Request.ev_snap getter: prop(this.cm_eid, 'stream_view') if this.cm_events and this.cm_eid != None and this.stream_rc == 0 else None
 Request.ev_snap on-setter ev-send:
   WHEN this.ev_snap != None and prop(this.ev_snap, 'state') in ['done', 'error']:
     this.send = {'id': 'event', 'event': 'message', 'data': this.ev_snap}
@@ -117,32 +134,44 @@ Request.ev_snap on-setter ev-send:
 -- ---- GET: the history (the newest turns, then older ones) ------------------------------------------------------------------------------
 -- {messages: [history_view, ...] oldest first, more: older turns exist, next: the oldest id of the page (pass it as `before`) or null}.
 -- `limit` (default 20, at least 1), `before` = a message id: only turns older than it; an unknown id is a 404. Only a history request computes any of this.
+-- THE PAGE IS CHOSEN BY THE STORE, never by a comprehension over every message (a store holds thousands; the step budget is for the page) and never by reading a body (docs/chat-keys.md):
+--   `sid=<sid>`  one session: the keys under `membrane::Chat:session:<sid>:message:` (a range of the `(cls, k)` index, newest first, LIMIT limit + 1);
+--   `sid=`       the main chat: the keys under `membrane::Chat:main:message:`;
+--   no `sid`     every turn of every chat in time order: the TIME ROWS under `membrane::Chat:main:time:` (one leaf key per message, `<id>:<where>`, written with the message), the same kind of range.
+-- A message is lazy (`instances` would list only the loaded ones); each key is read by eid, which loads it. The extra row only tells that older ones exist.
+-- `?1` is the first key of the range, `?2` the first key past it (or the cursor: only keys below it), `?3` the row count. rows are None while the query runs: the reply waits for them.
 Request.hs_on getter: this.route == '/membrane/chat/messages'
 Request.hs_limit getter: max(1, (num(([q[1] for q in this.qpairs if q[0] == 'limit'] or ['20'])[0]) or 20))
 Request.hs_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [None])[0]
--- the page is chosen BY THE STORE, not by a comprehension over every message (a store holds thousands; the step budget is for the page): one `sql` returns the newest `limit + 1` message keys older than `before`.
--- A message is lazy (`instances` would list only the loaded ones); each key is read by eid, which loads it. The order is `at` (the id's millisecond part: no body is read, a message body is large),
--- then the request number in the id, newest first; the extra row only tells that older ones exist. `?3` is the cursor id ('' = none), `?4` the row count.
--- rows are None while the query runs: the reply waits for them.
--- `sid` = a session id: only that session's turns; `sid=` (empty): the turns of no session; no `sid`: every turn
 Request.hs_sid getter: ([q[1] for q in this.qpairs if q[0] == 'sid'] or [None])[0]
--- The candidate message keys: with no `sid` they come from the message rows' KEYS only (the `(cls, k)` index covers it, no body is read). With a `sid` they come from the TURN rows (`<message>:turn`, about 1 KB each: a message
--- body is large and is never read for a filter); a turn carries the session id of its message (`sid`, written by the same setter), and every message has its turn. The two sources are one list of keys `m`.
-Request.hs_src getter:
-  WHEN this.hs_sid == None: 'SELECT k FROM c_field WHERE cls = \'Chat\' AND k LIKE ?1 AND k NOT LIKE ?2'
-  ELSE: 'SELECT substr(k, 1, length(k) - 5) AS k FROM c_field WHERE cls = \'Chat\' AND k LIKE ?1 AND k LIKE \'%:turn\' AND instr(substr(k, 24, length(k) - 28), \':\') = 0 AND coalesce(json_extract(body, \'$.props.sid\'), \'\') = ?5'
-Request.hs_sql getter: 'WITH m(k) AS (' + this.hs_src + ') SELECT k FROM m WHERE (?3 = \'\' OR CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) < CAST(substr(?3, 1, instr(?3, \'-\') - 1) AS INTEGER) OR (CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) = CAST(substr(?3, 1, instr(?3, \'-\') - 1) AS INTEGER) AND CAST(substr(k, 24 + instr(substr(k, 24), \'-\')) AS INTEGER) < CAST(substr(?3, instr(?3, \'-\') + 1) AS INTEGER))) ORDER BY CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) DESC, CAST(substr(k, 24 + instr(substr(k, 24), \'-\')) AS INTEGER) DESC LIMIT ?4'
+-- a sid or a cursor with a colon names no key of the range: refused (a 400), never put in a key
+Request.hs_bad getter: replace(str(this.hs_sid or '') + str(this.hs_before or ''), ':', '') != str(this.hs_sid or '') + str(this.hs_before or '')
+Request.hs_prefix getter:
+  WHEN this.hs_sid == None: 'membrane::Chat:main:time:'
+  ELSE WHEN this.hs_sid == '': 'membrane::Chat:main:message:'
+  ELSE: 'membrane::Chat:session:' + this.hs_sid + ':message:'
+-- the first key past the prefix: its last colon becomes `;` (the next character)
+Request.hs_end getter: head(this.hs_prefix, len(this.hs_prefix) - 1) + ';'
+Request.hs_hi getter: this.hs_prefix + this.hs_before if this.hs_before != None else this.hs_end
+-- a message's rows: the message key and its children (`<id>:turn`, `<id>:body`, ...) share the range; only the key with no colon after the prefix is a message
+Request.hs_sql_msg getter: 'SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 AND instr(substr(k, length(?1) + 1), \':\') = 0 ORDER BY k DESC LIMIT ?3'
+-- a time row is a leaf: `<id>:<where>`
+Request.hs_sql_time getter: 'SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 ORDER BY k DESC LIMIT ?3'
 Request.hs_rows getter:
-  WHEN not this.hs_on: []
-  ELSE WHEN this.hs_sid == None: sql(this.hs_sql, 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.hs_before or '', this.hs_limit + 1)
-  ELSE: sql(this.hs_sql, 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.hs_before or '', this.hs_limit + 1, this.hs_sid)
--- the cursor must be a message: the unknown id is a 404
-Request.hs_cut getter: sql('SELECT k FROM c_field WHERE k = ?', 'membrane::Chat:message:' + this.hs_before) if this.hs_on and this.hs_before != None else []
-Request.hs_ids getter: [{'eid': prop(r, 'k'), 'id': replace(prop(r, 'k'), 'membrane::Chat:message:', ''), 'at': num(before(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-')) / 1000, 'n': num(after(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-'))} for r in head(this.hs_rows, this.hs_limit)] if this.hs_rows != None else None
-Request.hs_page getter: sort_by(sort_by(this.hs_ids, 'n'), 'at')
+  WHEN not this.hs_on or this.hs_bad: []
+  ELSE WHEN this.hs_sid == None: sql(this.hs_sql_time, this.hs_prefix, this.hs_hi, this.hs_limit + 1)
+  ELSE: sql(this.hs_sql_msg, this.hs_prefix, this.hs_hi, this.hs_limit + 1)
+-- the cursor must be a message of this range: the unknown id is a 404 (one key lookup; in the time range, the first time row of that id)
+Request.hs_cut_lo getter: this.hs_prefix + this.hs_before + (':' if this.hs_sid == None else '')
+Request.hs_cut_hi getter: this.hs_prefix + this.hs_before + (';' if this.hs_sid == None else ':')
+Request.hs_cut getter: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 AND (?3 = 1 OR k = ?1) LIMIT 1', this.hs_cut_lo, this.hs_cut_hi, 1 if this.hs_sid == None else 0) if this.hs_on and this.hs_before != None and not this.hs_bad else []
+-- a message range gives the message key; a time range names the chat in its `<where>` (`main` or `session:<sid>`)
+Request.hs_ids getter: [{'eid': (prop(r, 'k') if this.hs_sid != None else 'membrane::Chat:' + after(replace(prop(r, 'k'), this.hs_prefix, ''), ':') + ':message:' + before(replace(prop(r, 'k'), this.hs_prefix, ''), ':')), 'id': before(replace(prop(r, 'k'), this.hs_prefix, ''), ':')} for r in head(this.hs_rows, this.hs_limit)] if this.hs_rows != None else None
+Request.hs_page getter: sort_by(this.hs_ids, 'id')
 Request.hs_more getter: len(this.hs_rows) > this.hs_limit
 Request.hs_get getter:
-  WHEN this.hs_rows == None or this.hs_cut == None: None
+  WHEN this.hs_bad: {'status': 400, 'body': {'error': 'sid and before must not contain a colon'}}
+  ELSE WHEN this.hs_rows == None or this.hs_cut == None: None
   ELSE WHEN this.hs_before != None and len(this.hs_cut) == 0: {'status': 404, 'body': {'error': 'no such message'}}
   ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'page_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None}}
 
