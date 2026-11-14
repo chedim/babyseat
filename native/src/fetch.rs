@@ -1,6 +1,8 @@
 //! The outbound HTTP driver (the model list, the model call and its streamed reply): `Fetch:<x>.request = {id, url, method?,
-//! headers?, body?, stream?, timeout_s?}`. The receipt is data. With `stream` the body is pushed into the engine as entities
-//! `Chunk:<fetch>:<n>` ({fetch, id, n, data, done}) while it is read. http and https: https is rustls with the webpki roots (feature `tls`, on with `python`; wasm
+//! headers?, body?, stream?, lines?, keep?, bearer_env?, timeout_s?}`. The receipt is data. With `stream` the body is pushed into the engine as entities
+//! `Chunk:<fetch>:<n>` ({fetch, id, n, data, done}) while it is read (`lines`: each chunk holds whole lines only; `keep`: the receipt ALSO carries the whole body).
+//! `bearer_env` names an environment variable whose value is sent as `Authorization: Bearer <value>` (a model endpoint's key, #1143): it is read HERE, so it is on no entity, row,
+//! journal line or receipt, and where the server prints it back it is masked (`***`), across the cut of two pieces too. http and https: https is rustls with the webpki roots (feature `tls`, on with `python`; wasm
 //! has none and refuses https). `ca_pem` (PEM text) adds trusted roots for a private CA or a test; a failed verification is a
 //! receipt (rc 1) whose head names the certificate problem.
 use std::io::{Read, Write};
@@ -100,6 +102,18 @@ fn take_text(pending: &mut Vec<u8>) -> String {
     }
 }
 
+/// What may leave `held` now: every secret in it is masked; the tail that could be the start of a secret the next piece completes stays held (`all` releases it: the end).
+fn release(held: &mut String, secrets: &[String], all: bool) -> String {
+    if secrets.is_empty() { return std::mem::take(held); }
+    let masked = secrets.iter().fold(std::mem::take(held), |t, s| t.replace(s.as_str(), crate::drivers::MASK));
+    if all { return masked; }
+    let max = secrets.iter().map(|s| s.len()).max().unwrap_or(0);
+    let keep = (1..max.min(masked.len() + 1)).rev().find(|k| masked.is_char_boundary(masked.len() - k) && secrets.iter().any(|s| s.as_bytes().starts_with(&masked.as_bytes()[masked.len() - k..]))).unwrap_or(0);
+    let cut = masked.len() - keep;
+    *held = masked[cut..].to_string();
+    masked[..cut].to_string()
+}
+
 /// A failed stream still ends with a `done` chunk carrying the reason (the consumer waits on `done`).
 fn end_failed_stream(st: &Store, eid: &str, id: &J, n: i64, why: &str) {
     let mut p = Map::new();
@@ -119,6 +133,16 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
         let ca = match req.get("ca_pem") { None | Some(J::Null) => None, Some(J::String(p)) => Some(p.as_str()), Some(_) => return refuse(&id, 2, "ca_pem must be PEM text".into()) };
         match tls_config(ca) { Ok(c) => Some(c), Err(e) => return refuse(&id, 2, e) }
     } else { None };
+    // the bearer, from the environment (nothing is sent without it); a value of MIN_SECRET_CHARS or more is masked where the server prints it back
+    let mut secrets: Vec<String> = Vec::new();
+    let bearer: Option<String> = match req.get("bearer_env") {
+        None | Some(J::Null) => None,
+        Some(J::String(var)) => match std::env::var(var) {
+            Ok(v) if !v.is_empty() => { if v.chars().count() >= crate::drivers::MIN_SECRET_CHARS { secrets.push(v.clone()); } Some(v) }
+            _ => return refuse(&id, 2, format!("environment variable {var} is not set (for Authorization)")),
+        },
+        Some(_) => return refuse(&id, 2, "bearer_env must name an environment variable".into()),
+    };
     let addr = match (host.as_str(), port).to_socket_addrs().ok().and_then(|mut a| a.next()) {
         Some(a) => a, None => return refuse(&id, 1, format!("connect {host}:{port}: cannot resolve")),
     };
@@ -140,11 +164,13 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
     if let Some(h) = req.get("headers").and_then(|h| h.as_object()) {
         for (k, v) in h {
             if k.eq_ignore_ascii_case("host") || k.eq_ignore_ascii_case("content-length") || k.eq_ignore_ascii_case("connection") { continue; }
+            if bearer.is_some() && k.eq_ignore_ascii_case("authorization") { continue; }
             let v = v.as_str().map(String::from).unwrap_or_else(|| v.to_string());
             if k.contains(['\r', '\n']) || v.contains(['\r', '\n']) { continue; }
             head.push_str(&format!("{k}: {v}\r\n"));
         }
     }
+    if let Some(b) = &bearer { head.push_str(&format!("Authorization: Bearer {b}\r\n")); }
     if !body.is_empty() || method == "POST" || method == "PUT" || method == "PATCH" { head.push_str(&format!("Content-Length: {}\r\n", body.len())); }
     head.push_str("\r\n");
     if let Err(e) = s.write_all(head.as_bytes()).and_then(|_| s.write_all(body.as_bytes())).and_then(|_| s.flush()) { return refuse(&id, 1, format!("send: {e}")); }
@@ -158,15 +184,18 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
     };
     let head_text = String::from_utf8_lossy(&buf[..head_end]).to_string();
     let mut lines = head_text.split("\r\n");
-    let status_line = lines.next().unwrap_or("");
+    let status_line = secrets.iter().fold(lines.next().unwrap_or("").to_string(), |t, s| t.replace(s.as_str(), crate::drivers::MASK));
+    let status_line = status_line.as_str();
     let http_status: i64 = status_line.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
     let mut headers = Map::new();
-    for l in lines { if let Some((k, v)) = l.split_once(':') { headers.insert(k.trim().to_ascii_lowercase(), json!(v.trim())); } }
+    for l in lines { if let Some((k, v)) = l.split_once(':') { headers.insert(k.trim().to_ascii_lowercase(), json!(secrets.iter().fold(v.trim().to_string(), |t, s| t.replace(s.as_str(), crate::drivers::MASK)))); } }
     let mut rest: Vec<u8> = buf[head_end + 4..].to_vec();
     let chunked = headers.get("transfer-encoding").and_then(|v| v.as_str()).map(|v| v.to_ascii_lowercase().contains("chunked")).unwrap_or(false);
     let want: Option<usize> = headers.get("content-length").and_then(|v| v.as_str()).and_then(|v| v.parse().ok());
 
     let mut body_out = String::new();
+    // `keep`: a streamed request's receipt ALSO carries the whole body (a consumer that reads the finished answer from the receipt, as a non-stream request does)
+    let want_body = stream && req.get("keep").and_then(|s| s.as_bool()).unwrap_or(false);
     let mut pending: Vec<u8> = Vec::new();
     let mut n_chunk: i64 = 0;
     let mut emit = |text: String, body_out: &mut String, n: &mut i64| {
@@ -177,14 +206,23 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
             p.insert("fetch".into(), json!(eid)); p.insert("id".into(), id.clone()); p.insert("n".into(), json!(*n));
             p.insert("data".into(), json!(text)); p.insert("done".into(), json!(false));
             st.push_inbound(format!("Chunk:{eid}:{n}"), "Chunk".into(), p);
-        } else if body_out.len() < MAX_BODY { body_out.push_str(&text); }
+        }
+        if (!stream || want_body) && body_out.len() < MAX_BODY { body_out.push_str(&text); }
     };
     let mut total = 0usize;
     // data bytes -> text pieces, whatever the framing
-    let mut feed = |bytes: &[u8], pending: &mut Vec<u8>, body_out: &mut String, n: &mut i64| {
+    // `lines`: a chunk holds whole lines only (the unfinished last line waits for the next piece, the end flushes it): a consumer parses each chunk alone
+    let by_lines = stream && req.get("lines").and_then(|s| s.as_bool()).unwrap_or(false);
+    let mut held = String::new();
+    let mut whole = String::new();
+    let mut feed = |bytes: &[u8], pending: &mut Vec<u8>, body_out: &mut String, n: &mut i64, held: &mut String, whole: &mut String| {
         pending.extend_from_slice(bytes);
-        let t = take_text(pending);
-        emit(t, body_out, n);
+        held.push_str(&take_text(pending));
+        let t = release(held, &secrets, false);
+        if by_lines {
+            whole.push_str(&t);
+            if let Some(i) = whole.rfind('\n') { let out: String = whole.drain(..=i).collect(); emit(out, body_out, n); }
+        } else { emit(t, body_out, n); }
     };
     let mut terminated = !chunked;                  // a chunked body must end with its zero-size chunk
     if chunked {
@@ -199,17 +237,17 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
                 let data = inbuf[i + 2..i + 2 + size].to_vec();
                 inbuf.drain(..i + 2 + size + 2);
                 total += data.len();
-                feed(&data, &mut pending, &mut body_out, &mut n_chunk);
+                feed(&data, &mut pending, &mut body_out, &mut n_chunk, &mut held, &mut whole);
             }
             match s.read(&mut chunk) { Ok(0) => break, Ok(n) => inbuf.extend_from_slice(&chunk[..n]), Err(e) => { let why = format!("read: {e}"); if stream { end_failed_stream(st, eid, &id, n_chunk, &why); } return refuse(&id, 1, why) } }
         }
     } else {
-        if !rest.is_empty() { total += rest.len(); let r = std::mem::take(&mut rest); feed(&r, &mut pending, &mut body_out, &mut n_chunk); }
+        if !rest.is_empty() { total += rest.len(); let r = std::mem::take(&mut rest); feed(&r, &mut pending, &mut body_out, &mut n_chunk, &mut held, &mut whole); }
         loop {
             if let Some(w) = want { if total >= w { break; } }
             match s.read(&mut chunk) {
                 Ok(0) => break,
-                Ok(n) => { total += n; feed(&chunk[..n], &mut pending, &mut body_out, &mut n_chunk); if total > MAX_BODY { break; } }
+                Ok(n) => { total += n; feed(&chunk[..n], &mut pending, &mut body_out, &mut n_chunk, &mut held, &mut whole); if total > MAX_BODY { break; } }
                 Err(e) => { if stream || total == 0 { let why = format!("read: {e}"); if stream { end_failed_stream(st, eid, &id, n_chunk, &why); } return refuse(&id, 1, why); } break; }
             }
         }
@@ -221,7 +259,10 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
         if stream { end_failed_stream(st, eid, &id, n_chunk, &why); }
         return refuse(&id, 1, why);
     }
-    if !pending.is_empty() { let t = String::from_utf8_lossy(&pending).to_string(); emit(t, &mut body_out, &mut n_chunk); }
+    if !pending.is_empty() { held.push_str(&String::from_utf8_lossy(&pending)); }
+    let t = release(&mut held, &secrets, true);
+    whole.push_str(&t);
+    emit(std::mem::take(&mut whole), &mut body_out, &mut n_chunk);
     if stream {
         let mut p = Map::new();
         p.insert("fetch".into(), json!(eid)); p.insert("id".into(), id.clone()); p.insert("n".into(), json!(n_chunk + 1));
@@ -229,6 +270,6 @@ pub fn request(st: &Store, eid: &str, req: &J) -> J {
         st.push_inbound(format!("Chunk:{eid}:{}", n_chunk + 1), "Chunk".into(), p);
     }
     let mut r = json!({"id": id, "status": "ok", "rc": 0, "head": status_line, "http_status": http_status, "headers": headers});
-    if !stream { r["body"] = json!(body_out); }
+    if !stream || want_body { r["body"] = json!(body_out); }
     r
 }

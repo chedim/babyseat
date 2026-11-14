@@ -130,6 +130,48 @@
     ],
     "boot_facts": []
   },
+  "chat_oai": {
+    "imports": [
+      "chat",
+      "chat_turn",
+      "fetch"
+    ],
+    "classes": [
+      "Chat",
+      "ChatCall",
+      "ChatMessage",
+      "ChatRound",
+      "Chunk"
+    ],
+    "members": 64,
+    "writes": [
+      "*.request",
+      "*.text",
+      "*.tools",
+      "Fetch:*.request",
+      "membrane:*.calls",
+      "membrane:*.ended",
+      "membrane:*.error",
+      "membrane:*.go",
+      "membrane:*.mention",
+      "membrane:*.oai",
+      "membrane:*.oai_tools",
+      "membrane:*.round",
+      "membrane:*.started",
+      "membrane:*.state",
+      "membrane:*.usage",
+      "membrane:*=ChatCall()",
+      "membrane:*=ChatResponse()",
+      "membrane:*=ChatRound()",
+      "membrane:*=ChatTool()",
+      "membrane:*=SemText()"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "cloud_models",
+      "seat_backend"
+    ]
+  },
   "chat_turn": {
     "imports": [
       "chat",
@@ -143,7 +185,7 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 54,
+    "members": 55,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",

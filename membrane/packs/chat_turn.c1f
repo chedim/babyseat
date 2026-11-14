@@ -96,7 +96,7 @@ ChatMessage.sys getter:
 -- is refused in the turn with the reason, the CLI never starts.
 ChatMessage.pick_default getter: (this.pick or '') in ['', 'membrane']
 ChatMessage.model_eff getter: this.seat_model if this.pick_default else this.pick
-ChatMessage.pick_ok getter: this.model_eff == this.seat_model or prop('Model:' + this.model_eff, 'backend') == 'claude-agent'
+ChatMessage.pick_ok getter: this.model_eff == this.seat_model or prop('Model:' + this.model_eff, 'backend') == 'claude-agent' or this.oai_cfg != None
 ChatMessage.sdk_model getter: tail(this.model_eff, len(this.model_eff) - len('claude-agent:')) if startswith(this.model_eff, 'claude-agent:') else ('' if this.model_eff == this.seat_model else this.model_eff)
 ChatMessage.model_args getter: ['--model', this.sdk_model] if this.sdk_model != '' else []
 ChatMessage.argv getter:
@@ -107,6 +107,8 @@ ChatMessage.argv getter:
 -- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------
 ChatMessage.plan getter:
   WHEN this.queued != True or this.tstate != 'queued' or this.text == None: None
+  -- a model that is not a claude rung is answered over an OpenAI-compatible endpoint (packs/chat_oai.c1f): its own plan, none of the claude CLI's checks apply
+  ELSE WHEN this.oai_cfg != None: this.oai_plan
   ELSE WHEN this.bin == '': {'refuse': 'The chat answers through the claude CLI, and its path is not named yet (chat_claude_bin). Name it with CLAUDE_BIN=<path to claude> when you start scripts/seat, or start cliffvm with --fact chat_claude_bin=<path>, then send the message again.'}
   ELSE WHEN this.auth not in ['api_key', 'login']: {'refuse': 'The chat_auth fact says ' + str(this.auth) + ', which is not a way the claude CLI is run here. Use chat_auth=api_key (the default: the key of ANTHROPIC_API_KEY) or chat_auth=login (the login of the claude CLI itself), then send the message again.'}
   ELSE WHEN this.auth == 'api_key' and not this.key_set: {'refuse': 'No Anthropic API key: the chat answers through the claude CLI with an API key by default. Set ANTHROPIC_API_KEY in the environment the seat is started from, restart the seat, then send the message again. To use the login of the claude CLI itself instead, start the seat with --fact chat_auth=login (a deliberate choice).'}
@@ -135,12 +137,13 @@ ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.mid
 Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if e is not Error and prop(e, 'type') == 'stream_event']
 Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
 Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
-ChatMessage.partial_text getter: '' if this.over else str(prop('Chunk:' + this.cmd_eid + ':acc', 'text') or '')
-ChatMessage.partial_tools getter: [] if this.over else words(str(prop('Chunk:' + this.cmd_eid + ':acc', 'tools') or ''))
+ChatMessage.oai_acc getter: 'Chunk:Fetch:oai:' + this.mid + ':' + str(prop(this.turn_eid, 'round') or 0) + ':acc'
+ChatMessage.partial_text getter: '' if this.over else (str(prop('Chunk:' + this.cmd_eid + ':acc', 'text') or '') or str(prop(this.oai_acc, 'text') or ''))
+ChatMessage.partial_tools getter: [] if this.over else (words(str(prop('Chunk:' + this.cmd_eid + ':acc', 'tools') or '')) or words(str(prop(this.oai_acc, 'tools') or '')))
 -- THE PARTIAL ANSWER IS ACCUMULATED, NOT RE-JOINED (w28): the message used to list every live chunk at every birth (a scan of all the chunks, a dict and a sort per chunk, a join of all
 -- their text), so a turn of N chunks cost N squared (the burst: 80% of the CPU). Now each chunk, when it has parsed its own lines, appends what it said and the tools it started to ONE
 -- accumulator, `Chunk:<command>:acc` (a chunk of the same command, so it lives and is collected with the others: the running effect holds it); a birth costs the same however many came before.
-Chunk.part getter: {'said': this.said, 'started': this.started}
+Chunk.part getter: {'said': this.said, 'started': this.started} if this.cmd != None else None
 Chunk.part on-setter partial-in:
   WHEN this.part != None and this.n != None:
     ('Chunk:' + this.cmd + ':acc').text = str(prop('Chunk:' + this.cmd + ':acc', 'text') or '') + str(prop(this.part, 'said') or '')

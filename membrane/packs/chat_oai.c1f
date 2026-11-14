@@ -1,0 +1,202 @@
+PACK chat_oai 1
+IMPORT chat 1
+IMPORT chat_turn 1
+IMPORT fetch 1
+-- THE OPENAI-COMPATIBLE CHAT RUNG (#1143, step 1b of the release swap): a chat turn answered by a model that is NOT a claude rung. Same turn as the claude one (packs/chat_turn.c1f):
+-- the system prompt is the doctrine plus the banner (`sys`, the very text the claude turn gets), the prompt is the message ALONE (no history), the model's tools are the door's own
+-- (`POST /mcp`, packs/door_tools.c1f), the answer becomes the turn's ChatResponse, the tools it ran are ChatTool entities under the turn. What differs is the transport:
+-- ONE streamed `POST <base_url>/v1/chat/completions` per round (a `Fetch` with `stream`, `lines` and `bearer_env`, native/src/fetch.rs), no process.
+--
+-- WHICH MODEL: the message's model (`model_eff`, packs/chat_turn.c1f) is an entry of the boot fact `cloud_models` whose `backend` is not `claude-agent`
+--   {name, backend, base_url, api_key_env, chat_path?}   name = the model id the endpoint is asked for; `base_url` = the endpoint's root (no trailing slash needed), the call goes to
+--                                                        `base_url + chat_path` (default `/v1/chat/completions`: gemini and groq-style bases name their own path); `api_key_env` =
+--                                                        the NAME of the environment variable that holds the key (no key: none is sent); `backend` is a label (the provider's name)
+-- or a model the local backend lists (`Model:<name>` with backend `ollama`, packs/router.c1f): the call goes to the boot fact `seat_backend`, no key.
+-- A cloud entry with no `base_url` refuses the turn with the reason (nothing is sent). A key variable that is not set (or empty) fails the turn at the driver: its cause names the variable.
+--
+-- THE KEY: `bearer_env` on the Fetch names the variable; the DRIVER reads it, sends `Authorization: Bearer <value>`, and masks the value (`***`) wherever the endpoint prints it back. No pack,
+-- property, argv, row, journal line, log or reply ever holds it (the same discipline as ANTHROPIC_API_KEY, docs/cliffvm.md "The claude turn's auth").
+--
+-- THE LOOP is explicit entities, no hidden state:
+--   `...:turn.oai`            the endpoint's settings for this turn {url, model, bearer_env, timeout_s, max_turns, mcp, owner_env}; `...:turn.oai_tools` the OpenAI function tools
+--   `Fetch:oai:<mid>:tools`   the door's `tools/list` (the door's own list is reused, never copied here)
+--   `...:turn:round:<n>`      one model call (ChatRound): {mid, n, messages}; what it said is read from its Fetch's receipt (the call asks `keep`)
+--   `Fetch:oai:<mid>:<n>`     the call; `Fetch:oai:<mid>:<n>:<i>` the door's `tools/call` of the round's call i; the receipts are the facts the next step reads
+--   `...:turn.round`          the round that is current (the page's partial text reads its chunks)
+-- A round with tool calls runs each through `/mcp tools/call` (the SAME door logic: the same text the claude CLI gets), appends the assistant message and the tool results to the conversation and
+-- opens round n+1; a round with text only is the answer; a round with calls when n reaches `chat_max_turns` ends the turn with the text said so far and `(stopped at the ceiling of N turns)`
+-- (as the claude turn does). A refused or failed call, an HTTP status other than 200, an error object in the stream or an answer with no text and no call is a failed turn whose cause is stored.
+-- Streaming: each chunk of the stream is whole lines; it parses its own SSE `data:` lines and appends what they said to ONE accumulator `Chunk:<fetch>:acc` (the claude turn's way);
+-- `ChatMessage.partial_text` shows the current round's accumulator, so the event stream carries the words as they arrive.
+
+-- ---- which model, which endpoint ---------------------------------------------------------------------------------------------------------------------
+ChatMessage.oai_entry getter:
+  WHEN this.over: None
+  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') != 'claude-agent'] or [None])[0]
+ChatMessage.oai_local getter: prop('Model:' + this.model_eff, 'backend') == 'ollama'
+ChatMessage.oai_base getter:
+  WHEN this.oai_entry != None: str(prop(this.oai_entry, 'base_url') or '')
+  ELSE: ([b.seat_backend for b in instances('Boot') if b.seat_backend != None] or [''])[0]
+ChatMessage.oai_root getter: head(this.oai_base, len(this.oai_base) - 1) if tail(this.oai_base, 1) == '/' else this.oai_base
+ChatMessage.oai_cfg getter:
+  WHEN this.over: None
+  ELSE WHEN this.oai_entry == None and not this.oai_local: None
+  ELSE WHEN this.oai_root == '': {'refuse': 'The model ' + this.model_eff + ' is not a claude rung, and its cloud_models entry names no base_url. Add "base_url": "<the endpoint, e.g. https://api.example.com>" (and "api_key_env": "<the NAME of the environment variable that holds its key>") to the entry in the cloud_models fact, restart the seat, then send the message again.'}
+  ELSE: {'url': this.oai_root + str(prop(this.oai_entry, 'chat_path') or '/v1/chat/completions'), 'model': this.model_eff, 'bearer_env': prop(this.oai_entry, 'api_key_env'), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'owner_env': 'MEMBRANE_OWNER_TOKEN' if this.owner_file != None else None}
+ChatMessage.oai_plan getter: {'refuse': prop(this.oai_cfg, 'refuse')} if prop(this.oai_cfg, 'refuse') != None else {'oai': this.oai_cfg}
+
+-- ---- start: the door's tool list, then round 1 -------------------------------------------------------------------------------------------------------------
+Chat.plan on-setter oai-start:
+  WHEN prop(this.plan, 'oai') != None:
+    membrane::Chat:message[this.mid]:turn.state = 'running'
+    membrane::Chat:message[this.mid]:turn.started = clock
+    membrane::Chat:message[this.mid]:turn.oai = prop(this.plan, 'oai')
+    ('Fetch:oai:' + this.mid + ':tools').request = {'id': {'mid': this.mid, 'n': 0}, 'url': prop(prop(this.plan, 'oai'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'oai'), 'owner_env'), 'timeout_s': prop(prop(this.plan, 'oai'), 'timeout_s')}
+ChatMessage.oai_trr getter: prop('Fetch:oai:' + this.mid + ':tools', 'request_result')
+ChatMessage.oai_tj getter: ([j for j in [json(str(prop(this.oai_trr, 'body') or ''))] if j is not Error] or [{}])[0]
+ChatMessage.oai_tlist getter: prop(prop(this.oai_tj, 'result'), 'tools')
+ChatMessage.oai_tools getter:
+  WHEN this.over or this.oai_trr == None: None
+  ELSE WHEN prop(this.oai_trr, 'rc') != 0 or prop(this.oai_trr, 'http_status') != 200 or not (this.oai_tlist is List): {'fail': 'The door\'s tool list could not be read for the model ' + this.model_eff + ' (' + str(prop(this.oai_trr, 'head')) + '): ' + str(prop(this.oai_trr, 'body') or '')}
+  ELSE: {'tools': [{'type': 'function', 'function': {'name': prop(t, 'name'), 'description': prop(t, 'description'), 'parameters': prop(t, 'inputSchema')}} for t in this.oai_tlist]}
+Chat.oai_tools on-setter oai-first:
+  WHEN prop(this.oai_tools, 'tools') != None and not this.over:
+    membrane::Chat:message[this.mid]:turn.oai_tools = prop(this.oai_tools, 'tools')
+    membrane::Chat:message[this.mid]:turn:round[1] = ChatRound(mid: this.mid, n: 1, messages: [{'role': 'system', 'content': this.sys}, {'role': 'user', 'content': this.text}])
+    membrane::Chat:message[this.mid]:turn:round[1].go = True
+    membrane::Chat:message[this.mid]:turn.round = 1
+
+-- (a birth runs no setter: each entity made below is told `go = True` AFTER it is born, and the send waits for it, as the message's `queued`)
+-- ---- a round: one streamed call ---------------------------------------------------------------------------------------------------------------------------
+ChatRound.kind getter: 'round'
+ChatRound.turn_e getter: 'membrane::Chat:message:' + this.mid + ':turn'
+ChatRound.rq getter: 'Fetch:oai:' + this.mid + ':' + str(this.n)
+ChatRound.cfg getter: prop(this.turn_e, 'oai')
+ChatRound.oai_req getter:
+  WHEN this.go != True or this.messages == None or this.cfg == None or prop(this.turn_e, 'oai_tools') == None: None
+  ELSE: {'id': {'mid': this.mid, 'n': this.n}, 'url': prop(this.cfg, 'url'), 'method': 'POST', 'headers': {'Content-Type': 'application/json', 'Accept': 'text/event-stream'}, 'body': {'model': prop(this.cfg, 'model'), 'messages': this.messages, 'tools': prop(this.turn_e, 'oai_tools'), 'stream': True}, 'stream': True, 'lines': True, 'keep': True, 'bearer_env': prop(this.cfg, 'bearer_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
+Chat.oai_req on-setter oai-send:
+  WHEN this.oai_req != None:
+    ('Fetch:oai:' + this.mid + ':' + str(this.n)).request = this.oai_req
+
+-- ---- the stream: the words as they arrive (chunks), the answer from the receipt -----------------------------------------------------------------------------------------------
+-- (`Chunk.part` of packs/chat_turn.c1f is the claude CLI's: it reads the chunks of a Command; these are the chunks of a Fetch, `fetch` in place of `cmd`.) A chunk is whole lines
+-- (`lines`); it parses its own SSE `data:` lines and appends the words and the names of the tools started to ONE accumulator `Chunk:<fetch>:acc`: that is only what the page shows
+-- while the call runs (`ChatMessage.partial_text`). The ANSWER is not read from it (the accumulator is collected when the call's receipt lands): the call asks for `keep`, so its
+-- receipt carries the whole body, and the round reads the finished stream from there, as the claude turn reads its CLI's stdout.
+Chunk.oevs getter: [e for e in [json(strip(after(l, 'data:'))) for l in lines(str(this.data or '')) if startswith(l, 'data:')] if e is not Error and e is Dict]
+Chunk.ochs getter: [(prop(e, 'choices') or [None])[0] for e in this.oevs]
+Chunk.oapart getter:
+  WHEN this.fetch == None or not startswith(str(this.fetch), 'Fetch:oai:') or this.n == None or this.done == True: None
+  ELSE: {'said': join([str(prop(prop(c, 'delta'), 'content') or '') for c in this.ochs], ''), 'started': join([join([str(prop(prop(tc, 'function'), 'name') or '') for tc in (prop(prop(c, 'delta'), 'tool_calls') or [])], ' ') for c in this.ochs], ' ')}
+Chunk.oacc getter: 'Chunk:' + str(this.fetch) + ':acc'
+Chunk.oapart on-setter oai-in:
+  WHEN this.oapart != None:
+    (this.oacc).text = str(prop(this.oacc, 'text') or '') + prop(this.oapart, 'said')
+    (this.oacc).tools = str(prop(this.oacc, 'tools') or '') + ' ' + prop(this.oapart, 'started')
+
+-- ---- what a round said, from its receipt: the calls assembled from their deltas (an index, an id once, the name and the arguments in pieces) ------------------------------------
+ChatRound.rcpt getter: prop(this.rq, 'request_result')
+ChatRound.rbody getter: str(prop(this.rcpt, 'body') or '')
+ChatRound.revs getter: [e for e in [json(strip(after(l, 'data:'))) for l in lines(this.rbody) if startswith(l, 'data:')] if e is not Error and e is Dict]
+ChatRound.rchs getter: [(prop(e, 'choices') or [None])[0] for e in this.revs]
+ChatRound.tcl getter: [prop(prop(c, 'delta'), 'tool_calls') for c in this.rchs if prop(prop(c, 'delta'), 'tool_calls') != None]
+ChatRound.usage getter: ([prop(e, 'usage') for e in this.revs if prop(e, 'usage') != None] or [None])[-1]
+ChatRound.finish getter: ([prop(c, 'finish_reason') for c in this.rchs if prop(c, 'finish_reason') != None] or [None])[-1]
+ChatRound.err getter: ([str(prop(e, 'error')) for e in this.revs if prop(e, 'error') != None] or [None])[0]
+ChatRound.idxs getter: [num(x) for x in distinct(words(join([join([str(prop(tc, 'index') or 0) for tc in e], ' ') for e in this.tcl], ' ')))]
+ChatRound.calls getter: [{'i': i, 'id': (words(join([join([str(prop(tc, 'id') or '') for tc in e if (prop(tc, 'index') or 0) == i], ' ') for e in this.tcl], ' ')) or ['call_' + str(this.n) + '_' + str(i)])[0], 'name': join([join([str(prop(prop(tc, 'function'), 'name') or '') for tc in e if (prop(tc, 'index') or 0) == i], '') for e in this.tcl], ''), 'args': join([join([str(prop(prop(tc, 'function'), 'arguments') or '') for tc in e if (prop(tc, 'index') or 0) == i], '') for e in this.tcl], '')} for i in this.idxs]
+ChatRound.said getter: join([str(prop(prop(c, 'delta'), 'content') or '') for c in this.rchs], '')
+ChatRound.step getter:
+  WHEN this.rcpt == None: None
+  ELSE WHEN prop(this.rcpt, 'rc') != 0: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' could not be called (' + str(prop(this.rcpt, 'head')) + ')'}
+  ELSE WHEN prop(this.rcpt, 'http_status') != 200: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' answered HTTP ' + str(prop(this.rcpt, 'http_status')) + ': ' + strip(this.rbody)}
+  ELSE WHEN this.err != None: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' reported an error: ' + str(this.err)}
+  ELSE WHEN len(this.calls) > 0 and this.n >= prop(this.cfg, 'max_turns'): {'capped': True}
+  ELSE WHEN len(this.calls) > 0: {'calls': True}
+  ELSE WHEN strip(this.said) == '': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' answered with no text and no tool call (finish: ' + str(this.finish) + ')'}
+  ELSE: {'final': this.said}
+
+-- ---- the round's tool calls: each is an entity (ChatCall) and the door's own `tools/call` -------------------------------------------------------------------------------
+Chat.step on-setter oai-calls:
+  WHEN prop(this.step, 'calls') == True:
+    FOR c IN this.calls:
+      membrane::Chat:message[this.mid]:turn:round[str(this.n)]:call[str(c['i'])] = ChatCall(mid: this.mid, n: this.n, i: c['i'], id: c['id'], name: c['name'], args: c['args'])
+      membrane::Chat:message[this.mid]:turn:round[str(this.n)]:call[str(c['i'])].go = True
+ChatCall.kind getter: 'call'
+ChatCall.rq getter: 'Fetch:oai:' + this.mid + ':' + str(this.n) + ':' + str(this.i)
+ChatCall.cfg getter: prop('membrane::Chat:message:' + this.mid + ':turn', 'oai')
+-- the arguments are JSON text the model wrote: a call whose text is not a JSON object is not sent, and the model is told so as the tool's result
+ChatCall.bad getter: not (json(str(this.args or '') or '{}') is Dict)
+ChatCall.input getter: {} if this.bad else json(str(this.args or '') or '{}')
+ChatCall.creq getter:
+  WHEN this.go != True or this.bad or this.cfg == None: None
+  ELSE: {'id': {'mid': this.mid, 'n': this.n, 'i': this.i}, 'url': prop(this.cfg, 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': this.name, 'arguments': this.input}}, 'bearer_env': prop(this.cfg, 'owner_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
+Chat.creq on-setter oai-tool-send:
+  WHEN this.creq != None:
+    (this.rq).request = this.creq
+ChatCall.rr getter: prop(this.rq, 'request_result')
+ChatCall.j getter: ([j for j in [json(str(prop(this.rr, 'body') or ''))] if j is not Error] or [{}])[0]
+ChatCall.door_text getter: prop((prop(prop(this.j, 'result'), 'content') or [None])[0], 'text')
+-- a call's text: the door's reply text (the same text `tools/call` gives the claude CLI), the door's JSON-RPC error message, or what went wrong reaching the door
+ChatCall.text getter:
+  WHEN this.bad: 'Error: the arguments of the call are not a JSON object: ' + str(this.args)
+  ELSE WHEN this.rr == None: None
+  ELSE WHEN prop(this.rr, 'rc') != 0: 'Error: the door could not be reached for ' + this.name + ' (' + str(prop(this.rr, 'head')) + ')'
+  ELSE WHEN this.door_text != None: str(this.door_text)
+  ELSE WHEN prop(prop(this.j, 'error'), 'message') != None: 'Error: ' + str(prop(prop(this.j, 'error'), 'message'))
+  ELSE: 'Error: the door answered HTTP ' + str(prop(this.rr, 'http_status')) + ': ' + str(prop(this.rr, 'body') or '')
+ChatCall.out getter: {'id': this.id, 'name': this.name, 'input': this.input, 'text': this.text} if this.text != None else None
+ChatRound.call_eids getter: ['membrane::Chat:message:' + this.mid + ':turn:round:' + str(this.n) + ':call:' + str(c['i']) for c in this.calls]
+ChatRound.results getter:
+  WHEN prop(this.step, 'calls') != True: None
+  ELSE: ([r for r in [[prop(e, 'out') for e in this.call_eids]] if len([x for x in r if x == None]) == 0] or [None])[0]
+ChatRound.assistant getter: {'role': 'assistant', 'content': (this.said or None), 'tool_calls': [{'id': c['id'], 'type': 'function', 'function': {'name': c['name'], 'arguments': c['args'] or '{}'}} for c in this.calls]}
+ChatRound.oai_next getter: {'messages': concat(concat(this.messages, [this.assistant]), [{'role': 'tool', 'tool_call_id': r['id'], 'content': r['text']} for r in this.results])} if this.results != None else None
+Chat.oai_next on-setter oai-next:
+  WHEN this.oai_next != None:
+    FOR r IN this.results:
+      membrane::Chat:message[this.mid]:turn:tool[r['id']] = ChatTool(name: r['name'], input: r['input'], result: r['text'])
+    membrane::Chat:message[this.mid]:turn:round[str(this.n + 1)] = ChatRound(mid: this.mid, n: this.n + 1, messages: prop(this.oai_next, 'messages'))
+    membrane::Chat:message[this.mid]:turn:round[str(this.n + 1)].go = True
+    membrane::Chat:message[this.mid]:turn.round = this.n + 1
+
+-- ---- what the turn has used, over its rounds (explicit, round by round) -----------------------------------------------------------------------------------------------
+ChatRound.prev getter: 'membrane::Chat:message:' + this.mid + ':turn:round:' + str(this.n - 1) if this.n > 1 else None
+ChatRound.ids_before getter: prop(this.prev, 'ids') or []
+ChatRound.names_before getter: prop(this.prev, 'names') or []
+ChatRound.ids getter: concat(this.ids_before, [c['id'] for c in this.calls])
+ChatRound.names getter: concat(this.names_before, [c['name'] for c in this.calls])
+-- the endpoint's own numbers, summed over the rounds: `seen` says whether any round reported usage (an endpoint that never does leaves the turn's usage empty)
+ChatRound.cum getter: {'in': (prop(prop(this.prev, 'cum'), 'in') or 0) + (prop(this.usage, 'prompt_tokens') or 0), 'out': (prop(prop(this.prev, 'cum'), 'out') or 0) + (prop(this.usage, 'completion_tokens') or 0), 'seen': prop(prop(this.prev, 'cum'), 'seen') == True or this.usage != None}
+ChatRound.usage_out getter: {'input_tokens': prop(this.cum, 'in'), 'output_tokens': prop(this.cum, 'out')} if prop(this.cum, 'seen') == True else None
+
+-- ---- the end of the turn ------------------------------------------------------------------------------------------------------------------------------------------
+ChatMessage.oai_round getter: 'membrane::Chat:message:' + this.mid + ':turn:round:' + str(prop(this.turn_eid, 'round') or 0)
+ChatMessage.oai_step getter: prop(this.oai_round, 'step')
+-- what ended the turn: the cause of a failure, or the answer; then ONE value holds everything the finish writes (a setter reads only the getter that triggers it and what it
+-- depends on: a sibling that reads the trigger would still be the old value when the setter runs)
+ChatMessage.oai_res getter:
+  WHEN this.over: None
+  ELSE WHEN prop(this.oai_tools, 'fail') != None: {'fail': prop(this.oai_tools, 'fail')}
+  ELSE WHEN prop(this.oai_step, 'fail') != None: {'fail': prop(this.oai_step, 'fail')}
+  ELSE WHEN prop(this.oai_step, 'final') != None: {'text': prop(this.oai_step, 'final')}
+  ELSE WHEN prop(this.oai_step, 'capped') == True: {'text': prop(this.oai_round, 'said') + '\n\n(stopped at the ceiling of ' + str(this.max_turns) + ' turns)'}
+  ELSE: None
+ChatMessage.oai_end getter:
+  WHEN this.oai_res == None: None
+  ELSE: {'fail': prop(this.oai_res, 'fail'), 'text': str(prop(this.oai_res, 'fail') or prop(this.oai_res, 'text') or ''), 'usage': prop(this.oai_round, 'usage_out'), 'calls': prop(this.oai_round, 'n'), 'names': prop(this.oai_round, 'names_before'), 'ids': join(prop(this.oai_round, 'ids_before'), ' ')}
+-- (a write in a setter is seen by the lines after it: `state` is written LAST, because `over` ends what `oai_res` says)
+Chat.oai_end on-setter oai-finish:
+  WHEN this.oai_end != None and not this.over:
+    membrane::Chat:message[this.mid]:turn.ended = clock
+    membrane::Chat:message[this.mid]:turn.error = prop(this.oai_end, 'fail')
+    membrane::Chat:message[this.mid]:turn.usage = prop(this.oai_end, 'usage')
+    membrane::Chat:message[this.mid]:turn.calls = prop(this.oai_end, 'calls')
+    this.tools_run = prop(this.oai_end, 'names')
+    this.tool_ids = prop(this.oai_end, 'ids')
+    membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: prop(this.oai_end, 'text'), error: prop(this.oai_end, 'fail') != None)
+    FOR t IN ([prop(this.oai_end, 'text')] if prop(this.oai_end, 'fail') == None else []):
+      membrane::Chat:message[this.mid]:turn:response:body = SemText(text: t)
+      membrane::Chat:message[this.mid]:turn:response:body.mention = True
+    membrane::Chat:message[this.mid]:turn.state = 'error' if prop(this.oai_end, 'fail') != None else 'done'
