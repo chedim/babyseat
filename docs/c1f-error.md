@@ -1,6 +1,18 @@
 # c1f `Error`: a value kind for failure, distinct from null (design note, #1143)
 
-**Important first.** This is a design note, no code. The kind is decided by the operator (2026-11-13): null = absent / not applicable (keeps its
+**STATUS (2026-11-13): BUILT, in six rounds (branch w39-error).** The note below is the design; where the build differs, this block says so. Built exactly as the
+note says, with the operator's decisions of 2026-11-13: `V::Error`, `is` / `is not` (class lists follow `parents`), the operator table, derived Errors stored as
+null with the kind in `Core.failed` beside `Core.why`, a setter writing an Error refused with a `refused` receipt, `Error('reason')`, the reserved name `Error`,
+`why(x)` reading an Error, inference as a kind (`T|Error`), one `types.json` regenerate commit. Differences and open points:
+(1) the Error carries its reason only (no separate `source` field: a getter that reads an Error returns it unchanged, and `Why` names the getter);
+(2) the `error: ` prefix is gone from failure reasons (`budget exceeded (N steps)`, `timeout N ms (allowance M ms)`, `not-a-type: ...`, the key errors): the kind says it;
+(3) NOT converted, left for the operator: `json(text)` of bad text (about 17 pack lines read `json(x) or {}` / `json(x) != None` as "not JSON is fine"); refused
+writes stay `refused` receipt TEXT (they are not values); `run_cliff` still shows a null with a reason as `error: <reason>` (an Error shows `Error: <reason>`);
+(4) the cast union `Int(v) or Text(v)` no longer works (a failed cast is an Error and `or` never hides it): it is written `v if v is Int or v is Text else ...`;
+(5) `x is Num` is not a kind (Num is a cast spelling, not a value kind): it reads as a class name and is false for every value;
+(6) a setter LOCAL or FOR list that is an Error stops the setter (a receipt), because a setter local holds JSON.
+
+**Important first (the original note).** This is a design note, no code. The kind is decided by the operator (2026-11-13): null = absent / not applicable (keeps its
 `why` as a note, `x == None` and `or` work as today); `Error` = something failed, carries reason + remedy, `x == None` is FALSE for it, it
 PROPAGATES through getters unchanged (no "via" chain), and the check is the operator `is`. Old JSON routes and `tests/golden/` stay
 byte-identical (an Error serialises as null there); only `entity_read` and `run_cliff` show the kind. Three things in the brief do not

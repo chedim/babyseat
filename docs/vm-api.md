@@ -50,7 +50,7 @@ A trigger is an entity of class `Trigger`: `WHEN <watchers> WHERE <atoms>: <targ
 - **Expressions.** A small safe language: arithmetic, comparisons, and/or/not, `x.prop`,
   `dot`, `norm`, `distance`, `unit`, `abs`, `min`, `max`, `prop`. The caps are
   `VEC_MAX` 8192. The old `EXPR_MAX` 400 / `NODES_MAX` 64 caps are gone from the native VM (ch.py parity for them is intentionally dropped): an
-  evaluation has a step budget (`DEFAULT_EVAL_BUDGET` 10000, env `MEMBRANE_EVAL_BUDGET`; over it: the reasoned null `error: budget exceeded (N steps)`).
+  evaluation has a step budget (`DEFAULT_EVAL_BUDGET` 10000, env `MEMBRANE_EVAL_BUDGET`; over it: the Error `budget exceeded (N steps)`).
   A getter body is a block of locals (`name = expr` lines) ending in its value (docs/c1f-stdlib.md).
 - **Denied properties.** No trigger may write `command`, `owner`, `owner_sig`, `when`,
   `where`, `write`, `shadow` or `predicted`.
@@ -99,7 +99,7 @@ A birth carries the entity's content, which a bare `(eid, None, eid)` can't rebu
 
 Limits an evaluation runs under (native): a step budget (default 100,000, env `MEMBRANE_EVAL_BUDGET`) and a self-time allowance
 (default 10 ms, env `MEMBRANE_EVAL_TIME_MS`; the time spent in host calls that wait is not counted). Over either, the node is a
-reasoned null (`budget exceeded (N steps)`, `timeout N ms (allowance M ms)`). The budget is deterministic. The time trip is not, so
+Error (`budget exceeded (N steps)`, `timeout N ms (allowance M ms)`). The budget is deterministic. The time trip is not, so
 replay needs it recorded: the kills only, never timings. A kill is a `Trip:<eid>#<prop>` entity written as a host write after the
 evaluation (like an effect receipt: writer `field:driver:trip`), which the journal keeps as an outside write; on replay the node
 evaluates, the journalled Trip arrives, and the node recomputes to the same null. It applies until an input of the node changes

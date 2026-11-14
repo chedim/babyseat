@@ -76,7 +76,7 @@ Box.safe getter: (this.total or 0) + 1
 Box.source getter: None('no path named yet') if this.path == None else this.path
 ```
 
-Casts check a type and give a reasoned null otherwise: `Int(x)`, `Float(x)`, `Num(x)`, `Text(x)`, `Bool(x)`, `List(x)`, `Dict(x)`.
+Casts check a type and give an Error (a failure, not a null) otherwise: `Int(x)`, `Float(x)`, `Num(x)`, `Text(x)`, `Bool(x)`, `List(x)`, `Dict(x)`. `x is Error` tests a failure, `x is Int` (or `Float Text Bool List Dict`) a value's kind, `x is Trip` an entity's class; `or` never hides an Error (`Help:upgrade`, "Errors").
 
 ## Operators and builtins
 

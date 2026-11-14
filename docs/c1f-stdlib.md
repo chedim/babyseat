@@ -84,6 +84,17 @@ A bare line `name = expr` (no dotted target; a write always has one, like `this.
 - **Nulls and their reasons** (#1143; `native/tests/semantics_1143.rs`): reading a property an entity does not hold is the null `absent: <entity>.<property>` (`View::attr`; a getter that computed `None` is a plain null, `Core.nulled`; the help `Help:upgrade` says the same). A reasoned null inside a list or a dict is kept: in an expression it is the element itself; in a
   value a getter STORED (JSON, where every null is plain: what is stored and sent is unchanged) the engine remembers the reason beside it in `Core.why` under `<prop> NUL <path>` (`expr::nested_nulls`, set by the getter that stores it, replaced with its next value, dropped with the entity) and a read of the stored list or dict puts the
   reasoned nulls back (`overlay_nested`). `str` of a list or a dict writes such a null as `{"$null": "<reason>"}` (`expr::to_json_shown`; a null without a reason stays `null`), which is what `run_cliff` prints. Not covered: a nested null a SETTER wrote (setter values keep plain nulls).
+- **Error: a failure is not a null** (#1143; `docs/c1f-error.md`, `native/tests/error_*_1143.rs`). `null` = not initialised, absent, not applicable (it keeps its
+  `why`); `Error` = something FAILED: a value kind (`V::Error`) that carries its reason (the remedy is part of the text). `x == None` is False for an Error; `or`
+  stays the default operator and never hides an Error (there is no `??`); `x is Error` is the test, `why(x)` reads its text. An Error PROPAGATES: arithmetic,
+  `-x`, `x[i]`, `x.a`, comparisons (not `x == None`), `not`, `and`, `or`, an `if`/WHEN/comprehension condition and every call but `why` give that same Error
+  (first one wins, an Error wins over a plain null); a WHEN over an Error does NOT fall through to the next arm. A getter reading an Error returns the same Error
+  unchanged (no "via" chain). Stored, a derived Error is a plain null with its kind in `Core.failed` beside the reason in `Core.why` (so every old route sees null;
+  `entity_read` and `run_cliff` print `Error: <reason>`); a setter or constructor that writes an Error is refused with a `refused` receipt and the old value stays; an
+  Error inside a list or dict is kept inside one evaluation and is a plain null across a store. Made by: a failed cast (`not-a-type: ...`), a bad entity-literal key,
+  a getter body that raised, the step budget, the self-time kill (the Trip), a timed-out `Command` (`proc.c1f`), and a pack's own `Error('reason')`. Still null:
+  a missing property, `.x` of an absent value, `pending: ...`, a collected virtual entity, `f of a null`. Unchanged: `json(text)` of bad text is a plain null
+  (a decision for the operator: ~17 pack lines read `json(x) or {}`). The name `Error` is reserved (no class, no local).
 - a local that holds a reasoned null passes it on like any value; `Why(...)` (`why_chain`) lists the locals of the getter evaluation it explains
   (`locals: {name: value}`, a null shows its reason);
 - the loader refuses a local that shadows a property of `this` (a name the class reads or writes as `this.<name>`, or a setter trigger),
@@ -101,7 +112,7 @@ read as an entity.
 - `[expr]` directly after an entity literal appends `:<value>` as the last segment: `membrane::Chat:message[123]` is
   `membrane::Chat:message:123`, `membrane::Config:voice:in[slug]` evaluates `slug` (a local, a getter or a loop name; a bare name
   is NEVER a literal segment). The value must be an integer or non-empty text. A float, bool, list, dict, entity or null gives a
-  reasoned null (`error: the key of <entity> is ...`) and, on the left of a write, creates and writes nothing; a null key passes on
+  Error (`the key of <entity> is ...`) and, on the left of a write, creates and writes nothing; a null key passes on
   its own reason.
 - The path may go on after a `]`: `:segment` (directly after the `]`) is a CHILD entity, `.name` is a PROPERTY.
   `membrane::Chat:message[id]:response` is `membrane::Chat:message:<id>:response` (an entity); `message[id].response` reads the
@@ -141,7 +152,7 @@ is written after the birth, and the entity is born again for the getters. A SETT
 
 ## Limits: the step budget and the time allowance (dials)
 The old caps (an expression at most 64 nodes / 400 characters) are removed from the native VM; `membrane/ch.py` keeps them for its own
-triggers (parity for the caps is intentionally dropped). Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is a reasoned null `error: budget exceeded (N steps)` (a getter's
+triggers (parity for the caps is intentionally dropped). Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is an Error `budget exceeded (N steps)` (a getter's
 `Why` shows it, a receipt says where), never a hang or a panic. The default is 100,000 steps (`DEFAULT_EVAL_BUDGET`), overridden by the env
 `MEMBRANE_EVAL_BUDGET`. `VEC_MAX` (8192) stays. Structural limits that are not size caps: expressions nest at most 64 deep and
 evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All accounting lives in `expr::Budget`.
@@ -150,7 +161,7 @@ evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All a
 (`DEFAULT_EVAL_TIME_MS`, env `MEMBRANE_EVAL_TIME_MS`; both approved by the operator 2026-11-12, to be tuned). Self-time is the
 elapsed time minus the time spent in host calls that wait on I/O (`expr::waiting`: the synchronous `Host::call`; `sql`, `jsonl`,
 `read`, `listdir`, `stat` and the `call_later` functions only ask and return a pending null at once, so there is nothing to
-subtract there). Over it, that node (only) becomes a reasoned null `error: timeout N ms (allowance M ms)` (N rounded up); `Why`
+subtract there). Over it, that node (only) becomes an Error `timeout N ms (allowance M ms)` (N rounded up); `Why`
 prints it like the budget's reason; the rest of the engine keeps running. The clock is read twice per evaluation (start, end),
 and the step counter doubles as the in-evaluation backstop: every `TIME_CHECK_EVERY` (256) steps it reads the clock again, so a
 runaway loop inside one evaluation trips before it ends. The clock is injectable (`expr::set_clock`) for tests.
@@ -160,7 +171,7 @@ a getter evaluation is killed the engine writes `Trip:<eid>#<prop>` {`node`, `se
 receipt arrives (writer `field:driver:trip`, a `born` then one write per property), so a journal that keeps the outside writes keeps
 the kill and needs no new line type. An evaluation that finishes in time writes nothing: there is no timing log. The budget trip
 (`budget exceeded`) is deterministic and is not recorded.
-- **While it applies.** A node whose own Trip is `active` IS the reasoned null `error: timeout N ms (allowance M ms)` (read from the
+- **While it applies.** A node whose own Trip is `active` IS the Error `timeout N ms (allowance M ms)` (read from the
   Trip's numbers; nothing is evaluated), and `Why` points at the Trip (`trip: <eid>`). It applies until one of the node's inputs changes:
   then the node is evaluated fresh, and a fresh evaluation that does not trip writes `active: false` (the kill stays as history; this
   write is derived, not journalled); one that trips again rewrites the Trip (a new `self_ms`/`at`, `active` written true again).
