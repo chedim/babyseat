@@ -2,5 +2,5 @@ PACK environment 1
 RESIDENT Environment
 -- THE ENVIRONMENT (#1143): `Environment:host` is ONE entity the host writes at the seat's start; its PROPERTIES ARE the environment variables (property name = variable name: `Environment:host.HOME`,
 -- `Environment:host.MEMBRANE_DATA_DIR`). A variable that is not set is absent (a read is a null with the reason `absent: ...`). Only an allow-listed set carries its value (HOME, USER, LANG, XDG_DATA_HOME,
--- XDG_CONFIG_HOME, MEMBRANE_DATA_DIR, CLAUDE_BIN, TMPDIR; the launch fact `env_allow` adds names); a variable whose name holds KEY, TOKEN, SECRET or PASSWORD reads the text `set` and never its value.
+-- XDG_CONFIG_HOME, MEMBRANE_DATA_DIR, CLAUDE_BIN, TMPDIR; the launch fact `env_allow` adds names); a variable whose name holds KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL reads the text `set` and never its value.
 -- The pack only declares the class so the host's write is kept. A stored, journalled outside write (`host:environment`): a replay and a restart see the value of the boot.

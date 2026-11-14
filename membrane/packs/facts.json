@@ -159,7 +159,7 @@
   },
   "env_allow": {
    "wired": false,
-   "why": "names of environment variables that carry their VALUE on `Environment:host` besides the default list (HOME, USER, LANG, XDG_DATA_HOME, XDG_CONFIG_HOME, TMPDIR, CLAUDE_BIN, MEMBRANE_DATA_DIR; native/src/host.rs `boot_environment`, membrane/packs/environment.c1f); a JSON list or text with commas; a name with KEY, TOKEN, SECRET or PASSWORD in it is refused (it reads `set`, never its value) and the start says so; told by `--fact env_allow=FOO_BAR`"
+   "why": "names of environment variables that carry their VALUE on `Environment:host` besides the default list (HOME, USER, LANG, XDG_DATA_HOME, XDG_CONFIG_HOME, TMPDIR, CLAUDE_BIN, MEMBRANE_DATA_DIR; native/src/host.rs `boot_environment`, membrane/packs/environment.c1f); a JSON list or text with commas; a name with KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL in it is refused (it reads `set`, never its value) and the start says so; told by `--fact env_allow=FOO_BAR`"
   },
   "legacy_batch": {
    "wired": false,

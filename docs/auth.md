@@ -15,7 +15,7 @@ The only mode without a secret is the BAREST seat (`scripts/seat`, no `door_secr
 
 **The secret file's rules** (release verification, docs/release-verification.md): a missing or empty file is made; one shorter than 32 bytes, unreadable, or a folder REFUSES the start (the seat never replaces a secret it cannot read: that would log everyone out). A second seat started on a copy of the file accepts the first's tokens. The door refuses `crit`, an `aud` and a non-numeric `nbf`/`iat`; a request carrying `X-Forwarded-For`, `Forwarded` or `X-Real-IP` is not this machine (no owner cookie); the door removes `authorization` and `cookie` from the Request entity after verifying them; a HEAD to a family route is a 405 with `allow`. Every pack setter that writes on a request reads `Request.entrant` (the 401 is only a reply).
 
-**The environment as an entity.** `Environment:host` (docs/cliffvm.md) shows the seat's environment variables to the model: an allow-list carries values; any name with KEY, TOKEN, SECRET or PASSWORD reads only `set`.
+**The environment as an entity.** `Environment:host` (docs/cliffvm.md) shows the seat's environment variables to the model: an allow-list carries values; any name with KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL reads only `set`.
 
 **Local tools** read the file: `curl -H "Authorization: Bearer $(cat <seat_data_dir>/owner.token)" http://127.0.0.1:<port>/global/health` (`scripts/seat-full` prints this line with the real paths).
 **The page** needs nothing: a page fetched from this machine (a loopback peer, no `X-Forwarded-For`/`Forwarded`) is given the owner cookie `membrane_jwt_<8 hex>` (HttpOnly, SameSite=Strict, 7 days); `POST /ui/login {"token": "<jwt>"}` turns any token into the same cookie.

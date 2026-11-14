@@ -158,6 +158,8 @@ pub struct Host {
     eng: Mutex<Engine>,
     db: Arc<Mutex<Connection>>,
     journal: Mutex<Vec<Line>>,
+    /// the key of the NEXT stored journal line: continues from the highest stored key at open (the in-memory `journal` holds this run's lines only), so a restart appends and never replaces
+    journal_next: std::sync::atomic::AtomicU64,
     clock: Box<dyn Fn() -> f64 + Send + Sync>,
     waiter: Option<crate::store::Waiter>,
     /// the last refusal of a Pack entity's text (parse, stale setter, PACK line, import clash): name -> message
@@ -276,6 +278,7 @@ impl Host {
             db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {t} (k TEXT PRIMARY KEY, body TEXT NOT NULL)")).map_err(dbe)?;
         }
         migrate(&db)?;
+        let journal_next = db.query_row(&format!("SELECT MAX(k) FROM {JOURNAL}"), [], |r| r.get::<_, Option<String>>(0)).map_err(dbe)?.and_then(|k| k.parse::<u64>().ok()).map_or(0, |k| k + 1);   // the primary key's index: no scan
         let db = Arc::new(Mutex::new(db));
         let mut core = Core::new();
         core.queue_writes = false;   // a field host runs no trigger engine: the queue would only hold every write's values (vm.rs `queue_writes`)
@@ -294,7 +297,7 @@ impl Host {
         core.storage = fields.storage_handle();   // the core reads the classes' modes too (`.pinned`)
         fields.inbound_by_host = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
-        Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default(), memory: Default::default(), rss_reading: Default::default() })
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), journal_next: std::sync::atomic::AtomicU64::new(journal_next), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default(), memory: Default::default(), rss_reading: Default::default() })
     }
 
     /// Whether the named pack holds the privilege (exempt from rule B): the packs of the first app (the root of trust, by the host), any other by a
@@ -991,7 +994,7 @@ impl Host {
         let mut j = self.journal.lock().unwrap_or_else(|e| e.into_inner());
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let body = l.to_json().to_string();
-        self.exec(&db, &format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", j.len()), body]);
+        self.exec(&db, &format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", self.journal_next.fetch_add(1, Ordering::SeqCst)), body]);
         // THE IN-MEMORY COPY keeps no huge value: the stored line (c_journal, what a replay reads) is whole, the copy in RAM names its size instead. A query receipt of the history import
         // carries a page of rows (megabytes) and every page was kept here for the life of the process (measured 2026-11-14: ~100 MB of RSS a page). A flagged threshold (JOURNAL_RAM_MAX_BYTES).
         if body.len() > JOURNAL_RAM_MAX_BYTES {
@@ -1054,12 +1057,12 @@ pub fn boot_started(h: &Host, facts: &Map<String, J>, announce: bool) {
 /// THE ENVIRONMENT (#1143, operator 2026-11-14: "Environment node that holds envvars as its properties"): at the start the host writes ONE entity, `Environment:host`, whose PROPERTIES ARE the
 /// environment variables (property name = variable name; a variable that is not set is absent). A STORED entity (class `Environment`, RESIDENT, declared by the pack `environment`), written by a
 /// JOURNALLED outside write (`host:environment`), so a replay shows the value the boot saw. THE SECRET RULE: only the names of `ENV_DEFAULT_ALLOW` (plus the launch fact `env_allow`) carry their
-/// value; a variable whose name holds KEY, TOKEN, SECRET or PASSWORD (any case) is published as the fixed text `set` when it is set and non-empty, never its value; every other variable is absent.
+/// value; a variable whose name holds KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL (any case) is published as the fixed text `set` when it is set and non-empty, never its value; every other variable is absent.
 pub const ENV_WRITER: &str = "host:environment";
 pub const ENV_ENTITY: &str = "Environment:host";
 pub const ENV_SET: &str = "set";
 pub const ENV_DEFAULT_ALLOW: [&str; 8] = ["HOME", "USER", "LANG", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "MEMBRANE_DATA_DIR", "CLAUDE_BIN", "TMPDIR"];
-pub const ENV_SECRET_WORDS: [&str; 4] = ["KEY", "TOKEN", "SECRET", "PASSWORD"];
+pub const ENV_SECRET_WORDS: [&str; 6] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL"];
 pub fn env_secret_name(name: &str) -> bool { let u = name.to_uppercase(); ENV_SECRET_WORDS.iter().any(|w| u.contains(w)) }
 
 /// The properties of `Environment:host` for this environment and these facts, and the names `env_allow` asked for that the secret rule refused (each as a line that says why; never a value).
@@ -1072,7 +1075,7 @@ pub fn environment_props(facts: &Map<String, J>, env: &[(String, String)]) -> (M
     let mut refused = vec![];
     let mut allow: Vec<String> = ENV_DEFAULT_ALLOW.iter().map(|s| s.to_string()).collect();
     for n in asked {
-        if env_secret_name(&n) { refused.push(format!("env_allow: {n} is refused: a name with KEY, TOKEN, SECRET or PASSWORD in it never carries its value (the environment shows only that it is set)")); }
+        if env_secret_name(&n) { refused.push(format!("env_allow: {n} is refused: a name with KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL in it never carries its value (the environment shows only that it is set)")); }
         else { allow.push(n); }
     }
     let mut out = Map::new();

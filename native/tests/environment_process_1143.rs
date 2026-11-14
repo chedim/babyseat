@@ -112,7 +112,7 @@ fn a_secret_name_asked_for_by_env_allow_is_refused_with_the_reason_and_its_value
 }
 
 #[test]
-fn a_restart_with_another_environment_shows_the_new_boot_value_and_the_journal_holds_the_boots_outside_write() {
+fn a_restart_with_another_environment_shows_the_new_boot_value_and_the_journal_holds_both_boots_writes() {
     let d = dir("restart");
     let mut a = start(&d, &[("MEMBRANE_DATA_DIR", "/first-w115")], &[]);
     assert_eq!(environment(a.port)["MEMBRANE_DATA_DIR"], json!("/first-w115"));
@@ -121,6 +121,24 @@ fn a_restart_with_another_environment_shows_the_new_boot_value_and_the_journal_h
     assert_eq!(environment(b.port)["MEMBRANE_DATA_DIR"], json!("/second-w115"), "the new boot's value");
     b.stop();
     let j = journal(&d).into_iter().filter(|l| l.contains("Environment:host")).collect::<Vec<_>>().join("\n");
-    assert!(j.contains("/second-w115") && j.contains("host:environment"), "the second boot's value is in the journal as an outside write: {j}");   // (a restart's journal lines replace the earlier run's first lines: host.rs journal keys)
+    assert!(j.contains("/first-w115") && j.contains("/second-w115") && j.contains("host:environment"), "both boots are in the journal as outside writes: {j}");
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn each_restart_of_the_barest_seat_appends_its_boot_lines_to_the_journal_and_the_growth_is_small() {
+    // measured: lines and bytes the stored journal gains per restart of an idle seat (the numbers are printed with --nocapture)
+    let d = dir("growth");
+    let mut sizes = vec![];
+    for _ in 0..3 {
+        let mut s = start(&d, &[], &[]);
+        let _ = environment(s.port);
+        s.stop();
+        let j = journal(&d);
+        sizes.push((j.len(), j.iter().map(|l| l.len()).sum::<usize>()));
+    }
+    eprintln!("journal after each start (lines, bytes): {sizes:?}");
+    assert!(sizes[0].0 < sizes[1].0 && sizes[1].0 < sizes[2].0, "every restart ADDS lines: {sizes:?}");
+    assert!(sizes[2].1 - sizes[1].1 < 64 * 1024, "an idle restart adds well under 64 KiB: {sizes:?}");
     let _ = std::fs::remove_dir_all(d);
 }

@@ -54,11 +54,11 @@ fn a_variable_that_is_not_set_reads_absent_and_a_pack_reads_the_names_as_written
 #[test]
 fn a_secret_bearing_variable_reads_the_text_set_never_its_value_and_an_unset_or_empty_one_is_absent() {
     let h = host(None);
-    boot_environment(&h, &facts(&[]), &env(&[("ANTHROPIC_API_KEY", "sk-secret-w115"), ("FOO_TOKEN", "xyz-w115"), ("DB_PASSWORD", "pw-w115"), ("MY_SECRET", "s-w115"), ("api_key", "lower-w115"), ("EMPTY_TOKEN", ""), ("HOME", "/h")]));
-    for k in ["ANTHROPIC_API_KEY", "FOO_TOKEN", "DB_PASSWORD", "MY_SECRET", "api_key"] { assert_eq!(read(&h, k), json!("set"), "{k}"); }
+    boot_environment(&h, &facts(&[]), &env(&[("ANTHROPIC_API_KEY", "sk-secret-w115"), ("FOO_TOKEN", "xyz-w115"), ("DB_PASSWORD", "pw-w115"), ("MY_SECRET", "s-w115"), ("api_key", "lower-w115"), ("DB_PASSWD", "pd-w115"), ("AWS_CREDENTIALS", "cr-w115"), ("EMPTY_TOKEN", ""), ("HOME", "/h")]));
+    for k in ["ANTHROPIC_API_KEY", "FOO_TOKEN", "DB_PASSWORD", "MY_SECRET", "api_key", "DB_PASSWD", "AWS_CREDENTIALS"] { assert_eq!(read(&h, k), json!("set"), "{k}"); }
     assert!(read(&h, "EMPTY_TOKEN").is_null() && read(&h, "OTHER_TOKEN").is_null(), "empty or unset: absent");
     let all = all_text(&h);
-    for v in ["sk-secret-w115", "xyz-w115", "pw-w115", "s-w115", "lower-w115"] { assert!(!all.contains(v), "{v} appears in the field"); }
+    for v in ["sk-secret-w115", "xyz-w115", "pw-w115", "s-w115", "lower-w115", "pd-w115", "cr-w115"] { assert!(!all.contains(v), "{v} appears in the field"); }
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn env_allow_adds_a_harmless_name_as_a_list_or_as_comma_text_and_a_secret_name_i
     for k in ["FOO_TOKEN", "my_Secret_x", "DB_PASSWORD", "SSH_KEY"] {
         assert_eq!(read(&h, k), json!("set"), "{k} is refused its value: only presence");
         let line = said.iter().find(|l| l.contains(k)).unwrap_or_else(|| panic!("{k}: no refusal in {said:?}"));
-        assert!(line.contains("KEY") && line.contains("TOKEN") && line.contains("SECRET") && line.contains("PASSWORD"), "the reason names the rule: {line}");
+        assert!(line.contains("KEY") && line.contains("TOKEN") && line.contains("SECRET") && line.contains("PASSWORD") && line.contains("PASSWD") && line.contains("CREDENTIAL"), "the reason names the rule: {line}");
     }
     let all = format!("{} {said:?}", all_text(&h));
     for v in ["xyz-w115", "s2-w115", "pw-w115", "k-w115"] { assert!(!all.contains(v), "{v} appears"); }
@@ -100,7 +100,7 @@ fn no_pack_that_declares_the_class_means_nothing_is_written() {
 }
 
 #[test]
-fn a_replay_restores_the_value_and_a_restart_with_another_environment_shows_the_new_one_and_drops_what_is_no_longer_set() {
+fn a_replay_restores_the_value_and_a_restart_with_another_environment_shows_the_new_one_and_drops_what_is_no_longer_set_while_the_journal_holds_both() {
     let d = tmp("replay");
     let store = d.join("a.sqlite");
     {
@@ -127,9 +127,14 @@ fn a_replay_restores_the_value_and_a_restart_with_another_environment_shows_the_
         let j = h.journal_stored().unwrap();
         let mine: Vec<&Line> = j.iter().filter(|l| format!("{l:?}").contains("Environment:host")).collect();
         let text = format!("{mine:?}");
-        // FINDING: the journal's key is the in-memory line count, which starts at 0 at every open, so a restart's lines REPLACE the earlier run's first lines (a journal is one run's)
-        assert!(text.contains("/second") && text.contains("Null"), "the journal holds this boot's writes, the cleared LANG included: {text}");
+        assert!(text.contains("/first") && text.contains("/second") && text.contains("Null"), "the journal holds both boots' writes, the cleared LANG included: {text}");
         assert!(mine.iter().all(|l| match l { Line::Write { writer, .. } | Line::Born { writer, .. } => writer.starts_with("host:") }), "every one is an OUTSIDE write");
+        // a replay of the WHOLE stored journal (both boots) ends at the last boot's value
+        let fresh = host(None);
+        fresh.replay(&j);
+        fresh.pump();
+        assert_eq!(read(&fresh, "MEMBRANE_DATA_DIR"), json!("/second"), "a replay ends at the last boot's value");
+        assert!(read(&fresh, "LANG").is_null());
     }
     let _ = std::fs::remove_dir_all(d);
 }
