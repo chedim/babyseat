@@ -65,6 +65,12 @@ Request.static_reply getter:
 Request.loop getter: startswith(this.peer or '', '127.0.0.1:') or startswith(this.peer or '', '[::1]:')
 Request.fwd getter: prop(this.headers, 'x-forwarded-for') != None or prop(this.headers, 'forwarded') != None
 Request.entrant getter: this.authed == True
+-- THE OWNER (#1143, persons): the person whose sub is the fact `operator` (the released MEMBRANE_OPERATOR), else `owner`: the sub of the token `cliffvm run` writes at boot.
+-- The barest seat (no secret, `open`) has no one to tell apart: its caller is the owner.
+Request.owner_sub getter: str(prop(this.facts, 'operator') or 'owner')
+Request.owner getter: this.authed == True and (this.open == True or this.sub == this.owner_sub)
+-- the 403 of a verified person who is not the owner: the released error shape (server.py `_json_err`, the one 403 of the JWT seat)
+Request.forbidden getter: {'status': 403, 'body': {'type': 'error', 'error': {'message': 'for the owner'}}}
 Request.who getter: {'sub': this.sub, 'name': prop(this.claims, 'name') or this.sub} if this.authed == True else None
 Request.boots getter: [b for b in instances('Boot')]
 Request.c_stt getter: 'server' if startswith(str(([b.seat_stt for b in this.boots] or [''])[0] or ''), 'http') else 'browser'

@@ -15,6 +15,13 @@ fn main() {
     match cli::parse(&args) {
         Ok(Cmd::Version) => println!("{} {}", env!("CARGO_BIN_NAME"), env!("CARGO_PKG_VERSION")),
         Ok(Cmd::Help) => println!("{}", cli::USAGE),
+        Ok(Cmd::Mint(m)) => {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            match cli::mint(&m, now) {
+                Ok(t) => println!("{t}"),
+                Err(e) => { eprintln!("cliffvm: token mint: {e}"); std::process::exit(2); }
+            }
+        }
         Ok(Cmd::Run(r)) => {
             #[cfg(feature = "alloc-stats")]
             membrane_vm::alloc_stats::report();

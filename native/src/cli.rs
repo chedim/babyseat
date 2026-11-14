@@ -8,13 +8,33 @@ use serde_json::{json, Map, Value as J};
 use crate::host::{self, Host, Options};
 use crate::plan::{self, Outcome};
 
-pub const USAGE: &str = "usage: cliffvm --version | cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>] [--fact <name>=<value>]...";
+pub const USAGE: &str = "usage: cliffvm --version | cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>] [--fact <name>=<value>]... | cliffvm token mint --sub <id> --ttl <30d|12h|15m|45s|seconds> --secret-file <path> [--name <name>]";
 
 #[derive(Debug, PartialEq)]
 pub struct RunArgs { pub apps: Vec<String>, pub store: String, pub port: Option<u16>, pub bind: Option<String>, pub ui_dir: Option<String>, pub facts: Vec<(String, J)> }
 
+/// `token mint`: a signed token for a person (the released `membrane token mint`, jwtauth.py `cli_main`). The secret file is the door's own and must exist (it is never made here);
+/// the ttl is required and has no default; no name = the sub is the name.
 #[derive(Debug, PartialEq)]
-pub enum Cmd { Version, Help, Run(RunArgs) }
+pub struct MintArgs { pub sub: String, pub name: Option<String>, pub ttl_s: f64, pub secret_file: String }
+
+#[derive(Debug, PartialEq)]
+pub enum Cmd { Version, Help, Run(RunArgs), Mint(MintArgs) }
+
+/// The released ttl spelling: `30d`, `12h`, `15m`, `45s` or plain seconds, a positive whole number.
+pub fn parse_ttl(s: &str) -> Result<f64, String> {
+    let t = s.trim();
+    let (digits, unit) = match t.chars().last() { Some(c) if "smhd".contains(c) => (&t[..t.len() - 1], c), _ => (t, 's') };
+    let n: u64 = digits.trim().parse().ok().filter(|n| *n > 0).ok_or_else(|| format!("bad ttl {s:?}: use e.g. 30d, 12h, 15m, 45s or seconds"))?;
+    Ok((n * match unit { 'm' => 60, 'h' => 3600, 'd' => 86400, _ => 1 }) as f64)
+}
+
+/// `token mint` at `now`: -> the token to print.
+pub fn mint(m: &MintArgs, now: f64) -> Result<String, String> {
+    if m.sub.starts_with("seat:") { return Err("'seat:' ids are the seat's own (reserved)".into()); }
+    let raw = std::fs::read_to_string(&m.secret_file).map_err(|e| format!("{}: {e}", m.secret_file))?;
+    crate::jwt::mint(raw.trim().as_bytes(), &m.sub, m.name.as_deref().unwrap_or(&m.sub), m.ttl_s, now)
+}
 
 pub fn parse(args: &[String]) -> Result<Cmd, String> {
     let mut it = args.iter();
@@ -42,6 +62,25 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             }
             if r.apps.is_empty() { return Err("run needs an app (a folder <name>.c1f or a pack file)".into()); }
             Ok(Cmd::Run(r))
+        }
+        Some("token") => {
+            if it.next().map(|s| s.as_str()) != Some("mint") { return Err("token: mint is the one subcommand".into()); }
+            let (mut sub, mut name, mut ttl, mut file) = (None, None, None, None);
+            while let Some(a) = it.next() {
+                let mut val = |n: &str| it.next().cloned().ok_or_else(|| format!("{n} needs a value"));
+                match a.as_str() {
+                    "--sub" => sub = Some(val("--sub")?),
+                    "--name" => name = Some(val("--name")?),
+                    "--ttl" => ttl = Some(parse_ttl(&val("--ttl")?)?),
+                    "--secret-file" => file = Some(val("--secret-file")?),
+                    x => return Err(format!("token mint: unknown option {x}")),
+                }
+            }
+            Ok(Cmd::Mint(MintArgs {
+                sub: sub.ok_or("token mint: --sub is required")?, name,
+                ttl_s: ttl.ok_or("token mint: --ttl is required (no default)")?,
+                secret_file: file.ok_or("token mint: --secret-file is required (the door's secret)")?,
+            }))
         }
         Some(x) => Err(format!("unknown command {x}")),
     }

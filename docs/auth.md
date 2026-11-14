@@ -19,6 +19,8 @@ The only mode without a secret is the BAREST seat (`scripts/seat`, no `door_secr
 **The chat turn**: the `claude` CLI the turn starts calls the seat's `/mcp`. Its MCP config (`chat_turn.c1f`, `mcp_json`) carries `"headers": {"Authorization": "Bearer ${MEMBRANE_OWNER_TOKEN}"}` and the run's `env_from` hands the launcher's value to the child's environment: the token is never in `argv` (a process listing shows `argv`)
 and never in a row. A turn whose CLI sends a wrong token fails visibly: the `401` is in the answer.
 
+**Other people, and who is the owner (w34).** `cliffvm token mint --sub alice --name Alice --ttl 30d --secret-file <seat>/door.secret` prints a token (ttl required, no default; `12h`, `15m`, `45s` or seconds work too). The first verified request of a token makes `Person:<sub>` (sub, name, first_seen, last_seen). The owner is the person whose sub is the fact `operator` (default `owner`), the sub of the boot's owner token; only the owner's calls to `/mcp` `entity_write` (packs included) and `run_cliff` run, any other person gets `403` (`for the owner`); reads are open to every verified person.
+
 ## The Python seat: the seat token, and JWT mode
 
 A seat has two ports: the OpenAI proxy (:11500) and the serve API + UI (:4096).

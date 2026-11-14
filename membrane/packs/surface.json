@@ -224,7 +224,7 @@
       "Http",
       "Request"
     ],
-    "members": 86,
+    "members": 89,
     "writes": [
       "Http:door.listen"
     ],
@@ -275,16 +275,25 @@
       "door"
     ],
     "classes": [
+      "Person",
       "Request"
     ],
-    "members": 7,
-    "writes": [],
+    "members": 9,
+    "writes": [
+      "*.first_seen",
+      "*.last_seen",
+      "*.name",
+      "*.sub"
+    ],
     "claims": [
       "/",
       "/index.html",
       "/membrane"
     ],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Person"
+    ]
   },
   "door_decisions": {
     "imports": [
@@ -536,7 +545,7 @@
       "Request",
       "Return"
     ],
-    "members": 84,
+    "members": 85,
     "writes": [
       "*.[]",
       "*.go",

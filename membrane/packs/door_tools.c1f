@@ -36,6 +36,9 @@ Request.mc_method getter: str(prop(this.mc_rpc, 'method') or '')
 Request.mc_params getter: prop(this.mc_rpc, 'params') or {}
 Request.mc_args getter: prop(this.mc_params, 'arguments') or {}
 Request.mc_tool getter: prop(this.mc_params, 'name')
+-- THE WRITING TOOLS ARE THE OWNER'S (persons, door.c1f `owner`): a call of `entity_write` (a pack is written by it too: `Pack:<name>.text`) or `run_cliff` by any other verified
+-- person is the 403 of door.c1f and runs nothing; the reads and the tool list stay open to every verified person.
+Request.mc_deny getter: this.mc_method == 'tools/call' and this.mc_tool in ['entity_write', 'run_cliff'] and not this.owner
 Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity_write', 'run_cliff']
 
 -- ---- the tools' list -----------------------------------------------------------------------------------------------------------------------
@@ -49,7 +52,7 @@ Request.mc_w_prop getter: strip(str(prop(this.mc_args, 'prop') or ''))
 -- or has no `membrane::` twin, is used as written.
 Request.mc_w_id getter: ('membrane::' + this.mc_w_spec) if prop('membrane::' + this.mc_w_spec, 'eid') != None and prop(this.mc_w_spec, 'eid') == None else this.mc_w_spec
 Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop' if this.mc_w_spec == '' or this.mc_w_prop == '' else None
-Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None else None
+Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None and not this.mc_deny else None
 Request.mc_write on-setter mcp-write:
   WHEN this.mc_write != None:
     this.mc_w_t0 = clock
@@ -123,7 +126,7 @@ Request.mc_w_text getter:
 -- time allowance (docs/c1f-stdlib.md): a runaway block answers with that reason and the seat stays up. A write's reactions come from the host like entity_write's.
 Request.cl_code getter: str(prop(this.mc_args, 'code') or '')
 Request.cl_bad getter: 'run_cliff needs code (a block of lines; the last one is the value)' if this.mc_tool == 'run_cliff' and strip(this.cl_code) == '' else None
-Request.cl_on getter: this.mc_tool == 'run_cliff' and this.cl_bad == None
+Request.cl_on getter: this.mc_tool == 'run_cliff' and this.cl_bad == None and not this.mc_deny
 Request.cl_n getter: replace(this.eid, 'Request:', '')
 Request.cl_gp getter: 'Pack:cliffg' + this.cl_n
 Request.cl_sp getter: 'Pack:cliffs' + this.cl_n
@@ -245,5 +248,6 @@ Request.r_tools getter:
   ELSE WHEN not this.mc_ok: {'status': 400, 'body': {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32600, 'message': 'invalid request'}}}
   ELSE WHEN this.mc_id == None: {'status': 202}
   ELSE WHEN not this.mc_known_method: {'status': 200, 'body': {'jsonrpc': '2.0', 'id': this.mc_id, 'error': {'code': -32601, 'message': 'method not found: ' + this.mc_method}}}
+  ELSE WHEN this.mc_deny: this.forbidden
   ELSE WHEN this.mc_result == None: None
   ELSE: {'status': 200, 'body': {'jsonrpc': '2.0', 'id': this.mc_id, 'result': this.mc_result}}

@@ -359,6 +359,7 @@
       "Request.family": "Dict?",
       "Request.family_checked": "Dict?",
       "Request.file": "Text?",
+      "Request.forbidden": "Dict",
       "Request.found": "Any",
       "Request.fwd": "Bool",
       "Request.fwdh": "Text",
@@ -383,6 +384,8 @@
       "Request.ms": "Num?",
       "Request.own_routes": "Dict?",
       "Request.owned": "Bool",
+      "Request.owner": "Bool",
+      "Request.owner_sub": "Text",
       "Request.parts": "List(Text)",
       "Request.path_body": "Dict",
       "Request.person": "Any",
@@ -424,18 +427,27 @@
   },
   "door_auth": {
     "getters": {
+      "Person.owner": "Bool",
       "Request.owner_ask": "Dict?",
       "Request.owner_page": "Bool",
-      "Request.owner_sub": "Text",
       "Request.owner_ttl": "Int",
       "Request.page": "Bool",
       "Request.page_cookie": "Text?",
-      "Request.page_hold": "Bool?"
+      "Request.page_hold": "Bool?",
+      "Request.person_eid": "Text?",
+      "Request.person_seen": "Dict?"
     },
     "writes": {
+      "*.first_seen": "Any",
+      "*.last_seen": "Any",
+      "*.name": "Any",
+      "*.sub": "Any",
       "Request.mint": "Dict?"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Person"
+    ]
   },
   "door_decisions": {
     "getters": {
@@ -913,6 +925,7 @@
       "Request.mc_args": "Any",
       "Request.mc_bad": "Text?",
       "Request.mc_call": "Dict?",
+      "Request.mc_deny": "Bool",
       "Request.mc_id": "Any",
       "Request.mc_init": "Dict",
       "Request.mc_is_err": "Bool",

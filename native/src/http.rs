@@ -143,7 +143,8 @@ pub fn listen(st: &Store, eid: &str, req: &J) -> J {
                             (Some(k), Some(t)) => crate::jwt::verify(&t, k, now),
                         } };
                         match verdict {
-                            Ok(claims) => { props.insert("authed".into(), json!(true)); props.insert("sub".into(), claims["sub"].clone()); props.insert("claims".into(), claims); }
+                            Ok(claims) => { if plain { props.insert("open".into(), json!(true)); }   // no secret, no check: the caller is the owner by decision (docs/auth.md)
+                                props.insert("authed".into(), json!(true)); props.insert("sub".into(), claims["sub"].clone()); props.insert("claims".into(), claims); }
                             Err(why) => { props.insert("authed".into(), json!(false)); props.insert("auth_error".into(), json!(why)); }
                         }
                         let conn = st3.hold_conn(s);

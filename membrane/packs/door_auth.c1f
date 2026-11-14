@@ -1,5 +1,6 @@
 PACK door_auth 1
 IMPORT door 1
+RESIDENT Person
 -- THE PAGE'S OWN TOKEN (operator decisions 2026-11-13: the released seat's two auth modes are a JWT and the loopback owner cookie; the seat-token
 -- mode and the LAN guard are dropped). docs/release-parity.md section 3; the released shape is `ui_serve.py` `intercept`.
 --   * a JWT (Bearer, Basic password or the seat's cookie) is verified by the door before any pack sees the request (`authed`, `sub`, `claims`);
@@ -9,8 +10,6 @@ IMPORT door 1
 --     the prefix is refused even from loopback, and a request from another address (or with a proxy header) has no way in but a JWT.
 -- The 401 (`Request.unauthorized`) is in door.c1f. Minting more tokens for other people (`token mint`) is not here yet (docs/release-parity.md).
 
--- who the owner is: the fact `operator` (the released MEMBRANE_OPERATOR), else `owner`
-Request.owner_sub getter: str(prop(this.facts, 'operator') or 'owner')
 -- how long the owner cookie lives: 7 days, as the released seat minted it (ui_serve.py) -- a threshold carried over, flagged for the operator
 Request.owner_ttl getter: 604800
 Request.page getter: this.route in ['/', '/index.html', '/membrane'] and not this.ui_served
@@ -22,3 +21,17 @@ Request.owner_ask on-setter owner-mint:
 -- the page waits for the receipt (door.c1f `static_reply`); a door with no secret answers rc 2 and the page is served with no cookie
 Request.page_hold getter: True if this.owner_page and this.mint_result == None else None
 Request.page_cookie getter: (this.cookie_name + '=' + str(prop(this.mint_result, 'token')) + '; Path=/; Max-Age=' + str(this.owner_ttl) + '; HttpOnly; SameSite=Strict' + this.secure) if prop(this.mint_result, 'rc') == 0 else None
+
+-- ---- PERSONS (#1143, docs/auth.md): `Person:<sub>` is the field's entity for a person the door verified ----------------------------------------------
+-- The first verified request of a token makes it, every later one keeps it: {sub, name (the token's, else the sub), first_seen (the first request's clock, kept),
+-- last_seen (this request's clock)}. A refused request, and the barest seat (no secret: nobody is verified, `Request.open`), make none. THE OWNER is the person
+-- whose sub is `Request.owner_sub` (door.c1f: the fact `operator`, else `owner`); `Person.owner` says it of the entity, `Request.owner` of the request.
+Person.owner getter: this.sub == str(prop(([b.facts for b in instances('Boot') if b.facts != None] or [{}])[0], 'operator') or 'owner')
+Request.person_eid getter: 'Person:' + this.sub if this.authed == True and this.open != True else None
+Request.person_seen getter: {'sub': this.sub, 'name': this.person, 'first': prop(this.person_eid, 'first_seen') or clock, 'last': clock} if this.person_eid != None else None
+Request.person_seen on-setter person-seen:
+  WHEN this.person_seen != None:
+    (this.person_eid).sub = prop(this.person_seen, 'sub')
+    (this.person_eid).name = prop(this.person_seen, 'name')
+    (this.person_eid).first_seen = prop(this.person_seen, 'first')
+    (this.person_eid).last_seen = prop(this.person_seen, 'last')
