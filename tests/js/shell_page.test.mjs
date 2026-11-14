@@ -1,7 +1,7 @@
 // The WHOLE barest page as c1f, END TO END (#1143): a REAL private cliffvm barest seat (the shipped packs + the barest app + the page's ui folder, own store, own port) with a FAKE claude
 // (chat_claude_bin: a script that waits for a `go.<prompt>` file, then answers "Final answer to: <prompt>"; a prompt with `boom` exits 1 with a message; no model, no login, no network),
 // a second seat WITHOUT a backend, and the page in headless Chrome over the DevTools protocol. What is asserted:
-//   1. the page is the bootstrap + the shell: the nav (Chat, Field, Settings), the status line, the chat by default; Settings is the placeholder; screenshots of each view;
+//   1. the page is the bootstrap + the shell: the nav (Chat, Field, Settings), the status line, the chat by default; Settings is the settings view; screenshots of each view;
 //   2. a message goes (ONE POST for three Enters), shows, and the answer REPLACES "Waiting for a turn…": the view returns to idle (status line too);
 //   3. a reload DURING a running turn: the page comes back with the pending turn and shows the answer when it finishes;
 //   4. a turn that errors shows its error as text; a seat WITHOUT a backend answers with its own error and the page shows that text;
@@ -271,9 +271,9 @@ try {
   await b.ev(click('.scrim'));
   assert.equal(await b.ev(`${Q(K('DomNode:chat:input'))}.value`), 'a draft that must survive');
 
-  // Settings: the placeholder
+  // Settings: the settings view fills the slot (tests/js/settings_page.test.mjs drives it)
   await b.ev(click(K('DomNode:shell:nav:settings')));
-  await b.until(`${textOf(K('DomNode:shell:slot:settings:empty'))} === 'Settings' && !${Q(K('DomNode:shell:slot:settings'))}.hidden`, 'the Settings placeholder');
+  await b.until(`!!${Q('.setview .setrow')} && !${Q(K('DomNode:shell:slot:settings'))}.hidden && ${Q(K('DomNode:shell:slot:settings:empty'))}.hidden`, 'the Settings view (the placeholder is gone)');
   await b.shot('settings');
   await b.ev(click(K('DomNode:shell:theme')));
   await b.until(`document.documentElement.getAttribute('data-theme') === 'light'`, 'the theme button sets data-theme on <html>');

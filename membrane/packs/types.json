@@ -1717,6 +1717,10 @@
     "getters": {
       "Boot.setting_keys": "List(Text)",
       "Boot.setting_rows": "List(Dict)",
+      "Request.m_settings": "List(Text)",
+      "Request.o_settings": "Bool",
+      "Request.r_settings": "Dict",
+      "Request.st_rows": "List(Dict)",
       "Setting.boot_val": "Any",
       "Setting.current": "Any",
       "Setting.fact_val": "Any"

@@ -117,6 +117,52 @@ html, body { height: 100%; }
 .flegend .fdot { width: 10px; height: 10px; }
 .fnote { padding: 6px 10px; background: var(--note); color: var(--note-ink); font-size: 12px; }
 
+/* the settings view (settings_view.c1f): a column of groups, each a list of rows; a row is its label, its badge (applies now / needs a restart), one line of help, then the control or the value */
+.setview { flex: 1; min-height: 0; overflow: auto; padding: 20px 20px 32px; }
+.setview > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+.sethead h2 { margin: 0 0 4px; font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+.setlead { margin: 0 0 16px; color: var(--mute); }
+.setnote { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 8px 12px; border-radius: 8px; background: var(--seat); color: var(--mute); }
+.setnote[role="alert"] { background: var(--note); color: var(--note-ink); }
+.setnote span { flex: 1; }
+.setgroups { display: flex; flex-direction: column; gap: 24px; }
+.setgroup h3 { margin: 0; font-size: 11px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--mute); }
+.setsub { margin: 2px 0 8px; color: var(--mute); font-size: 12px; }
+.setrows { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.setrow { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; background: var(--panel); }
+.setrow + .setrow { border-top: 1px solid var(--line); }
+.settop { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.setlabel { margin: 0; font-size: 14px; font-weight: 600; }
+.setbadge { padding: 1px 8px; border-radius: 999px; font-size: 11px; line-height: 1.6; color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.setbadge[data-live="restart"] { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
+.sethelp, .setlimits, .setnow, .sethow { margin: 0; color: var(--mute); font-size: 12px; }
+.setnow { color: var(--ink); }
+.setvalue { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--seat); font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.setform { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; }
+.setview input, .setview select { font: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+.setview input:focus-visible, .setview select:focus-visible { border-color: var(--accent); }
+.setrow[data-kind="number"] .setinput { width: 11ch; }
+.setrow[data-kind="text"] .setinput { flex: 1 1 14ch; max-width: 360px; }
+.setunit { color: var(--mute); font-size: 12px; }
+.setsave { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); padding: 6px 16px; }
+.setrow[data-kind="list"] .setform, .setrow[data-kind="allowlist"] .setform { flex-direction: column; align-items: stretch; }
+.setrow[data-kind="list"] .setsave, .setrow[data-kind="allowlist"] .setsave { align-self: flex-start; }
+.setadd { align-self: flex-start; }
+.setentries { display: flex; flex-direction: column; gap: 10px; }
+.setentry { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(150px, 2fr) minmax(150px, 2fr) auto; gap: 8px; align-items: end; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.setrow[data-kind="list"] .setentry { grid-template-columns: minmax(0, 1fr) auto; padding: 0; border: 0; background: none; }
+.setfield { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.setfield label { font-size: 11px; color: var(--mute); }
+.setrow[data-kind="list"] .setfield label { display: none; }
+.setstate { margin: 0; font-size: 12px; color: var(--mute); }
+.setstate[data-kind="ok"] { color: var(--ok); }
+.setstate[data-kind="bad"] { padding: 6px 10px; border-radius: 6px; background: var(--note); color: var(--note-ink); }
+@media (max-width: 640px) {
+  .setview { padding: 14px 12px 28px; }
+  .setentry { grid-template-columns: 1fr; }
+  .setrow[data-kind="list"] .setentry { grid-template-columns: minmax(0, 1fr) auto; }
+  .setentry .setremove { justify-self: start; }
+}
 
 @media (max-width: 800px) {
   .shell-body { flex-direction: column; padding: 8px 16px 12px; }
