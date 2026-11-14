@@ -95,7 +95,7 @@ jobs:
           docker inspect babyseat:ci --format '{{.Config.ExposedPorts}} {{.Config.Volumes}}' | grep -q '4096/tcp.*/data'
           docker run --rm babyseat:ci sh -c '! command -v claude'
           docker run --rm babyseat:ci --version | grep -q "${{ steps.ver.outputs.version }}"
-      - name: the seat answers (health 401 without the token, 200 with the owner token)
+      - name: the seat answers (health 401 without the token, 200 with the admin token)
         run: |
           set -eu
           docker run -d --name seat -p 127.0.0.1:4096:4096 babyseat:ci
@@ -104,14 +104,14 @@ jobs:
             sleep 1
           done
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4096/global/health)" = 401 ] || { docker logs seat; exit 1; }
-          tok=$(docker exec seat cat /data/owner.token)
+          tok=$(docker exec seat cat /data/admin.token)
           [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $tok" http://127.0.0.1:4096/global/health)" = 200 ]
           docker stop seat >/dev/null
           docker rm seat >/dev/null
       - name: privacy (no runtime state in the image)
         run: |
           found=$(docker run --rm --entrypoint sh babyseat:ci -c \
-            'find / -xdev \( -name ".membrane" -o -name "*.jsonl" -o -name "owner.token" -o -name "door.secret" -o -name "seat.sqlite*" \) -not -path "/data/*" 2>/dev/null' || true)
+            'find / -xdev \( -name ".membrane" -o -name "*.jsonl" -o -name "admin.token" -o -name "door.secret" -o -name "seat.sqlite*" \) -not -path "/data/*" 2>/dev/null' || true)
           if [ -n "$found" ]; then echo "runtime state found in the image:"; echo "$found"; exit 1; fi
           echo "clean"
 

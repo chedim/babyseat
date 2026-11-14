@@ -6,7 +6,7 @@
 # (docker.yml downloads them from the workflow's artifacts; scripts/dist/build.sh --archive makes one by hand, from a linux binary.)
 #
 # RUN:    docker run -p 4096:4096 -v babyseat:/data -e ANTHROPIC_API_KEY chedim/babyseat
-#   the seat is on http://localhost:4096 ; its data (store, door secret, owner token) is the /data volume. THE OWNER TOKEN for a local tool: docker exec <container> cat /data/owner.token
+#   the seat is on http://localhost:4096 ; its data (store, door secret, admin token) is the /data volume. THE OWNER TOKEN for a local tool: docker exec <container> cat /data/admin.token
 #   The door binds 0.0.0.0 inside the container (docker's bridge is not loopback) and wants a token for everything but the page: publish the port to 127.0.0.1 unless you mean the network (-p 127.0.0.1:4096:4096).
 # THE claude CLI IS NOT IN THE IMAGE (it is Anthropic's, with its own license and updates): the chat runs it as a child, so the image has a seat that boots, serves the page and answers /global/health,
 #   and a chat that says how to supply it. Supply it by mounting a Linux claude executable and naming it:  -v /path/to/claude:/opt/claude:ro -e CLAUDE_BIN=/opt/claude

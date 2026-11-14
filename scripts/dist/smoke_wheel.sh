@@ -1,7 +1,7 @@
 #!/bin/sh
 # The smoke test of a built wheel (CI runs it per platform where the runner can run the binary): install it into a FRESH venv, then
 #   `babyseat --version` names the wheel's version, `babyseat --help` is the seat's usage, `membrane --version` too (the old command), and `babyseat --port 0 --data-dir <tmp>` comes up
-#   with a fake claude (no chat turn runs): /global/health is 401 without a token and 200 with the owner token (<data>/owner.token); the installed dist passes verify.sh. Then it is stopped.
+#   with a fake claude (no chat turn runs): /global/health is 401 without a token and 200 with the admin token (<data>/admin.token); the installed dist passes verify.sh. Then it is stopped.
 #   scripts/dist/smoke_wheel.sh <wheel>        env PYTHON = the python that makes the venv (default python3)
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)

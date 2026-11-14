@@ -43,12 +43,12 @@ def start_launcher(dist, tmp_path, old):
     port = None
     for _ in range(300):
         m = re.search(r"door listening on .*:(\d+)", log.read_text())
-        if m and (data / "owner.token").exists():
+        if m and (data / "admin.token").exists():
             port = int(m.group(1)); break
         assert p.poll() is None, log.read_text()
         time.sleep(0.1)
     assert port, log.read_text()
-    return p, port, (data / "owner.token").read_text().strip()
+    return p, port, (data / "admin.token").read_text().strip()
 
 
 def old_store(tmp_path):
