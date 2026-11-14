@@ -1304,8 +1304,10 @@ impl Fields {
         for (e, verb, rec) in core.effect_receipts() {                                       // a driver effect finished
             if !core.docs.contains_key(&e) { continue; }
             let rc = rec.get("rc").cloned().unwrap_or(J::Null);
-            self.emit_unchecked(core, &mut work, &e, &format!("{}_result", verb), rec, &format!("driver:{}", verb), seq, now);
-            self.emit_unchecked(core, &mut work, &e, &format!("{}_rc", verb), rc, &format!("driver:{}", verb), seq, now);
+            // the Sql driver's receipts are journalled (writer `record:`, host.rs stamp_writer): a replay has no file to ask and reads what was answered
+            let w = if e.starts_with("SqlQuery:") || e.starts_with("SqlSource:") { format!("record:{verb}") } else { format!("driver:{verb}") };
+            self.emit_unchecked(core, &mut work, &e, &format!("{}_result", verb), rec, &w, seq, now);
+            self.emit_unchecked(core, &mut work, &e, &format!("{}_rc", verb), rc, &w, seq, now);
         }
         loop {
             if !core.arrived.is_empty() { self.complete_arrivals(core, now); }   // an evaluation loaded stored entities: they join the field before the next step
@@ -1622,8 +1624,21 @@ impl Fields {
             if w.new.is_null() || w.new == json!("") { return; }
             let Some(cls) = core.docs.get(&w.eid).map(|e| e.cls.clone()) else { return };
             if !crate::drivers::VERBS.iter().any(|(c, v)| *c == cls && *v == w.prop) { return; }
-            let props = core.docs.get(&w.eid).map(|e| e.props.clone()).unwrap_or_default();
+            let mut props = core.docs.get(&w.eid).map(|e| e.props.clone()).unwrap_or_default();
             self.emit_unchecked(core, work, &w.eid, &w.prop.clone(), json!(""), "direct:consumed", seq, now);
+            if cls == "SqlQuery" {
+                // the Sql driver (sqldrv.rs): the same id as the run noted last is the same run (no second one); a new id runs
+                let id = w.new.get("id").cloned().unwrap_or(J::Null);
+                if !id.is_null() && props.get("running").and_then(|r| r.get("id")) == Some(&id) { return; }
+                self.emit_unchecked(core, work, &w.eid, "running", json!({"id": id, "started": now}), "driver:running", seq, now);
+                // the source's own props ride along (the effect runs off the engine and reads no entity)
+                let name = props.get("source").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let src = format!("SqlSource:{name}");
+                if let Some(s) = core.docs.get(&src) {
+                    props.insert("source_eid".into(), json!(src));
+                    for (k, p) in [("path", "source_path"), ("mode", "source_mode")] { if let Some(v) = s.props.get(k) { props.insert(p.into(), v.clone()); } }
+                }
+            }
             if cls == "Command" && w.prop == "run" {
                 if let Some(c) = w.new.get("cmd").filter(|c| !c.is_null()) { self.emit_unchecked(core, work, &w.eid, "cmd", c.clone(), "driver:cmd", seq, now); }   // `run = {id, cmd}`: the cmd is kept on the entity
                 // a run in flight reads `running` (proc.c1f `status`) until its receipt lands

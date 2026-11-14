@@ -1554,6 +1554,34 @@
       "Span"
     ]
   },
+  "sql": {
+    "getters": {
+      "SqlQuery.changes": "Any",
+      "SqlQuery.failed_run": "Bool",
+      "SqlQuery.kind": "Text",
+      "SqlQuery.ok": "(Bool|Error)?",
+      "SqlQuery.prepared": "Any",
+      "SqlQuery.rc": "Any",
+      "SqlQuery.reused": "Any",
+      "SqlQuery.rows": "Any",
+      "SqlQuery.run_why": "Text",
+      "SqlQuery.status": "Any",
+      "SqlQuery.truncated": "Bool?",
+      "SqlSource.kind": "Text",
+      "SqlSource.mode_eff": "Any",
+      "SqlSource.open_current": "Bool",
+      "SqlSource.opened": "(Bool|Error)?"
+    },
+    "writes": {
+      "SqlSource.mode": "Any",
+      "SqlSource.path": "Any"
+    },
+    "findings": [],
+    "resident": [
+      "SqlSource",
+      "SqlQuery"
+    ]
+  },
   "stats": {
     "getters": {},
     "writes": {},

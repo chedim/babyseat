@@ -1,0 +1,64 @@
+PACK sql 1
+IMPORT boot 1
+RESIDENT SqlSource
+RESIDENT SqlQuery
+-- THE Sql DRIVER's classes (native/src/sqldrv.rs, #1143): a second SQLite file, as entities. No builtin; a run is a write.
+--   SqlSource:<name> {path, mode}   `mode` is `ro` (the default) or `rw`. `ro` opens the file with the immutable URI: SQLite writes nothing and takes no
+--                                  lock, so the file must not change while the seat runs. The seat's own store is never a source.
+--   SqlQuery:<name>  {source, sql}  `source` is the NAME of a SqlSource; `sql` is ONE statement, prepared on first use and kept in the connection's cache.
+-- Run it with a write; the run never blocks the field, its receipt lands when it ends:
+--   SqlQuery.run = {id, args: [...], max_rows?}  -> run_result {id, status, rc, rows, changes, ms, started, finished, head, truncated?, prepared, reused}, run_rc
+-- `args` are BOUND to the ? of the statement and never spliced into its text. The SAME id as the latest run is the same run (no second one); a new id runs
+-- again. Only the latest receipt stays on the entity (the journal keeps the history, and a replay reads the recorded receipt, it never asks the file again).
+-- The sources are written by hand (SqlSource:lex.path = '/data/wordnet.sqlite') or pre-declared at launch by the fact `sql_sources`
+-- ([{name, path, mode}, ...]); a path or mode rewritten later is opened again by the next run.
+-- Entity scripts and peers never run an effect.
+
+SqlSource.kind getter: 'sql_source'
+SqlSource.mode_eff getter: this.mode if this.mode != None else 'ro'
+-- how the last open went: the receipt of a run that opened it; it counts only for the path and mode it opened (a rewritten path reads as not opened yet)
+SqlSource.open_current getter: this.open_result != None and prop(this.open_result, 'path') == this.path and prop(this.open_result, 'mode') == this.mode_eff
+SqlSource.opened getter:
+  WHEN this.path == None: None(str(this.eid) + ' has no path: write ' + str(this.eid) + '.path = ' + "'<file>'")
+  ELSE WHEN not this.open_current: None(str(this.eid) + ' is opened by the first run of a SqlQuery that names it')
+  ELSE WHEN prop(this.open_result, 'status') == 'error': Error(prop(this.open_result, 'head'))
+  ELSE: True
+
+SqlQuery.kind getter: 'sql_query'
+SqlQuery.failed_run getter: this.run_result != None and prop(this.run_result, 'status') == 'error'
+SqlQuery.run_why getter: str(this.eid) + ': ' + str(prop(this.run_result, 'head'))
+SqlQuery.ok getter:
+  WHEN this.failed_run: Error(this.run_why)
+  ELSE: this.run_rc == 0 if this.run_rc != None else None
+SqlQuery.rc getter:
+  WHEN this.failed_run: Error(this.run_why)
+  ELSE: this.run_rc
+SqlQuery.rows getter:
+  WHEN this.failed_run: Error(this.run_why)
+  ELSE: prop(this.run_result, 'rows') if this.run_result else None
+SqlQuery.changes getter:
+  WHEN this.failed_run: Error(this.run_why)
+  ELSE: prop(this.run_result, 'changes') if this.run_result else None
+SqlQuery.truncated getter: prop(this.run_result, 'truncated') == True if this.run_result and not this.failed_run else None
+SqlQuery.prepared getter: prop(this.run_result, 'prepared') if this.run_result else None
+SqlQuery.reused getter: prop(this.run_result, 'reused') if this.run_result else None
+-- a run in flight is told apart from one never started (the same rule as Command.status)
+SqlQuery.status getter:
+  WHEN this.running == None and not this.run_result: None(str(this.eid) + ' has not been run: write run = {id, args: []} (a run in flight reads status running)')
+  ELSE WHEN this.running == None: prop(this.run_result, 'status')
+  ELSE WHEN this.run_result == None or prop(this.run_result, 'finished') < prop(this.running, 'started'): 'running'
+  ELSE: prop(this.run_result, 'status')
+
+-- the launch fact `sql_sources` (a LIST of {name, path, mode}: c1f cannot list the keys of a dict, `keys()` is only a proposed builtin) births the same entities;
+-- the fact and `started` arrive in no fixed order, so BOTH make them (the launch declares: the path it names wins over an earlier one; a source the model
+-- wrote that the fact does not name is left alone)
+Boot.started on-setter sql-sources:
+  ALWAYS:
+    FOR s IN (this.sql_sources or []):
+      ('SqlSource:' + prop(s, 'name')).path = prop(s, 'path')
+      ('SqlSource:' + prop(s, 'name')).mode = prop(s, 'mode') or 'ro'
+Boot.sql_sources on-setter sql-sources-told:
+  WHEN this.sql_sources != None:
+    FOR s IN this.sql_sources:
+      ('SqlSource:' + prop(s, 'name')).path = prop(s, 'path')
+      ('SqlSource:' + prop(s, 'name')).mode = prop(s, 'mode') or 'ro'

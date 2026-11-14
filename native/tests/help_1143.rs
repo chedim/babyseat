@@ -8,7 +8,7 @@ use serde_json::Value as J;
 use std::path::PathBuf;
 
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
-const TOPICS: [&str; 6] = ["c1f", "packs", "upgrade", "banner", "cliff", "semtext"];
+const TOPICS: [&str; 7] = ["c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql"];
 
 struct Block { topic: String, kind: String, body: String, line: usize }
 
@@ -28,7 +28,7 @@ fn blocks(topic: &str) -> Vec<Block> {
 
 fn host() -> Host { let mut o = Options::new(None); o.effects = false; host_with(o) }
 /// the same host with the real drivers: a store in a folder of its own (the commands run there)
-fn host_live(dir: &std::path::Path) -> Host { host_with(Options::new(Some(dir.join("s.sqlite3").to_string_lossy().to_string()))) }
+fn host_live(dir: &std::path::Path) -> Host { std::fs::create_dir_all(dir.join(".membrane")).unwrap(); host_with(Options::new(Some(dir.join(".membrane/s.sqlite3").to_string_lossy().to_string()))) }   // the seat's folder is `dir` (a relative path in an example is under it)
 fn host_with(o: Options) -> Host {
     let h = Host::open(o).unwrap();
     let r = repo();
@@ -145,7 +145,16 @@ fn run_live(b: &Block, at: &str) {
     std::fs::create_dir_all(&dir).unwrap();
     let h = host_live(&dir);
     for l in b.body.lines() {
-        if let Some(r) = l.strip_prefix("-- write ") {
+        if let Some(r) = l.strip_prefix("-- sqlite ") {      // `-- sqlite <file> = <SQL script>`: a SQLite file in the seat's folder, made before the example runs
+            let (f, sql) = r.split_once(" = ").unwrap();
+            rusqlite::Connection::open(dir.join(f.trim())).unwrap().execute_batch(sql).unwrap();
+        } else if let Some(r) = l.strip_prefix("-- reads ") {
+            let (t, v) = r.split_once(" = ").unwrap();
+            let (e, p) = target(t);
+            let want: J = serde_json::from_str(v).unwrap();
+            let got = h.get(&e, &p);
+            assert!(same(&got, &want), "{at}: {e}.{p} reads {got}, the help says {want}");
+        } else if let Some(r) = l.strip_prefix("-- write ") {
             let (t, v) = r.split_once(" = ").unwrap();
             let (e, p) = target(t);
             let val: J = serde_json::from_str(v).unwrap();

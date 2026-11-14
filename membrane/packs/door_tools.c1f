@@ -3,19 +3,20 @@ IMPORT door 1
 IMPORT fs 1
 IMPORT proc 1
 IMPORT fetch 1
+IMPORT sql 1
 IMPORT store 1
 VIRTUAL Return
 RESIDENT Pack
 -- THE MODEL'S TOOLS AS AN MCP DOOR (#1143, the `tools` route family): `POST /mcp` speaks MCP over plain HTTP, JSON-RPC 2.0, one JSON
 -- answer per request (no SSE stream: a GET is a 405). The model's CLI (`claude --mcp-config`) connects here; the tools are the FIELD
 -- operations only (operator, 2026-11-12: field manipulation and querying, nothing else; a shell, a file or a fetch is a Command:, File:
--- or Fetch: entity the model writes):
+-- or Fetch: entity the model writes; a second SQLite file is a SqlSource: and SqlQuery: entity pair, see help('sql')):
 --   entity_query {q, k, offset, full, count}  which entities exist: `kind:<Class>`, `kind!:<Class>` (all but that class) and `name~:<eid prefix>`,
 --                                     joined with `&`; k rows (default 20, at most 100) from row `offset` (default 0); full=true adds each row's stored properties
 --   entity_read  {spec, prop}         an entity's stored properties, or one property in full (a getter's value too)
 --   entity_write {spec, prop, value}  set one property; what reacts to the write runs (a setter, a driver verb: `Command:x.run = {id, args}`)
 -- `spec` is an entity id as the field spells it (`Command:build`, `membrane::Chat:main`). A write is a write like any pack's: the class
--- must be one this pack owns or imports (door, fs, proc, fetch, store), or one no pack owns yet, UNLESS this pack is privileged: boot.c1f
+-- must be one this pack owns or imports (door, fs, proc, fetch, sql, store), or one no pack owns yet, UNLESS this pack is privileged: boot.c1f
 -- grants it at start (docs/c1f-layers.md, "Privilege"), so a write here may also reach, and create, a class a model's pack owns. A refusal is in the reply. An effect's
 -- receipt lands as `<verb>_result` on the entity: read it back.
 -- Methods: initialize, notifications/* (a request without an id: 202, no body), ping, tools/list, tools/call.
@@ -69,7 +70,7 @@ Request.mc_write on-setter mcp-write:
 -- reply is made at once and a receipt that is not there says where to read it.
 Request.mc_w_wait getter: num(prop(this.mc_args, 'wait')) or 0
 Request.mc_w_cls getter: (words(replace(replace(this.mc_w_id, 'membrane::', ''), ':', ' ')) or [''])[0]
-Request.mc_w_effect getter: (this.mc_w_cls + '.' + this.mc_w_prop) in ['File.write', 'File.move', 'File.delete', 'Command.run', 'Command.stop', 'Store.run', 'Fetch.request']
+Request.mc_w_effect getter: (this.mc_w_cls + '.' + this.mc_w_prop) in ['File.write', 'File.move', 'File.delete', 'Command.run', 'Command.stop', 'Store.run', 'Fetch.request', 'SqlQuery.run']
 Request.mc_w_rprop getter: this.mc_w_prop + '_result'
 Request.mc_w_rec getter: prop(this.mc_w_id, this.mc_w_rprop) if this.mc_done == True and this.mc_w_effect else None
 -- the receipt of THIS write: what is there now, unless it is what was there before the write

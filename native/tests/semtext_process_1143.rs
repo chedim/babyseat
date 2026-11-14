@@ -22,7 +22,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 }
 
 
-const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f"];
+const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f"];
 
 fn start(tag: &str) -> (Run, u16) {
     let dir = tmp(tag);

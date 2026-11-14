@@ -141,9 +141,13 @@
    "wired": false,
    "why": "the time limit in seconds of one chat turn's `claude` run (chat_turn.c1f; default 21600 = 6 h in the pack, a threshold flagged for the operator): the turn is exempt from `command_timeout_s`; told by `--fact chat_turn_timeout_s=<n>`"
   },
+  "sql_sources": {
+   "wired": false,
+   "why": "second SQLite files to open as entities (membrane/packs/sql.c1f, native/src/sqldrv.rs): a LIST of {name, path, mode} (mode ro, the default, opens the file read-only and immutable; rw may write); each entry makes `SqlSource:<name>` as if it were written by hand; the seat's own store is refused; told by `--fact sql_sources='[{\"name\": \"lex\", \"path\": \"/data/words.sqlite\"}]'`"
+  },
   "effect_workers": {
    "wired": false,
-   "why": "the cap on Command / File / Fetch effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"
+   "why": "the cap on Command / File / Fetch / SqlQuery effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"
   },
   "eval_stats": {
    "wired": false,

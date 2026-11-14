@@ -6,6 +6,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -88,6 +89,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -140,6 +142,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -197,6 +200,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -259,6 +263,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -346,6 +351,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -408,6 +414,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -465,6 +472,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -522,6 +530,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -579,6 +588,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -636,6 +646,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -724,6 +735,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -795,6 +807,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -873,6 +886,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -936,6 +950,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
@@ -1000,6 +1015,7 @@
    "membrane/packs/fs.c1f",
    "membrane/packs/proc.c1f",
    "membrane/packs/fetch.c1f",
+   "membrane/packs/sql.c1f",
    "membrane/packs/store.c1f",
    "membrane/packs/door.c1f",
    "membrane/packs/door_tools.c1f"
