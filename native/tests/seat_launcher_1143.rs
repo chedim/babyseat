@@ -1,4 +1,4 @@
-//! scripts/seat-full: the full pack set on the current page, claude the only model (a fake `claude`: nothing runs a model here).
+//! scripts/seat: the one launcher, the strict door on the barest pack set, claude the only model (a fake `claude`: nothing runs a model here).
 #![cfg(feature = "bin")]
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -14,11 +14,11 @@ impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self
 
 fn tmp(tag: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let d = std::env::temp_dir().join(format!("seat-full-{tag}-{}-{n}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("seat-launcher-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d
 }
-fn script() -> String { format!("{}/../scripts/seat-full", env!("CARGO_MANIFEST_DIR")) }
+fn script() -> String { format!("{}/../scripts/seat", env!("CARGO_MANIFEST_DIR")) }
 
 fn start(data: &std::path::Path, extra: &[&str]) -> Run {
     let mut child = Command::new("sh").arg(script()).args(["--data-dir", data.to_str().unwrap(), "--port", "0"]).args(extra)

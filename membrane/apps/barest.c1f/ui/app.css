@@ -98,7 +98,7 @@ html, body { height: 100%; }
 .chatview > .msg { padding: 0 12px 8px; }
 .pollnote { padding: 6px 12px; background: var(--note); color: var(--note-ink); font-size: 12px; }
 
-/* the field as a view pack (ui/chatmount.js `mountField`, field_view.c1f): an SVG scene drawn by DomNode entities inside .fieldview */
+/* the field as a view pack (apps/field.c1f/field_view.c1f): an SVG scene drawn by DomNode entities inside .fieldview */
 .fieldmount, .fieldview { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .fhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .fcount { margin-right: auto; color: var(--mute); font-size: 12px; }

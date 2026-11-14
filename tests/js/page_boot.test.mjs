@@ -1,4 +1,4 @@
-// The current page against the full-set cliffvm seat (scripts/seat-full), checked in headless Chrome over the DevTools protocol:
+// The current page against the release cliffvm seat (scripts/seat), checked in headless Chrome over the DevTools protocol:
 // the page is loaded from loopback (so it is given its owner cookie) and every request it makes on boot is recorded. What is asserted:
 //   1. nothing hangs: every request the page made got an answer (an event stream counts when its headers came);
 //   2. nothing is refused: no 401 (the cookie the page was given is accepted on every /ui/serve/ call);
@@ -6,7 +6,7 @@
 //      the backlog of the swap (docs/release-parity.md). The lists are checked both ways: a route that now answers must leave its list.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -25,14 +25,23 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 //   NOT_BUILT (501, a deliberate "not built" with its reason): informational, never a failure.
 const MISSING = new Set(process.env.PAGE_BOOT_MISSING ? process.env.PAGE_BOOT_MISSING.split(',') : [
   '/ui/serve/membrane/map/locate',
+  '/ui/serve/membrane/map/field3d',   // the degraded map shapes (door_map.c1f) are removed (#1143, operator 2026-11-14): the legacy page's map calls have no route; the c1f page does not make them
+  '/ui/serve/membrane/map/blurp',
 ]);
 const HANGS = new Set(process.env.PAGE_BOOT_HANGS ? process.env.PAGE_BOOT_HANGS.split(',') : []);
 if (!existsSync(bin)) { console.log(`page boot: skipped, no cliffvm at ${bin} (build it, or set CLIFFVM)`); process.exit(0); }
 if (!existsSync(chrome)) { console.log(`page boot: skipped, no Chrome at ${chrome} (set CHROME)`); process.exit(0); }
-const data = mkdtempSync(path.join(tmpdir(), 'seat-full-'));
+const data = mkdtempSync(path.join(tmpdir(), 'seat-launcher-'));
 const prof = mkdtempSync(path.join(tmpdir(), 'page-boot-'));
-const seat = spawn('sh', [path.join(repo, 'scripts/seat-full'), '--data-dir', path.join(data, 'd'), '--port', String(port)],
-  { cwd: repo, stdio: 'ignore', env: { ...process.env, CLIFFVM: bin, CLAUDE_BIN: '/usr/bin/true' } });
+// the legacy page (membrane/ui/index.html) needs the WHOLE pack folder, which the release launcher's list does not carry: started here directly, on the same strict door
+// (the removed second launcher did exactly this)
+const d = path.join(data, 'd');
+const minds = '{"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude","loops_auth":"chat","cortex_auth":"chat","workers_auth":"chat","think":"auto"}';
+mkdirSync(d, { recursive: true });
+const seat = spawn(bin, ['run', 'membrane/packs/boot.c1f', 'membrane/packs', '--store', path.join(d, 'seat.sqlite'), '--port', String(port), '--ui-dir', 'membrane/ui',
+  '--fact', `door_secret_file=${path.join(d, 'door.secret')}`, '--fact', `seat_data_dir=${d}`, '--fact', `minds=${minds}`, '--fact', 'seat_backend=http://127.0.0.1:11434',
+  '--fact', 'router_on=false', '--fact', 'cloud_models=[{"name":"claude","backend":"claude-agent"}]', '--fact', 'chat_claude_bin=/usr/bin/true'],
+  { cwd: repo, stdio: 'ignore' });
 const br = spawn(chrome, ['--headless=new', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${prof}`,
   `--remote-debugging-port=${dbg}`, 'about:blank'], { stdio: 'ignore' });
 try {

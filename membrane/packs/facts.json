@@ -193,10 +193,6 @@
    "wired": false,
    "why": "the `code_runs_keep` option's default (released 30); a `--fact` setting, default 30"
   },
-  "ui_views": {
-   "wired": false,
-   "why": "which renderer owns each view of the page, a JSON dict `{\"chat\": \"legacy\" | \"pack\"}` (--fact; default legacy for every view): GET /ui/fieldvm reports it as `views`, the bare page mounts the chat view pack (apps/barest.c1f/chat_view.c1f) when it says pack; the page URL `?ui=pack` / `?ui=legacy` overrides it"
-  },
   "chat_page_size": {
    "wired": false,
    "why": "the chat view's first load and each \"Load older turns\": how many turns the history route is asked for (default 20, the legacy chat.js PAGE)"

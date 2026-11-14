@@ -4,17 +4,16 @@ IMPORT door 1
 RESIDENT FieldVm
 VIRTUAL FvDir
 VIRTUAL FvFile
--- THE BROWSER VM'S START AS A DOOR ROUTE (#1143, swap step 3): GET /ui/fieldvm (the page's `fieldvm.js connect()`: the snapshot, then the event stream).
+-- THE BROWSER VM'S START AS A DOOR ROUTE (#1143, swap step 3): GET /ui/fieldvm (the page's `fieldvm.js connect()`: the snapshot; the field view then polls `/ui/fieldvm/active` below, there is no event stream).
 -- The page runs its own field engine (WebAssembly, the same VM) and follows the seat's: it starts from this snapshot, {packs: {name: c1f text}, entities:
--- [{eid, cls, props}]}, and the packs that import `dom` run in the page and draw there (the About window is one: packs/about.c1f).
+-- [{eid, cls, props}]}, and the packs that import `dom` run in the page and draw there (packs/about.c1f is one, when a seat loads it: the release seat's list, apps/barest.packs, does not).
 -- BUILT: `packs` = every pack FILE of the apps' folders whose text has the line `IMPORT dom ...` (the released seat sent every pack it loaded; the others
 -- are the seat's, not the page's), by file name without `.c1f`, the text whole. They are read ONCE at boot (`FieldVm:seat`, from `Boot:seat.app_dirs`:
 -- each folder is listed, each pack file read), so a request waits only for the first read; a file pack changed afterwards is not re-read (a restart does).
--- `entities` is one entity, `Boot:seat`, holding the chat view's settings (the snapshot getter below), and `views` is the per-view switch.
+-- `entities` is one entity, `Boot:seat`, holding the views' settings (the snapshot getter below).
 -- MISSING, and why: (1) the released seat sent every entity of a class the view packs declare (About:seat, fed by about.py with the
 -- version, the git sha and the changelog); nothing here feeds those entities, and the engine's entities of those classes are not listed yet, so the About
--- window has nothing to draw; (2) the page's follow-up stream, `field.write` / `field.pack` / `field.remove` frames, is not on `/ui/serve/event` (it carries the
--- session events only), so the page's field never changes after the snapshot; (3) a Pack entity written by the model (`Pack:<name>.text`) is not in `packs`
+-- window has nothing to draw; (2) there is no follow-up stream (the Wire feed is removed): the page's field changes only by its poll of `/ui/fieldvm/active`; (3) a Pack entity written by the model (`Pack:<name>.text`) is not in `packs`
 -- (only files); (4) two folders holding the same pack name: either may win (the released seat had one folder).
 -- (A VIRTUAL entity is collected when nothing holds it: `FieldVm:seat` is RESIDENT, a row of its own, and its `dirs` and `files` getters hold the folders and the files.)
 -- The `packs` dict has data keys, which c1f cannot write: it is built by one `sql()` over the pairs (`json_group_object`, the way the session status is).
@@ -47,23 +46,22 @@ FieldVm.done getter: this.listed and len([f for f in this.files if f.text == Non
 FieldVm.pairs getter: [[f.stem, f.text] for f in this.files if f.view]
 FieldVm.rows getter: sql("SELECT json_group_object(json_extract(value, '$[0]'), json_extract(value, '$[1]')) AS packs FROM json_each(?)", this.pairs) if this.done else None
 -- THE FIELD VIEW'S SETTINGS ride the same entity: `field_window` (how many of the most recently active entities the field view keeps, launch fact, none by default: the pack's tried value stands) and
--- `field_poll_ms` (the period of its calls); the field view is the page's Field view (apps/barest.c1f/field_view.c1f, drawn by the shell: shell_view.c1f).
--- THE VIEWS' SETTINGS (the bare chat, apps/barest.c1f/chat_view.c1f; the shell, shell_view.c1f; docs/ui-rebuild-plan.md): `views` (from the seat fact `ui_views`) is still reported, but the page no longer
--- reads it: the chat and the field are the page's views. The shell's and the chat's facts (shell_status_ms, shell_panel_chars, chat_poll_timeout_s) ride with the chat's.
+-- `field_poll_ms` (the period of its calls); the field view is the page's Field view (apps/field.c1f/field_view.c1f, drawn by the shell: shell_view.c1f).
+-- THE VIEWS' SETTINGS (the bare chat, apps/barest.c1f/chat_view.c1f; the shell, shell_view.c1f; docs/ui-rebuild-plan.md): the chat and the field are the page's views. The shell's and the chat's facts (shell_status_ms, shell_panel_chars, chat_poll_timeout_s) ride with the chat's.
 -- The legacy chat's constants ride as ONE entity, `Boot:seat`, holding the facts the view reads (chat_page_size ... chat_tool_chars; a fact not given is null: the pack's own
 -- default, the value the old chat.js had, stands).
 FieldVm.snapshot getter:
   WHEN this.rows != None and len(this.rows) > 0:
     pk = json(prop(this.rows[0], 'packs'))
     bt = ([b for b in instances('Boot')] or [None])[0]
-    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars'), 'field_window': prop('Setting:map.window', 'current') or prop(bt, 'field_window'), 'field_poll_ms': prop('Setting:map.poll_ms', 'current') or prop(bt, 'field_poll_ms'), 'chat_poll_timeout_s': prop(bt, 'chat_poll_timeout_s'), 'shell_status_ms': prop(bt, 'shell_status_ms'), 'shell_panel_chars': prop(bt, 'shell_panel_chars')}}], 'views': {'chat': prop(prop(bt, 'ui_views'), 'chat') or 'legacy', 'field': prop(prop(bt, 'ui_views'), 'field') or 'legacy'}}
+    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars'), 'field_window': prop('Setting:map.window', 'current') or prop(bt, 'field_window'), 'field_poll_ms': prop('Setting:map.poll_ms', 'current') or prop(bt, 'field_poll_ms'), 'chat_poll_timeout_s': prop(bt, 'chat_poll_timeout_s'), 'shell_status_ms': prop(bt, 'shell_status_ms'), 'shell_panel_chars': prop(bt, 'shell_panel_chars')}}]}
   ELSE: None
 
 Request.o_fieldvm getter: this.route in ['/ui/fieldvm', '/ui/fieldvm/active', '/ui/fieldvm/edges', '/ui/fieldvm/entity']
 Request.m_fieldvm getter: ['GET']
 Request.fv_seat getter: ([s for s in instances('FieldVm') if s.eid == 'FieldVm:seat'] or [None])[0]
 Request.fv_body getter: this.fv_seat.snapshot if this.fv_seat != None else None
--- THE ACTIVE WINDOW (#1143, the field view pack apps/barest.c1f/field_view.c1f; docs/field-view-plan.md slices 1-2, operator 2026-11-14): `GET /ui/fieldvm/active?m=<n>` answers
+-- THE ACTIVE WINDOW (#1143, the field view pack apps/field.c1f/field_view.c1f; docs/field-view-plan.md slices 1-2, operator 2026-11-14): `GET /ui/fieldvm/active?m=<n>` answers
 -- `{nodes: [{id, cls, updated, parent}], n_total, hidden, m}`: the `m` entities written most recently (the `updated` column, newest first) whose class is not hidden, and how many there are in all.
 -- It reads the COLUMNS `k`, `cls`, `updated` of `c_field` and never a body, so an entity nobody loaded stays unloaded. `parent` is the nearest colon-prefix owner that is in the window too
 -- (null otherwise): the ownership edge. `m` named but not a number of at least 1 is a 400; a request that names none gets `Setting:map.window` (default 150); the page names it from `field_window`, and the setting (packs/settings.c1f), the live owner of that number (the launch fact `field_window` is its default). The hidden classes are the live setting `Setting:map.hidden` (default: the launch fact

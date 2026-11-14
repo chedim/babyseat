@@ -1,6 +1,6 @@
 [package]
 name = "membrane_vm"
-version = "0.1.0"
+version = "0.7.60"
 edition = "2021"
 description = "membrane's cliffhanger VM, native (#971)"
 license = "MIT"

@@ -10,7 +10,7 @@ RESIDENT Pack
 -- THE MODEL'S TOOLS AS AN MCP DOOR (#1143, the `tools` route family): `POST /mcp` speaks MCP over plain HTTP, JSON-RPC 2.0, one JSON
 -- answer per request (no SSE stream: a GET is a 405). The model's CLI (`claude --mcp-config`) connects here; the tools are the FIELD
 -- operations only (operator, 2026-11-12: field manipulation and querying, nothing else; a shell, a file or a fetch is a Command:, File:
--- or Fetch: entity the model writes; a second SQLite file is a SqlSource: and SqlQuery: entity pair, see help('sql')):
+-- or Fetch: entity the model writes; a second SQLite file is a SqlSource: and SqlQuery: entity pair, read the topic with entity_read Help:sql):
 --   entity_query {q, k, offset, full, count}  which entities exist: `kind:<Class>`, `kind!:<Class>` (all but that class) and `name~:<eid prefix>`,
 --                                     joined with `&`; k rows (default 20, at most 100) from row `offset` (default 0); full=true adds each row's stored properties
 --   entity_read  {spec, prop}         an entity's stored properties, or one property in full (a getter's value too)

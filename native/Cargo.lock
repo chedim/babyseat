@@ -559,7 +559,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "membrane_vm"
-version = "0.1.0"
+version = "0.7.60"
 dependencies = [
  "bytemuck",
  "libc",

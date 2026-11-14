@@ -69,7 +69,7 @@ Request.st_read getter:
   ELSE WHEN this.route == '/membrane/seat/pause': this.st_pause_body
   ELSE WHEN this.route == '/membrane/self/card': this.st_card_body
   ELSE: this.st_state_body
--- LAUNCH SETTINGS (`--fact name=value`, scripts/seat-full passes them on): the constants carried over from the release, each with the released value as its default (docs/release-parity.md, 'Settings').
+-- LAUNCH SETTINGS (`--fact name=value`, scripts/seat passes them on): the constants carried over from the release, each with the released value as its default (docs/release-parity.md, 'Settings').
 Request.st_probe_s getter: ([b.quota_probe_s for b in this.boots] or [None])[0] or 600
 Request.st_quota_body getter: {'now': clock, 'paused': [], 'probe_s': this.st_probe_s}
 -- STATS (tokenomics.py `_assemble`, the 📊 window): the released answer of a seat that counted nothing. The counters (the message store's token rows,

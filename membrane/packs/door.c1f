@@ -81,7 +81,9 @@ Request.c_voice getter: ([b.seat_voice_out for b in this.boots] or [False])[0] =
 Request.c_lang getter: ([b.seat_language for b in this.boots] or ['en'])[0] or 'en'
 Request.c_blurp getter: ([b.seat_blurp for b in this.boots] or [False])[0] == True
 Request.c_build getter: ([b.build_id for b in this.boots] or [None])[0]
-Request.conf_body getter: {'serve_ok': True, 'serve_url': 'standalone', 'standalone': True, 'build': this.c_build, 'name': this.c_name, 'named': this.c_named, 'aliases': this.c_aliases, 'stt': this.c_stt, 'voice_out': this.c_voice, 'language': this.c_lang, 'blurp': this.c_blurp, 'auth': 'jwt', 'who': this.who}
+-- the door's real mode: `jwt` when the launcher named a door secret (every call but the page's shell needs a token), `none` when it did not (the open door)
+Request.c_auth getter: 'jwt' if str(([b.door_secret_file for b in this.boots] or [''])[0] or '') != '' else 'none'
+Request.conf_body getter: {'serve_ok': True, 'serve_url': 'standalone', 'standalone': True, 'build': this.c_build, 'name': this.c_name, 'named': this.c_named, 'aliases': this.c_aliases, 'stt': this.c_stt, 'voice_out': this.c_voice, 'language': this.c_lang, 'blurp': this.c_blurp, 'auth': this.c_auth, 'who': this.who}
 Request.conf_reply getter:
   WHEN not this.is_read: {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE: {'status': 200, 'body': this.conf_body}
@@ -180,7 +182,7 @@ Request.probe_reply getter:
 --                        or None while it is still being worked out (an effect has not landed). The reserved families:
 --   models  decisions  state  voice  session  self  tools  map  fieldvm  settings
 -- A family that owns the path answers it, before the shipped routes; the gate still comes first.
-Request.owned getter: this.o_models == True or this.o_decisions == True or this.o_state == True or this.o_voice == True or this.o_session == True or this.o_self == True or this.o_tools == True or this.o_map == True or this.o_fieldvm == True or this.o_settings == True
+Request.owned getter: this.o_models == True or this.o_decisions == True or this.o_state == True or this.o_voice == True or this.o_session == True or this.o_self == True or this.o_tools == True or this.o_fieldvm == True or this.o_settings == True
 Request.family getter:
   WHEN this.o_models == True: this.r_models
   ELSE WHEN this.o_decisions == True: this.r_decisions
@@ -188,7 +190,6 @@ Request.family getter:
   ELSE WHEN this.o_voice == True: this.r_voice
   ELSE WHEN this.o_session == True: this.r_session
   ELSE WHEN this.o_self == True: this.r_self
-  ELSE WHEN this.o_map == True: this.r_map
   ELSE WHEN this.o_fieldvm == True: this.r_fieldvm
   ELSE WHEN this.o_settings == True: this.r_settings
   ELSE: this.r_tools
@@ -215,7 +216,6 @@ Request.allow getter:
   ELSE WHEN this.o_session == True: this.m_session
   ELSE WHEN this.o_self == True: this.m_self
   ELSE WHEN this.o_tools == True: this.m_tools
-  ELSE WHEN this.o_map == True: this.m_map
   ELSE WHEN this.o_fieldvm == True: this.m_fieldvm
   ELSE WHEN this.o_settings == True: this.m_settings
   ELSE: None
@@ -227,10 +227,10 @@ Request.routed getter: this.family_checked if this.owned else this.own_routes
 Request.shipped getter: this.gate if this.gate != None else this.routed
 
 -- ---- the page's prefix: /ui/serve/<path> is <path> (the released page calls every route through it) --------------------------------
--- The page (membrane/ui/*.js) asks `/ui/serve/session`, `/ui/serve/global/health`, ...; the released Python seat stripped the prefix and
+-- The page (membrane/ui/boot.js and the view packs) asks `/ui/serve/session`, `/ui/serve/global/health`, ...; the released Python seat stripped the prefix and
 -- answered the route behind it. The door does the same, once and only at the front, with two getters and no rewrite: `ui_served` says
 -- the request came through the prefix (the page's own call: door_auth.c1f gives the page its token and refuses a tokenless one), `ui_path`
--- is the path without it, and `route` is the path every route family reads: ALWAYS `this.route`, never `this.route` (the raw path stays
+-- is the path without it, and `route` is the path every route family reads: ALWAYS `this.route`, never `this.path` (the raw path stays
 -- as the client sent it; a setter cannot rewrite it: a write back to the property that started the chain is refused as a loop).
 Request.ui_served getter: startswith(this.path or '', '/ui/serve/')
 Request.ui_path getter: '/' + tail(this.path, len(this.path) - len('/ui/serve/'))

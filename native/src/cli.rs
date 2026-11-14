@@ -1,6 +1,6 @@
 //! cliffvm's command line (docs/cliffvm.md). NO app logic: the arguments become Boot facts (the ones fields_live.seat_facts tells,
 //! membrane/packs/facts.json), and the apps are the program: the FIRST argument is the root of trust, later ones are layers above it. The barest seat has no security (operator, 2026-11-12): there is no
-//! secret and no token; `--bind` only says which address the door opens on.
+//! secret and no token unless the launcher names `door_secret_file`; `--bind` only says which address the door opens on.
 use std::sync::atomic::AtomicBool;
 
 use serde_json::{json, Map, Value as J};
@@ -46,6 +46,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             while let Some(a) = it.next() {
                 let mut val = |n: &str| it.next().cloned().ok_or_else(|| format!("{n} needs a value"));
                 match a.as_str() {
+                    "--help" | "-h" => return Ok(Cmd::Help),
                     "--store" => r.store = val("--store")?,
                     "--port" => r.port = Some(val("--port")?.parse().map_err(|_| "--port: a number 0-65535 (0 = any free port)".to_string())?),
                     "--bind" => r.bind = Some(val("--bind")?),
@@ -69,6 +70,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
             while let Some(a) = it.next() {
                 let mut val = |n: &str| it.next().cloned().ok_or_else(|| format!("{n} needs a value"));
                 match a.as_str() {
+                    "--help" | "-h" => return Ok(Cmd::Help),
                     "--sub" => sub = Some(val("--sub")?),
                     "--name" => name = Some(val("--name")?),
                     "--ttl" => ttl = Some(parse_ttl(&val("--ttl")?)?),

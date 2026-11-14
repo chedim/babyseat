@@ -429,6 +429,7 @@
       "Request.app_dirs": "Any",
       "Request.boots": "List(Entity(Boot))",
       "Request.c_aliases": "Any",
+      "Request.c_auth": "Text",
       "Request.c_blurp": "Bool",
       "Request.c_build": "Any",
       "Request.c_lang": "Any",
@@ -715,30 +716,6 @@
     "resident": [
       "FieldVm"
     ]
-  },
-  "door_map": {
-    "getters": {
-      "Request.m_map": "List(Text)",
-      "Request.mp_3d": "Dict",
-      "Request.mp_arg": "List(List(Text?))",
-      "Request.mp_eid": "Text",
-      "Request.mp_empty_pid": "Text",
-      "Request.mp_err": "Text",
-      "Request.mp_expired": "Dict",
-      "Request.mp_ints": "List(Num?)",
-      "Request.mp_ints_ok": "Bool",
-      "Request.mp_pid": "Text?",
-      "Request.mp_q": "Text",
-      "Request.mp_root": "Dict",
-      "Request.mp_tau": "Any",
-      "Request.mp_tile": "Dict",
-      "Request.mp_tile_k": "Any",
-      "Request.mp_val": "List(Text?)",
-      "Request.o_map": "Bool",
-      "Request.r_map": "Dict"
-    },
-    "writes": {},
-    "findings": []
   },
   "door_models": {
     "getters": {

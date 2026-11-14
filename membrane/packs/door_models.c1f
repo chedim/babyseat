@@ -112,7 +112,7 @@ Request.minds_reply getter:
 Settings.kind getter: 'settings'
 
 Request.op_set getter: ([s for s in instances('Settings') if s.eid == 'Settings:seat'] or [None])[0]
--- LAUNCH SETTINGS (`--fact name=value`, scripts/seat-full passes them on): the constants carried over from the release, each with the released value as its default (docs/release-parity.md, 'Settings').
+-- LAUNCH SETTINGS (`--fact name=value`, scripts/seat passes them on): the constants carried over from the release, each with the released value as its default (docs/release-parity.md, 'Settings').
 Request.op_share_def getter: ([b.self_cpu_share_default for b in this.boots] or [None])[0] or 0.5
 Request.op_keep_def getter: ([b.code_runs_keep_default for b in this.boots] or [None])[0] or 30
 Request.op_tau getter: ([b.field_tau_s for b in this.boots] or [None])[0] or 180.0

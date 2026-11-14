@@ -5,7 +5,7 @@ RESIDENT Store
 --   sql(query, args...)  a read (SELECT / WITH; anything else is refused), arguments bound by `?`, rows as dicts;
 --                        as the official drivers: no time limit, no row cap, a lock waited for up to 5 s. Thread-safe and
 --                        non-blocking: the engine's own read-only connection (WAL: it never waits for the seat's
---                        writer), run with the GIL released.
+--                        writer), run off the seat's loop.
 --   json(text)           a row's JSON body as a dict (an Error when the text is not JSON); str(x) a value as text.
 -- Tables: c_<collection> (k TEXT PRIMARY KEY, body TEXT) with body = {"o": <order>, "d": {...the document...}} --
 --   c_events (chat turns, tool results: d.session, d.role, d.stream, d.text, d.seq, d.n, d.ts), c_sentences,
