@@ -324,6 +324,8 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/apps/bar
 
 ## 11. Libraries in `.c1f`
 
+(0.7 history: `banner.c1f`, the whole banner with recall and Blurp, is in `membrane/packs/` but NOT loaded in the release; the release's banner is `membrane/apps/barest.c1f/default_banner.c1f` and `Help:banner`.)
+
 - **`membrane/packs/banner.c1f`** (the whole banner): one `Banner:<admin>:<chat>` per person per chat, internal
   chats too; a turn writes `ask` and the seat's facts as fields (`paused`, `alerts` -- the track alerts it took --,
   `tools`, and Blurp's `blurp` / `suggest` when Blurp is on), and shows `text` (every section and the layout:
