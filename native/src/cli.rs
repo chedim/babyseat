@@ -192,6 +192,7 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
     }
     let mut told = facts(r);
     told.extend(admin_facts);
+    for m in host::boot_environment(&h, &told, &std::env::vars().collect::<Vec<_>>()) { eprintln!("cliffvm: {m}"); }   // the environment as an entity (host.rs), before `started` so a setter on it finds it
     host::boot_started(&h, &told, true);
     if let Some(steps) = &steps {
         let _ = plan::run(h.engine(), &host::NullHost, steps, true, &mut |_| Outcome::Skipped);   // the UI is up: the background steps

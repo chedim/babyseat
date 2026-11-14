@@ -6,15 +6,15 @@
 #
 # It downloads the release tarball of your platform (macOS arm64/x86_64, Linux x86_64/aarch64 on glibc or musl), CHECKS its sha256 against the release's .sha256 file BEFORE extracting,
 # extracts it into a staging folder, checks every file against the folder's own MANIFEST.sha256, and only then moves it to
-#   ~/.local/share/membrane/<version>/        (the dist folder: bin/cliffvm packs/ apps/ help/ ...)
-#   ~/.local/share/membrane/babyseat          (a two-line launcher: `cliffvm serve "$@"` of the CURRENT version)
-#   ~/.local/share/membrane/current           (a link to the installed version)
+#   ~/.local/share/membrane-app/<version>/        (the dist folder: bin/cliffvm packs/ apps/ ...)
+#   ~/.local/share/membrane-app/babyseat          (a two-line launcher: `cliffvm serve "$@"` of the CURRENT version)
+#   ~/.local/share/membrane-app/current           (a link to the installed version)
 #   ~/.local/bin/babyseat                     (a link to the launcher)
 # Never uses sudo; nothing outside those two folders is touched. A failed run leaves the previous install as it was. Run it again to upgrade.
 #
 #   --version <X.Y.Z>   the release to install (default: the latest GitHub release)
 #   --base-url <url>    where babyseat-<version>-<target>.tar.gz and its .sha256 are (default: the GitHub release of the version; file:// works)
-#   --prefix <dir>      the install folder (default ~/.local/share/membrane; env MEMBRANE_INSTALL_DIR)
+#   --prefix <dir>      the install folder (default ~/.local/share/membrane-app, apart from the seat's data folder; env MEMBRANE_INSTALL_DIR)
 #   --bin-dir <dir>     where the babyseat link goes (default ~/.local/bin; env MEMBRANE_BIN_DIR)
 #   --target <triple>   the platform's rust triple, instead of detecting it
 #   --print-target      print the detected triple and stop
@@ -82,7 +82,7 @@ if [ -z "$version" ]; then
 fi
 version=${version#v}
 [ -n "$base" ] || base=https://github.com/$REPO/releases/download/v$version
-[ -n "$prefix" ] || prefix=${HOME:?no HOME in the environment: name the folder with --prefix}/.local/share/membrane
+[ -n "$prefix" ] || prefix=${HOME:?no HOME in the environment: name the folder with --prefix}/.local/share/membrane-app
 [ -n "$bindir" ] || bindir=${HOME:?no HOME in the environment: name the folder with --bin-dir}/.local/bin
 asset=babyseat-$version-$target.tar.gz
 
@@ -132,4 +132,4 @@ say "start it:   babyseat            (the seat on http://127.0.0.1:4096; --port 
 say "it chats with Claude through the claude CLI or an API key: export ANTHROPIC_API_KEY=... before starting"
 case ":$PATH:" in *":$bindir:"*) ;; *) say "$bindir is not on your PATH: add it, e.g.  echo 'export PATH=\"$bindir:\$PATH\"' >> ~/.profile" ;; esac
 say "macOS: files installed this way are not quarantined. A tarball downloaded in a browser is: right-click the binary and choose Open once, or run  xattr -dr com.apple.quarantine <folder>"
-say "upgrade: run this installer again. Remove: rm -rf $prefix/$version $prefix/current $prefix/babyseat $bindir/babyseat (on Linux the seat's data lives in $prefix too (seat.sqlite, door.secret): leave those)"
+say "upgrade: run this installer again. Remove: rm -rf $prefix $bindir/babyseat (the seat's data is in its own folder, not in these)"

@@ -1,6 +1,6 @@
 # The graph link: joining the seat's graph and the page's graph (design, 2026-11-14, #1143)
 
-DESIGN, with section 15 BUILT (slice 1). Nothing else here is built; every number, default, new builtin and new native piece is a DECISION for the operator (list at the end; "(D<n>)" points at it).
+Status: a DESIGN with ONE built piece. Built and in the release: slice 1 (section 15): the page tells the seat what it loaded and what it can do (`Vm:<ns>.caps`, `<ns>::Page:main.report`; `membrane/packs/link.c1f`, `membrane/apps/barest.c1f/link_view.c1f`, `Help:page`), so the model reads `Vm:*` and `Page:main`. In progress, not in this tree: slice 2, the link engine and the seat side (branches `w116-linkengine`, `w117-linkseat`). Everything else here is design, not built; every number, default, new builtin and new native piece is a DECISION for the operator (list at the end; "(D<n>)" points at it).
 Where I disagree with the operator's sketch I say so in a line starting "Challenge".
 
 ## 0. The problem, as the code has it
@@ -136,7 +136,7 @@ The protocol is frames; the transport carries them.
 
 **Slice 3: forwarded writes from the model to page nodes.** `door_tools.c1f` routes `entity_write` of a foreign-owned id to a `wr`; the page-side verdict getter (page pack) decides; `res` returns as the tool's reply (the Return entity pattern, docs/cliffvm.md:96: pending until the receipt). Native: none beyond slice 2. Tests: model writes `p7a::Shell:main.open`, the panel opens; a refused class answers with the reason. Risk: medium (a page that is hidden or gone: `refused: page not connected`).
 
-**Slice 4: websocket.** Section 6. Rust: `http.rs` upgrade + frames, a held non-Request connection, SHA-1; JS: `WebSocket` driver and allow-list entry. Tests: a frame round trip, close, ping, a malformed frame (never abort, docs/crash-covenant.md). Risk: medium; the frame layer is the same.
+**Slice 4: websocket.** Section 6. Rust: `http.rs` upgrade + frames, a held non-Request connection, SHA-1; JS: `WebSocket` driver and allow-list entry. Tests: a frame round trip, close, ping, a malformed frame (never abort). Risk: medium; the frame layer is the same.
 
 **Slice 5: model-authored views.** Section 7; a design of its own before any code.
 

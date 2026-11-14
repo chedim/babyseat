@@ -11,8 +11,9 @@ IMPORT legacy_import 1
 -- THE SEARCH ORDER (first hit wins; a place holds `field.sqlite/field.sqlite3`, the Python seat's own layout; the stat of each is asked, a file is a hit):
 --   1 the fact `legacy_path` (the launcher's `--legacy <path>`): a file, or a folder that holds the store (the `.membrane` folder, the `field.sqlite` folder, or the folder of `field.sqlite3`). A NAMED path that
 --     holds no store is an error with the path, never a fallback to another place; 1b a source the launch already declared as `legacy` (the fact `sql_sources`, or one an earlier start kept) is used as it is;
---   2 `<seat_data_dir>`  3 `<seat_data_dir>/.membrane`  4 `<seat_cwd>/.membrane` (the Python seat's cwd folder)  5 `<seat_home>/membrane/.membrane` (the Python seat's default home folder, restarts.py)
---   6 `/config/membrane/.membrane` (the Home Assistant component's seat folder)
+--   2 `Environment:host.MEMBRANE_DATA_DIR` (the environment's own pointer to a seat's data folder, packs/environment.c1f; right after the named path, before the conventional places)
+--   3 `<seat_data_dir>`  4 `<seat_data_dir>/.membrane`  5 `<seat_cwd>/.membrane` (the Python seat's cwd folder)  6 `<seat_home>/membrane/.membrane` (the Python seat's default home folder, restarts.py; the home is the fact `seat_home`, the launcher's HOME)
+--   7 `/config/membrane/.membrane` (the Home Assistant component's seat folder)
 -- A place with no store is nothing: no error and no notice. When no place has one, the ledger says `absent` and later starts do nothing (a store that appears later is picked up only when the user passes its path).
 -- ONCE: `done` ends it for good (later starts look at the ledger and nothing else). `importing` and `error` are tried again at the next start: the import resumes from the per-session ledgers
 -- (`Legacy:session:<sid>`, packs/legacy_import.c1f), a session that is done is never read again.
@@ -24,11 +25,12 @@ LegacySeat.cx_batch getter: ([prop(b, 'legacy_batch') for b in instances('Boot')
 LegacySeat.cx_declared getter: prop('SqlSource:legacy', 'path')
 LegacySeat.cx_state getter: prop('membrane::Legacy:cutover', 'state')
 LegacySeat.cx_named getter: this.cx_fact if this.cx_fact != None else this.cx_declared
+LegacySeat.cx_env getter: str(prop('Environment:host', 'MEMBRANE_DATA_DIR') or '')
 LegacySeat.cx_data getter: str(([prop(b, 'seat_data_dir') for b in instances('Boot') if prop(b, 'seat_data_dir') != None] or [''])[0])
 LegacySeat.cx_cwd getter: str(([prop(b, 'seat_cwd') for b in instances('Boot') if prop(b, 'seat_cwd') != None] or [''])[0])
 LegacySeat.cx_home getter: str(([prop(b, 'seat_home') for b in instances('Boot') if prop(b, 'seat_home') != None] or [''])[0])
 -- the places, in order: the roots told as facts (a root that is not told is left out)
-LegacySeat.cx_roots getter: concat([x for x in [this.cx_data, this.cx_data + '/.membrane' if this.cx_data != '' else '', this.cx_cwd + '/.membrane' if this.cx_cwd != '' else '', this.cx_home + '/membrane/.membrane' if this.cx_home != '' else ''] if x != ''], ['/config/membrane/.membrane'])
+LegacySeat.cx_roots getter: concat([x for x in [this.cx_env, this.cx_data, this.cx_data + '/.membrane' if this.cx_data != '' else '', this.cx_cwd + '/.membrane' if this.cx_cwd != '' else '', this.cx_home + '/membrane/.membrane' if this.cx_home != '' else ''] if x != ''], ['/config/membrane/.membrane'])
 LegacySeat.cx_cands getter:
   WHEN not this.cx_active: []
   ELSE WHEN this.cx_fact != None: [this.cx_fact, this.cx_fact + '/field.sqlite3', this.cx_fact + '/field.sqlite/field.sqlite3']
@@ -36,12 +38,13 @@ LegacySeat.cx_cands getter:
   ELSE: [r + '/field.sqlite/field.sqlite3' for r in this.cx_roots]
 -- the search runs until the ledger ends it: not `done`; `absent` only when the user passes a path now
 LegacySeat.cx_active getter: this.cx_boot != None and this.cx_state != 'done' and (this.cx_state != 'absent' or this.cx_fact != None)
--- the stat of each place, one getter each (a `stat` inside a list comprehension is not waited for: the five getters are the most places there are: 3 for a named path, 5 conventional)
+-- the stat of each place, one getter each (a `stat` inside a list comprehension is not waited for: the six getters are the most places there are: 3 for a named path, 6 conventional)
 LegacySeat.cx_s0 getter: stat(this.cx_cands[0]) if len(this.cx_cands) > 0 else None
 LegacySeat.cx_s1 getter: stat(this.cx_cands[1]) if len(this.cx_cands) > 1 else None
 LegacySeat.cx_s2 getter: stat(this.cx_cands[2]) if len(this.cx_cands) > 2 else None
 LegacySeat.cx_s3 getter: stat(this.cx_cands[3]) if len(this.cx_cands) > 3 else None
 LegacySeat.cx_s4 getter: stat(this.cx_cands[4]) if len(this.cx_cands) > 4 else None
+LegacySeat.cx_s5 getter: stat(this.cx_cands[5]) if len(this.cx_cands) > 5 else None
 LegacySeat.cx_f0 getter:
   WHEN len(this.cx_cands) <= 0: ''
   ELSE WHEN this.cx_s0 == None: None
@@ -62,7 +65,11 @@ LegacySeat.cx_f4 getter:
   WHEN len(this.cx_cands) <= 4: ''
   ELSE WHEN this.cx_s4 == None: None
   ELSE: this.cx_cands[4] if prop(this.cx_s4, 'kind') == 'file' else ''
-LegacySeat.cx_probe getter: [this.cx_f0, this.cx_f1, this.cx_f2, this.cx_f3, this.cx_f4]
+LegacySeat.cx_f5 getter:
+  WHEN len(this.cx_cands) <= 5: ''
+  ELSE WHEN this.cx_s5 == None: None
+  ELSE: this.cx_cands[5] if prop(this.cx_s5, 'kind') == 'file' else ''
+LegacySeat.cx_probe getter: [this.cx_f0, this.cx_f1, this.cx_f2, this.cx_f3, this.cx_f4, this.cx_f5]
 LegacySeat.cx_ready getter: len(this.cx_cands) > 0 and len([x for x in this.cx_probe if x == None]) == 0
 LegacySeat.cx_pick getter:
   WHEN not this.cx_ready: None

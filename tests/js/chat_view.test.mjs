@@ -81,7 +81,7 @@ scenario('a page of turns is drawn as the legacy chat draws it', () => {
   assert.equal(row(w, d, ':who').text, 'queued'); assert.equal(w.text(`DomNode:chat:row:${d}:ans`), 'Waiting for a turn…'); assert.equal(row(w, d, ':ans').class, 'bubble seat pending');
   // the tools folded under the answer: a count, then each tool's name and its input shortened to 90
   assert.equal(row(w, a, ':tools').tag, 'details'); assert.equal(row(w, a, ':tools').class, 'tools-run');
-  assert.equal(row(w, a, ':tools:sum').text, '2 tools');
+  assert.equal(row(w, a, ':tools:sum').text, '2 tool calls');
   const names = w.log.filter((e) => e.prop === 'text' && /:tools:t:.*:name$/.test(e.eid)).map((e) => e.new);
   assert.deepEqual(names, ['mcp__membrane__entity_read', 'Bash']);
   const ins = w.log.filter((e) => e.prop === 'text' && /:tools:t:.*:in$/.test(e.eid)).map((e) => e.new);
@@ -297,7 +297,7 @@ scenario('the import line is shown while the history is imported and goes away w
   w.write('DomNode:chat:older:btn', 'clicked', 2);
   assert.equal(w.asked('older').url, '/membrane/chat/messages?limit=20&before=1002-3', 'the same cursor');
   w.reply('older', 200, { ...page([MSGS[0], MSGS[1]], false, null), import: LINE });
-  assert.equal(row(w, '1000-1', ':me').text, 'hello', 'the older turns that arrived are drawn');
+  assert.equal(w.text('DomNode:chat:row:1000-1:me'), 'hello', 'the older turns that arrived are drawn');
   // a poll after the end of the import: no line
   w.tick(3.5);
   w.reply('history', 200, { ...page([MSGS[2], MSGS[3]], false, null), import: null });
@@ -320,7 +320,7 @@ scenario('no View entity, nothing happens', () => {
 // STOP: shown only while a turn runs; one click is one POST to the abort route of the running message; the receipt is read; a refusal is said in text
 scenario('Stop: shown while a turn runs, one POST, errors as text, gone when idle', () => {
   const w = world(); w.open();
-  assert.equal(w.n('stop').tag, 'button'); assert.equal(w.n('stop').type, 'button'); assert.equal(w.n('stop').text, 'Stop');
+  assert.equal(w.n('stop').tag, 'button'); assert.equal(w.n('stop').type, 'button'); assert.equal(w.n('stop').text, 'Stop'); assert.equal(w.n('stop')['aria-label'], 'Stop the answer', 'a name for a screen reader');
   assert.equal(w.n('stop').hidden, true, 'nothing runs: no Stop');
   w.reply('history', 200, page([MSGS[0], MSGS[1]]));          // 1001-2 is running
   assert.equal(w.n('stop').hidden, false, 'a running turn: Stop');
@@ -336,10 +336,25 @@ scenario('Stop: shown while a turn runs, one POST, errors as text, gone when idl
   w.write('DomNode:chat:stop', 'clicked', 3);
   w.reply('stop:1001-2', 200, true);
   assert.equal(w.n('note:bubble').text, '', 'a good stop clears the note');
+  assert.equal(w.n('input').focused, true, 'after a stop the composer has the focus back');
   w.tick(1000); w.reply('history', 200, page([{ ...MSGS[1], state: 'error', response: 'half an answer\n\n(stopped from the page)', turn: { state: 'error', started: 110, ended: 120 } }]));
   assert.equal(w.n('stop').hidden, true, 'the turn ended: no Stop');
   assert.match(w.text('DomNode:chat:row:1001-2:ans'), /half an answer/); assert.match(w.text('DomNode:chat:row:1001-2:ans'), /\(stopped from the page\)/);
-  assert.equal(row(w, '1001-2', ':ans').class, 'bubble note', 'the stopped turn is shown as a note');
+  assert.equal(row(w, '1001-2', ':ans').class, 'bubble seat stopped', 'the stopped turn is neutral, not an error');
 });
 
+
+scenario('tool calls: a clear label, singular for one, collapsible by the keyboard (details/summary), name and a short input', () => {
+  const w = world(); w.open();
+  w.reply('history', 200, page([{ id: '3000-1', text: 'x', state: 'done', response: 'ok', turn: { state: 'done', started: 1, ended: 2 }, tools: ['Bash'], tool_calls: [{ id: 't1', name: 'Bash', input: 'ls' }] },
+    { id: '3001-2', text: 'y', state: 'done', response: 'ok', turn: { state: 'done', started: 1, ended: 2 }, tools: [], tool_calls: Array.from({ length: 12 }, (_, i) => ({ id: 'u' + i, name: 'Read', input: 'f' + i })) }]));
+  assert.equal(row(w, '3000-1', ':tools:sum').text, '1 tool call'); assert.equal(row(w, '3001-2', ':tools:sum').text, '12 tool calls');
+  assert.equal(row(w, '3001-2', ':tools:sum').tag, 'summary'); assert.equal(row(w, '3001-2', ':tools').tag, 'details');
+});
+scenario('a turn the person stopped is a neutral note, an error stays an error', () => {
+  const w = world(); w.open();
+  w.reply('history', 200, page([{ id: '4000-1', text: 'x', state: 'error', response: 'half\n\n(stopped from the page)', turn: { state: 'error', started: 1, ended: 2 }, tools: [], tool_calls: [] },
+    { id: '4001-2', text: 'y', state: 'error', response: 'claude failed (rc 3)', turn: { state: 'error', started: 1, ended: 2 }, tools: [], tool_calls: [] }]));
+  assert.equal(row(w, '4000-1', ':ans').class, 'bubble seat stopped'); assert.equal(row(w, '4001-2', ':ans').class, 'bubble note');
+});
 console.log(`chat_view: ok (${n} scenarios)`);

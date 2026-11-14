@@ -1,6 +1,6 @@
 name: wheels
 
-# THE WHEELS (#1143, docs/packaging-plan.md decided 2026-11-14, docs/python-retirement.md the wrapper): `babyseat` ships as one platform wheel per target, `py3-none-<platform>`, that carries the
+# THE WHEELS (#1143, docs/packaging-plan.md, decided 2026-11-14): `babyseat` ships as one platform wheel per target, `py3-none-<platform>`, that carries the
 # prebuilt `cliffvm` seat and its packs/apps/help as `membrane/dist/`; Python is only the launcher. No cargo here: the binaries come from release-binaries.yml (called below: its `wheel-payload-<target>`
 # artifacts are the dist folders), and scripts/dist/build_wheel.sh packs each into its wheel. Each wheel is installed into a fresh venv and smoke-tested (scripts/dist/smoke_wheel.sh: babyseat --version,
 # --help, serve --port 0 with a fake claude, /global/health 401 without a token and 200 with the admin token) wherever the runner can run it: macOS arm64 natively, macOS x86_64 under Rosetta,

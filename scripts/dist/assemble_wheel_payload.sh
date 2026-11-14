@@ -1,5 +1,5 @@
 #!/bin/sh
-# The payload of the binary wheel (docs/python-retirement.md, the wrapper): the dist folder, verified, in the shape the wrapper packages.
+# The payload of the binary wheel (docs/packaging-plan.md, the wrapper): the dist folder, verified, in the shape the wrapper packages.
 #   scripts/dist/assemble_wheel_payload.sh <dist folder> <payload dir>
 # THE INTERFACE (this script makes, the wrapper's setup.py/pyproject take):
 #   <payload dir>/dist/            the whole dist folder, no version folder above it:

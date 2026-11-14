@@ -7,10 +7,9 @@ RESIDENT Store
 --                        non-blocking: the engine's own read-only connection (WAL: it never waits for the seat's
 --                        writer), run off the seat's loop.
 --   json(text)           a row's JSON body as a dict (an Error when the text is not JSON); str(x) a value as text.
--- Tables: c_<collection> (k TEXT PRIMARY KEY, body TEXT) with body = {"o": <order>, "d": {...the document...}} --
---   c_events (chat turns, tool results: d.session, d.role, d.stream, d.text, d.seq, d.n, d.ts), c_sentences,
---   c_entities, c_sessions, c_messages, c_entity_states, c_relations, ...  json_extract(body, '$.d.<field>') reads one.
--- Store:field shows what is there.
+-- Tables of a store made by cliffvm: `c_field` (k = the eid, cls, updated, body = {props, writers}: the entities) and `c_journal` (the outside writes); `Store:field` shows what is there.
+--   A store that came from the 0.7 Python seat has tables of its own (`c_events`, `c_sessions`, `c_messages`, `c_entities`, ... with body = {"o": <order>, "d": {...the document...}}):
+--   it is read through a `SqlSource` (packs/sql.c1f), never as this store. json_extract(body, '$.d.<field>') reads one field of such a row.
 
 Store.tables getter: FOR r IN sql("SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 2) = 'c_' ORDER BY name"): prop(r, 'name')
 Store.events getter: max([prop(r, 'n') for r in sql("SELECT count(*) AS n FROM c_events")]) if this.counted else None

@@ -1,4 +1,7 @@
-# Python to cliffhanger: the migration
+# Python to cliffhanger: the migration (done)
+
+Status: DONE for the release. The 0.7 Python seat package is removed from the tree (its source is the tag `v0.7.53` and the last-python tag); Python is `membrane/launcher.py`, which finds the `cliffvm` binary and `exec`s `cliffvm serve`
+(docs/packaging-plan.md). Everything else is `.c1f` packs and the Rust host. What follows is the plan as it was written, kept as the reasoning behind the split; the status rows show where each piece ended up.
 
 **End state (operator, 2026-11-11):** Python is only the pip package (install, entry points) and basic VM
 initialization. Everything else is `.c1f` packs on the field (getters, setters, steps as entities) or a native

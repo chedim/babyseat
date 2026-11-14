@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the platform wheel of babyseat from a dist folder (docs/packaging-plan.md, docs/python-retirement.md, the wrapper). CI calls it once per platform.
+# Build the platform wheel of babyseat from a dist folder (docs/packaging-plan.md, the wrapper). CI calls it once per platform.
 #   scripts/dist/build_wheel.sh <platform tag> (--dist <dist folder> | --payload <payload dir>) [--out <dir>]
 #   <platform tag>   macosx_11_0_arm64 | macosx_10_9_x86_64 | manylinux_2_28_x86_64 | manylinux_2_28_aarch64 | musllinux_1_2_x86_64 | musllinux_1_2_aarch64 | ...  (the wheel is py3-none-<tag>)
 #   --dist           a dist folder (scripts/dist/build.sh made it): verified against its MANIFEST.sha256 and packed with assemble_wheel_payload.sh

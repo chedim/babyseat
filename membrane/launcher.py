@@ -1,6 +1,6 @@
 """The two commands `membrane` and `babyseat`: start the seat. This is ALL the Python the seat has: it finds the `cliffvm` binary the wheel
 carries and replaces itself with it (`os.execv`), so a SIGTERM from `docker stop` or ctrl+c lands on the Rust seat, not on a wrapper.
-No flags are parsed, no defaults chosen, no secret or store path is known here: `cliffvm serve` owns them (docs/python-retirement.md)."""
+No flags are parsed, no defaults chosen, no secret or store path is known here: `cliffvm serve` owns them (docs/packaging-plan.md)."""
 import os
 import sys
 from pathlib import Path

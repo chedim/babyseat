@@ -30,7 +30,7 @@ LABEL org.opencontainers.image.title="babyseat" \
       org.opencontainers.image.description="babyseat (formerly membrane): a local-first seat for AI with a memory field (the Rust seat, cliffvm)" \
       org.opencontainers.image.source="https://github.com/chedim/membrane" \
       org.opencontainers.image.url="https://github.com/chedim/membrane" \
-      org.opencontainers.image.documentation="https://github.com/chedim/membrane/blob/main/docs/docker.md" \
+      org.opencontainers.image.documentation="https://github.com/chedim/membrane/blob/main/docs/packaging-plan.md" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}"
 

@@ -54,7 +54,7 @@ def run(tmp_path, rel, *args, env=None):
 def test_installs_under_the_version_folder_and_links_babyseat(tmp_path):
     r, home = run(tmp_path, release(tmp_path))
     assert r.returncode == 0, r.stderr + r.stdout
-    root = home / ".local" / "share" / "membrane"
+    root = home / ".local" / "share" / "membrane-app"
     assert (root / VER / "bin" / "cliffvm").is_file() and os.access(root / VER / "bin" / "cliffvm", os.X_OK)
     assert (root / VER / "VERSION").read_text().strip() == VER
     link = home / ".local" / "bin" / "babyseat"
@@ -79,7 +79,7 @@ def test_version_flag_of_the_installed_command_is_the_binarys(tmp_path):
 def test_a_tarball_that_does_not_match_its_sha256_is_refused_before_anything_is_extracted(tmp_path):
     r, home = run(tmp_path, release(tmp_path, bad_sidecar=True))
     assert r.returncode != 0 and "sha256" in r.stderr
-    assert not (home / ".local" / "share" / "membrane").exists() or not any((home / ".local" / "share" / "membrane").iterdir())
+    assert not (home / ".local" / "share" / "membrane-app").exists() or not any((home / ".local" / "share" / "membrane-app").iterdir())
     assert not (home / ".local" / "bin" / "babyseat").exists()
 
 
@@ -92,7 +92,7 @@ def test_a_missing_sha256_is_refused_not_skipped(tmp_path):
 def test_a_folder_that_fails_its_own_manifest_is_refused(tmp_path):
     r, home = run(tmp_path, release(tmp_path, tamper_inner=True))
     assert r.returncode != 0 and "MANIFEST" in r.stderr
-    root = home / ".local" / "share" / "membrane"
+    root = home / ".local" / "share" / "membrane-app"
     assert not (root / VER).exists() and not (home / ".local" / "bin" / "babyseat").exists()
 
 
@@ -101,7 +101,7 @@ def test_a_failed_reinstall_keeps_the_working_install(tmp_path):
     assert r.returncode == 0
     r2, _ = run(tmp_path, release(tmp_path, bad_sidecar=True))
     assert r2.returncode != 0
-    assert (home / ".local" / "share" / "membrane" / VER / "bin" / "cliffvm").is_file()
+    assert (home / ".local" / "share" / "membrane-app" / VER / "bin" / "cliffvm").is_file()
     assert (home / ".local" / "bin" / "babyseat").is_symlink()
 
 
@@ -162,4 +162,4 @@ def test_build_sh_archive_has_the_sha256_sidecar_install_sh_checks(tmp_path):
     home.mkdir()
     r = subprocess.run(["sh", str(INSTALL), "--version", ver, "--base-url", f"file://{tmp_path}", "--target", TARGET], capture_output=True, text=True, env={"PATH": os.environ["PATH"], "HOME": str(home)})
     assert r.returncode == 0, r.stderr
-    assert (home / ".local" / "share" / "membrane" / ver / "packs" / "boot.c1f").is_file()
+    assert (home / ".local" / "share" / "membrane-app" / ver / "packs" / "boot.c1f").is_file()

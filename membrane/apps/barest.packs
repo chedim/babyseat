@@ -3,6 +3,7 @@
 boot
 entity
 stats
+environment
 door
 door_auth
 fs

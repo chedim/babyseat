@@ -8,10 +8,10 @@ VIRTUAL Chunk
 -- THE BARE CHAT'S TURN (#1143, operator 2026-11-12): a message is answered by ONE run of the model's CLI, in the mode the Python rung
 -- used (membrane/claude_agent.py): Claude's built-in tools OFF, no user MCP config, no settings files, the allowed tools exactly the
 -- membrane MCP set (the door's `POST /mcp`, packs/door_tools.c1f), one continuous run per answer with a ceiling, the system prompt is the
--- barest doctrine (docs/doctrine-barest-draft.md) plus the chat's banner, the prompt is the message ALONE: no chat history reaches the model (map mode). What must outlive
+-- barest doctrine (docs/doctrine-barest.md) plus the chat's banner, the prompt is the message ALONE: no chat history reaches the model (map mode). What must outlive
 -- the turn goes into the field; the banner shows it.
 -- THE RUN is a Command entity (`membrane::Command:chat:<id>`) the turn writes; the stream-json lines of its stdout are read here by
--- `json()` (the receipt lands when the process ends: the answer is not streamed, see docs/cliffvm.md); the result line is the answer,
+-- `json()` (the receipt lands when the process ends; the partial chunks stream while it runs, see docs/cliffvm.md "The event stream"); the result line is the answer,
 -- else the assistant's text in order. The run is the message's TURN entity (`...:turn`, packs/chat.c1f: state, started, ended); each tool the model ran and the answer are entities under the turn (ChatTool: name, input, result).
 -- Boot facts (cliffvm run ... --fact name=value):
 --   chat_claude_bin   the CLI's path. NO DEFAULT: without it a message is answered with an error that says so, and nothing is run.

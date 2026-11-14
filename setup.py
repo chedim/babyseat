@@ -1,4 +1,4 @@
-"""The platform wheel's build hook (#1143, docs/packaging-plan.md, docs/python-retirement.md step 9).
+"""The platform wheel's build hook (#1143, docs/packaging-plan.md).
 
 Everything about the package is in pyproject.toml. This file only turns a PREPARED PAYLOAD into the binary wheel: cargo never runs here (the dist folder is built by
 scripts/dist/build.sh, packed by scripts/dist/assemble_wheel_payload.sh; scripts/dist/build_wheel.sh runs the whole step).
