@@ -20,16 +20,22 @@ import { WASM_VERSION } from './fieldvm_version.js';
 
 export const DOM_PACK = "PACK dom 1\n-- the page's DOM as entities: DomNode:<key>\nDomNode.tag getter: this.tag or 'div'\n";
 
+export const FETCH_PACK = "PACK fetch 1\nRESIDENT Fetch\n-- THE OUTBOUND HTTP DRIVER's class (native/src/fetch.rs): `Fetch:<x>.request = {id, url, ...}` is the effect, `request_result` the receipt\n-- ({id, status, rc, head, http_status, headers, body}). A pack that makes a call IMPORTs this pack and adds its own getters/setters.\nFetch.kind getter: 'fetch'\n";
+
 const TAGS = new Set(['div', 'span', 'p', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'button', 'a', 'section', 'header',
   'footer', 'small', 'strong', 'em', 'code', 'pre', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'label', 'details', 'summary']);
 const ATTRS = new Set(['class', 'title', 'role', 'hidden', 'alt', 'href', 'aria-label']);
 const NODE = 'DomNode:';
+const FETCH = 'Fetch:';
+const FETCH_VERBS = new Set(['GET', 'POST', 'PATCH', 'DELETE']);
+const FETCH_HEADERS = new Set(['content-type', 'accept']);
 
 export async function start(root, { packs = {}, wasm } = {}) {
   // by its content hash: the seat caches .wasm for a week, so a rebuilt loader never meets an old binary
   await init({ module_or_path: wasm || new URL(`./fieldvm_core_bg.wasm?v=${WASM_VERSION}`, import.meta.url) });
   const f = new Field();
   f.set_pack('dom', DOM_PACK);
+  f.set_pack('fetch', FETCH_PACK);
   const errors = {};
   for (const [name, src] of Object.entries(packs)) {
     try { f.set_pack(name, src); } catch (e) { errors[name] = String(e); }
@@ -41,6 +47,7 @@ class Host {
   constructor(f, root, errors) {
     this.f = f; this.root = root; this.nodes = new Map(); this.pending = []; this.frame = 0;
     this.errors = errors;
+    this.out = new Map();                 // W2: the Fetch in flight (or last made) per entity: {key, ctl, why}
     this.els = new WeakMap();             // element -> its entity (the page's and the packs')
     this.page = new Map();                // the page's own elements: entity -> element
     this.schedule = (fn) => requestAnimationFrame(fn);           // one batch per frame (a test may use a timer)
@@ -49,9 +56,10 @@ class Host {
   now() { return Date.now() / 1000; }
 
   /** An entity arrives: made empty, then each field written, so the views' setters see it. */
-  feed(eid, cls, props = {}) {
+  feed(eid, cls, props = {}, mirror = false) {
     if (this.f.get(eid) === 'null') this.f.load(eid, cls, '{}');
     for (const [k, v] of Object.entries(props)) this.f.write(eid, k, JSON.stringify(v ?? null), this.now());
+    if (!mirror) this.fetches(Object.entries(props).map(([prop, v]) => ({ eid, prop, new: v })));   // W2: what the seat did is not asked again here
     this.flush();
   }
 
@@ -64,6 +72,7 @@ class Host {
   /** An outside write (a click, a value from the seat). */
   write(eid, prop, value) {
     this.f.write(eid, prop, JSON.stringify(value ?? null), this.now());
+    this.fetches([{ eid, prop, new: value }]);                    // W2: an outside write is not in drain(); a pack's is
     this.flush();
   }
 
@@ -78,6 +87,7 @@ class Host {
   flush() {
     const out = JSON.parse(this.f.drain());
     this.pending.push(...out.writes);
+    this.fetches(out.writes);                                     // W2: a write of Fetch:<x>.request / .abort
     if (!this.frame) this.frame = this.schedule(() => this.apply());
   }
 
@@ -140,6 +150,68 @@ class Host {
   attach(el, parent) {
     const p = typeof parent === 'string' && parent.startsWith(NODE) ? this.node(parent) : this.root;
     if (el.parentNode !== p) p.appendChild(el);
+  }
+
+  // ---- W2: the page's `Fetch` entity (#1143). A pack writes `Fetch:<x>.request = {id, url, method?, headers?, body?, timeout_s?}`; this
+  // makes ONE fetch() and writes `request_result` back in the seat's shape (native/src/drivers.rs + fetch.rs: {id, status, rc, head,
+  // http_status, headers, body, started, finished, ms}; a failure is {id, status:'error', rc, head: the reason, started, finished, ms}).
+  // Same origin only, credentials same-origin (the owner cookie), never authorization or cookie. `abort = true` aborts the one in flight.
+  // No timeout unless the request carries `timeout_s`. `stream` is W3: accepted, ignored, and the receipt says so (`note`).
+
+  fetches(writes) {
+    for (const w of writes) {
+      if (!w.eid || !w.eid.startsWith(FETCH) || w.born) continue;
+      if (w.prop === 'request' && w.new && typeof w.new === 'object') this.ask(w.eid, w.new);
+      else if (w.prop === 'abort' && w.new === true) { const cur = this.out.get(w.eid); if (cur) cur.ctl.abort(); }
+    }
+  }
+
+  /** Why a request may not go (a visible reason), or null. */
+  refuse(req, origin) {
+    if (typeof req.url !== 'string' || !req.url) return 'refused: the request has no url';
+    let u;
+    try { u = new URL(req.url, origin || undefined); } catch { return `refused: not a url: ${JSON.stringify(req.url)}`; }
+    if (!origin || u.origin !== origin) return `refused: ${u.origin} is not this page's origin: the page's Fetch is same origin only`;
+    const m = String(req.method ?? 'GET').toUpperCase();
+    if (!FETCH_VERBS.has(m)) return `refused: method ${m} is not one of ${[...FETCH_VERBS].join(', ')}`;
+    for (const h of Object.keys(req.headers || {})) if (!FETCH_HEADERS.has(h.toLowerCase())) return `refused: header ${h} is not one of ${[...FETCH_HEADERS].join(', ')}`;
+    if (req.body != null && typeof req.body !== 'string') return 'refused: body is text only for now';
+    if (req.timeout_s != null && !(typeof req.timeout_s === 'number' && req.timeout_s > 0)) return 'refused: timeout_s must be a positive number';
+    return null;
+  }
+
+  ask(eid, req) {
+    const id = req.id ?? null;
+    const key = JSON.stringify(id !== null ? id : req);
+    const cur = this.out.get(eid);
+    if (cur && cur.key === key) return;                           // the same request again: not made twice
+    const started = this.now(), t0 = Date.now();
+    const round3 = (x) => Math.round(x * 1000) / 1000;
+    const done = (r) => this.write(eid, 'request_result', { id, ...r, started: round3(started), finished: round3(this.now()), ms: Date.now() - t0 });
+    const mine = { key, ctl: new AbortController(), why: null };
+    this.out.set(eid, mine);
+    const origin = this.origin !== undefined ? this.origin : (globalThis.location && globalThis.location.origin);
+    const bad = this.refuse(req, origin);
+    if (bad) { done({ status: 'error', rc: 2, head: bad }); return; }
+    const timer = req.timeout_s != null ? setTimeout(() => { mine.why = `timeout after ${req.timeout_s} s`; mine.ctl.abort(); }, req.timeout_s * 1000) : null;
+    mine.ctl.signal.addEventListener('abort', () => { mine.why = mine.why || 'aborted'; });
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers || {})) headers[k.toLowerCase()] = String(v);
+    const init = { method: String(req.method ?? 'GET').toUpperCase(), headers, credentials: 'same-origin', signal: mine.ctl.signal };
+    if (req.body != null) init.body = req.body;
+    (async () => {
+      try {
+        const resp = await fetch(new URL(req.url, origin).href, init);
+        const body = await resp.text();
+        const hs = {};
+        for (const [k, v] of resp.headers) hs[String(k).toLowerCase()] = v;
+        const r = { status: 'ok', rc: 0, head: `${resp.status} ${resp.statusText || ''}`.trim(), http_status: resp.status, headers: hs, body };
+        if (req.stream) r.note = 'stream: not in this round (W3); the whole body is returned';
+        done(r);
+      } catch (e) {
+        done({ status: 'error', rc: 1, head: mine.why || String((e && e.message) || e) });
+      } finally { if (timer) clearTimeout(timer); }
+    })();
   }
 
   /** Link the page's own DOM under `top` into the field, and keep it in step (one batch per frame). */
@@ -276,7 +348,7 @@ export async function connect(root, opts = {}) {
     const snap = await r.json();
     for (const [name, src] of Object.entries(snap.packs || {})) if (name !== 'goalgraph') host.pack(name, src);
     for (const [name, src] of Object.entries(opts.packs || {})) host.pack(name, src);
-    for (const e of [...snap.entities].sort((a, b) => order(a) - order(b))) host.feed(e.eid, e.cls, e.props);
+    for (const e of [...snap.entities].sort((a, b) => order(a) - order(b))) host.feed(e.eid, e.cls, e.props, true);
     status(`following ${snap.entities.length} entities`);
   }
   async function follow() {
@@ -301,7 +373,7 @@ export async function connect(root, opts = {}) {
         if (e.type === 'field.pack') { if (e.name !== 'goalgraph') host.pack(e.name, e.c1f); status(`pack ${e.name} reloaded`); continue; }
         if (e.type === 'field.remove') { host.drop(e.eid); continue; }   // #1054
         if (e.type !== 'field.write') continue;
-        host.feed(e.eid, e.cls, e.props || { [e.prop]: e.new });
+        host.feed(e.eid, e.cls, e.props || { [e.prop]: e.new }, true);
       }
     }
   }
