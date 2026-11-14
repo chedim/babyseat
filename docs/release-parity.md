@@ -270,6 +270,8 @@ Rounds: pack + native subcommand + owner/guest gating + contract fixtures **5-7*
 Packs that already read legacy rows: voice (`c_entities`, `P/door_voice.c1f:37-55`), decisions (`c_entities`, `c_relations`, `c_entity_deltas`, `c_raw`, `P/door_decisions.c1f`, `N/tests/door_decisions_sql.rs`), the chat (`c_events`).
 **Failure seen in the dry run:** those reads never answer when the table does not exist (fresh cliffvm store): rows 55, 56, 69 hang instead of returning an empty answer or 500.
 
+The full data-migration design (convert on touch, reverse path, version stamp, cutover runbook, tests, build plan, decisions) is `docs/migration-design.md`.
+
 **What a read-only legacy source adapter needs:** (a) a `Legacy` pack: `Legacy:<coll>.get(k)` over `sql()` returning the parsed `d`; (b) convert-on-touch: a getter-miss on `<Class>:<key>` reads
 `c_entities`/`c_sessions`/`c_messages` and writes the c1f entity (idempotent, constructor by identity: `P/door_voice.c1f` already does this for voice, same recipe); (c) a one-shot reader of `settings.json` (needs the `fs` driver, exists) into a `Settings:seat` entity;
 (d) the vectors file stays as is until recall is native (`N/src/recall.rs`, `topk.rs` exist; the f16 matrix reader is **not checked**); (e) the rename/backups: the old store is never written (WAL readers only, `P/store.c1f:7`).
