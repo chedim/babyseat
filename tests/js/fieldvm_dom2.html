@@ -1,0 +1,135 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- DOM v2 of the browser VM: form tags, SVG, events as writes, writes back onto the element (run by fieldvm_dom2.test.mjs in headless Chrome) -->
+<body>
+<div id="mount"></div>
+<form id="pform"><textarea id="ptext"></textarea><button id="pbtn" type="submit">go</button></form>
+<pre id="result">pending</pre>
+<script type="module">
+import { start } from '/membrane/ui/fieldvm.js';
+const frame = () => new Promise(r => setTimeout(r, 40));
+const PACK = `PACK t 1
+IMPORT dom 1
+DomNode.value on-setter mirror:
+  WHEN this.tag == 'textarea': ('DomNode:t:out').text = 'saw ' + this.value
+DomNode.submitted on-setter clear:
+  WHEN this.tag == 'form': ('DomNode:t:ta').value = ''
+`;
+const res = {}; const step = (s) => { res.step = s; document.getElementById('result').textContent = JSON.stringify(res); };
+const SVG = 'http://www.w3.org/2000/svg';
+try {
+  step('start');
+  const host = await start(document.getElementById('mount'), { packs: { t: PACK } });
+  res.errors = host.errors; host.schedule = (fn) => setTimeout(fn, 0);
+  const calls = [];                                   // every write the page makes into the VM
+  const fw = host.f.write.bind(host.f);
+  let sim = false;                                    // true while the test plays a pack's write
+  host.f.write = (eid, prop, json, now) => { if (!sim) calls.push([eid, prop, json]); return fw(eid, prop, json, now); };
+  // a pack's write: what the field did lands in `drain` as a write; the page's host applies it to the element
+  const pack = (eid, prop, v) => { sim = true; try { host.f.write(eid, prop, JSON.stringify(v), 1); } finally { sim = false; }
+    host.pending.push({ eid, prop, new: v }); host.flush(); };
+  const put = (eid, props) => { if (host.f.get(eid) === 'null') host.f.load(eid, 'DomNode', '{}');
+    for (const [k, v] of Object.entries(props)) pack(eid, k, v); };
+  const count = (eid, prop) => calls.filter(c => c[0] === eid && c[1] === prop).length;
+  const el = (k) => host.nodes.get(k);
+
+  // 1. tags
+  const tags = ['input', 'textarea', 'select', 'option', 'form', 'label', 'button', 'svg', 'g', 'circle', 'line', 'path', 'text', 'rect'];
+  res.tags = {};
+  for (const t of tags) { put(`DomNode:t:tag-${t}`, { tag: t }); }
+  await frame();
+  for (const t of tags) { const e = el(`DomNode:t:tag-${t}`); res.tags[t] = e ? [e.tagName.toLowerCase(), e.namespaceURI] : null; }
+  put('DomNode:t:tag-script', { tag: 'script' }); await frame();
+  res.script = { tag: el('DomNode:t:tag-script').tagName.toLowerCase(), refused: host.get('DomNode:t:tag-script').refused };
+
+  // 2. attributes
+  const attrs = { value: 'v', placeholder: 'ph', disabled: true, type: 'text', name: 'n', for: 'x', tabindex: '3', rows: '4',
+    'aria-label': 'l', 'aria-live': 'polite', 'data-k': 'dk' };
+  put('DomNode:t:attrs', { tag: 'input', ...attrs }); await frame();
+  const a = el('DomNode:t:attrs');
+  res.attrs = { placeholder: a.getAttribute('placeholder'), disabled: a.hasAttribute('disabled'), type: a.getAttribute('type'), name: a.getAttribute('name'),
+    for: (() => { put('DomNode:t:lab', { tag: 'label', for: 'x' }); return null; })(), tabindex: a.getAttribute('tabindex'),
+    live: a.getAttribute('aria-live'), data: a.getAttribute('data-k'), value: a.value };
+  put('DomNode:t:ta2', { tag: 'textarea', rows: '4' }); await frame();
+  res.attrs.rows = el('DomNode:t:ta2').getAttribute('rows');
+  await frame(); res.attrs.for = el('DomNode:t:lab').getAttribute('for');
+  const geo = { cx: '1', cy: '2', r: '3', x: '4', y: '5', x1: '6', y1: '7', x2: '8', y2: '9', d: 'M0 0L1 1', width: '10', height: '11',
+    viewBox: '0 0 10 10', points: '0,0 1,1', fill: 'red', stroke: 'blue', 'stroke-width': '2', transform: 'rotate(5)' };
+  put('DomNode:t:geo', { tag: 'svg', ...geo }); await frame();
+  res.geo = {}; for (const k of Object.keys(geo)) res.geo[k] = el('DomNode:t:geo').getAttribute(k);
+
+  // 3. refused, with a visible reason
+  put('DomNode:t:bad', { tag: 'div', style: 'color:red', onclick: 'alert(1)', src: 'x.png', href: 'javascript:alert(1)' }); await frame();
+  const bad = el('DomNode:t:bad');
+  res.bad = { style: bad.getAttribute('style'), onclick: bad.getAttribute('onclick'), src: bad.getAttribute('src'), href: bad.getAttribute('href'),
+    refused: host.get('DomNode:t:bad').refused, marked: bad.getAttribute('data-refused') };
+
+  // 4. events on a pack's nodes
+  put('DomNode:t:form', { tag: 'form' });
+  put('DomNode:t:ta', { tag: 'textarea', parent: 'DomNode:t:form' });
+  put('DomNode:t:out', { tag: 'div' });
+  await frame();
+  const ta = el('DomNode:t:ta'), form = el('DomNode:t:form');
+  ta.value = 'hello'; ta.setSelectionRange(2, 2);
+  ta.dispatchEvent(new Event('input', { bubbles: true })); await frame();
+  res.input = host.get('DomNode:t:ta').value;
+  res.round = { out: el('DomNode:t:out').textContent, valueWrites: count('DomNode:t:ta', 'value'), caret: [ta.selectionStart, ta.selectionEnd] };
+  // a pack writing the value the user just produced: no set on the element, caret stays, no echo write
+  let sets = 0; const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+  Object.defineProperty(ta, 'value', { get() { return proto.get.call(this); }, set(v) { sets++; proto.set.call(this, v); }, configurable: true });
+  const before = count('DomNode:t:ta', 'value');
+  pack('DomNode:t:ta', 'value', 'hello'); await frame();
+  res.same = { sets, caret: [ta.selectionStart, ta.selectionEnd], writes: count('DomNode:t:ta', 'value') - before };
+  pack('DomNode:t:ta', 'value', 'other'); await frame();
+  res.pack = { value: ta.value, sets, writes: count('DomNode:t:ta', 'value') - before };
+  // the keydown
+  const kd = (init) => { const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }); ta.dispatchEvent(e); return e.defaultPrevented; };
+  res.enterPrevented = kd({ key: 'Enter' }); await frame();
+  res.key = host.get('DomNode:t:ta').key;
+  res.shiftPrevented = kd({ key: 'Enter', shiftKey: true }); await frame();
+  res.keyShift = host.get('DomNode:t:ta').key;
+  kd({ key: 'a', ctrlKey: true }); await frame();
+  res.keyCtrl = host.get('DomNode:t:ta').key;
+  // submit (the pack clears the textarea in answer)
+  ta.value = 'draft'; ta.dispatchEvent(new Event('input', { bubbles: true })); await frame();
+  const sub = new Event('submit', { bubbles: true, cancelable: true }); form.dispatchEvent(sub); await frame();
+  res.submitted = typeof host.get('DomNode:t:form').submitted; res.submitPrevented = sub.defaultPrevented;
+  res.cleared = ta.value;
+  // click stays
+  form.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  res.clicked = typeof host.get('DomNode:t:form').clicked;
+  // focus / blur, both ways
+  ta.dispatchEvent(new FocusEvent('focus')); await frame();
+  res.focused1 = host.get('DomNode:t:ta').focused;
+  ta.dispatchEvent(new FocusEvent('blur')); await frame();
+  res.focused2 = host.get('DomNode:t:ta').focused;
+  const f0 = count('DomNode:t:ta', 'focused');
+  pack('DomNode:t:ta', 'focused', true); await frame();
+  res.focusCall = { active: document.activeElement === ta, writes: count('DomNode:t:ta', 'focused') - f0 };
+  pack('DomNode:t:ta', 'focused', false); await frame();
+  res.blurCall = document.activeElement === ta;
+  // disabled from a pack
+  pack('DomNode:t:ta', 'disabled', true); await frame(); res.disabledOn = ta.disabled;
+  pack('DomNode:t:ta', 'disabled', false); await frame(); res.disabledOff = ta.disabled;
+  // scroll
+  put('DomNode:t:sc', { tag: 'div' }); await frame();
+  const sc = el('DomNode:t:sc'); sc.dispatchEvent(new Event('scroll'));
+  await frame(); const s = host.get('DomNode:t:sc').scroll;
+  res.scroll = s && ['top', 'height', 'client'].every(k => typeof s[k] === 'number');
+
+  // 5. the page's own form elements
+  host.link(document.body); await frame();
+  const pt = document.getElementById('ptext');
+  pt.value = 'page text'; pt.dispatchEvent(new Event('input', { bubbles: true })); await frame();
+  res.pageInput = host.get('DomNode:page:#ptext').value;
+  res.pageMirror = el('DomNode:t:out').textContent;
+  pack('DomNode:page:#ptext', 'value', 'from pack'); await frame(); res.pagePack = pt.value;
+  pack('DomNode:page:#pbtn', 'disabled', true); await frame(); res.pageDisabled = document.getElementById('pbtn').disabled;
+  pt.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await frame();
+  res.pageKey = (host.get('DomNode:page:#ptext').key || {}).key;
+  document.getElementById('pform').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await frame();
+  res.pageSubmit = typeof host.get('DomNode:page:#pform').submitted;
+} catch (e) { res.error = String(e && e.stack || e); }
+res.done = true;
+document.getElementById('result').textContent = JSON.stringify(res);
+</script>

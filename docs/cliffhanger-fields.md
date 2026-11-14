@@ -245,6 +245,18 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
 - **View packs:** packs importing `dom` wait on the seat and run in the page. `DomNode:<key>` entities are elements:
   `tag` (allow-listed), `text` (textContent only, never HTML), `parent`, and allow-listed attributes (`href` http(s)
   only). A click writes `clicked`. A round's DOM writes are applied together, once per frame.
+- **DOM v2 (W1, #1143):** `DOM_ALLOW` in `fieldvm.js` is the ONE table of what a pack may put in the page: tags (the
+  old ones plus `input textarea select option form label button`), SVG tags (`svg g circle line path text rect`, made in
+  the SVG namespace), attributes (`value placeholder disabled type name for tabindex rows`, the SVG geometry names, and
+  the `aria-*` / `data-*` prefixes). Refused, with a visible reason (`data-refused` on the element, `refused` {name:
+  reason} on the DomNode): `style`, `src`, `srcdoc`, `formaction`, every `on*`, a `href` that is not http(s), and a tag
+  outside the table (made a div). Events are written back as entity writes: `input`/`change` -> `value` (the text),
+  `submit` -> `submitted` (time; the default navigation is cancelled), `keydown` -> `key` `{key, shift, ctrl, time}`
+  (Enter without Shift in a textarea is `preventDefault`ed: that is how a chat sends), `focus`/`blur` -> `focused`
+  (bool), `scroll` -> `scroll` `{top, height, client}`, `click` -> `clicked`. The other direction: a pack's write of
+  `value`, `disabled` or `focused` (a `focus()` / `blur()` call) updates the element; an event whose value or flag the
+  field already holds writes nothing, and a `value` equal to the element's own is not set (the caret and the user's
+  typing stay). Page elements (`link`) get the same events. Test: `tests/js/fieldvm_dom2.test.mjs` (headless Chrome).
 - **The page's own DOM:** `link(document.body)` puts every page element (open shadow roots included) in the field as
   `DomNode:page:#<id>` (`DomNode:page:<n>` without an id) with `page=true`, its tag, parent, id, own text and the
   allow-listed attributes. A new element is born whole, a change is written (only what differs from the field, so a

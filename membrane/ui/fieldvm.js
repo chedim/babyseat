@@ -5,8 +5,13 @@
 //   tag     the element's tag (from an allow-list; `div` otherwise), set when the element is made
 //   text    its text (textContent only: a pack can never write HTML)
 //   parent  the DomNode it sits in (the mount's root when empty)
-//   class, title, role, hidden, alt, href (http/https only), aria-label: attributes, from an allow-list
-// A click on an element writes its `clicked` (the time). A round's DOM writes are applied together, in one frame.
+//   class, title, role, hidden, alt, href (http/https only), aria-label ...: attributes, from the ONE allow-list (DOM_ALLOW)
+//   value, focused: a pack's write sets the element's value / focus (no echo; the user's caret is not clobbered)
+// Form tags and SVG (own namespace) are in the allow-list; style, event handlers and src are refused, and a refusal is
+// visible: the element carries `data-refused` and the DomNode's `refused` holds {name: reason}.
+// Events are written back: click -> `clicked` (time); input -> `value`; submit -> `submitted` (time); keydown ->
+// `key` {key, shift, ctrl, time}; focus/blur -> `focused` (bool); scroll -> `scroll` {top, height, client}.
+// A round's DOM writes are applied together, in one frame.
 //
 // The page's own DOM links in too (`link`): each element of the page (open shadow roots included) is a
 // `DomNode:page:#<id>` entity (`DomNode:page:<n>` without an id) with page=true and its tag, parent, id, direct text
@@ -20,10 +25,37 @@ import { WASM_VERSION } from './fieldvm_version.js';
 
 export const DOM_PACK = "PACK dom 1\n-- the page's DOM as entities: DomNode:<key>\nDomNode.tag getter: this.tag or 'div'\n";
 
-const TAGS = new Set(['div', 'span', 'p', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'button', 'a', 'section', 'header',
-  'footer', 'small', 'strong', 'em', 'code', 'pre', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'label', 'details', 'summary']);
-const ATTRS = new Set(['class', 'title', 'role', 'hidden', 'alt', 'href', 'aria-label']);
+// THE ALLOW-LIST: the one table of what a pack may put in the page. Changing it is a one-line edit here.
+export const DOM_ALLOW = {
+  tags: 'div span p ul ol li h1 h2 h3 h4 button a section header footer small strong em code pre table thead tbody tr td th label details summary input textarea select option form',
+  svgTags: 'svg g circle line path text rect',                       // made in the SVG namespace
+  attrs: 'class title role hidden alt href aria-label value placeholder disabled type name for tabindex rows',
+  svgAttrs: 'cx cy r x y x1 y1 x2 y2 d width height viewBox points fill stroke stroke-width transform',
+  prefixes: ['aria-', 'data-'],
+  // never written to the element, each with its reason (a decision: `style`, `href`'s scheme, `src`)
+  refused: {
+    style: 'style is not in the allow-list (decision: inline style)',
+    src: 'src is not in the allow-list (decision: embedded sources)',
+    srcdoc: 'srcdoc is never allowed',
+    formaction: 'formaction is never allowed',
+  },
+  refusedPrefixes: { on: 'event-handler attributes are never allowed' },
+  hrefSchemes: /^https?:\/\//i,                                       // href is kept (the About link): http(s) only
+};
+const words = (t) => new Set(t.split(' '));
+const TAGS = words(DOM_ALLOW.tags), SVG_TAGS = words(DOM_ALLOW.svgTags);
+const ATTRS = new Set([...words(DOM_ALLOW.attrs), ...words(DOM_ALLOW.svgAttrs)]);
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const VALUE_TAGS = new Set(['input', 'textarea', 'select']);          // `value` is a property there
+const allowed = (name) => ATTRS.has(name) || DOM_ALLOW.prefixes.some(p => name.startsWith(p) && name.length > p.length);
+const reason = (name, v) => {
+  if (DOM_ALLOW.refused[name]) return DOM_ALLOW.refused[name];
+  for (const [p, why] of Object.entries(DOM_ALLOW.refusedPrefixes)) if (name.startsWith(p) && name !== 'on') return why;
+  if (name === 'href' && v != null && v !== false && !DOM_ALLOW.hrefSchemes.test(String(v))) return 'href must be http(s)';
+  return null;
+};
 const NODE = 'DomNode:';
+const EVENTS = ['input', 'change', 'submit', 'keydown', 'focus', 'blur', 'scroll'];
 
 export async function start(root, { packs = {}, wasm } = {}) {
   // by its content hash: the seat caches .wasm for a week, so a rebuilt loader never meets an old binary
@@ -103,9 +135,10 @@ class Host {
     if (own) return own;                                          // the page's element: the page owns its tag
     let el = this.nodes.get(eid);
     const e = this.get(eid) || {};
-    const tag = TAGS.has(String(e.tag)) ? String(e.tag) : 'div';
+    const want = String(e.tag), ok = TAGS.has(want) || SVG_TAGS.has(want), tag = ok ? want : 'div';
+    if (!ok && e.tag != null) this.refuse(el, eid, 'tag', `tag '${want}' is not in the allow-list (made a div)`);
     if (el && el.tagName.toLowerCase() !== tag) {                 // its tag changed: a new element in its place
-      const nu = document.createElement(tag);
+      const nu = this.make(tag);
       for (const a of [...el.attributes]) nu.setAttribute(a.name, a.value);
       nu.append(...el.childNodes);
       this.els.set(nu, eid);
@@ -115,8 +148,8 @@ class Host {
       return nu;
     }
     if (!el) {
-      el = document.createElement(tag);
-      el.dataset.key = eid;
+      el = this.make(tag);
+      el.setAttribute('data-key', eid);
       this.els.set(el, eid);
       this.listen(el, eid);
       this.nodes.set(eid, el);
@@ -125,14 +158,52 @@ class Host {
     return el;
   }
 
-  listen(el, eid) { el.addEventListener('click', ev => { ev.stopPropagation(); this.write(eid, 'clicked', this.now()); }); }
+  make(tag) { return SVG_TAGS.has(tag) ? document.createElementNS(SVG_NS, tag) : document.createElement(tag); }
+
+  listen(el, eid) {
+    el.addEventListener('click', ev => { ev.stopPropagation(); this.write(eid, 'clicked', this.now()); });
+    for (const t of EVENTS) el.addEventListener(t, ev => this.event(eid, ev, el));
+  }
+
+  /** A DOM event of an element becomes a write on its DomNode (an unchanged value or flag is no write: no echo loop). */
+  event(eid, ev, el) {
+    if (ev.type === 'scroll' && ev.target !== el) return;
+    const e = this.get(eid) || {}, same = (k, v) => JSON.stringify(e[k] ?? null) === JSON.stringify(v);
+    const put = (k, v) => { if (!same(k, v)) this.write(eid, k, v); };
+    if (ev.type === 'input' || ev.type === 'change') { if (ev.target === el) put('value', el.value); }
+    else if (ev.type === 'submit') { ev.preventDefault(); this.write(eid, 'submitted', this.now()); }
+    else if (ev.type === 'keydown') {
+      if (ev.key === 'Enter' && !ev.shiftKey && el.tagName === 'TEXTAREA') ev.preventDefault();   // Enter sends; Shift+Enter is a newline
+      this.write(eid, 'key', { key: ev.key, shift: ev.shiftKey, ctrl: ev.ctrlKey, time: this.now() });
+    }
+    else if (ev.type === 'focus') put('focused', true);
+    else if (ev.type === 'blur') put('focused', false);
+    else if (ev.type === 'scroll') put('scroll', { top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight });
+  }
+
+  /** A name or tag the allow-list refuses: the reason is written on the DomNode and marked on the element. */
+  refuse(el, eid, name, why) {
+    const cur = (this.get(eid) || {}).refused || {};
+    if (cur[name] === why) return;
+    const next = { ...cur, [name]: why };
+    this.f.write(eid, 'refused', JSON.stringify(next), this.now());
+    if (el) el.setAttribute('data-refused', Object.keys(next).join(' ') + ': ' + Object.values(next).join('; '));
+  }
 
   set(el, eid, prop, v) {
     if (prop === 'text') el.textContent = v == null ? '' : String(v);
     else if (prop === 'parent') this.attach(el, v);
-    else if (ATTRS.has(prop)) {
+    else if (prop === 'focused') {                                // a pack's focus(): the event that follows is no write (same value)
+      if (v && document.activeElement !== el) el.focus(); else if (!v && document.activeElement === el) el.blur();
+    }
+    else if (prop === 'value' && VALUE_TAGS.has(el.tagName.toLowerCase())) {
+      const s = v == null ? '' : String(v);
+      if (el.value !== s) el.value = s;                           // the user's own text is left alone: the caret stays
+    }
+    else if (allowed(prop) || reason(prop, v)) {
+      const why = reason(prop, v);
+      if (why) { this.refuse(el, eid, prop, why); el.removeAttribute(prop); return; }
       if (v == null || v === false) { el.removeAttribute(prop); return; }
-      if (prop === 'href' && !/^https?:\/\//i.test(String(v))) return;
       el.setAttribute(prop, v === true ? '' : String(v));
     }
   }
@@ -160,6 +231,10 @@ class Host {
         if (this.page.has(eid)) this.write(eid, 'clicked', this.now());
         break;                                   // a pack's node records its own click
       }
+    }, true);
+    for (const t of EVENTS) document.addEventListener(t, ev => {   // the page's own form elements: the same events as writes
+      const el = ev.composedPath()[0], eid = this.els.get(el);
+      if (eid && this.page.has(eid)) this.event(eid, ev, el);
     }, true);
     this.watch(top.getRootNode() instanceof ShadowRoot ? top.getRootNode() : top);
     const now = this.now();
@@ -241,7 +316,8 @@ class Host {
     const up = el === this.top ? null : this.els.get(this.up(el));
     const text = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.data).join('').trim();
     const p = { page: true, tag: el.tagName.toLowerCase(), parent: up || null, id: el.id || null, text: text || null };
-    for (const a of ATTRS) p[a] = a === 'hidden' ? (el.hasAttribute('hidden') || null) : el.getAttribute(a);
+    for (const a of ATTRS) p[a] = a === 'hidden' ? (el.hasAttribute('hidden') || null)
+      : a === 'value' && VALUE_TAGS.has(p.tag) ? el.value : a === 'disabled' ? (el.hasAttribute('disabled') || null) : el.getAttribute(a);
     return p;
   }
 
