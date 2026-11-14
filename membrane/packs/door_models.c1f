@@ -21,7 +21,6 @@ Request.m_ask on-setter models-ask:
     ('Router:seat').refresh = this.m_ask
 
 -- ---- GET /v1/models: the screened tags, the sentinel lane, the autoselect lanes (only with a router), the cloud rungs
-Request.m_chat_auth getter: ([b.chat_auth for b in instances('Boot') if b.chat_auth != None] or ['api_key'])[0]
 Request.m_router getter: ([b.router_on for b in instances('Boot')] or [False])[0] == True
 Request.m_tags getter: [m for m in instances('Model') if m.listed == True and m.rung != True and m.chat_ok == True]
 -- a claude-agent rung is the model this seat RUNS (the chat's turn is the claude CLI): listed with or without a router (the router's other rungs are the router's)
@@ -112,8 +111,13 @@ Request.minds_reply getter:
 Settings.kind getter: 'settings'
 
 Request.op_set getter: ([s for s in instances('Settings') if s.eid == 'Settings:seat'] or [None])[0]
-Request.op_share getter: prop(this.jbody, 'self_cpu_share') if (this.op_go == True and prop(this.jbody, 'self_cpu_share') != None) else (prop(this.op_set, 'self_cpu_share') or 0.5)
-Request.op_keep getter: prop(this.jbody, 'code_runs_keep') if (this.op_go == True and prop(this.jbody, 'code_runs_keep') != None) else (prop(this.op_set, 'code_runs_keep') or 30)
+-- LAUNCH SETTINGS (`--fact name=value`, scripts/seat-full passes them on): the constants carried over from the release, each with the released value as its default (docs/release-parity.md, 'Settings').
+Request.op_share_def getter: ([b.self_cpu_share_default for b in this.boots] or [None])[0] or 0.5
+Request.op_keep_def getter: ([b.code_runs_keep_default for b in this.boots] or [None])[0] or 30
+Request.op_tau getter: ([b.field_tau_s for b in this.boots] or [None])[0] or 180.0
+Request.op_chat_auth getter: ([b.chat_auth for b in this.boots] or [None])[0] or 'api_key'
+Request.op_share getter: prop(this.jbody, 'self_cpu_share') if (this.op_go == True and prop(this.jbody, 'self_cpu_share') != None) else (prop(this.op_set, 'self_cpu_share') or this.op_share_def)
+Request.op_keep getter: prop(this.jbody, 'code_runs_keep') if (this.op_go == True and prop(this.jbody, 'code_runs_keep') != None) else (prop(this.op_set, 'code_runs_keep') or this.op_keep_def)
 Request.op_keys getter: ['self_cpu_share', 'code_runs_keep', 'current_tau_s', 'energy', 'loops', 'cortex', 'workers', 'loops_auth', 'cortex_auth', 'workers_auth', 'think']
 Request.op_seen getter: [k for k in this.op_keys if prop(this.jbody, k) != None]
 Request.op_mind_keys getter: [k for k in ['loops', 'cortex', 'workers', 'loops_auth', 'cortex_auth', 'workers_auth', 'think'] if prop(this.jbody, k) != None]
@@ -138,8 +142,8 @@ Request.op_models getter: [m.name for m in instances('Model') if m.rung == True 
 -- the models a mind may take: the pickable ones, and the models the minds hold now first when they are not among them
 Request.op_cur getter: [x for x in [prop(this.mind_read, 'loops'), prop(this.mind_read, 'cortex'), prop(this.mind_read, 'workers')] if x != None and x != '' and not (x in this.pickable)]
 Request.op_all getter: concat(this.op_cur, this.pickable)
-Request.op_bg getter: {'loops': prop(this.mind_read, 'loops'), 'cortex': prop(this.mind_read, 'cortex'), 'workers': prop(this.mind_read, 'workers'), 'loops_auth': prop(this.mind_read, 'loops_auth'), 'cortex_auth': prop(this.mind_read, 'cortex_auth'), 'workers_auth': prop(this.mind_read, 'workers_auth'), 'models': this.op_all, 'claude': [m for m in this.op_all if m in this.op_models], 'chat_auth': this.m_chat_auth, 'picked': (prop(this.mind_read, 'loops') or '') != ''}
-Request.op_body getter: {'self_cpu_share': this.op_share, 'code_runs_keep': this.op_keep, 'defaults': {'self_cpu_share': 0.5, 'code_runs_keep': 30}, 'writable': concat(['self_cpu_share', 'code_runs_keep'], ['loops', 'cortex', 'workers', 'loops_auth', 'cortex_auth', 'workers_auth', 'think'] if this.mind_seat != None else []), 'current_tau_s': 180.0, 'current_tau_note': 'changing it needs the operator\'s approval', 'energy': None, 'background': this.op_bg if this.mind_seat != None else None}
+Request.op_bg getter: {'loops': prop(this.mind_read, 'loops'), 'cortex': prop(this.mind_read, 'cortex'), 'workers': prop(this.mind_read, 'workers'), 'loops_auth': prop(this.mind_read, 'loops_auth'), 'cortex_auth': prop(this.mind_read, 'cortex_auth'), 'workers_auth': prop(this.mind_read, 'workers_auth'), 'models': this.op_all, 'claude': [m for m in this.op_all if m in this.op_models], 'chat_auth': this.op_chat_auth, 'picked': (prop(this.mind_read, 'loops') or '') != ''}
+Request.op_body getter: {'self_cpu_share': this.op_share, 'code_runs_keep': this.op_keep, 'defaults': {'self_cpu_share': this.op_share_def, 'code_runs_keep': this.op_keep_def}, 'writable': concat(['self_cpu_share', 'code_runs_keep'], ['loops', 'cortex', 'workers', 'loops_auth', 'cortex_auth', 'workers_auth', 'think'] if this.mind_seat != None else []), 'current_tau_s': this.op_tau, 'current_tau_note': 'changing it needs the operator\'s approval', 'energy': None, 'background': this.op_bg if this.mind_seat != None else None}
 
 Request.op_post_go getter: True if this.op_go == True else None
 Request.op_post_go on-setter opts-share:

@@ -1680,7 +1680,7 @@
   ]
  },
  {
-  "name": "/membrane/minds reads the live Python seat: 501 until its piece is ported",
+  "name": "/membrane/minds answers the released empty orb lists",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/door.c1f",
@@ -1750,12 +1750,17 @@
    {
     "eid": "Request:1",
     "prop": "reply.status",
-    "equals": 501
+    "equals": 200
    },
    {
     "eid": "Request:1",
-    "prop": "reply.body.error",
-    "equals": "not ported yet: reads the live seat"
+    "prop": "reply.body.thinker",
+    "equals": []
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.loops",
+    "equals": {}
    }
   ]
  },
@@ -1920,7 +1925,7 @@
   ]
  },
  {
-  "name": "a not-ported route answers 501 whatever the method",
+  "name": "a not-ported route answers 501 whatever the method (the state ?section= pull)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/door.c1f",
@@ -1970,14 +1975,14 @@
     "class": "Request",
     "props": {
      "method": "POST",
-     "query": "",
+     "query": "section=where_we_are",
      "headers": {
       "content-type": "application/json"
      },
      "body": "",
      "peer": "127.0.0.1:5",
      "authed": true,
-     "path": "/membrane/stats",
+     "path": "/membrane/state",
      "sub": "alice",
      "claims": {
       "sub": "alice"

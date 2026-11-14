@@ -12,6 +12,8 @@ inputs a fresh seat has (no field, no self, no quota pause, no Minds), exactly a
     blurp          ch_blurp.overlay(<a seat with no VM>)    GET /membrane/map/blurp         (lanes.py:4649)
     field3d        field3d.build(no rows) + root + current  GET /membrane/map/field3d       (lanes.py:4188 field3d_answer, an empty field)
     voice_state    voice_io.set_state(<a stub seat>, ...)   POST /membrane/voice/state      (server.py:4765)
+    stats          tokenomics._assemble(empty) + paused [] GET /membrane/stats                       (server.py:4559, tokenomics.read)
+    minds          the literal the handler writes with no pulse GET /membrane/minds                (lanes.py:4606; fieldpulse.minds() of a pulse with no sessions has the same keys)
     map_field      the literal the handler writes when the field is not loaded (lanes.py:5013)
     map_search     the literal the handler writes with no entity store (lanes.py:5144)
 
@@ -72,6 +74,15 @@ def main() -> int:
     out["options_bg"] = {"status": 200, "body": options._background(seat)}
 
     out["quota"] = {"status": 200, "body": quota.status(None, None)}
+    import time as _t
+    _now = _t.time()
+    _lt = _t.localtime(_now)
+    _mid = _t.mktime((_lt.tm_year, _lt.tm_mon, _lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    from membrane import tokenomics
+    _st = tokenomics._assemble(tokenomics.foreground({}, _mid, _now - 3600), None, CA.usage_stats(), _now, _mid)
+    _st["paused"] = quota.snapshot(_now)
+    out["stats"] = {"status": 200, "body": _st}
+    out["minds"] = {"status": 200, "body": {"loops": {}, "thinker": [], "dreamer": []}}
     out["blurp"] = {"status": 200, "body": ch_blurp.overlay(types.SimpleNamespace())}
 
     proj = field3d.build(lambda: iter([]), lambda s: s, "")

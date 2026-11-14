@@ -14,10 +14,8 @@ RESIDENT Seat
 -- QUOTA (quota.py, the out-of-tokens popup and the home ⚠): GET /membrane/quota and POST /membrane/quota/resume answer the released shape of a seat with
 -- NOTHING PAUSED, which is every seat here: no model is paused by a spent quota (the pause is the Python proxy's own bookkeeping, and the claude CLI's
 -- limit shows up as the turn's error). The page shows nothing for an empty `paused` list. `probe_s` is quota.py's PROBE_S (600), the released constant.
--- NOT PORTED (they read live Python-only state; each answers 501 and names why): /membrane/stats (the windows' `models` is a
--- dict keyed by model name and c1f has no way to build a dict with data-driven keys: a design fork, see docs/python-to-c1f.md),
--- /membrane/minds (fieldpulse's loop sessions, the thinker's and dreamer's logs),
--- and the /membrane/state ?section= pull (where_we_are). (/membrane/self/sheet and /membrane/self/recent are the self family's:
+-- DEGRADED (w46): /membrane/stats and /membrane/minds answer the released empty shape (a seat that counted nothing), below.
+-- NOT PORTED (reads live Python-only state; answers 501 and names why): the /membrane/state ?section= pull (where_we_are). (/membrane/self/sheet and /membrane/self/recent are the self family's:
 -- door_self.c1f.)
 
 -- the class is declared here so the engine mirrors the presence entity
@@ -64,19 +62,32 @@ Request.st_ask on-setter st-control:
     ('membrane::presence').control = this.st_ask
 
 -- ---- the reply ---------------------------------------------------------------------------------------------------------------------------
-Request.st_gap getter: this.route in ['/membrane/stats', '/membrane/minds'] or (this.route in ['/membrane/state', '/state'] and 'section=' in this.query)
+Request.st_gap getter: (this.route in ['/membrane/state', '/state'] and 'section=' in this.query)
 Request.st_post getter: this.method == 'POST' and this.route in ['/membrane/seat/pause', '/membrane/seat/control']
 Request.st_read getter:
   WHEN this.route == '/membrane/seat': this.st_seat_body
   ELSE WHEN this.route == '/membrane/seat/pause': this.st_pause_body
   ELSE WHEN this.route == '/membrane/self/card': this.st_card_body
   ELSE: this.st_state_body
-Request.st_quota_body getter: {'now': clock, 'paused': [], 'probe_s': 600}
+-- LAUNCH SETTINGS (`--fact name=value`, scripts/seat-full passes them on): the constants carried over from the release, each with the released value as its default (docs/release-parity.md, 'Settings').
+Request.st_probe_s getter: ([b.quota_probe_s for b in this.boots] or [None])[0] or 600
+Request.st_quota_body getter: {'now': clock, 'paused': [], 'probe_s': this.st_probe_s}
+-- STATS (tokenomics.py `_assemble`, the 📊 window): the released answer of a seat that counted nothing. The counters (the message store's token rows,
+-- bg-usage.json, the claude ledger) are Python state nothing here keeps, so every window is zero and `minds`/`models` are empty dicts, which the window
+-- draws as its zero rows and "no Claude answers since the seat started". `midnight` is the local midnight to the minute (localtime has no seconds, so it can be up to 59 s early; the page does not read it): a decision.
+Request.st_zero getter: {'calls': 0, 'input': 0, 'output': 0}
+Request.st_win getter: {'total': this.st_zero, 'minds': {}, 'models': {}}
+Request.st_split getter: {'cache_read': 0, 'cache_write': 0, 'input': 0, 'output': 0, 'effective': 0}
+Request.st_stats_body getter: {'now': clock, 'midnight': clock - 3600 * prop(localtime(clock), 'hour') - 60 * prop(localtime(clock), 'minute'), 'today': this.st_win, 'hour': this.st_win, 'claude': {'answers': 0, 'steps': 0, 'total': this.st_split, 'per_answer': this.st_split, 'first_step': this.st_split, 'later_step': this.st_split}, 'paused': []}
+-- MINDS (fieldpulse.minds(), the orbs' chat views): no loop session, no thinker log, no dream (lanes.py: the answer of a seat with no pulse)
+Request.st_minds_body getter: {'loops': {}, 'thinker': [], 'dreamer': []}
 Request.st_resume_model getter: strip(str(prop(this.jbody, 'model') or ''))
 Request.r_state getter:
   WHEN this.route == '/membrane/quota': {'status': 200, 'body': this.st_quota_body}
+  ELSE WHEN this.route == '/membrane/stats': {'status': 200, 'body': this.st_stats_body}
+  ELSE WHEN this.route == '/membrane/minds': {'status': 200, 'body': this.st_minds_body}
   ELSE WHEN this.route == '/membrane/quota/resume' and this.st_resume_model == '': {'status': 400, 'body': {'error': 'model required'}}
-  ELSE WHEN this.route == '/membrane/quota/resume': {'status': 200, 'body': {'now': clock, 'paused': [], 'probe_s': 600, 'resumed': False}}
+  ELSE WHEN this.route == '/membrane/quota/resume': {'status': 200, 'body': {'now': clock, 'paused': [], 'probe_s': this.st_probe_s, 'resumed': False}}
   ELSE WHEN this.st_gap: {'status': 501, 'body': {'error': 'not ported yet: reads the live seat'}}
   ELSE WHEN this.st_post and not (this.st_pause_ok or this.st_ctl_ok): {'status': 400, 'body': {'error': 'the body is {"paused": true|false}' if this.route == '/membrane/seat/pause' else 'the body names a control: paused, loops_max, self, accept or self_name'}}
   ELSE WHEN this.st_post and this.st_seat == None: {'status': 503, 'body': {'error': 'no seat'}}

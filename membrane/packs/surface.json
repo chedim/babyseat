@@ -327,6 +327,7 @@
       "/membrane/entity-history",
       "/membrane/goals",
       "/membrane/item-chat",
+      "/membrane/item-chat/say",
       "/membrane/work-graph"
     ],
     "boot_facts": [],
@@ -374,7 +375,7 @@
     "classes": [
       "Request"
     ],
-    "members": 16,
+    "members": 18,
     "writes": [],
     "claims": [
       "/membrane/field/entity",
@@ -386,7 +387,10 @@
       "/membrane/map/search",
       "/membrane/map/tile"
     ],
-    "boot_facts": []
+    "boot_facts": [
+      "field_tau_s",
+      "map_tile_k"
+    ]
   },
   "door_models": {
     "imports": [
@@ -397,7 +401,7 @@
       "Request",
       "Settings"
     ],
-    "members": 63,
+    "members": 66,
     "writes": [
       "Minds:seat.cortex",
       "Minds:seat.cortex_auth",
@@ -418,7 +422,10 @@
     ],
     "boot_facts": [
       "chat_auth",
-      "router_on"
+      "code_runs_keep_default",
+      "field_tau_s",
+      "router_on",
+      "self_cpu_share_default"
     ],
     "resident": [
       "Settings"
@@ -514,7 +521,7 @@
       "Request",
       "Seat"
     ],
-    "members": 31,
+    "members": 37,
     "writes": [
       "membrane::presence.control"
     ],
@@ -531,7 +538,8 @@
       "/state"
     ],
     "boot_facts": [
-      "nerve_pause_off"
+      "nerve_pause_off",
+      "quota_probe_s"
     ],
     "resident": [
       "Seat"
