@@ -14,17 +14,32 @@ VIRTUAL Chunk
 -- else the assistant's text in order. The run is the message's TURN entity (`...:turn`, packs/chat.c1f: state, started, ended); each tool the model ran and the answer are entities under the turn (ChatTool: name, input, result).
 -- Boot facts (cliffvm run ... --fact name=value):
 --   chat_claude_bin   the CLI's path. NO DEFAULT: without it a message is answered with an error that says so, and nothing is run.
+--   chat_auth         how the CLI authenticates: `api_key` (the DEFAULT: the key of the seat's environment variable ANTHROPIC_API_KEY, handed to the CLI in ITS environment) or `login` (the
+--                     CLI's own login: an explicit opt-in, never chosen silently). Anything else is refused. The key is never read by a pack: the launcher tells only `anthropic_key_set`
+--                     (a yes or no), and the run's `env_from` hands the value to the child (the driver masks it in whatever the child prints), so it is in no property, argv, row or reply.
 --   chat_turn_timeout_s the turn's time limit in seconds (a Command's timeout_s); default 21600 here (a threshold: flagged for the operator).
 --   chat_max_turns    the ceiling (the CLI's --max-turns); default 2048 here (a threshold: flagged for the operator).
 -- `env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is the CLI's own switch the Python rung set (no auto-memory keyed to the folder).
 -- (the two setters are on the class Chat, not on the kind ChatMessage: a setter reaches a kind only through an ISA parent ENTITY, `cls:chatmessage`,
 -- and a getter only needs the `parents` stamp; only a message has `plan` and `answer`.)
 -- `--` ends the options (the CLI's --allowedTools and --mcp-config take lists: without it they would swallow the prompt).
--- The login is the CLI's own; --bare is NOT used: it never reads the login (OAuth/keychain), only an API key.
+-- The login is the CLI's own and only by opt-in (chat_auth=login); --bare is NOT used: it never reads the login (OAuth/keychain), only an API key.
+-- KEY MODE (the default): the credentials the CLI ranks above the key or that stand in for it (ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY, CLAUDE_CODE_OAUTH_TOKEN) are
+-- REMOVED from the child's environment (`env -u`), the list of the Python rung (claude_agent.py OVERRIDING_ENV and LOGIN_ENV, v0.7.53), so the key is what answers even where a login is stored.
+-- LOGIN MODE: ANTHROPIC_API_KEY is removed, so the login answers.
 
 ChatMessage.bin getter:
   WHEN this.over: None
   ELSE: ([b.chat_claude_bin for b in instances('Boot') if b.chat_claude_bin != None] or [''])[0]
+ChatMessage.auth getter:
+  WHEN this.over: None
+  ELSE: ([b.chat_auth for b in instances('Boot') if b.chat_auth != None] or ['api_key'])[0]
+ChatMessage.key_set getter:
+  WHEN this.over: None
+  ELSE: ([b.anthropic_key_set for b in instances('Boot') if b.anthropic_key_set != None] or [False])[0] == True
+ChatMessage.auth_env getter:
+  WHEN this.over: None
+  ELSE: ['env', '-u', 'ANTHROPIC_API_KEY'] if this.auth == 'login' else ['env', '-u', 'ANTHROPIC_AUTH_TOKEN', '-u', 'CLAUDE_CODE_USE_BEDROCK', '-u', 'CLAUDE_CODE_USE_VERTEX', '-u', 'CLAUDE_CODE_USE_FOUNDRY', '-u', 'CLAUDE_CODE_OAUTH_TOKEN']
 ChatMessage.max_turns getter:
   WHEN this.over: None
   ELSE: ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
@@ -47,9 +62,13 @@ ChatMessage.mcp_server getter:
   WHEN this.over or this.port == None: None
   ELSE WHEN this.owner_file != None: {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'headers': {'Authorization': 'Bearer ${MEMBRANE_OWNER_TOKEN}'}}
   ELSE: {'type': 'http', 'url': 'http://127.0.0.1:' + str(this.port) + '/mcp'}
+-- what the run's `env_from` hands the child: the owner's token (a seat with a secret) and, in key mode, the API key (both named, never valued here)
 ChatMessage.owner_env getter:
-  WHEN this.over or this.owner_file == None: None
-  ELSE: {'MEMBRANE_OWNER_TOKEN': 'MEMBRANE_OWNER_TOKEN'}
+  WHEN this.over: None
+  ELSE WHEN this.owner_file != None and this.auth == 'api_key': {'MEMBRANE_OWNER_TOKEN': 'MEMBRANE_OWNER_TOKEN', 'ANTHROPIC_API_KEY': 'ANTHROPIC_API_KEY'}
+  ELSE WHEN this.owner_file != None: {'MEMBRANE_OWNER_TOKEN': 'MEMBRANE_OWNER_TOKEN'}
+  ELSE WHEN this.auth == 'api_key': {'ANTHROPIC_API_KEY': 'ANTHROPIC_API_KEY'}
+  ELSE: None
 ChatMessage.mcp_json getter:
   WHEN this.over: None
   ELSE: str({'mcpServers': {'membrane': this.mcp_server}}) if this.mcp_server != None else None
@@ -81,12 +100,14 @@ ChatMessage.model_args getter: ['--model', this.sdk_model] if this.sdk_model != 
 ChatMessage.argv getter:
   WHEN this.over: None
   ELSE WHEN this.bin == '' or this.mcp_json == None or this.sys == None or this.text == None: None
-  ELSE: concat(concat(['env', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence'], this.model_args), ['--max-turns', str(this.max_turns), '--system-prompt', this.sys, '--', this.text])
+  ELSE: concat(concat(concat(this.auth_env, ['CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence']), this.model_args), ['--max-turns', str(this.max_turns), '--system-prompt', this.sys, '--', this.text])
 
 -- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------
 ChatMessage.plan getter:
   WHEN this.queued != True or this.tstate != 'queued' or this.text == None: None
   ELSE WHEN this.bin == '': {'refuse': 'The chat answers through the claude CLI, and its path is not named yet (chat_claude_bin). Name it with CLAUDE_BIN=<path to claude> when you start scripts/seat, or start cliffvm with --fact chat_claude_bin=<path>, then send the message again.'}
+  ELSE WHEN this.auth not in ['api_key', 'login']: {'refuse': 'The chat_auth fact says ' + str(this.auth) + ', which is not a way the claude CLI is run here. Use chat_auth=api_key (the default: the key of ANTHROPIC_API_KEY) or chat_auth=login (the login of the claude CLI itself), then send the message again.'}
+  ELSE WHEN this.auth == 'api_key' and not this.key_set: {'refuse': 'No Anthropic API key: the chat answers through the claude CLI with an API key by default. Set ANTHROPIC_API_KEY in the environment the seat is started from, restart the seat, then send the message again. To use the login of the claude CLI itself instead, start the seat with --fact chat_auth=login (a deliberate choice).'}
   ELSE WHEN not this.pick_ok: {'refuse': 'This seat answers through the claude CLI only: ' + str(this.pick) + ' is not one of its claude models (GET /v1/models lists them). Pick one of those, or the seat default.'}
   ELSE WHEN this.argv != None: {'argv': this.argv}
   ELSE: None

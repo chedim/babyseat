@@ -21,6 +21,7 @@ Request.m_ask on-setter models-ask:
     ('Router:seat').refresh = this.m_ask
 
 -- ---- GET /v1/models: the screened tags, the sentinel lane, the autoselect lanes (only with a router), the cloud rungs
+Request.m_chat_auth getter: ([b.chat_auth for b in instances('Boot') if b.chat_auth != None] or ['api_key'])[0]
 Request.m_router getter: ([b.router_on for b in instances('Boot')] or [False])[0] == True
 Request.m_tags getter: [m for m in instances('Model') if m.listed == True and m.rung != True and m.chat_ok == True]
 -- a claude-agent rung is the model this seat RUNS (the chat's turn is the claude CLI): listed with or without a router (the router's other rungs are the router's)
@@ -106,8 +107,7 @@ Request.minds_reply getter:
 -- current_tau_s (180.0, the field current's fade: a threshold, changing it needs the operator's approval) and energy (Blurp's, None: no self here). NOTHING in
 -- this seat reads the two writable values yet (Blurp's loop and the code tree's collector are Python): the gear window shows and keeps them, and they are
 -- ready for the day those are c1f. The minds' keys (loops, cortex, workers, <mind>_auth, think) are the models route's, written to `Minds:seat` by the same
--- setters; `background` is the minds with the models they may take: the pickable ones, the claude rungs among them, the chat's credentials (the claude
--- CLI's own login) and `picked` (a model is set: the page asks "Which model?" at boot only when it is not). NOT KEPT: an unknown key is refused without its
+-- setters; `background` is the minds with the models they may take: the pickable ones, the claude rungs among them, the chat's credentials (`chat_auth`: api_key, or login when the seat opted in) and `picked` (a model is set: the page asks "Which model?" at boot only when it is not). NOT KEPT: an unknown key is refused without its
 -- name (the message says what is writable): c1f cannot list a dict's keys (`keys(d)` is a proposed builtin, docs/c1f-stdlib.md).
 Settings.kind getter: 'settings'
 
@@ -138,7 +138,7 @@ Request.op_models getter: [m.name for m in instances('Model') if m.rung == True 
 -- the models a mind may take: the pickable ones, and the models the minds hold now first when they are not among them
 Request.op_cur getter: [x for x in [prop(this.mind_read, 'loops'), prop(this.mind_read, 'cortex'), prop(this.mind_read, 'workers')] if x != None and x != '' and not (x in this.pickable)]
 Request.op_all getter: concat(this.op_cur, this.pickable)
-Request.op_bg getter: {'loops': prop(this.mind_read, 'loops'), 'cortex': prop(this.mind_read, 'cortex'), 'workers': prop(this.mind_read, 'workers'), 'loops_auth': prop(this.mind_read, 'loops_auth'), 'cortex_auth': prop(this.mind_read, 'cortex_auth'), 'workers_auth': prop(this.mind_read, 'workers_auth'), 'models': this.op_all, 'claude': [m for m in this.op_all if m in this.op_models], 'chat_auth': 'login', 'picked': (prop(this.mind_read, 'loops') or '') != ''}
+Request.op_bg getter: {'loops': prop(this.mind_read, 'loops'), 'cortex': prop(this.mind_read, 'cortex'), 'workers': prop(this.mind_read, 'workers'), 'loops_auth': prop(this.mind_read, 'loops_auth'), 'cortex_auth': prop(this.mind_read, 'cortex_auth'), 'workers_auth': prop(this.mind_read, 'workers_auth'), 'models': this.op_all, 'claude': [m for m in this.op_all if m in this.op_models], 'chat_auth': this.m_chat_auth, 'picked': (prop(this.mind_read, 'loops') or '') != ''}
 Request.op_body getter: {'self_cpu_share': this.op_share, 'code_runs_keep': this.op_keep, 'defaults': {'self_cpu_share': 0.5, 'code_runs_keep': 30}, 'writable': concat(['self_cpu_share', 'code_runs_keep'], ['loops', 'cortex', 'workers', 'loops_auth', 'cortex_auth', 'workers_auth', 'think'] if this.mind_seat != None else []), 'current_tau_s': 180.0, 'current_tau_note': 'changing it needs the operator\'s approval', 'energy': None, 'background': this.op_bg if this.mind_seat != None else None}
 
 Request.op_post_go getter: True if this.op_go == True else None

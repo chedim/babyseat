@@ -25,6 +25,8 @@ use crate::store::{Poll, Store};
 
 /// a Command run that states no `timeout_s` is limited to this many seconds (the boot fact `command_timeout_s` changes it): the operator-delegated
 /// sensible default (2026-11-13), the time a model-run command may take unless the model says more
+/// what a handed-over secret (`env_from`) becomes where the child printed it
+pub const MASK: &str = "***";
 pub const DEFAULT_COMMAND_TIMEOUT_S: f64 = 120.0;
 /// after the SIGTERM of a timeout the group gets this long to end; then it is killed with SIGKILL (the operator, 2026-11-13)
 pub const KILL_GRACE_MS: u64 = 2000;
@@ -214,9 +216,12 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 };
                 c.args(&args).current_dir(&cwd).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).stdin(std::process::Stdio::null());
                 std::os::unix::process::CommandExt::process_group(&mut c, 0);   // the child leads its own group: a timeout or a stop ends the whole tree
+                // the values handed over are SECRETS: whatever the child prints of them (a 401 page, a debug line) is masked before it reaches a chunk, a receipt or any row
+                let mut secrets: Vec<String> = Vec::new();
                 for (k, var) in &env_from {
-                    match std::env::var(var) { Ok(v) => { c.env(k, v); } Err(_) => return receipt(&id, 2, format!("environment variable {} is not set (for {})", var, k), Map::new()) }
+                    match std::env::var(var) { Ok(v) => { if !v.is_empty() { secrets.push(v.clone()); } c.env(k, v); } Err(_) => return receipt(&id, 2, format!("environment variable {} is not set (for {})", var, k), Map::new()) }
                 }
+                let mask = |t: String| -> String { secrets.iter().fold(t, |t, s| t.replace(s.as_str(), MASK)) };
                 let epoch = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
                 let (t_start, t_clock) = (epoch(), std::time::Instant::now());
                 let child = match c.spawn() { Ok(ch) => ch, Err(e) => return receipt(&id, 127, format!("{}", e), Map::new()) };
@@ -244,11 +249,11 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 let partial = req2.get("partial").and_then(|p| p.as_bool()).unwrap_or(false);
                 let h = Store::from_shared(sh);
                 let (mut all, mut held, mut n): (Vec<u8>, Vec<u8>, i64) = (Vec::new(), Vec::new(), 0);
-                let mut push = |bytes: &[u8], n: &mut i64| {
+                let push = |bytes: &[u8], n: &mut i64| {
                     *n += 1;
                     let mut p = Map::new();
                     p.insert("cmd".into(), json!(eid)); p.insert("id".into(), id.clone()); p.insert("n".into(), json!(*n));
-                    p.insert("data".into(), json!(String::from_utf8_lossy(bytes)));
+                    p.insert("data".into(), json!(mask(String::from_utf8_lossy(bytes).to_string())));
                     h.push_inbound(format!("Chunk:{eid}:{n}"), "Chunk".into(), p);
                 };
                 if let Some(r) = out_r.as_mut() {
@@ -267,8 +272,8 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                     }
                 }
                 if partial && !held.is_empty() { push(&held, &mut n); }
-                let out = String::from_utf8_lossy(&all).to_string();
-                let err = err_t.join().unwrap_or_default();
+                let out = mask(String::from_utf8_lossy(&all).to_string());
+                let err = mask(err_t.join().unwrap_or_default());
                 let status = slot.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| ch.wait());
                 crate::store::child_done(sh, eid);
                 drop(done_tx);

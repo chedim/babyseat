@@ -18,7 +18,8 @@
     "props": {
      "ui_dir": "/x",
      "chat_claude_bin": "/opt/fake/claude",
-     "chat_max_turns": 7
+     "chat_max_turns": 7,
+     "anthropic_key_set": true
     }
    },
    {
@@ -73,116 +74,166 @@
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.1",
-    "equals": "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
+    "equals": "-u"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.2",
-    "equals": "/opt/fake/claude"
+    "equals": "ANTHROPIC_AUTH_TOKEN"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.3",
-    "equals": "-p"
+    "equals": "-u"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.4",
-    "equals": "--output-format"
+    "equals": "CLAUDE_CODE_USE_BEDROCK"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.5",
-    "equals": "stream-json"
+    "equals": "-u"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.6",
-    "equals": "--verbose"
+    "equals": "CLAUDE_CODE_USE_VERTEX"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.7",
-    "equals": "--include-partial-messages"
+    "equals": "-u"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.8",
-    "equals": "--tools"
+    "equals": "CLAUDE_CODE_USE_FOUNDRY"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.9",
-    "equals": ""
+    "equals": "-u"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.10",
-    "equals": "--strict-mcp-config"
+    "equals": "CLAUDE_CODE_OAUTH_TOKEN"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.11",
-    "equals": "--mcp-config"
+    "equals": "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.12",
-    "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\"}}}"
+    "equals": "/opt/fake/claude"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.13",
-    "equals": "--allowedTools"
+    "equals": "-p"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.14",
-    "equals": "mcp__membrane__*"
+    "equals": "--output-format"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.15",
-    "equals": "--setting-sources"
+    "equals": "stream-json"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.16",
-    "equals": ""
+    "equals": "--verbose"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.17",
-    "equals": "--no-session-persistence"
+    "equals": "--include-partial-messages"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.18",
-    "equals": "--max-turns"
+    "equals": "--tools"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.19",
-    "equals": "7"
+    "equals": ""
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.20",
-    "equals": "--system-prompt"
+    "equals": "--strict-mcp-config"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.21",
+    "equals": "--mcp-config"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.22",
-    "equals": "--"
+    "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\"}}}"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.23",
-    "equals": "hello"
+    "equals": "--allowedTools"
    },
    {
     "eid": "membrane::Chat:message:1-1",
     "prop": "argv.24",
+    "equals": "mcp__membrane__*"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.25",
+    "equals": "--setting-sources"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.26",
+    "equals": ""
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.27",
+    "equals": "--no-session-persistence"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.28",
+    "equals": "--max-turns"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.29",
+    "equals": "7"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.30",
+    "equals": "--system-prompt"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.32",
+    "equals": "--"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.33",
+    "equals": "hello"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.34",
     "none": true
    }
   ]
@@ -205,7 +256,8 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude"
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
     }
    },
    {
@@ -269,7 +321,7 @@
    },
    {
     "eid": "membrane::Chat:message:1-1",
-    "prop": "argv.19",
+    "prop": "argv.29",
     "equals": "2048"
    }
   ]
@@ -379,7 +431,9 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/nonexistent/claude-fake"
+     "chat_claude_bin": "/nonexistent/claude-fake",
+     "anthropic_key_set": true,
+     "chat_auth": "login"
     }
    },
    {
@@ -434,7 +488,7 @@
   "expect": [
    {
     "eid": "membrane::Command:chat:1-1",
-    "prop": "cmd.2",
+    "prop": "cmd.4",
     "equals": "/nonexistent/claude-fake"
    },
    {
@@ -446,6 +500,11 @@
     "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "text",
     "contains": "claude failed (rc 127)"
+   },
+   {
+    "eid": "membrane::Command:chat:1-1",
+    "prop": "cmd.1",
+    "equals": "-u"
    }
   ]
  },
@@ -467,7 +526,8 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude"
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
     }
    },
    {
@@ -606,7 +666,8 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude"
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
     }
    },
    {
@@ -702,7 +763,8 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude"
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
     }
    },
    {
@@ -804,7 +866,8 @@
     "props": {
      "ui_dir": "/x",
      "chat_claude_bin": "/opt/fake/claude",
-     "chat_max_turns": 7
+     "chat_max_turns": 7,
+     "anthropic_key_set": true
     }
    },
    {
@@ -900,7 +963,8 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude"
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
     }
    },
    {

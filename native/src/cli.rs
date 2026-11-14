@@ -100,6 +100,8 @@ pub fn facts(r: &RunArgs) -> Map<String, J> {
     m.insert("build_id".into(), json!(format!("cliffvm-{}", ver)));
     if let Ok(d) = std::env::current_dir() { m.insert("seat_cwd".into(), json!(d.to_string_lossy())); }
     if let Ok(h) = std::env::var("HOME") { m.insert("seat_home".into(), json!(h)); }
+    // whether the seat's environment holds a non-empty ANTHROPIC_API_KEY (the claude turn's key, membrane/packs/chat_turn.c1f): ONLY the yes or no is told, never the value
+    m.insert("anthropic_key_set".into(), json!(std::env::var("ANTHROPIC_API_KEY").map(|k| !k.is_empty()).unwrap_or(false)));
     m.insert("seat_name".into(), json!("Bob"));
     m.insert("seat_named".into(), json!(false));
     m.insert("seat_aliases".into(), json!([]));

@@ -168,7 +168,7 @@ fn the_options_read_has_the_released_shape_and_the_background_minds_the_page_nee
         assert_eq!((bg["loops"].clone(), bg["cortex"].clone(), bg["picked"].clone()), (json!("claude"), json!("claude"), json!(true)), "{bg}");
         assert_eq!(bg["claude"], json!(["claude"]), "{bg}");
         assert!(bg["models"].as_array().unwrap().contains(&json!("claude")), "{bg}");
-        assert_eq!(bg["chat_auth"], json!("login"), "the chat runs on the claude CLI's own login: {bg}");
+        assert_eq!(bg["chat_auth"], json!("api_key"), "the chat runs on an API key unless the login is switched on (chat_auth=login): {bg}");
         let w = o["writable"].as_array().unwrap();
         for k in ["self_cpu_share", "code_runs_keep", "loops", "cortex", "loops_auth", "cortex_auth"] { assert!(w.contains(&json!(k)), "{k} is writable: {w:?}"); }
     }

@@ -45,3 +45,19 @@ fn several_apps_are_layers_the_first_is_the_root_and_the_door_is_told_the_folder
     assert!(parse(&["run".to_string()]).is_err(), "run needs an app");
     let _ = std::fs::remove_dir_all(d);
 }
+
+#[test]
+fn the_launcher_tells_only_whether_the_anthropic_key_is_set_never_the_key_and_an_option_cannot_fake_it() {
+    // (the environment of THIS process is the one `facts` reads: set, read, restore, in one test so nothing else races on it)
+    let r = run(&["run", "p", "--fact", "anthropic_key_set=true"]);
+    let old = std::env::var("ANTHROPIC_API_KEY").ok();
+    std::env::remove_var("ANTHROPIC_API_KEY");
+    assert_eq!(facts(&r)["anthropic_key_set"], json!(false), "no key in the environment: the option cannot say yes");
+    std::env::set_var("ANTHROPIC_API_KEY", "");
+    assert_eq!(facts(&r)["anthropic_key_set"], json!(false), "an empty variable is no key");
+    std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-api03-PLANTED-cli-facts");
+    let f = facts(&r);
+    assert_eq!(f["anthropic_key_set"], json!(true));
+    assert!(!serde_json::to_string(&f).unwrap().contains("PLANTED-cli-facts"), "the key is in no fact");
+    match old { Some(v) => std::env::set_var("ANTHROPIC_API_KEY", v), None => std::env::remove_var("ANTHROPIC_API_KEY") }
+}

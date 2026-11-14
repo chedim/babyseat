@@ -1,6 +1,14 @@
 {
  "_doc": "The Boot facts packs read (docs/c1f-stdlib.md). wired=true: the launcher writes it today; wired=false: a pack reads it and the launcher does not tell it yet (the to-do list for the door's cutover).",
  "facts": {
+  "anthropic_key_set": {
+   "wired": false,
+   "why": "told by `cliffvm run` (the Python seat has no such fact): whether the seat's environment holds a non-empty ANTHROPIC_API_KEY (told by `cliffvm run`: only the yes or no, never the key); the claude turn is refused without it unless chat_auth is login"
+  },
+  "chat_auth": {
+   "wired": false,
+   "why": "an operator `--fact` of `cliffvm run`: how the claude turn authenticates (--fact chat_auth=...): api_key (the default: the key of the seat's environment) or login (the claude CLI's own login, an explicit opt-in)"
+  },
   "agent_writes": {
    "wired": true,
    "why": "whether the model may write memory (--no-agent-writes)"

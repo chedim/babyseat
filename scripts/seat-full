@@ -47,6 +47,16 @@ cloud='[{"name":"claude","backend":"claude-agent"}]'
 set -- membrane/packs/boot.c1f membrane/packs --store "$data/seat.sqlite" --port "$port" --ui-dir membrane/ui \
   --fact "door_secret_file=$secret" --fact "seat_data_dir=$data" --fact "minds=$minds" --fact "seat_backend=http://127.0.0.1:11434" \
   --fact "router_on=false" --fact "cloud_models=$cloud"
+# THE CLAUDE AUTH (the release gate): the chat answers with an Anthropic API key by default: the seat reads ANTHROPIC_API_KEY from THIS environment and hands it to the claude CLI.
+# The CLI's own login is a deliberate opt-in: CLAUDE_AUTH=login scripts/seat-full (it passes --fact chat_auth=login). With neither, a message is answered with an error that says how.
+case "${CLAUDE_AUTH:-}" in
+  '') ;;
+  login) set -- "$@" --fact "chat_auth=login" ;;
+  *) echo "scripts/seat-full: CLAUDE_AUTH=${CLAUDE_AUTH} is not known (it is: login)." >&2; exit 2 ;;
+esac
+if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ "${CLAUDE_AUTH:-}" != login ]; then
+  echo "scripts/seat-full: no ANTHROPIC_API_KEY in the environment: the chat will refuse a message until you set it (or opt into the claude CLI's login: CLAUDE_AUTH=login scripts/seat-full)." >&2
+fi
 if [ -n "$claude" ]; then
   set -- "$@" --fact "chat_claude_bin=$claude"
 else

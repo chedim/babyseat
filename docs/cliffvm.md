@@ -61,7 +61,7 @@ scripts/seat [--store ./.cliffvm/seat.sqlite] [--port 4096] [--open] [--fact nam
 
 It runs `cliffvm run <the packs of membrane/apps/barest.packs, one file each> membrane/apps/barest.c1f --store <sqlite> --port <n> [--fact name=value ...] --fact chat_claude_bin=<claude>`
 from the repo root and prints the URL. `CLIFFVM` names the binary (else `native/target/release/cliffvm`, else PATH); `CLAUDE_BIN` names the claude CLI
-(else the one on PATH; with none, the seat starts and the chat answers with how to name it). `--fact name=value` (repeatable) is passed on as a Boot fact (`--fact warm_rows=0`). `--open` opens the page on macOS. The launcher starts nothing else
+(else the one on PATH; with none, the seat starts and the chat answers with how to name it). The chat needs `ANTHROPIC_API_KEY` in the environment, or `CLAUDE_AUTH=login` to use the claude CLI's own login (docs/cliffvm.md, "The claude turn's auth"). `--fact name=value` (repeatable) is passed on as a Boot fact (`--fact warm_rows=0`). `--open` opens the page on macOS. The launcher starts nothing else
 (no Ollama, nothing under `~/.membrane`) and uses no port but `--port`.
 
 **What you see** (`membrane/apps/barest.c1f/ui/`: `index.html`, `app.css`, `app.js`, `mcp.js`, `graph.js`, `chat.js`; plain static JavaScript served by the door
@@ -231,7 +231,7 @@ scripts/seat-full [--data-dir ./.cliffvm/full] [--port 4310] [--open] [--fact na
 
 It tells the facts the dry run said the full set needs (`docs/release-parity.md` section 6): `door_secret_file` (`<data-dir>/door.secret`: `cliffvm run` makes it on the first run, 64 hex characters from `/dev/urandom`, mode 0600, and keeps it), `seat_data_dir` (the data dir),
 `minds` (every mind picks `claude`, auth `chat`, think `auto`), `cloud_models` (one rung, `claude`, backend `claude-agent`), `router_on=false`, `seat_backend=http://127.0.0.1:11434` (nothing needs to run there: a refused connection is an empty
-tag list), `chat_claude_bin` (`CLAUDE_BIN`, else the claude on PATH). Store: `<data-dir>/seat.sqlite`. Your `--fact` arguments come last and win (`--fact operator=ann`). `CLIFFVM` names the binary as for `scripts/seat`; the default port is not 4096.
+tag list), `chat_claude_bin` (`CLAUDE_BIN`, else the claude on PATH), and `chat_auth=login` only when `CLAUDE_AUTH=login` is set (else the API key default: set `ANTHROPIC_API_KEY`). Store: `<data-dir>/seat.sqlite`. Your `--fact` arguments come last and win (`--fact operator=ann`). `CLIFFVM` names the binary as for `scripts/seat`; the default port is not 4096.
 Nothing else is started. Tests: `native/tests/seat_full_1143.rs` (the secret, its mode, kept across runs, a fact wins, the printed token path and curl line), `tests/js/page_boot.test.mjs` (the page in headless Chrome, below).
 
 **The door's two ways in, and the rule that a localhost peer is not the owner** (operator decisions 2026-11-13: a JWT and the loopback owner cookie are the only modes; the seat-token mode and the LAN guard are dropped; the no-tokenless rule of #842 holds; `door_auth.c1f`, `door.c1f`, `native/src/owner.rs`; docs/auth.md):
@@ -393,7 +393,8 @@ shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus t
 **The turn** is one run of the model's CLI through the `Command` driver, in the mode the Python rung used (`claude_agent.py`):
 
 ```
-env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 <chat_claude_bin> -p --output-format stream-json --verbose --include-partial-messages
+env -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u CLAUDE_CODE_OAUTH_TOKEN
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 <chat_claude_bin> -p --output-format stream-json --verbose --include-partial-messages
     --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{"membrane":{"type":"http","url":"http://127.0.0.1:<port>/mcp"}}}'
     --allowedTools 'mcp__membrane__*' --setting-sources "" --no-session-persistence --max-turns <chat_max_turns>
     --system-prompt <the doctrine (four sentences) + the chat's banner> -- <the message>
@@ -403,11 +404,21 @@ Built-in tools off, no user MCP config (the config is an inline JSON string, gen
 settings files, allowed tools exactly the membrane server's, one continuous run, the system prompt is the doctrine, the operator's four sentences
 (`docs/doctrine-barest-draft.md`) plus `Banner:owner:main`'s text (the banner, see "The banner"), the prompt is the message ALONE: no history. `--` ends the options (the
 list-valued `--allowedTools` / `--mcp-config` would swallow a prompt). `--bare` is NOT used: per `claude --help` (2.1.323) it never
-reads OAuth or the keychain, only an API key, so it cannot use the operator's CLI login. The stream-json stdout is read by c1f
+reads OAuth or the keychain, only an API key, so it cannot use the CLI's login. The stream-json stdout is read by c1f
 (`json()` per line): the `result` line's text is the answer, else the assistant's text in order; `is_error` or a failing exit with no
 result line is an error answer (with stderr); `error_max_turns` keeps what was said and says it stopped at the ceiling. Boot facts:
 `chat_claude_bin` (no default), `chat_max_turns` (default 2048 in the pack: a THRESHOLD for the operator to approve; it is the old
 rung's per-answer tool-call ceiling).
+
+**The claude turn's auth (the release gate, #1143: an Anthropic API key by default, the CLI's login only by opt-in).** The seat reads the key from ITS OWN environment variable
+`ANTHROPIC_API_KEY` and hands it to the `claude -p` child in the child's environment (the run's `env_from`, as the owner token; docs/auth.md). `cliffvm run` tells the packs only
+`anthropic_key_set` (a yes or no); no pack, property, row, journal line, log, reply, tool result or `argv` ever holds the value, and the Command driver masks (`***`) any secret it handed over
+wherever the child printed it (a 401 page, a debug line) in chunks and receipts. With no key (unset or empty) the turn ends as an error whose text says to set `ANTHROPIC_API_KEY` and restart, and to
+start with `--fact chat_auth=login` for the login deliberately; no `claude` process starts. `--fact chat_auth=login` (or `CLAUDE_AUTH=login scripts/seat` / `scripts/seat-full`, which pass it) runs the CLI on its own login:
+`ANTHROPIC_API_KEY` is removed from the child's environment and no key is needed. Any other `chat_auth` value is refused with the two valid ones. In key mode the credentials the CLI would rank above or in place of the key
+(`ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` / `_FOUNDRY`, `CLAUDE_CODE_OAUTH_TOKEN`) are removed from the child's environment (`env -u`), the list the released rung blanked
+(`claude_agent.py` v0.7.53: `OVERRIDING_ENV`, `LOGIN_ENV`, `credential_env`), so a stored login cannot answer. `GET /membrane/options` `background.chat_auth` shows the mode. Tests: `native/tests/chat_process.rs`
+(the planted key: the child gets it, no store file, log, route reply or `argv` holds it, even when the CLI echoes it; the refusal; the login; the removed variables; an unknown value), `cli_facts_1143.rs`, `seat_process.rs` (the scripts).
 
 **Tests**: `tests/specs/door_tools.json`, `chat.json`, `chat_turn.json` (pack behaviour), `native/tests/chat_process.rs` (the binary
 through the MCP door; the whole chat with a FAKE `claude` that records its argv, calls the door's `/mcp` itself, waits while the test

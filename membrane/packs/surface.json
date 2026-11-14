@@ -143,7 +143,7 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 51,
+    "members": 54,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
@@ -167,6 +167,8 @@
     ],
     "claims": [],
     "boot_facts": [
+      "anthropic_key_set",
+      "chat_auth",
       "chat_claude_bin",
       "chat_max_turns",
       "chat_turn_timeout_s",
@@ -395,7 +397,7 @@
       "Request",
       "Settings"
     ],
-    "members": 62,
+    "members": 63,
     "writes": [
       "Minds:seat.cortex",
       "Minds:seat.cortex_auth",
@@ -415,6 +417,7 @@
       "/v1/models/"
     ],
     "boot_facts": [
+      "chat_auth",
       "router_on"
     ],
     "resident": [

@@ -145,7 +145,13 @@ here = os.path.dirname(os.path.abspath(__file__))
 argv = sys.argv[1:]
 prompt = argv[-1]
 tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
-json.dump({"argv": argv, "auto_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY"), "cwd": os.getcwd()}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
+_k = os.environ.get("ANTHROPIC_API_KEY")
+_watch = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_OAUTH_TOKEN"]
+_wp = os.path.join(here, "want_key")   # a file `want_key` holds the key the test planted: the record says only whether the child's key IS it (never the key)
+_want = open(_wp).read() if os.path.exists(_wp) else None
+json.dump({"argv": argv, "auto_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY"), "cwd": os.getcwd(), "key_is_wanted": (_k == _want) if _want is not None else None, "cred_env": [n for n in _watch if os.environ.get(n)]}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
+if os.path.exists(os.path.join(here, "echo_key")):   # a CLI that echoes its key on stderr and in its answer (a 401 page, a debug line)
+    sys.stderr.write("auth debug: key=" + (_k or "") + "\n"); sys.stderr.flush()
 errp = os.path.join(here, "err")   # a file `err`: the CLI ends with a result line that reports this text as an error
 if os.path.exists(os.path.join(here, "fail")):
     sys.stderr.write(open(os.path.join(here, "fail")).read() or "fake: not logged in\n"); sys.exit(3)
@@ -179,7 +185,7 @@ out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tu
 out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu2", "content": r}]}})
 if os.path.exists(errp):
     out({"type": "result", "subtype": "success", "is_error": True, "result": open(errp).read(), "num_turns": 1, "session_id": "fake-1"}); sys.exit(0)
-out({"type": "result", "subtype": "success", "is_error": False, "result": "Final answer to: " + prompt, "num_turns": 3, "duration_ms": 4321, "total_cost_usd": 0.0123, "usage": {"input_tokens": 11, "cache_creation_input_tokens": 22, "cache_read_input_tokens": 33, "output_tokens": 44}, "session_id": "fake-1"})
+out({"type": "result", "subtype": "success", "is_error": False, "result": "Final answer to: " + prompt + ((" key=" + (_k or "")) if os.path.exists(os.path.join(here, "echo_key")) else ""), "num_turns": 3, "duration_ms": 4321, "total_cost_usd": 0.0123, "usage": {"input_tokens": 11, "cache_creation_input_tokens": 22, "cache_read_input_tokens": 33, "output_tokens": 44}, "session_id": "fake-1"})
 "#;
 
 const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f"];
@@ -189,7 +195,9 @@ fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) { fake
 /// the same, with more packs (name, text) in the seat's pack folder: a model's own banner pack, for one
 fn fake_seat_with(tag: &str, extra: &[&str], packs: &[(&str, &str)]) -> (Run, u16, std::path::PathBuf) { fake_seat_script(tag, extra, packs, FAKE) }
 /// the same, with the fake's own script text
-fn fake_seat_script(tag: &str, extra: &[&str], packs: &[(&str, &str)], script: &str) -> (Run, u16, std::path::PathBuf) {
+fn fake_seat_script(tag: &str, extra: &[&str], packs: &[(&str, &str)], script: &str) -> (Run, u16, std::path::PathBuf) { fake_seat_cred(tag, extra, packs, script, &[("ANTHROPIC_API_KEY", HARNESS_KEY)]) }
+/// the same, with the seat's credential environment named (see `launch_env`)
+fn fake_seat_cred(tag: &str, extra: &[&str], packs: &[(&str, &str)], script: &str, env: &[(&str, &str)]) -> (Run, u16, std::path::PathBuf) {
     let dir = tmp(tag);
     let bin = dir.join("fake-claude");
     std::fs::write(&bin, script).unwrap();
@@ -199,20 +207,33 @@ fn fake_seat_script(tag: &str, extra: &[&str], packs: &[(&str, &str)], script: &
     for (n, t) in shipped(CHAT_PACKS) { std::fs::write(pd.join(n), t).unwrap(); }
     std::fs::copy(format!("{}/../membrane/apps/barest.c1f/default_banner.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("default_banner.c1f")).unwrap();   // the barest app's default banner pack
     for (n, t) in packs { std::fs::write(pd.join(n), t).unwrap(); }
-    let (run, port) = launch(&dir, &bin, extra);
+    let (run, port) = launch_env(&dir, &bin, extra, env);
     (run, port, dir)
 }
 
+/// the key every harness seat is started with unless a test says otherwise (the default mode is the API key; a seat with none refuses the turn)
+const HARNESS_KEY: &str = "sk-ant-harness-default-0000";
+/// the credential variables the seat must not inherit from the developer's own shell (a test names the ones it wants)
+const CRED_VARS: [&str; 6] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_OAUTH_TOKEN"];
+
 /// start the binary in `dir` (its packs folder and store are there; a second launch in the same folder is a RESTART)
-fn launch(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str]) -> (Run, u16) {
+fn launch(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str]) -> (Run, u16) { launch_env(dir, bin, extra, &[("ANTHROPIC_API_KEY", HARNESS_KEY)]) }
+/// the same with the credential environment named: ONLY these of CRED_VARS are set. The seat's stdout and stderr go to `seat.out` and `seat.err` in `dir`.
+fn launch_env(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str], env: &[(&str, &str)]) -> (Run, u16) {
     let pd = dir.join("packs");
     let fact = format!("chat_claude_bin={}", bin.display());
-    let mut child = Command::new(BIN).current_dir(dir)
+    let mut cmd = Command::new(BIN);
+    cmd.current_dir(dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact])
-        .args(extra).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+        .args(extra);
+    for v in CRED_VARS { cmd.env_remove(v); }
+    cmd.envs(env.iter().copied());
+    let err = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("seat.err")).unwrap();
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::from(err)).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
-    std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
+    let log = dir.join("seat.out");
+    std::thread::spawn(move || { let mut f = std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap(); for l in BufReader::new(out).lines().map_while(Result::ok) { let _ = writeln!(f, "{l}"); if tx.send(l).is_err() { break; } } });
     let run = Run { child, _lines: rx, dir: dir.to_path_buf() };
     let line = run._lines.recv_timeout(Duration::from_secs(30)).expect("the door came up");
     let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap();
@@ -1663,5 +1684,127 @@ fn a_run_that_ends_with_no_answer_at_all_is_an_error_that_says_so() {
     let v = wait("the end", || { let v = view(port, &id); if v["state"] == "error" || v["state"] == "done" { Some(v) } else { None } });
     assert_eq!(v["state"], "error", "{v}");
     assert!(v["response"].as_str().unwrap_or("").contains("no answer"), "{v}");
+    assert!(terminate(&mut run));
+}
+
+// ---- THE CLAUDE RUNG'S AUTH (#1143, the release gate: an Anthropic API key by default, the CLI's login only by opt-in) -----------------------
+const PLANTED: &str = "sk-ant-api03-PLANTED-0123456789-abcdefghij";
+/// every file the seat left in its folder (the store and its journal, the log, the packs) EXCEPT the fake's own records: nothing in them may hold `needle`
+fn assert_nowhere_on_disk(dir: &std::path::Path, needle: &str) {
+    fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { walk(&p, out) } else { out.push(p) } } }
+    let mut files = vec![];
+    walk(dir, &mut files);
+    let mut seen_store = false;
+    for f in files {
+        let name = f.file_name().unwrap().to_string_lossy().to_string();
+        if name == "fake-claude" || name == "want_key" || name == "fail" || name == "echo_key" || name.starts_with("argv.") || name.starts_with("go.") { continue; }
+        if name.starts_with("field.sqlite3") { seen_store = true; }
+        let bytes = std::fs::read(&f).unwrap_or_default();
+        assert!(!bytes.windows(needle.len()).any(|w| w == needle.as_bytes()), "the key is in {}", f.display());
+    }
+    assert!(seen_store, "the store file was looked at");
+}
+/// the replies of the routes a model or a person can read, after a turn: none may hold `needle`
+fn assert_nowhere_in_routes(port: u16, id: &str, needle: &str) {
+    let mut seen: Vec<(String, String)> = vec![];
+    for p in [format!("/membrane/chat/message/{id}"), "/membrane/chat".to_string(), "/global/health".to_string(), "/membrane/options".to_string(), "/v1/models".to_string(), "/session".to_string(), "/session/status".to_string()] {
+        let (_, b) = http(port, "GET", &p, "");
+        seen.push((p, b));
+    }
+    for spec in [format!("membrane::Command:chat:{id}"), format!("membrane::Chat:message:{id}:turn"), format!("membrane::Chat:message:{id}:turn:response"), "Boot:seat".to_string(), format!("membrane::Chat:message:{id}")] {
+        seen.push((spec.clone(), call(port, "entity_read", json!({"spec": spec})).0));
+    }
+    for q in ["kind:Command", "kind:Boot", "kind:ChatMessage", "kind:ChatTool", "kind:Chat"] { seen.push((q.to_string(), call(port, "entity_query", json!({"q": q})).0)); }
+    for (what, body) in seen { assert!(!body.contains(needle), "the key is in the reply of {what}: {body}"); }
+}
+fn argv_record(dir: &std::path::Path, prompt: &str) -> J {
+    wait("the fake's record", || std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of(prompt)))).ok().and_then(|t| serde_json::from_str(&t).ok()))
+}
+
+#[test]
+fn by_default_the_cli_gets_the_key_from_the_seats_environment_and_it_is_written_nowhere() {
+    let (mut run, port, dir) = fake_seat_cred("authkey", &[], &[], FAKE, &[("ANTHROPIC_API_KEY", PLANTED)]);
+    std::fs::write(dir.join("echo_key"), "").unwrap();   // the worst case: the CLI itself prints its key on stderr and in its answer
+    std::fs::write(dir.join("want_key"), PLANTED).unwrap();
+    let id = send(port, "with a key");
+    let v = finish(port, &dir, &id, "with a key");
+    assert_eq!(v["state"], "done", "{v}");
+    let rec = argv_record(&dir, "with a key");
+    assert_eq!(rec["key_is_wanted"], json!(true), "the child got the key, in its environment");
+    assert!(!rec["argv"].to_string().contains(PLANTED), "the key is not in argv (a process listing shows it)");
+    assert!(!v.to_string().contains(PLANTED), "{v}");
+    assert!(v["response"].as_str().unwrap().contains("key="), "the answer is still the CLI's");
+    assert_nowhere_in_routes(port, &id, PLANTED);
+    assert!(terminate(&mut run));
+    assert_nowhere_on_disk(&dir, PLANTED);
+}
+
+#[test]
+fn a_failing_cli_that_echoes_the_key_on_stderr_does_not_put_it_in_the_answer_the_rows_or_the_disk() {
+    let (mut run, port, dir) = fake_seat_cred("authkeyfail", &[], &[], FAKE, &[("ANTHROPIC_API_KEY", PLANTED)]);
+    std::fs::write(dir.join("fail"), format!("401 invalid x-api-key: {PLANTED}\n")).unwrap();
+    let id = send(port, "failing");
+    let v = wait("the error answer", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    assert!(v["response"].as_str().unwrap().contains("401 invalid x-api-key"), "the CLI's words stay: {v}");
+    assert_nowhere_in_routes(port, &id, PLANTED);
+    assert!(terminate(&mut run));
+    assert_nowhere_on_disk(&dir, PLANTED);
+}
+
+#[test]
+fn with_no_key_the_turn_is_refused_how_to_set_it_and_how_to_opt_into_the_login_and_no_cli_starts() {
+    let (mut run, port, dir) = fake_seat_cred("authnokey", &[], &[], FAKE, &[]);
+    let id = send(port, "no key");
+    let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    let t = v["response"].as_str().unwrap();
+    assert!(t.contains("ANTHROPIC_API_KEY") && t.contains("chat_auth=login"), "the refusal says how to set the key AND how to switch the login on: {t}");
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!dir.join(format!("argv.{}.json", tag_of("no key"))).exists(), "no claude process started");
+    assert!(terminate(&mut run));
+    // an EMPTY variable is no key
+    let (mut run, port, dir) = fake_seat_cred("authemptykey", &[], &[], FAKE, &[("ANTHROPIC_API_KEY", "")]);
+    let id = send(port, "empty key");
+    let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    assert!(v["response"].as_str().unwrap().contains("ANTHROPIC_API_KEY"), "{v}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!dir.join(format!("argv.{}.json", tag_of("empty key"))).exists());
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_login_is_an_opt_in_fact_the_key_is_then_not_handed_to_the_cli_and_no_key_is_needed() {
+    // login + a key in the seat's environment: the key is NOT passed (the login answers)
+    let (mut run, port, dir) = fake_seat_cred("authlogin", &["--fact", "chat_auth=login"], &[], FAKE, &[("ANTHROPIC_API_KEY", PLANTED)]);
+    let id = send(port, "login mode");
+    let v = finish(port, &dir, &id, "login mode");
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(argv_record(&dir, "login mode")["cred_env"], json!([]), "no credential variable reaches the CLI: its own login answers");
+    assert!(terminate(&mut run));
+    // login + no key at all: it runs
+    let (mut run, port, dir) = fake_seat_cred("authlogin2", &["--fact", "chat_auth=login"], &[], FAKE, &[]);
+    let id = send(port, "login no key");
+    assert_eq!(finish(port, &dir, &id, "login no key")["state"], "done");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn in_key_mode_the_credentials_that_would_win_over_the_key_or_stand_in_for_it_are_removed_from_the_cli() {
+    let env = [("ANTHROPIC_API_KEY", PLANTED), ("ANTHROPIC_AUTH_TOKEN", "t1"), ("CLAUDE_CODE_USE_BEDROCK", "1"), ("CLAUDE_CODE_USE_VERTEX", "1"), ("CLAUDE_CODE_USE_FOUNDRY", "1"), ("CLAUDE_CODE_OAUTH_TOKEN", "o1")];
+    let (mut run, port, dir) = fake_seat_cred("authwins", &[], &[], FAKE, &env);
+    let id = send(port, "key wins");
+    assert_eq!(finish(port, &dir, &id, "key wins")["state"], "done");
+    assert_eq!(argv_record(&dir, "key wins")["cred_env"], json!(["ANTHROPIC_API_KEY"]), "only the key is in the CLI's environment");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn an_unknown_chat_auth_is_refused_with_the_two_values_and_runs_nothing() {
+    let (mut run, port, dir) = fake_seat_cred("authbad", &["--fact", "chat_auth=oauth"], &[], FAKE, &[("ANTHROPIC_API_KEY", PLANTED)]);
+    let id = send(port, "bad auth");
+    let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    let t = v["response"].as_str().unwrap();
+    assert!(t.contains("chat_auth") && t.contains("api_key") && t.contains("login") && t.contains("oauth"), "{t}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!dir.join(format!("argv.{}.json", tag_of("bad auth"))).exists());
     assert!(terminate(&mut run));
 }

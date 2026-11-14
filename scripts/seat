@@ -47,6 +47,16 @@ if [ -n "$facts" ]; then
   for f in $facts; do set -- "$@" --fact "$f"; done
   IFS=$oldifs
 fi
+# THE CLAUDE AUTH (the release gate): the chat answers with an Anthropic API key by default: the seat reads ANTHROPIC_API_KEY from THIS environment and hands it to the claude CLI.
+# The CLI's own login is a deliberate opt-in: CLAUDE_AUTH=login scripts/seat (it passes --fact chat_auth=login). With neither, a message is answered with an error that says how.
+case "${CLAUDE_AUTH:-}" in
+  '') ;;
+  login) set -- "$@" --fact "chat_auth=login" ;;
+  *) echo "scripts/seat: CLAUDE_AUTH=${CLAUDE_AUTH} is not known (it is: login)." >&2; exit 2 ;;
+esac
+if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ "${CLAUDE_AUTH:-}" != login ]; then
+  echo "scripts/seat: no ANTHROPIC_API_KEY in the environment: the chat will refuse a message until you set it (or opt into the claude CLI's login: CLAUDE_AUTH=login scripts/seat)." >&2
+fi
 if [ -n "$claude" ]; then
   set -- "$@" --fact "chat_claude_bin=$claude"
 else

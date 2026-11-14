@@ -57,7 +57,7 @@ fn seat_at(dir: std::path::PathBuf, with_fake: bool, facts: &[&str]) -> (Run, u1
     { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     let r = repo();
     let mut cmd = Command::new(BIN);
-    cmd.current_dir(&dir).arg("run").args(barest_packs()).arg(r.join("membrane/apps/barest.c1f"))
+    cmd.current_dir(&dir).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000").arg("run").args(barest_packs()).arg(r.join("membrane/apps/barest.c1f"))
         .args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"]);
     for f in facts { cmd.arg("--fact").arg(f); }
     if with_fake { cmd.arg("--fact").arg(format!("chat_claude_bin={}", bin.display())); }
@@ -525,6 +525,29 @@ fn the_seat_script_forwards_each_fact_to_cliffvm_run() {
     assert_eq!(facts, ["request_keep_s=0", "chat_max_turns=5", "chat_claude_bin=/bin/echo"], "{args:?}");
     assert_eq!(args[0], "run");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_launch_scripts_switch_the_login_on_only_when_asked_and_otherwise_leave_the_api_key_default() {
+    for script in ["scripts/seat", "scripts/seat-full"] {
+        let dir = tmp("scripts-auth");
+        let fake = dir.join("fake-cliffvm");
+        std::fs::write(&fake, "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done > \"$ARGS_OUT\"\n").unwrap();
+        { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let out = dir.join("args");
+        let go = |login: bool| -> Vec<String> {
+            let mut c = Command::new(repo().join(script));
+            if script.ends_with("full") { c.args(["--data-dir", dir.join("data").to_str().unwrap(), "--port", "0"]); } else { c.args(["--store", dir.join("s.sqlite").to_str().unwrap(), "--port", "0"]); }
+            c.env("CLIFFVM", &fake).env("CLAUDE_BIN", "/bin/echo").env("ARGS_OUT", &out).env_remove("CLAUDE_AUTH").env_remove("ANTHROPIC_API_KEY");
+            if login { c.env("CLAUDE_AUTH", "login"); }
+            assert!(c.stdout(Stdio::null()).stderr(Stdio::null()).status().unwrap().success(), "{script}");
+            std::fs::read_to_string(&out).unwrap().lines().map(String::from).collect()
+        };
+        assert!(!go(false).iter().any(|a| a.starts_with("chat_auth=")), "{script}: the default names no chat_auth (the pack's default is the API key)");
+        let a = go(true);
+        assert!(a.windows(2).any(|w| w[0] == "--fact" && w[1] == "chat_auth=login"), "{script}: CLAUDE_AUTH=login passes the opt-in fact: {a:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[test]
