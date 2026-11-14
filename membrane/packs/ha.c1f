@@ -4,7 +4,7 @@ IMPORT door_state 1
 RESIDENT HaCall
 RESIDENT HaCatalog
 RESIDENT HaAllow
--- THE SEAT'S USE OF HOME ASSISTANT (#1143, slice 2; docs/home-assistant.md, docs/hass-plan.md "D-act: B"). The seat holds NO Home Assistant secret and Home Assistant holds none of
+-- THE SEAT'S USE OF HOME ASSISTANT (#1143, slice 2; docs/home-assistant.md). The seat holds NO Home Assistant secret and Home Assistant holds none of
 -- the seat's but its own token: the model WRITES a call, the component inside Home Assistant (which already talks to this door with a token) PULLS the pending calls, runs them
 -- with Home Assistant's own services and states, and writes the receipt back. Nothing here runs an effect; a call is data until the component answers it.
 --
@@ -102,7 +102,7 @@ HaCatalog.service_ids getter: [prop(s, 'id') for s in (this.services or [])]
 HaCatalog.domains getter: distinct([before(x, '.') for x in this.entity_ids])
 HaAllow.kind getter: 'ha_allow'
 
--- ---- the metrics: what the seat tells Home Assistant's sensors (#1143, docs/hass-plan.md I4/I12) -----------------------------------------------------------
+-- ---- the metrics: what the seat tells Home Assistant's sensors (#1143, docs/home-assistant.md) -----------------------------------------------------------
 -- Rows {key, name, platform, value, icon, unit?, device_class?, attributes?} built here from what the seat really knows: the chat's turns (the store's turn rows: state, ended, error)
 -- and the model the chat runs on. The component makes one entity per row, so the list lives in this pack, not in Python. The 13 keys of the old component that read the efield, the
 -- thinker and the loops have no source on cliffvm and are gone. `value` is a plain value (a time is epoch seconds, `device_class: timestamp`: the component turns it into a time).

@@ -1,13 +1,13 @@
 {
- "_doc": "The Boot facts packs read (docs/c1f-stdlib.md). wired=true: the launcher writes it today; wired=false: a pack reads it and the launcher does not tell it yet (the to-do list for the door's cutover).",
+ "_doc": "The Boot facts packs read (docs/c1f-stdlib.md). wired=true: `cliffvm` (cli.rs, host.rs, launcher.c1f or scripts/seat) writes it; wired=false: a pack reads it and it is told only when a launch line names it (`--fact name=value`), else the pack's own default stands.",
  "facts": {
   "link_stale_s": {
    "wired": false,
    "why": "seconds of silence after which a page the seat heard from (Vm:<name>, packs/link.c1f) reads `stale` instead of `connected` (--fact link_stale_s=...; default 120: a value tried, not decided)"
   },
   "anthropic_key_set": {
-   "wired": false,
-   "why": "told by `cliffvm run` (the Python seat has no such fact): whether the seat's environment holds a non-empty ANTHROPIC_API_KEY (told by `cliffvm run`: only the yes or no, never the key); the claude turn is refused without it unless chat_auth is login"
+   "wired": true,
+   "why": "told by `cliffvm`: whether the seat's environment holds a non-empty ANTHROPIC_API_KEY (only the yes or no, never the key); the claude turn is refused without it unless chat_auth is login"
   },
   "chat_auth": {
    "wired": false,
@@ -27,19 +27,19 @@
   },
   "door_port": {
    "wired": true,
-   "why": "the port the Rust door listens on; absent = no door (set from MEMBRANE_DOOR_PORT at the cutover)"
+   "why": "the port the Rust door listens on (`--port`; 0 = any free port; the default 4096 is `launcher.c1f`'s `Boot.default_port`)"
   },
   "door_secret_file": {
    "wired": true,
    "why": "the JWT secret file the door verifies tokens with"
   },
   "app_dirs": {
-   "wired": false,
-   "why": "told by `cliffvm run` (the Python seat has no apps yet): the folders of the apps given to it, the upper layer first; the door serves an app's `ui/` files, an upper layer's file shadowing a lower one's (docs/c1f-layers.md)"
+   "wired": true,
+   "why": "told by `cliffvm`: the folders of the apps given to it, the upper layer first; the door serves an app's `ui/` files, an upper layer's file shadowing a lower one's (docs/c1f-layers.md)"
   },
   "ui_dir": {
    "wired": true,
-   "why": "the folder of the UI's files: the lowest layer under each app's own ui/ folder (--ui-dir; none by default)"
+   "why": "an extra folder of the page's files: the lowest layer under each app's own ui/ folder (`cliffvm run --ui-dir`; none by default and none in `serve`)"
   },
   "build_id": {
    "wired": true,
@@ -154,7 +154,7 @@
    "why": "the lazy history import (membrane/packs/legacy_import.c1f, door_session.c1f; #1143): how many old user rows one query reads when a session imported as a header only is opened for the first time (GET /session/<sid>/message imports its messages, once, and answers). NO default: unset, an open imports nothing (the eager `Legacy:seat.import` stays); told by `--fact legacy_page=<n>`"
   },
   "legacy_path": {
-   "wired": false,
+   "wired": true,
    "why": "the earlier (Python, 0.7.x) seat's store, for the automatic history cutover (membrane/packs/legacy_cutover.c1f; #1143): a file (its field.sqlite3), or a folder that holds it (its `.membrane` folder, its `field.sqlite` folder, or the folder of field.sqlite3). Told, it is the ONLY place looked at (a path that holds no store is an error shown as text, never a fallback); unset, the seat looks in `<seat_data_dir>`, `<seat_data_dir>/.membrane`, `<seat_cwd>/.membrane`, `<seat_home>/membrane/.membrane` and `/config/membrane/.membrane` (each `field.sqlite/field.sqlite3`), the first that has a store wins, and when none has one nothing happens; told by `--fact legacy_path=<path>` (the launcher's `--legacy <path>`)"
   },
   "legacy_batch": {

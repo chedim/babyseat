@@ -5,18 +5,17 @@ IMPORT shell_view 1
 IMPORT markdown 1
 -- THE BARE CHAT AS A VIEW PACK (#1143, the first vertical slice of the UI rebuild: docs/ui-rebuild-plan.md section (c)).
 -- It runs in the PAGE's field engine (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f, and does not run it) and draws the
--- chat the way membrane/apps/barest.c1f/ui/chat.js does: the turns (who, the message, the answer or its pending line, the tools folded under it), a
--- textarea and Send, "Load older turns". The page's shell (ui/chatmount.js) births ONE entity, `View:chat` {open: true}, when the page is asked for the pack
--- view (the seat fact `ui_views` or `?ui=pack`); nothing here runs before that.
+-- chat: the turns (who, the message, the answer in markdown or its pending line, the tools folded under it), a textarea with Send and Stop, "Load older turns".
+-- The page's boot (ui/boot.js) births ONE entity, `View:chat` {open: true}; nothing here runs before that.
 --   View:chat       the view: the settings (the legacy constants, below), the polls, the cursor of the older turns
 --   Composer:chat   {draft, sending, error}: the text in the box, one POST at a time (the double-submit guard), the note of a failed send
 --   ChatRow:<id>    one turn: `raw` is the history route's row (the page's `GET /membrane/chat/messages`), everything shown is a getter of it
 --   Fetch:history / Fetch:send / Fetch:older   the three calls (the page's Fetch, fieldvm.js W2): the request is the effect, the receipt `request_result` comes back
 -- THE SHELL (fieldvm.js) gives this pack: a `scroll` write on a DomNode, `before` (an ordered child), `composing` on the key event, `Conn:page.hidden` and the clock
--- (`run_clock`, started by the mount). It does not give a stream (W3: the answer appears when the poll sees it) or an index in a FOR.
+-- (`run_clock`, started by the page's boot). A FOR has no index.
 
--- THE LEGACY CONSTANTS are Boot facts (the page's Boot:seat is fed by the snapshot, door_fieldvm.c1f); the view reads them once, when it opens, each
--- with the value chat.js had when no fact says otherwise (docs/release-parity.md: chat_page_size 20, chat_poll_size 10, chat_list_poll_ms 3000,
+-- THE VIEW'S CONSTANTS are Boot facts (the page's Boot:seat is fed by the snapshot, door_fieldvm.c1f); the view reads them once, when it opens, each
+-- with its own default when no fact says otherwise (chat_page_size 20, chat_poll_size 10, chat_list_poll_ms 3000,
 -- chat_active_poll_ms 700, chat_stick_px 80, chat_tool_chars 90).
 -- THE SHELL (shell_view.c1f) plugs this view in: it registers `Nav:chat` when the shell opens, the view opens when `Nav:chat` becomes active and draws into the slot
 -- `DomNode:shell:slot:chat`. There is ONE chat: it reads `GET /membrane/chat/messages` with no `sid` (every turn, newest page first, `before` pages older ones: the seat's imported history is the
