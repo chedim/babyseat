@@ -1,2 +1,2 @@
 // written by native/build-web.sh: the wasm build the loader asks for (a cache key)
-export const WASM_VERSION = "0184b04ecb76";
+export const WASM_VERSION = "2504e97e1836";

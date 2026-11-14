@@ -313,8 +313,8 @@ Chunk.oc_go on-setter oc-chunk:
 
 -- ---- POST /session/<sid>/abort ----------------------------------------------------------------------------------------------------------------
 -- the session's running turns are its messages' CLI runs that have no receipt yet (the `Command` entities of the chat, which are resident: a turn's row in the store may lag a start) and are marked `aborted` and their CLI is stopped (`Command.stop`); the receipt
--- that follows ends each turn as the chat always ends one, with the text below as its error (`failed`). The reply is `true` (the Python seat's) at once; a session with nothing running is `true` too.
-ChatMessage.failed getter:
+-- that follows ends each turn as the chat always ends one, with the text below as its error (`fail_why`). The reply is `true` (the Python seat's) at once; a session with nothing running is `true` too.
+ChatMessage.fail_why getter:
   WHEN this.aborted == True and this.rr != None: 'aborted: the turn was stopped from the page'
 Request.ab_on getter: this.ss_route == 'abort' and this.method == 'POST' and this.ss_view != None
 Request.ab_turns getter: [replace(c.eid, 'membrane::Command:chat:', '') for c in instances('Command') if startswith(c.eid, 'membrane::Command:chat:') and c.run_result == None and prop('membrane::Chat:message:' + replace(c.eid, 'membrane::Command:chat:', ''), 'sid') == this.ss_sid] if this.ab_on else None

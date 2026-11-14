@@ -96,16 +96,16 @@ fn a_when_over_an_error_in_a_layered_getter_is_that_error_not_the_next_arm() {
     let (c, _f) = world(&[("base", base), ("upper", upper)]);
     let key = ("Light:a".to_string(), "word".to_string());
     assert_eq!(c.docs["Light:a"].props.get("word").cloned().unwrap_or(J::Null), J::Null, "not 'off': the arm cannot be chosen");
-    assert!(c.failed.contains(&key), "the kind is kept beside the reason");
-    assert_eq!(c.why.get(&key).map(String::as_str), Some("layer boom"));
+    assert_eq!(c.docs["Light:a"].failure("word"), Some("layer boom"), "the failure is in the entity's `failed`");
 }
 
 #[test]
-fn the_kind_lives_in_core_why_beside_the_reason_and_a_plain_null_has_none() {
+fn the_failure_lives_in_the_entitys_failed_and_a_null_keeps_its_note_in_core_why() {
     let (c, _f) = world(&[("p", "PACK p 1\nLight.bad getter: Error('x broke')\nLight.nul getter: None('x absent')\n")]);
     let (bad, nul) = (("Light:a".to_string(), "bad".to_string()), ("Light:a".to_string(), "nul".to_string()));
-    assert!(c.failed.contains(&bad) && !c.failed.contains(&nul));
-    assert_eq!(c.why.get(&bad).map(String::as_str), Some("x broke"));
+    assert_eq!(c.docs["Light:a"].failure("bad"), Some("x broke"));
+    assert_eq!(c.docs["Light:a"].failure("nul"), None);
+    assert_eq!(c.why.get(&bad), None, "a failure's reason is not in the side map any more");
     assert_eq!(c.why.get(&nul).map(String::as_str), Some("x absent"));
 }
 

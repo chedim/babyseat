@@ -609,9 +609,10 @@
   "entity": {
     "imports": [],
     "classes": [
-      "Entity"
+      "Entity",
+      "Error"
     ],
-    "members": 1,
+    "members": 2,
     "writes": [],
     "claims": [],
     "boot_facts": []
