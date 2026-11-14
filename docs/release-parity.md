@@ -6,8 +6,9 @@ Agreed order (operator): (1) server swap, (2) no-history chat backend behind the
 (4) data migration and cutover. One "round" = one agent round of 20-45 min.
 Step 3 plan (VM growth, architecture, first slice, rollout, tests, decisions): `docs/ui-rebuild-plan.md`.
 
-Conventions. `PY` = `membrane/server.py` at HEAD; `PY53` = the same file at tag `v0.7.53` (the release users run: it still serves the
 Packaging and the launcher (wheels, binary per platform, `cliffvm serve`, upgrade path, release checklist): `docs/packaging-plan.md`.
+
+Conventions. `PY` = `membrane/server.py` at HEAD; `PY53` = the same file at tag `v0.7.53` (the release users run: it still serves the
 decision routes that HEAD moved to the door); `LN` = `membrane/lanes.py` (the :11500 proxy and the field map); `UIS` = `membrane/ui_serve.py`;
 `P/` = `membrane/packs/`; `N/` = `native/`; `T/` = `tests/`. "Used" = called by something in the tree (UI JS, HA integration, TUI attach
 stubs), found by grep, never "exists in Python". Status on cliffvm: **PRESENT** = a c1f/Rust route exists and a test covers it;
