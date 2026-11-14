@@ -1255,7 +1255,7 @@
       "Path.mentioned_in": "List(Any)",
       "SemText.mention_n": "Int",
       "SemText.mention_spans": "List(Dict)",
-      "SemText.mentioned": "Bool?",
+      "SemText.mentioned": "Any",
       "SemText.mentions": "List((Entity(Identifier)|Entity(Path)|Entity(Word))?)",
       "Span.armed": "Bool",
       "Span.classified": "Bool",

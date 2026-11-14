@@ -36,6 +36,7 @@ Command.partial_errors getter: prop(this.run_result, 'stderr') if this.timed_out
 -- slot is consumed at once, so a pack setter cannot read the value); `status` reads `running` until a receipt of that run (finished no earlier than the write)
 -- lands, then the receipt's own status (ok or error); none before any run.
 Command.status getter:
-  WHEN this.running == None: prop(this.run_result, 'status') if this.run_result else None
+  WHEN this.running == None and not this.run_result: None(str(this.eid) + ' has not been run: write run = {id, cmd} (a run in flight reads status running)')
+  ELSE WHEN this.running == None: prop(this.run_result, 'status')
   ELSE WHEN this.run_result == None or prop(this.run_result, 'finished') < prop(this.running, 'started'): 'running'
   ELSE: prop(this.run_result, 'status')

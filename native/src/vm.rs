@@ -197,6 +197,10 @@ pub struct Core {
     /// why a null getter value is null: (eid, prop) -> reason. The value itself is stored as a plain JSON null; reading it back through
     /// an expression gives `V::Nil(reason)` so the reason travels (fields.rs writes it, `why_chain` reads it)
     pub why: std::collections::BTreeMap<(String, String), String>,
+    /// (entity, property) a getter computed as a plain null (no reason): that null is held, not absent (`View::attr`)
+    pub nulled: std::collections::BTreeSet<(String, String)>,
+    /// the reasoned nulls inside the list or dict the last `eval_traced` returned (`expr::nested_nulls`), for the getter that stores it
+    pub nested_last: Vec<(String, String)>,
     /// the locals a getter's block bound in its last evaluation: (eid, prop) -> name -> value (a null shows its reason). `Why` prints them.
     pub locals: std::collections::BTreeMap<(String, String), serde_json::Map<String, J>>,
     order: Vec<Option<String>>,
@@ -285,8 +289,9 @@ impl<'a> expr::World for View<'a> {
             TOUCHED if !e.props.contains_key(TOUCHED) => V::Int(e.touched.get() as i64),   // likewise (reading it is no touch), unless the entity stores a property of that name (the Python-era `Turn.touched`): its own wins
             PINNED => match self.core.pinned_reason(eid) { Some(r) => V::Str(r), None => V::Bool(false) },
             _ => { e.touched.set(self.core.bump()); match e.props.get(attr) {
-                Some(j) if !j.is_null() => expr::from_json(j),
-                _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| V::Nil(r.clone())).unwrap_or(V::None),
+                Some(j) if !j.is_null() => { let mut v = expr::from_json(j); if matches!(v, V::List(_) | V::Dict(_)) { self.core.overlay_nested(eid, attr, &mut v); } v }
+                // a getter that computed None (`nulled`) is a plain null; a property the entity never had says `absent`, naming both
+                _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| V::Nil(r.clone())).unwrap_or_else(|| if self.core.nulled.contains(&(eid.to_string(), attr.to_string())) { V::None } else { V::Nil(format!("absent: {eid}.{attr}")) }),
             } },
         }
     }
@@ -358,7 +363,7 @@ pub enum Step {
 impl Core {
     pub fn new() -> Self {
         Core {
-            why: Default::default(), locals: Default::default(),
+            why: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
             docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), queue_writes: true, dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
@@ -611,6 +616,8 @@ impl Core {
         let lo = (eid.to_string(), String::new());
         let keys: Vec<(String, String)> = self.why.range(lo.clone()..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
         for k in keys { self.why.remove(&k); }
+        let keys: Vec<(String, String)> = self.nulled.range(lo.clone()..).take_while(|(e, _)| e == eid).cloned().collect();
+        for k in keys { self.nulled.remove(&k); }
         let keys: Vec<(String, String)> = self.locals.range(lo..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
         for k in keys { self.locals.remove(&k); }
         self.unloaded.insert(eid.to_string(), cls);
@@ -893,12 +900,29 @@ impl Core {
         env
     }
 
+    /// The key a nested reasoned null of (eid, prop) is remembered under in `why`: the property, a NUL, the path.
+    fn nested_key(prop: &str, path: &str) -> String { format!("{prop}\u{0}{path}") }
+    /// A getter stored a list or a dict: remember the reasoned nulls inside it (JSON keeps them plain), replacing what the last value had.
+    pub fn set_nested(&mut self, eid: &str, prop: &str, nulls: Vec<(String, String)>) {
+        let lo = (eid.to_string(), Self::nested_key(prop, ""));
+        let old: Vec<(String, String)> = self.why.range(lo..).take_while(|(k, _)| k.0 == eid && k.1.starts_with(&format!("{prop}\u{0}"))).map(|(k, _)| k.clone()).collect();
+        for k in old { self.why.remove(&k); }
+        for (path, r) in nulls { self.why.insert((eid.to_string(), Self::nested_key(prop, &path)), r); }
+    }
+    /// A read of a stored list or dict: the reasoned nulls inside it come back.
+    fn overlay_nested(&self, eid: &str, prop: &str, v: &mut V) {
+        let pre = format!("{prop}\u{0}");
+        let lo = (eid.to_string(), pre.clone());
+        let nulls: Vec<(String, String)> = self.why.range(lo..).take_while(|(k, _)| k.0 == eid && k.1.starts_with(&pre)).map(|(k, r)| (k.1[pre.len()..].to_string(), r.clone())).collect();
+        if !nulls.is_empty() { expr::overlay_nulls(v, &nulls); }
+    }
+
     /// A FOR's list (#994): each item an entity (bound as one) or a value; None is the empty list.
     pub fn eval_items(&mut self, src: &str, vars: &[(&str, &str)], extra: &[(&str, J)]) -> Result<Vec<Item>, String> {
         let env = Self::env_of(vars, extra);
         match self.eval(src, &env)? {
             V::List(l) => l.into_iter().map(|v| match v { V::Ent(e) => Ok(Item::Ent(e)), v => expr::to_json(&v).map(Item::Val) }).collect(),
-            V::None => Ok(vec![]),
+            V::None | V::Nil(_) => Ok(vec![]),
             other => Err(format!("not a list ({})", expr::to_json(&other).map(|j| j.to_string()).unwrap_or_else(|_| "an entity".into()))),
         }
     }
@@ -993,17 +1017,19 @@ impl Core {
                 let parsed = self.cache.get(src);
                 let tv = Traced { inner: View { core: self }, reads: std::cell::RefCell::new(vec![]), host, asker };
                 let mut nil: Option<String> = None;
+                let mut nested = vec![];
                 let mut locals = vec![];
                 let r = match &*parsed {
                     Ok(node) => {
                         let n: &Node = node;
                         let (r, l) = expr::eval_locals(n, &env, &tv);
                         locals = l;
-                        r.and_then(|v| { if let V::Nil(why) = &v { nil = Some(why.clone()); } expr::to_json(&v) })
+                        r.and_then(|v| { if let V::Nil(why) = &v { nil = Some(why.clone()); } nested = expr::nested_nulls(&v); expr::to_json(&v) })
                     }
                     Err(e) => Err(e.clone()),
                 };
                 let reads = tv.reads.into_inner();
+                self.nested_last = nested;
                 (r, reads, nil, locals)
             };
             tries += 1;

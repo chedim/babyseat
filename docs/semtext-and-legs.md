@@ -118,6 +118,9 @@ layer rows cached on it), up to 300 transient spans, up to 300 new Word entities
 Measured on the fake-CLI chat test: one message with its answer = 7 entities under the message (message, turn, body, response, response body, 2 tools) + 8 Word entities and 1
 Identifier. `mentioned_in` of a very common word grows by one entry per sentence that holds it and is rewritten whole at each mention: the cost of K = 1 with no cut, flagged below.
 
+`mentioned` is the value of `mention` last finished (`record-mentions` writes it once; the mention setter does not reset it: a field write that a round already made is refused, and resetting it there made the cascade refuse its own last write, `loop: (<text>, mentioned) already written this round`). A text whose `mention` takes a new value is mentioned again.
+The reply of an `entity_write` of `mention` lists every property the cascade wrote, once for each transient span too: about 20 entries per span (~95 bytes each: ~47 KB for a 23-word text, ~0.6 MB for a 300-word one). That is the shape of `reactions` (every real change of the round), not of the mention.
+
 ### Thresholds flagged for the operator
 MENTION_CAP = 400 per layer (`SemText.mention_cap`; none was given). `related_n` has no default: the asker gives it. The frequency divisor of `related` is the count itself (no number).
 Open: a cut for the entities mentioned by very many sentences (their `mentioned_in` grows without bound and `related` reads it whole; one evaluation past the step budget answers a

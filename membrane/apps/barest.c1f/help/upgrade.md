@@ -25,14 +25,19 @@ list them with entity_query `kind:Trip`.
 
 ## Nulls carry a reason
 
-A missing property is a null with the reason `absent`; an operation on a null is that null; `None('reason')` makes one; `or` replaces it.
+A missing property is a null with the reason `absent: <entity>.<property>`; an operation on a null is that null; `None('reason')` makes one; `or` replaces it. `why(x)` reads the reason. A null inside a list or a dict keeps its reason (`why(rows[0])`).
 Casts `Int Float Num Text Bool List Dict` check a type (`Int('a')` is a null saying `not-a-type: int expected, got text`).
 
 ```c1f
 -- given Box:a {"raw": "a"}
 -- reads Box:a.n = 0
 -- reads Box:a.why = null
+-- reads Box:a.gone = "absent: Box:a.price"
+-- reads Box:a.row_gone = "absent: Box:a.price"
 Box.n getter: Int(this.raw) or 0
+Box.gone getter: why(this.price)
+Box.row getter: [this.raw, this.price]
+Box.row_gone getter: why(this.row[1])
 Box.why getter: None('waiting for a price') if this.price == None else this.price
 ```
 

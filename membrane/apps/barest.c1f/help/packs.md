@@ -114,6 +114,12 @@ A class has one of three storage modes, and ONLY THE PACK THAT OWNS THE CLASS de
 
 A class belongs to one pack: a `VIRTUAL` or `RESIDENT` line in any other pack is refused, and naming both modes for one class is refused.
 
+A getter that counts or lists a class (`len(instances('Keep'))`) sees the entities that are loaded. For a class that grows by your writes, and that a getter of yours counts or lists whole, add `RESIDENT <Class>` to the header
+of the pack that owns the class (the pack that defines its getters): a restart then counts every stored one, and a count that fell after a restart was the unloaded ones. Add the line by writing the pack's text again.
+
+A write of the value a property already holds changes nothing, so it runs no setter. A property that triggers a setter (`snap`) takes a new value each time: a counter, or the clock
+(`Watch:main.snap = 2`, then `3`), or let the setter's work be a getter that follows what it reads.
+
 ```c1f
 -- given Stop:a {"due": 5}
 -- given Stop:b {"due": 500}
