@@ -3,7 +3,7 @@
 import { queryAll, readEntity } from './mcp.js';
 import { Graph, classColor } from './graph.js';
 import { startChat } from './chat.js';
-import { mountChat } from './chatmount.js';
+import { mountChat, mountField } from './chatmount.js';
 
 const $ = (id) => document.getElementById(id);
 const POLL_MS = 3000;
@@ -175,5 +175,11 @@ $('listbtn').addEventListener('click', () => {
 // the chat pane: the legacy chat.js is the default; the view pack chat_view.c1f only when the seat fact `ui_views` or `?ui=pack` says so (ui/chatmount.js)
 const chatParts = { log: $('log'), form: $('composer'), input: $('input'), send: $('send') };
 mountChat(chatParts, document.querySelector('.pane.chat'), () => startChat(chatParts));
-refresh().then(() => graph.fit());
-setTimeout(loop, POLL_MS);
+// the graph pane: the legacy canvas graph (graph.js) is the default; the view pack field_view.c1f (a 3D graph of the most recently active entities) only when `ui_views` ({"field": "pack"}) or `?ui=pack` says so.
+// The pack draws and polls by itself: the legacy graph then neither draws nor polls.
+const pane = document.querySelector('.pane.graph');
+mountField(pane, [pane.querySelector('.tools'), pane.querySelector('.stage'), $('legend')]).then((mode) => {
+  if (mode === 'pack') return;
+  refresh().then(() => graph.fit());
+  setTimeout(loop, POLL_MS);
+});

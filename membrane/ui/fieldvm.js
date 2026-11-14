@@ -9,10 +9,11 @@
 //   value, focused: a pack's write sets the element's value / focus (no echo; the user's caret is not clobbered)
 // Form tags and SVG (own namespace) are in the allow-list; style, event handlers and src are refused, and a refusal is
 // visible: the element carries `data-refused` and the DomNode's `refused` holds {name: reason}.
-// Events are written back: click -> `clicked` (time); input -> `value`; submit -> `submitted` (time); keydown ->
+// Events are written back: pointerdown/pointermove (button held)/pointerup -> `pointer` {type, x, y, w, h, buttons, time} (x, y in the element's box); wheel -> `wheel` {dy, x, y, w, h, time}; click -> `clicked` (time); input -> `value`; submit -> `submitted` (time); keydown ->
 // `key` {key, shift, ctrl, composing, time}; focus/blur -> `focused` (bool); scroll -> `scroll` {top, height, client}.
 // A pack writes `scroll` {top: n} or 'end' to scroll an element (applied after the round's other writes; the measured scroll is written back).
 // `before` (a sibling DomNode eid) puts a node above that sibling; writing it again moves the node. A round's DOM writes are applied together, in one frame.
+// A pack's `retire = true` on any entity removes it from the engine (as the seat's does); a DomNode's element leaves the page with the elements under it.
 // Explicit drivers, called by the mount: `run_clock(ms)` / `stop_clock()` tick the field; `track_hidden()` keeps `Conn:page.hidden` (bool).
 //
 // The page's own DOM links in too (`link`): each element of the page (open shadow roots included) is a
@@ -59,7 +60,7 @@ const reason = (name, v) => {
   return null;
 };
 const NODE = 'DomNode:';
-const EVENTS = ['input', 'change', 'submit', 'keydown', 'focus', 'blur', 'scroll'];
+const EVENTS = ['input', 'change', 'submit', 'keydown', 'focus', 'blur', 'scroll', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'wheel'];
 const FETCH = 'Fetch:';
 const FETCH_VERBS = new Set(['GET', 'POST', 'PATCH', 'DELETE']);
 const FETCH_HEADERS = new Set(['content-type', 'accept']);
@@ -140,10 +141,25 @@ class Host {
   get(eid) { return JSON.parse(this.f.get(eid)); }
 
   flush() {
-    const out = JSON.parse(this.f.drain());
-    this.pending.push(...out.writes);
-    this.fetches(out.writes);                                     // W2: a write of Fetch:<x>.request / .abort
+    for (;;) {
+      const out = JSON.parse(this.f.drain());
+      this.pending.push(...out.writes);
+      this.fetches(out.writes);                                   // W2: a write of Fetch:<x>.request / .abort
+      const gone = out.writes.filter(w => w.prop === 'retire' && w.new === true).map(w => w.eid);
+      for (const eid of gone) this.retire(eid);                   // the seat's engine removes a retired entity (docs/cliffvm.md): so does the page's; what that changes is drained again
+      if (!gone.length) break;
+    }
     if (!this.frame) this.frame = this.schedule(() => this.apply());
+  }
+
+  /** `retire = true` (any writer): the entity leaves the engine; a DomNode's element leaves the page, and the nodes under it are forgotten (their entities are retired by the pack that made them). */
+  retire(eid) {
+    this.f.remove(eid, this.now());
+    this.pending = this.pending.filter(w => w.eid !== eid);       // a write the element was still owed is moot
+    const el = this.nodes.get(eid);
+    if (!el) return;
+    el.remove();
+    for (const [k, e] of this.nodes) if (!e.isConnected) this.nodes.delete(k);
   }
 
   /** One frame: make the new elements first, then set fields (a parent may be made in the same round). */
@@ -229,6 +245,13 @@ class Host {
     else if (ev.type === 'focus') put('focused', true);
     else if (ev.type === 'blur') put('focused', false);
     else if (ev.type === 'scroll') put('scroll', { top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight });
+    else if (ev.type === 'wheel') { ev.preventDefault(); const b = el.getBoundingClientRect(); this.write(eid, 'wheel', { dy: ev.deltaY, x: ev.clientX - b.left, y: ev.clientY - b.top, w: b.width, h: b.height, time: this.now() }); }
+    else if (ev.type.startsWith('pointer')) {                       // a press, a move WITH a button held, a release: a hover writes nothing (the field is not flooded)
+      if (ev.type === 'pointermove' && !ev.buttons) return;
+      if (ev.type === 'pointerdown' && el.setPointerCapture) { try { el.setPointerCapture(ev.pointerId); } catch {} }   // the drag goes on outside the element
+      const b = el.getBoundingClientRect();
+      this.write(eid, 'pointer', { type: ev.type, x: ev.clientX - b.left, y: ev.clientY - b.top, w: b.width, h: b.height, buttons: ev.buttons, time: this.now() });
+    }
   }
 
   /** A name or tag the allow-list refuses: the reason is written on the DomNode and marked on the element. */

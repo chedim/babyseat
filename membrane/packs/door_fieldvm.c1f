@@ -4,6 +4,7 @@ IMPORT door 1
 RESIDENT FieldVm
 VIRTUAL FvDir
 VIRTUAL FvFile
+VIRTUAL Wire
 -- THE BROWSER VM'S START AS A DOOR ROUTE (#1143, swap step 3): GET /ui/fieldvm (the page's `fieldvm.js connect()`: the snapshot, then the event stream).
 -- The page runs its own field engine (WebAssembly, the same VM) and follows the seat's: it starts from this snapshot, {packs: {name: c1f text}, entities:
 -- [{eid, cls, props}]}, and the packs that import `dom` run in the page and draw there (the About window is one: packs/about.c1f).
@@ -46,6 +47,8 @@ FieldVm.files getter: [f for f in instances('FvFile')]
 FieldVm.done getter: this.listed and len([f for f in this.files if f.text == None]) == 0
 FieldVm.pairs getter: [[f.stem, f.text] for f in this.files if f.view]
 FieldVm.rows getter: sql("SELECT json_group_object(json_extract(value, '$[0]'), json_extract(value, '$[1]')) AS packs FROM json_each(?)", this.pairs) if this.done else None
+-- THE FIELD VIEW'S SETTINGS ride the same entity: `field_window` (how many of the most recently active entities the field view keeps, launch fact, none by default: the pack's tried value stands) and
+-- `field_poll_ms` (the period of its calls); its switch is `ui_views.field` (apps/barest.c1f/field_view.c1f, ui/chatmount.js `mountField`).
 -- THE CHAT VIEW'S SETTINGS AND ITS SWITCH (the bare chat as a view pack, apps/barest.c1f/chat_view.c1f, docs/ui-rebuild-plan.md (d)): `views` says which renderer owns
 -- each view, `{"chat": "legacy" | "pack"}`, from the seat fact `ui_views` (a JSON dict: --fact 'ui_views={"chat":"pack"}'); a view the fact does not name, or no fact, is `legacy`.
 -- The legacy chat's constants ride as ONE entity, `Boot:seat`, holding the facts the view reads (chat_page_size ... chat_tool_chars; a fact not given is null: the pack's own
@@ -54,11 +57,60 @@ FieldVm.snapshot getter:
   WHEN this.rows != None and len(this.rows) > 0:
     pk = json(prop(this.rows[0], 'packs'))
     bt = ([b for b in instances('Boot')] or [None])[0]
-    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars')}}], 'views': {'chat': prop(prop(bt, 'ui_views'), 'chat') or 'legacy'}}
+    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars'), 'field_window': prop(bt, 'field_window'), 'field_poll_ms': prop(bt, 'field_poll_ms')}}], 'views': {'chat': prop(prop(bt, 'ui_views'), 'chat') or 'legacy', 'field': prop(prop(bt, 'ui_views'), 'field') or 'legacy'}}
   ELSE: None
 
-Request.o_fieldvm getter: this.route == '/ui/fieldvm'
+Request.o_fieldvm getter: this.route in ['/ui/fieldvm', '/ui/fieldvm/active', '/ui/fieldvm/events', '/ui/fieldvm/edges']
 Request.m_fieldvm getter: ['GET']
 Request.fv_seat getter: ([s for s in instances('FieldVm') if s.eid == 'FieldVm:seat'] or [None])[0]
 Request.fv_body getter: this.fv_seat.snapshot if this.fv_seat != None else None
-Request.r_fieldvm getter: {'status': 200, 'body': this.fv_body} if this.fv_body != None else None
+-- THE ACTIVE WINDOW (#1143, the field view pack apps/barest.c1f/field_view.c1f; docs/field-view-plan.md slices 1-2, operator 2026-11-14): `GET /ui/fieldvm/active?m=<n>` answers
+-- `{nodes: [{id, cls, updated, parent}], n_total, hidden, m}`: the `m` entities written most recently (the `updated` column, newest first) whose class is not hidden, and how many there are in all.
+-- It reads the COLUMNS `k`, `cls`, `updated` of `c_field` and never a body, so an entity nobody loaded stays unloaded. `parent` is the nearest colon-prefix owner that is in the window too
+-- (null otherwise): the ownership edge. `m` has NO default here (400 without it): the window's size is the view's launch fact (`field_window`). The hidden classes are the launch fact
+-- `map_hidden` (a JSON list, or comma-separated text); without it: Message, SemText, Span, Request, DomNode, View, Fetch (operator 2026-11-14).
+Request.fa_m getter: num(concat([r[1] for r in this.qpairs if r[0] == 'm'], [''])[0])
+Request.fa_hide_fact getter: prop(this.facts, 'map_hidden')
+Request.fa_hidden getter: ([strip(x) for x in this.fa_hide_fact] if this.fa_hide_fact is List else words(replace(str(this.fa_hide_fact), ',', ' '))) if this.fa_hide_fact != None else ['Message', 'SemText', 'Span', 'Request', 'DomNode', 'View', 'Fetch']
+-- the hidden EID PREFIXES (the launch fact `map_hidden_prefix`, a JSON list or comma text; default `Chat:message:`, operator 2026-11-14): a chat message and its body have `cls = Chat` (the eid's class),
+-- so the class list cannot hide them; the prefix is matched on the `k` column, never a body
+Request.fa_pre_fact getter: prop(this.facts, 'map_hidden_prefix')
+Request.fa_prefixes getter: ([strip(x) for x in this.fa_pre_fact] if this.fa_pre_fact is List else words(replace(str(this.fa_pre_fact), ',', ' '))) if this.fa_pre_fact != None else ['Chat:message:']
+Request.fa_ok getter: this.fa_m != None and this.fa_m >= 1
+Request.fa_rows getter: sql("WITH w AS (SELECT k, cls, updated FROM c_field WHERE cls NOT IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM json_each(?) WHERE substr(k, 1, length(value)) = value) ORDER BY updated DESC, k LIMIT ?) SELECT w.k AS id, w.cls AS cls, w.updated AS updated, (SELECT p.k FROM w p WHERE p.k != w.k AND substr(w.k, 1, length(p.k) + 1) = p.k || ':' ORDER BY length(p.k) DESC LIMIT 1) AS parent FROM w ORDER BY w.updated DESC, w.k", this.fa_hidden, this.fa_prefixes, this.fa_m) if this.fa_ok else None
+Request.fa_total getter: sql("SELECT count(*) AS n FROM c_field WHERE cls NOT IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM json_each(?) WHERE substr(k, 1, length(value)) = value)", this.fa_hidden, this.fa_prefixes) if this.fa_ok else None
+Request.fa_answer getter:
+  WHEN not this.fa_ok: {'status': 400, 'body': {'error': {'message': 'm (the number of entities, at least 1) is required', 'type': 'membrane_error'}}}
+  ELSE WHEN this.fa_rows == None or this.fa_total == None: None
+  ELSE: {'status': 200, 'body': {'nodes': this.fa_rows, 'n_total': prop(this.fa_total[0], 'n'), 'hidden': this.fa_hidden, 'hidden_prefixes': this.fa_prefixes, 'm': this.fa_m}}
+
+-- THE WRITE STREAM (#1143, operator 2026-11-14): `GET /ui/fieldvm/events` is an event stream of `field.write` frames, `{type, eid, cls, prop, ts}` (no value: the view needs who and when), pushed as entities are
+-- written, so the field view grows without a poll tick. The host notes the writes of every round and gives the engine ONE batch per round, `Wire:host.batch` (an outside write stamped by the host's sensor,
+-- never journalled; the Wire is VIRTUAL, no row; host.rs `flush_wire`, docs/cliffvm.md "The write feed"), one entry per entity (its last write), never a VIRTUAL class's. The setter below sends it as ONE
+-- `send` with all the frames to each open stream. No keep-alive and no cap on a batch (thresholds, not chosen). A `Request` is an open stream once its head is out (`stream_rc` 0).
+Request.fv_events getter: this.route == '/ui/fieldvm/events'
+Request.wire_open getter: this.fv_events and this.stream_rc == 0
+Wire.batch on-setter fv-wire:
+  WHEN len([r for r in instances('Request') if r.wire_open == True]) > 0:
+    FOR r IN [r for r in instances('Request') if r.wire_open == True]:
+      (r.eid).send = {'id': 'wire', 'frames': [{'data': {'type': 'field.write', 'eid': prop(x, 'eid'), 'cls': prop(x, 'cls'), 'prop': prop(x, 'prop'), 'ts': prop(x, 'ts')}} for x in this.batch]}
+
+-- THE EDGE LIST OF ONE ENTITY (operator 2026-11-14: the card's "near" is replaced by the edges): `GET /ui/fieldvm/edges?eid=<eid>&n=<cap>` answers `{eid, owner, children, refs}`: the owner (the nearest colon-prefix
+-- ancestor that exists: the key column), the direct children (the key column's range; at most `n`, the view's window), and the entities this one points at by a `$ref` value (the ONE row's body; a ref to an entity
+-- that does not exist is left out). Each is `{id, cls}`. Inbound `$ref`s are NOT listed: finding them is a scan of every body. `n` is required (no default here).
+Request.fe_eid getter: strip(concat([r[1] for r in this.qpairs if r[0] == 'eid'], [''])[0])
+Request.fe_n getter: num(concat([r[1] for r in this.qpairs if r[0] == 'n'], [''])[0])
+Request.fe_ok getter: this.fe_eid != '' and this.fe_n != None and this.fe_n >= 1
+Request.fe_owner getter: sql("SELECT k AS id, cls FROM c_field WHERE k IN (WITH RECURSIVE c(i) AS (SELECT instr(?1, ':') UNION ALL SELECT i + instr(substr(?1, i + 1), ':') FROM c WHERE instr(substr(?1, i + 1), ':') > 0) SELECT substr(?1, 1, i - 1) FROM c WHERE i > 1) ORDER BY length(k) DESC LIMIT 1", this.fe_eid) if this.fe_ok else None
+Request.fe_kids getter: sql("SELECT k AS id, cls FROM c_field WHERE k >= ?1 || ':' AND k < ?1 || ';' AND instr(substr(k, length(?1) + 2), ':') = 0 ORDER BY k LIMIT ?2", this.fe_eid, this.fe_n) if this.fe_ok else None
+Request.fe_refs getter: sql("SELECT f.k AS id, f.cls AS cls FROM c_field f WHERE f.k IN (SELECT DISTINCT t.value FROM c_field c, json_tree(c.body, '$.props') t WHERE c.k = ?1 AND t.key = '$ref')", this.fe_eid) if this.fe_ok else None
+Request.fe_answer getter:
+  WHEN not this.fe_ok: {'status': 400, 'body': {'error': {'message': 'eid and n (at least 1) are required', 'type': 'membrane_error'}}}
+  ELSE WHEN this.fe_owner == None or this.fe_kids == None or this.fe_refs == None: None
+  ELSE: {'status': 200, 'body': {'eid': this.fe_eid, 'owner': (this.fe_owner[0] if len(this.fe_owner) > 0 else None), 'children': this.fe_kids, 'refs': this.fe_refs}}
+
+Request.r_fieldvm getter:
+  WHEN this.route == '/ui/fieldvm/edges': this.fe_answer
+  ELSE WHEN this.route == '/ui/fieldvm/active': this.fa_answer
+  ELSE WHEN this.fv_events: {'status': 200, 'stream': True}
+  ELSE: {'status': 200, 'body': this.fv_body} if this.fv_body != None else None
