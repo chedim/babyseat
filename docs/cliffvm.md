@@ -1,18 +1,18 @@
-# cliffvm: the field VM as a standalone app
+# cliffvm: the seat's program (developer and operator reference)
 
-`cliffvm` is the cliffhanger field VM as a process of its own: no Python, no pyo3. The command name is working and
-PINNED/undecided; it lives in ONE place, the `[[bin]] name` in `native/Cargo.toml` (the tests read
-`CARGO_BIN_EXE_cliffvm`: one more line in `native/tests/cliffvm_process.rs`, and a literal in `cli.rs`'s `build_id` fact).
+Status: describes `cliffvm` 0.7.60 (`native/`, `membrane/packs/`, `membrane/apps/barest.c1f/`). Every claim was checked against the code or a test named next to it; nothing here describes the 0.7 Python seat
+(its source is the tag `python-seat-last`). The user-facing page is the README; auth is docs/auth.md. Items still in progress are marked with the branch that carries them.
 
-**The barest seat has no security, by operator decision (2026-11-12).** No JWT, no shared secret, no login, no persons, no
-Host/Origin check. The door answers every request: in this mode every request is `authed` with the subject `admin`. The door
-opens on 127.0.0.1 unless `--bind` says another address (`--bind 0.0.0.0` opens it to the network: configuration only). The old
-JWT code is still in the tree (a later cleanup removes it); the binary neither requires nor uses it.
+`cliffvm` is the cliffhanger field VM as a process of its own: no Python, no pyo3 (the `python` cargo feature builds the old extension and is not part of the release). `cliffvm --version` prints `cliffvm 0.7.60`
+(the `version` of `native/Cargo.toml`, the one number of the release: pyproject, the Home Assistant manifest and the dist folder's `VERSION` carry the same). `cliffvm --help` prints the usage;
+`cliffvm serve --help` the launcher's options. The command name lives in ONE place, the `[[bin]] name` in `native/Cargo.toml`.
 
-**The app is a folder of packs (or a pack file).** `main()` parses arguments into Boot facts and runs the apps given; every route, tool,
-turn and view is a `.c1f` pack in one (the shipped `membrane/packs/*.c1f` are the app). Several apps are LAYERS and the FIRST is the
-root of trust (docs/c1f-layers.md). The Rust side is only the host: the loop, the
-drivers, the store, the socket. A decision a pack could make is not made in Rust: if it shows up, it is listed below.
+**The door is strict and there are no users** (docs/auth.md). `cliffvm serve` makes a door secret and an admin token in the data folder; every route but the page's shell needs a verified token and every verified token is the
+admin. The door opens on 127.0.0.1 unless `--bind` says another address. A door with NO secret (`--fact door_secret_file=` on `serve`, or `cliffvm run` without the fact) is open and every caller is the admin: for tests only.
+
+**The app is a folder of packs (or a pack file).** `main()` parses arguments into Boot facts and runs the apps given; every route, tool, turn and view is a `.c1f` pack in one (the shipped `membrane/packs/*.c1f` and
+`membrane/apps/barest.c1f` are the app). Several apps are LAYERS and the FIRST is the root of trust (docs/c1f-layers.md). The Rust side is only the host: the loop, the drivers, the store, the socket.
+A decision a pack could make is not made in Rust: if it shows up, it is listed below.
 
 ## Build and run
 
@@ -20,86 +20,67 @@ drivers, the store, the socket. A decision a pack could make is not made in Rust
 cd native
 cargo build --release --no-default-features --features bin     # target/release/cliffvm
 cliffvm --version
-cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>]
+cliffvm serve [options]                                        # the users' launcher
+cliffvm run <app> [<app>...] [--store <sqlite>] [--port <n>] [--bind <addr>] [--ui-dir <dir>] [--fact name=value ...]   # the low-level command
+cliffvm token mint --sub <id> --ttl <30d|12h|15m|45s|seconds> --secret-file <path> [--name <name>]
 ```
 
-- Features (`native/Cargo.toml`): `store` = rusqlite + tls (the native store, the drivers, the door); `python = [pyo3, store]` (the
-  seat's `membrane_vm.so`, unchanged: `sh native/build.sh`); `bin = [store]` (the app). A Python extension is not a program, so the
-  app is built with `--no-default-features --features bin`. Tests of the app: the same flags.
-- `run <app>...`: an APP is a folder `<name>.c1f/` or one pack file (the loader tells them apart). The `.c1f` files of a folder (its
-  whole tree) are packs, loaded in dependency order (a pack after the packs of that app it imports; of those ready, the alphabetically
-  first path next); every other file is DATA at its path (the door serves an app's `ui/` files). Several apps load in the order given and
-  each is a layer above the one before it: a pack whose name is already loaded is skipped (the lower layer's stays).
-  **Trust is by position, never by name**: the packs of the FIRST argument are the root of trust (privileged: docs/c1f-layers.md,
-  "Privilege"); a later app has no privilege until a privileged pack grants it (`Pack:<name>.privileged = true`; boot.c1f grants
-  `door_tools`). A pack named `boot` in a later app is not trusted. The shipped packs are a flat folder, so the shipped line is
-  `cliffvm run membrane/packs/boot.c1f membrane/packs`: the single file is the first app (the root of trust), the folder a layer above it
-  that skips `boot` (already loaded). The boot plan (`boot.json`, `boot.c1f`) is looked for beside the first app (in its folder, or
-  the folder a pack file is in). After the packs: computes the getters once (a rebuild
-  runs no setter), runs the boot plan, tells the facts, then `Boot.started`, then loops
-  until SIGTERM/SIGINT. `--port` becomes the fact `door_port` (0 = any free port); the pack `door.c1f` answers with
-  `Http:door.listen`; once it is up the binary prints `cliffvm: door listening on <host>:<port>`.
-- Facts the arguments tell (names as `membrane/packs/facts.json`): `door_port`, `ui_dir`, `app_dirs` (the folders of the apps given, the upper
-  layer first; the door serves each one's `ui/` files, an upper layer's file shadowing the lower's; `--ui-dir` stays as the LOWEST layer), `seat_version`, `build_id`, `seat_cwd`,
-  `seat_home`, `seat_name` (Bob), `seat_named`, `seat_aliases`, `seat_voice_out`, `seat_language`, `seat_blurp`, and the whole set
-  as the dict `facts` (as `boot_started` writes it). There is no `door_secret_file`.
-- `--store`: one SQLite file (default `./cliffvm.sqlite3`), WAL: the entity rows (`c_field`: eid -> {cls, props, writers}), the
-  journal (`c_journal`), and what `sql(...)` in packs reads (read-only connections of the same process).
-  The WAL is folded back and truncated by the clock tick once it is over `WAL_LIMIT_BYTES` (8 MB, `host.rs` `trim_wal`; a reader holding a snapshot stops SQLite's own reset, and SQLite never shrinks the log file by itself; the wait for readers is 50 ms, then the next tick tries again). The main file does not shrink after rows are retired (freed pages are reused, `auto_vacuum` is off); test `native/tests/wal_1143.rs`.
-  DURABILITY: the store is WAL with `PRAGMA synchronous = NORMAL` (`Host::open`; the operator approved it, the Python store does the same): a commit is not fsynced one by one, so a power loss (not a process crash) may lose the last commits, never corrupts the file; a clean restart keeps everything (test `finished_guard_1143.rs`).
-- The boot plan: this host runs none of the plan's steps (they are the Python seat's), so each is `skipped` and the plan only says
-  when the boot is over. Then `started`.
+- Features (`native/Cargo.toml`): `store` = rusqlite + tls (the native store, the drivers, the door); `python = [pyo3, store]` (the old `membrane_vm.so`: `sh native/build.sh`, not used by the release); `bin = [store]` (the app).
+  `default` includes `python`, so the app is built with `--no-default-features --features bin`. Tests of the app: the same flags (`cargo test --release --no-default-features --features bin`).
+- `run <app>...`: an APP is a folder `<name>.c1f/` or one pack file (the loader tells them apart). The `.c1f` files of a folder (its whole tree) are packs, loaded in dependency order (a pack after the packs of that app it imports;
+  of those ready, the alphabetically first path next); every other file is DATA at its path (the door serves an app's `ui/` files). Several apps load in the order given and each is a layer above the one before it:
+  a pack whose name is already loaded is skipped (the lower layer's stays). **Trust is by position, never by name**: the packs of the FIRST argument are the root of trust (privileged: docs/c1f-layers.md, "Privilege");
+  a later app has no privilege until a privileged pack grants it (`Pack:<name>.privileged = true`; boot.c1f grants `door_tools`). A pack named `boot` in a later app is not trusted.
+  The boot plan (`boot.json`, `boot.c1f`) is looked for beside the first app. After the packs: the getters are computed once (a rebuild runs no setter), the boot plan runs, the facts are told, then `Boot.started`, then the loop runs until SIGTERM/SIGINT.
+  `--port` becomes the fact `door_port` (0 = any free port); the pack `door.c1f` answers with `Http:door.listen`; once it is up the binary prints `cliffvm: door listening on <host>:<port>`. The door binds 127.0.0.1 unless `--bind` says otherwise.
+- Facts the arguments tell (names as `membrane/packs/facts.json`; `native/src/cli.rs` `facts`): `door_port`, `ui_dir`, `app_dirs` (the folders of the apps given, the upper layer first; the door serves each one's `ui/` files, an upper layer's
+  file shadowing the lower's), `seat_version`, `build_id` (`cliffvm-<version>`), `seat_cwd`, `seat_home`, `anthropic_key_set` (yes or no, never the key), `seat_name`, `seat_named`, `seat_aliases`, `seat_voice_out`, `seat_language`,
+  `seat_blurp` (always false), and the whole set as the dict `facts`. Then `--fact name=value` (JSON when the value parses, else text) wins over everything.
+- `--store`: one SQLite file (default `./cliffvm.sqlite3` for `run`, `<data-dir>/seat.sqlite` for `serve`), WAL: the entity rows (`c_field`: eid -> {cls, props, writers}), the journal (`c_journal`), and what `sql(...)` in packs reads
+  (read-only connections of the same process). The WAL is folded back and truncated by the clock tick once it is over `WAL_LIMIT_BYTES` (8 MB, `host.rs` `trim_wal`; test `native/tests/wal_1143.rs`). The main file does not shrink after rows are retired
+  (freed pages are reused, `auto_vacuum` is off). DURABILITY: the store is WAL with `PRAGMA synchronous = NORMAL` (`Host::open`): a commit is not fsynced one by one, so a power loss (not a process crash) may lose the last commits, never corrupts the file;
+  a clean restart keeps everything (test `finished_guard_1143.rs`).
+- The boot plan: this host runs none of the plan's steps (they were the Python seat's), so each is `skipped` and the plan only says when the boot is over. Then `started`.
 
-## Run a seat
-
-The barest usable agent seat: one command starts `cliffvm` on the shipped packs and the barest app, and the page is a graph viewer plus the one chat.
+## Run a seat: `cliffvm serve`
 
 ```
-cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--store <sqlite>] [--root <dist folder>] [--fact name=value ...]      # the users' launcher (cliffvm serve --help)
-scripts/seat [--open] [--data-dir <dir>] [--port <n>] [--fact name=value ...]                                                    # the dev wrapper: the same, on this checkout's membrane/ folder
+cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--store <sqlite>] [--root <dist folder>] [--legacy <path>] [--fact name=value ...]
+scripts/seat [--open] [--data-dir <dir>] [--port <n>] [--fact name=value ...]    # the dev wrapper: the same, on this checkout's membrane/ folder
 ```
 
-`cliffvm serve` only FINDS things. The dist folder is the one above `bin/` (`<root>/bin/cliffvm`, `--root` names another; the repo's `membrane/` has the same shape: `packs/ apps/`); it reads
-`<root>/apps/barest.packs` (one pack per line, load order, the first is the root of trust), loads those packs from `<root>/packs/`, then `launcher.c1f`, then the app `<root>/apps/barest.c1f` (the page is that app's `ui/` folder).
-The data folder is `--data-dir`, else `$XDG_DATA_HOME/membrane`, else `~/Library/Application Support/membrane` (macOS) or `~/.local/share/membrane`; it holds `seat.sqlite` (the store), `door.secret`
-(made at the first run, mode 0600) and `admin.token` (new at every start, mode 0600). The claude CLI is `CLAUDE_BIN`, else `claude` on PATH. It tells the facts `door_secret_file`, `seat_data_dir`, `chat_claude_bin`,
-then yours (`--fact`, which win), and prints the URL, where the admin token is and a ready curl line once the door is up. The door binds 127.0.0.1 unless `--bind` says otherwise.
+`cliffvm serve` only FINDS things. The dist folder is the one above `bin/` (`<root>/bin/cliffvm`; `--root` names another; the repo's `membrane/` has the same shape, `packs/ apps/`); it reads `<root>/apps/barest.packs`
+(one pack per line, load order, the first is the root of trust), loads those packs from `<root>/packs/`, then `launcher.c1f`, then the app `<root>/apps/barest.c1f` (the page is that app's `ui/` folder).
+The data folder is `--data-dir`, else `$XDG_DATA_HOME/membrane`, else `~/Library/Application Support/membrane` (macOS) or `~/.local/share/membrane`; it holds `seat.sqlite` (the store), `door.secret` (made at the first run, mode 0600)
+and `admin.token` (new at every start, mode 0600). The claude CLI is `CLAUDE_BIN`, else `claude` on PATH. It tells the facts `door_secret_file`, `seat_data_dir`, `chat_claude_bin` and `legacy_path` (below), then yours (`--fact`, which win),
+and prints the URL, where the admin token is and a ready curl line once the door is up. `serve` has no `--open`; the dev wrapper has its own. Options not in the list above are refused; `serve` takes no positional arguments.
 
-**The defaults are c1f, not Rust** (`membrane/packs/launcher.c1f`, loaded by `serve` after the packs of `barest.packs`; `cliffvm run` does not load it): the default port (`Boot.default_port`, 4096, read by `door.c1f`'s `door-listen` when `--port` told none), the minds (the claude CLI for
-every mind and the chat's pick), the model rung `claude`, the local backend address, `router_on=false`. Each fills a fact only when none was told, so a fact always wins; edit the pack in the dist folder to change a default. Not here: `chat_auth`
-(the default `api_key` lives in `chat_turn.c1f`). The chat needs `ANTHROPIC_API_KEY` in the environment; `--fact chat_auth=login` opts into the claude CLI's own login (`scripts/seat` maps `CLAUDE_AUTH=login` to it); with neither, `serve`
-says so at start and a message is answered with how to set it.
-
-```
-(cd native && cargo build --release --no-default-features --features bin)      # once; the launcher builds nothing
-scripts/seat [--store ./.cliffvm/seat.sqlite] [--port 4096] [--open] [--fact name=value ...]
-```
+**The defaults are c1f, not Rust** (`membrane/packs/launcher.c1f`, loaded by `serve` after the packs of `barest.packs`; `cliffvm run` does not load it): the default port (`Boot.default_port`, 4096, read by `door.c1f` when `--port` told none),
+the minds (the claude CLI for every mind and the chat's pick), the model rung `claude`, the local backend address, `router_on=false`. Each fills a fact only when none was told, so a fact always wins; edit the pack in the dist folder to change a default.
+Not here: `chat_auth` (the default `api_key` lives in `chat_turn.c1f`). The chat needs `ANTHROPIC_API_KEY` in the environment; `--fact chat_auth=login` opts into the claude CLI's own login (`scripts/seat` maps `CLAUDE_AUTH=login` to it);
+with neither, `serve` says so at start and a message is answered with how to set it. The facts the page and the packs read are listed with their meaning in `membrane/packs/facts.json` (the contracts test pins that every fact a pack reads is there).
 
 `scripts/seat` is `cliffvm serve --root membrane` with the data in `./.cliffvm` (when no `--data-dir`/`--store` is named) and its own `--open`. `CLIFFVM` names the binary (else `native/target/release/cliffvm`, else PATH).
 
-**The dist folder** (`scripts/dist/build.sh [--bin <cliffvm>] [--out <dir>] [--target <triple>] [--archive <tar.gz>]`; default `dist/<version>`, the version of `native/Cargo.toml`):
-`bin/cliffvm  packs/  apps/{barest.packs, barest.c1f/}  help/  LICENSE  VERSION  MANIFEST.sha256` (a sha256 per file but itself, sorted; `scripts/dist/verify.sh <dir>` checks it; `scripts/dist/smoke.sh <dir>` starts
-`serve --port 0` from the folder and reads `/global/health`; `scripts/dist/assemble_wheel_payload.sh <dist> <payload>` makes the folder the wheel wrapper packages as `membrane/dist/`).
-`.github/workflows/release-binaries.yml` builds it per platform on a tag `v*` or by hand, and publishes nothing. Tests: `native/tests/serve_1143.rs`, `native/tests/dist_1143.rs`.
+**The history cutover** (`membrane/packs/legacy_cutover.c1f`, `legacy_import.c1f`; `--legacy <path>`, the fact `legacy_path`): at every start the seat looks for the 0.7 Python seat's store (a file, or a folder that holds `field.sqlite3`; a NAMED path that holds none is an error, never a
+fallback), declares it as the read-only `SqlSource:legacy` and imports the chat history in the background, newest session first. Without `--legacy` it uses `MEMBRANE_DATA_DIR` when set (the old seat's data dir), else searches the seat's data folder, `<data>/.membrane`,
+`./.membrane`, `~/membrane/.membrane` and Home Assistant's `/config/membrane/.membrane`. It ends for good when the ledger says `done`; an interrupted import resumes. Only the chat history is converted (docs/migration-design.md); the model reads the rest of the old field on demand (`Help:legacy`).
 
-**What you see** (`membrane/apps/barest.c1f/ui/`: `index.html` (a bootstrap: one mount node), `boot.js` (starts the engine, feeds the seat's packs and facts, runs the clock), `app.css`; the whole page is c1f view packs in the browser VM: `shell_view.c1f` (layout, nav, sessions, status line, theme, the slide-over detail panel), `chat_view.c1f`, `field_view.c1f`, see docs/ui-rebuild-plan.md "The shell and the view-pack contract"); static files served by the door
-from the app folder, no build step, no dependencies; a later piece ports it to c1f view packs in the browser VM):
-- Left, the GRAPH VIEWER: every entity as a node (a canvas force layout written for this page: repulsion, springs, centring, pan, zoom, node drag), coloured by class.
-  Edges are ownership (`A:b:c` hangs under `A:b`, or under its nearest listed ancestor) and references (a `{"$ref": eid}` value or a string that is another listed eid, dashed).
-  It polls every 3 s keeping positions, has a substring filter, a `requests` switch (the door's own Request entities are hidden by default), a list view, and a side panel with the
-  selected entity's properties (a reference is a link). Keys on the canvas: arrows pan, `+`/`-` zoom, `0` fits.
-- Right, the CHAT: the history is the chat's entities, so a reload brings it back; Enter sends, Shift+Enter adds a line; a running message is read from its event stream (see "The event stream": the answer appears as it is written; the page falls back to polling it every 700 ms only when the stream cannot be had) and
-  shows the tools Claude ran with a short input. An answer that asks for something (no CLI named) is shown as a note.
-- The graph reads through `POST /mcp` (`entity_query`, `entity_read`); the chat reads `/membrane/chat/messages` (history) and `/membrane/chat/message/<id>/events`.
+**The dist folder** (`scripts/dist/build.sh [--bin <cliffvm>] [--out <dir>] [--target <triple>] [--archive <tar.gz>]`; default `dist/<version>`):
+`bin/cliffvm  packs/  apps/{barest.packs, barest.c1f/}  help/  LICENSE  VERSION  MANIFEST.sha256` (a sha256 per file but itself, sorted; `scripts/dist/verify.sh <dir>` checks it; `scripts/dist/smoke.sh <dir>` starts `serve --port 0` from the folder
+and reads `/global/health`; `scripts/dist/assemble_wheel_payload.sh <dist> <payload>` makes the folder the wheel wrapper packages as `membrane/dist/`). `.github/workflows/release-binaries.yml` builds it per platform on a tag `v*` or by hand and publishes nothing.
+The wheels, the installer and the image are in progress (branch `w118-wheels`; docs/packaging-plan.md). Tests: `native/tests/serve_1143.rs`, `native/tests/dist_1143.rs`.
 
-**`entity_query` additions for the viewer**: `offset` (paging), `kind!:<Class>` (all but a class) and `full` (rows carry the stored properties).
-**Data** is the `--store` file (default `./.cliffvm/seat.sqlite`).
+**What you see** (`membrane/apps/barest.c1f/ui/`: `index.html` (a bootstrap: one mount node), `boot.js` (starts the browser engine, feeds it the seat's packs and facts, runs the clock), `app.css`; the whole page is c1f view packs in the browser VM:
+`shell_view.c1f` (layout, nav, sessions, status line, theme, the slide-over detail panel), `chat_view.c1f` (the chat: markdown through `markdown.c1f`, a Stop button), `settings_view.c1f` (Settings: docs/settings-groups.md), `link_view.c1f` (tells the seat what the page loaded:
+docs/graph-link.md); see docs/ui-rebuild-plan.md "The shell and the view-pack contract"). Static files are served by the door from the app folder; no build step. The page has two screens, Chat and Settings. The 3D field view
+(`membrane/apps/field.c1f/field_view.c1f`, docs/field-view-plan.md) is built and DISABLED: that folder is not in the dist, and the default launch does not load it, so the page has no Field tab and makes no field request.
+The chat reads `/membrane/chat/messages` (history) and the message's event stream; the model reads and writes the graph through `POST /mcp`.
 
-**The barest packs** (`membrane/apps/barest.packs`, one shipped pack name per line in load order; `scripts/seat` and `seat_process.rs` read it): `boot door fs proc fetch store door_tools chat chat_turn`,
-each a single-file app (the first, `boot`, is the root of trust), then the app folder. The Python-era packs (`door_self`, `door_models`, `door_voice`, `door_state`, `door_decisions`,
-`router`, `decisions`, `dev`, ...) stay in `membrane/packs/` for the Python seat and are NOT loaded here: a request carries none of their getters, and the seat seeds no
-`Command:git`, `Command:gh` (dev.c1f) or `File:operator-ledger` (decisions.c1f).
-
+**The barest packs** (`membrane/apps/barest.packs`, one shipped pack name per line in load order; `cliffvm serve`, `scripts/seat` and `seat_process.rs` read it): `boot entity environment stats door door_auth fs proc fetch router sql store door_tools semtext mentions chat chat_turn door_session
+legacy_import legacy_cutover door_fieldvm door_state door_models ha settings link`, each a single-file app (the first, `boot`, is the root of trust), then `launcher` (serve only), then the app folder `barest.c1f`. The other packs in `membrane/packs/`
+(`door_self`, `door_voice`, `door_decisions`, `decisions`, `dev`, `banner`, `attention`, `memory`, `methods`, `peer`, `turn`, `messages`, `about`, `mcp`, `ported`, `chat_oai`, `legacy_persons`, ...) are Python-era packs kept for their tests and
+are NOT loaded: a request carries none of their getters, and the seat seeds no `Command:git` or `File:operator-ledger`.
 **Door requests are garbage collected** (`Request` is VIRTUAL; "Garbage collection of virtual entities" below). A request is held by its open connection until its reply is delivered (an event stream until `end`), then nothing holds it and the engine collects it at the end of that round: no pack retires it, nothing is kept for a while (`request_keep_s` is gone; the fact is accepted and does nothing), and a seat that polls does not grow. Read the live ones with `run_cliff` and `instances('Request')`.
 `membrane/apps/barest.c1f/collector.c1f` (an app pack: the Python seat does not load it) keeps ONLY the start-up sweep: it retires the Request rows an earlier run left in the store (`Boot.old_requests`, setter `sweep-old-requests`; they are stored text). Also `entity_query` selects the stored properties only when `full` is asked: they used to be in every query's rows, so each request held its
 predecessors' whole state and the sizes doubled per request (a 100-row query reached megabytes and the engine stopped answering).
@@ -235,46 +216,7 @@ Tests: `native/tests/multi_class_1143.rs`, `seat_process.rs` (`an_entity_carries
 
 **Retiring an entity** (`native/src/fields.rs` `retired`, `host.rs` `drain_apply`): a write of `retire = true` to ANY entity, by any writer (a pack's setter: the ordinary ownership rules
 apply; the model's `entity_write` as the privileged door), removes it: the engine forgets the entity (what read it recalculates), its stored row is deleted. It is derived when a setter wrote it,
-so never journalled, and a replay re-derives it; an outside write of `retire` is journalled and replayed like any. Test: `native/tests/host_loop.rs` (retire + replay), `seat_process.rs`. In the BROWSER VM the host does the same (`membrane/ui/fieldvm.js` `retire`, #1143): the entity leaves the page's engine and a DomNode's element leaves the page (`tests/js/fieldvm_retire.test.mjs`); the page has no store, so there is no row.
-
-**Not there yet**: the UI as c1f view packs; tokens and persons (no security, one superuser chat); the graph's own event stream (the graph still polls every 3 s, only while the tab is visible; the chat's stream is built); a message's class is `Chat` (its eid
-names it), so the viewer finds chat entities by the `membrane::Chat:` prefix (`Chat:main:message:`, `Chat:session:<sid>:message:`), not by a `ChatMessage` kind; the viewer lists at most 600 entities and reads the
-properties of 6 per poll for reference edges (more as it keeps running); entity removal is the `retire` write above.
-**Tests**: `native/tests/seat_process.rs` (the page and its files, a chat turn with a fake claude, the query options, `node --check` of every script).
-
-
-### The full-set seat (`scripts/seat-full`, #1143)
-
-The step before the swap: the same binary on EVERY shipped pack (`membrane/packs`, `boot.c1f` first) serving the current page (`membrane/ui`, `--ui-dir`), with the claude CLI as the only model.
-
-```
-scripts/seat-full [--data-dir ./.cliffvm/full] [--port 4310] [--open] [--fact name=value ...]
-```
-
-It tells the facts the dry run said the full set needs (`docs/release-parity.md` section 6): `door_secret_file` (`<data-dir>/door.secret`: `cliffvm run` makes it on the first run, 64 hex characters from `/dev/urandom`, mode 0600, and keeps it), `seat_data_dir` (the data dir),
-`minds` (every mind picks `claude`, auth `chat`, think `auto`), `cloud_models` (one rung, `claude`, backend `claude-agent`), `router_on=false`, `seat_backend=http://127.0.0.1:11434` (nothing needs to run there: a refused connection is an empty
-tag list), `chat_claude_bin` (`CLAUDE_BIN`, else the claude on PATH), and `chat_auth=login` only when `CLAUDE_AUTH=login` is set (else the API key default: set `ANTHROPIC_API_KEY`). Store: `<data-dir>/seat.sqlite`. Your `--fact` arguments come last and win (`--fact operator=ann`). `CLIFFVM` names the binary as for `scripts/seat`; the default port is not 4096.
-Nothing else is started. Tests: `native/tests/seat_full_1143.rs` (the secret, its mode, kept across runs, a fact wins, the printed token path and curl line), `tests/js/page_boot.test.mjs` (the page in headless Chrome, below).
-
-**The door's two ways in, and the rule that a localhost peer is not the admin, and there are no users** (operator decisions 2026-11-13: a JWT and the loopback admin cookie are the only modes; the seat-token mode and the LAN guard are dropped; the no-tokenless rule of #842 holds; `door_auth.c1f`, `door.c1f`, `native/src/admin.rs`; docs/auth.md):
-- With a door secret EVERY route but the public shell (`/`, `/index.html`, `/membrane`, `/favicon.ico`, `/ui/www/*`, `/ui/login`, `/ui/logout`) needs a verified JWT: Bearer, Basic password or the cookie, from loopback too. Unprefixed routes included (`/global/health`, the opencode probes, `curl`). A seat with no secret (the barest) is open by decision.
-- The admin token: at every boot `cliffvm run` writes a fresh admin JWT to `<seat_data_dir>/admin.token` (0600; sub = `admin`; life = the fact `admin_token_ttl_s`, default 30 days: flagged) and tells the path as `Boot:seat.admin_token_file`. Local tools read the file; the value is in no property, row or argv (docs/auth.md).
-  The chat turn's CLI reaches `/mcp` with it through the MCP config's `headers` and the run's `env_from` (`MEMBRANE_ADMIN_TOKEN`).
-- The page fetched from this machine (`/`, `/index.html`, `/membrane` from a loopback peer with no `X-Forwarded-For`/`Forwarded`/`X-Real-IP` header and a `Host` that is `localhost`, `127.0.0.1`, `[::1]` or in the fact `host_names`) is given the ADMIN cookie `membrane_jwt_<8 hex>` (HttpOnly, SameSite=Strict, 7 days: the released seat's number, flagged):
-  a token with the sub `admin` signed by the door with its own secret. The pack never holds the secret: `Request:<n>.mint = {id, sub, name, ttl}` is a driver verb (`native/src/http.rs` `mint`, `jwt.rs` `mint`) whose receipt `mint_result` carries `token`.
-  A door with no secret answers `rc 2` and the page is served with no cookie.
-- Every page call goes through `/ui/serve/<path>`: `Request.ui_served`, `.ui_path` and `.route` (door.c1f) strip the prefix once; every family reads `this.route`, never `this.path` (a setter cannot rewrite `path`: a write back to the property that started the chain is refused as a loop), so a route answers on the bare path and the prefixed one, both behind the same gate.
-- The 401 is the released one (`jwtauth.py` `send_unauthorized`): `WWW-Authenticate: Bearer realm="membrane"` and `{"error": {"message": "missing or invalid token", "type": "unauthorized"}}`, the same for a missing and a refused token.
-- NO USERS (operator 2026-11-14): every valid token or the page cookie is THE ADMIN whatever its `sub` says (`native/src/http.rs` replaces `sub` and `name` by `admin` once the token is verified); no `Person` is made (the class stays declared, RESIDENT, for `legacy_persons.c1f`, the imported history), there is no `operator` fact, no `403 for the owner` and no non-admin tier: the model's writing tools through `/mcp` (`entity_write`, which also writes a `Pack:<name>.text`, and `run_cliff`) and the models, options and `/membrane/ha/*` routes need only a verified token (`Request.entrant`; a request with no token is `401` and writes nothing). `native/tests/admin_1143.rs`.
-- `cliffvm token mint --sub <id> --ttl <30d|12h|15m|45s|seconds> --secret-file <path> [--name <name>]` prints a token (the released `membrane token mint`; `--sub` and `--name` are labels, every valid token is the admin): the ttl has no default, the secret file must exist (never made here), no name = the sub, `seat:` ids are refused.
-- Not here, by decision: per-person session visibility and the speaker line (no users). `door_voice.c1f` still reads a person from the request body when there is no token: unreachable behind the gate, left for its pack's author to remove.
-
-**Page boot check** (`node tests/js/page_boot.test.mjs`; needs Chrome, `CHROME=` names it, and the built binary): starts `scripts/seat-full` on a free port with `CLAUDE_BIN=/usr/bin/true`, loads `/` in headless Chrome and records every request the page makes in 8 s.
-It asserts the page's files all load, nothing is refused (401), nothing hangs and nothing 404s, except the calls on the two backlog lists in the test (checked both ways: a call that is answered now must leave its list). Since swap step 3 (w33) the hang list is empty and the 404 list holds one tolerated call (`map/locate`: a reasoned 404).
-
-**The page's boot routes** (w33, #1143; `native/tests/boot_routes_1143.rs`, shapes against `tests/golden/boot/*.json` recorded from the released code by `scripts/golden_boot.py`): `/agent` and `/config` (the opencode probes the chat reads: `door.c1f`), `/membrane/options` (read and a validated post, `door_models.c1f`, the minds' keys shared with `/membrane/models`), `/membrane/quota` (the empty answer, `door_state.c1f`), `/membrane/stats` and `/membrane/minds` (the empty released shapes of a seat that counted nothing, w46), `/membrane/self/recent` (`{lines: []}`), `/membrane/item-chat/say` (an honest 501), the released constants as `--fact` settings (`quota_probe_s`, `map_tile_k`, `field_tau_s`, `self_cpu_share_default`, `code_runs_keep_default`, `chat_auth`: `docs/release-parity.md` "Settings"),
-the field map (`door_map.c1f`, family `map`: the released answers of a field with NO live entity, so the 2D panel and the 3D window read "the field is empty": `tests/js/field_empty.test.mjs` runs the page's own code on them; the map engine itself is not here), `GET /ui/fieldvm` (`door_fieldvm.c1f`, family `fieldvm`: the browser VM's snapshot of the view packs, read once at boot, `views` (the fact `ui_views`: which renderer owns the chat) and one entity `Boot:seat` with the chat view's settings; no `field.*` frames yet: `tests/js/fieldvm_snapshot.test.mjs`; the barest seat serves it too, with `--ui-dir membrane/ui` in `scripts/seat`, so the page can mount the chat view pack: `tests/js/chat_view_page.test.mjs`)
-and the session's `voice`/`predict`/`todo`/`children`/`diff` reads (`[]`). The voice, history and item-chat reads no longer wait for the Python seat's tables (`c_entities`, `c_entity_deltas`, `c_relations`): a query of a missing table never answers, so the voice routes read `c_field` and the history reads ask `sqlite_master` first. What is degraded, with the reasons, is in `docs/release-parity.md` section 6 ("After swap step 3").
+so never journalled, and a replay re-derives it; an outside write of `retire` is journalled and replayed like any. Test: `native/tests/host_loop.rs` (retire + replay), `seat_process.rs`. In the BROWSER VM the host does the same (`membrane/apps/barest.c1f/ui/fieldvm.js` `retire`, #1143): the entity leaves the page's engine and a DomNode's element leaves the page (`tests/js/fieldvm_retire.test.mjs`); the page has no store, so there is no row.
 
 ## The Sql driver: a second SQLite file as entities (#1143, operator 2026-11-14)
 
@@ -303,8 +245,7 @@ SQLite file (the old store of the migration, the lexicon, a scratch database) is
 - Not decided by the build (listed for the operator): a default `max_rows`, the 256-statement cache, whether an `rw` source may create a missing file, the worker slot a busy source holds.
 
 ### The chat history import (`membrane/packs/legacy_import.c1f`, #1143, migration phase 1)
-The previous seat's chat history (sessions and messages) is imported from the read-only `SqlSource:legacy` by `Legacy:seat.list = {id}` (the headers) and `Legacy:seat.import = {id, sessions, page}` (the messages; `page` has no default), with a ledger entity `Legacy:session:<sid>` per old session. With the launch fact `legacy_page` a session's messages are imported lazily, the first time `GET /session/<sid>/message` opens it (the reply waits for the ledger's `done`). The
-whole description (mapping, owner rule, runbook, measured numbers, decisions) is `docs/migration-design.md` "Phase 1"; the model's own page is `Help:legacy`.
+The previous seat's chat history (sessions and messages) is imported from the read-only `SqlSource:legacy` by `Legacy:seat.list = {id}` (the headers) and `Legacy:seat.import = {id, sessions, page}` (the messages; `page` has no default), with a ledger entity `Legacy:session:<sid>` per old session. The whole description (mapping, the admin rule, runbook, measured numbers, decisions) is `docs/migration-design.md` "Phase 1"; the model's own page is `Help:legacy`.
 
 ## The host loop (`native/src/host.rs`)
 
@@ -362,50 +303,29 @@ Ported from `membrane/fields_live.py`, the minimum the door and the boot need:
   removal, a pack waiting for an import), `native/tests/privilege_1143.rs` (rule B, grant, revoke, granted_by, cleanup, replay) and the two
   direct-write tests in `pack_entities.rs`.
 
+## The environment: `Environment:host` (#1143, operator 2026-11-14)
+
+At the start the host (`host.rs` `boot_environment`, one call in `cli.rs` `run`, before `started`) writes ONE entity, `Environment:host`, whose PROPERTIES ARE the environment variables (property name = variable name; unset = absent, a reasoned null). Class `Environment`,
+declared RESIDENT by `membrane/packs/environment.c1f` (a pack of the barest set: without it the write would be dropped, and a host with no such pack writes nothing). It is STORED and written by a JOURNALLED outside write (`host:environment`): a replay of a run's
+journal gives the value the boot saw; a restart rewrites it (a variable no longer set is cleared). THE SECRET RULE (docs/auth.md): only the default names (`HOME`, `USER`, `LANG`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `TMPDIR`, `CLAUDE_BIN`, `MEMBRANE_DATA_DIR`) and those of the
+fact `env_allow` carry their value; a name holding KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL (any case) reads the text `set` when set and non-empty, never its value, and `env_allow` refuses such a name (said on stderr, no value); every other variable is absent. Help: `Help:environment`.
+Tests: `environment_host_1143.rs`, `environment_process_1143.rs` (the real binary; the secret values are searched in every reply, the store, WAL, journal, stdout, stderr and `ps`). The history cutover reads `Environment:host.MEMBRANE_DATA_DIR` (`legacy_cutover.c1f`).
+Journal across restarts: the stored journal (`c_journal`) holds ALL outside writes, in order, across restarts: the line key continues from the highest stored key at open (`Host::open` reads `MAX(k)`, one index lookup; the in-memory `journal` copy holds only this run's lines). Before this the key was the in-memory count, restarting at 0, so a restart replaced the earlier run's first lines and a replay lost the births. The journal now only grows (an idle restart of the barest seat adds about 8 lines, 1 KB; the first boot is about 400 lines, 60 KB); nothing replays it at startup (the rows of `c_field` are the state), only `migrate`'s one-time `updated` backfill reads it. Test: `journal_restart_1143.rs`.
+
 ## Eval accounting: `Stats:eval` (#1143)
 
 Which getters and setters burn the time is a question the VM answers about itself (`native/src/stats.rs`). Always on (the boot fact `eval_stats`, default on; `--fact eval_stats=false` turns it off and there is no entity), the VM counts per **(kind, class, property, pack)** the evaluations, their **self time** (the run's own clock time, minus what it waited in host calls such as `sql(...)`, which is counted apart as `wait_ms`, minus the runs nested in it) and their **steps**. The table is a fixed `Vec` (2048 slots, 1024 keys; a key past that is counted in one `(other)` row); counting a known key allocates nothing.
 
 The host publishes it on the entity `Stats:eval` (class `Stats`, RESIDENT, declared by the shipped pack `stats`, in `barest.packs`) every window (`--fact eval_stats_window_s=<s>`, default 10; a threshold flagged for the operator): `window_s`, `top` (the top 20 of THIS window by self time: `{class, prop, pack, kind, calls, ms, wait_ms, steps, slow}` (`slow` = the evaluations whose own self time passed the former 10 ms allowance, `MEMBRANE_EVAL_TIME_MS`: a flag, never a limit; time decides no value, docs/c1f-stdlib.md)), `total_calls`, `total_ms` (all rows of the window), `top_total` (the same top over the process's lifetime), `life_calls`, `life_ms`, `at`. The writes are the host's (`host:stats`), heard by the engine but **not journalled** (like an unload: not part of a replay); no pack reads the entity, so nothing reacts. `Stats:eval.reset = true` clears the table at the next tick and lowers the flag. Read it with `entity_read` or `run_cliff` (`Stats:eval.top`). The counting changes no value; its cost is about 125 ns per evaluation (`overhead_report` in `native/tests/eval_stats_1143.rs`, a report, not an assertion). A rebuild (start-up) evaluates a getter once, then only those whose inputs a write of the previous pass changed (a getter whose inputs did not move is not evaluated again; before, a chain that never settled ran every getter of every entity up to 16 times: `Command.timeout_default` 1890 evaluations for 189 Commands, now 378). Tests: `eval_stats_1143.rs`, `eval_stats_host_1143.rs`, `seat_process.rs` (`stats_eval_...`, `the_boot_fact_eval_stats_false_...`).
 
-## What `fields_live.py` does that the Rust loop does NOT yet do
-
-- **Mirroring the Python entity store**: there is none here; the rows are the host's own table. No `est.docs` hear/mirror, no
-  `mirrored()` by ISA kinds (`parents: ["cls:..."]`), no class-of-removal memory, no mirrored removal of entities (`f.remove`, #1054; the `retire` write, see the barest seat, does it for the engine and the store): on the barest seat the engine collects every virtual entity nothing holds (a Request included); elsewhere a
-  Request entity stays forever.
-- **`silent_birth`** on engine-born entities (`{"born": cls}` is stored with no props).
-- **Packs from entities, the rest**: `pack_op` (list/show/load), the shipped-pack rule, `_view_classes` (packs importing `dom` that
-  run in pages), `Pack` entities with the Python name `membrane::pack:<name>` / a `c1f` property / any class holding c1f (here only
-  `Pack:<name>.text`, see "Pack entities"; the privilege grant is the one other Pack property the host reads, `privileged`). Pack FILES are loaded once at start: no mtime rescan. A Pack
-  entity can not be deleted (its text emptied removes the pack). Entities other than Packs are restored by `load_stored_entities` (see "Restart restores the entities").
-- **Banner instances per owner and chat** (the barest seat has the one `Banner:admin:main`: see "The banner"), the dials (`recall:dials`), the class switch (writing `class` does not reassign an instance), facts per turn, `sql_forget`,
-  the 3 s banner time limit, `mark_delivered` / `mark_seq`.
-- **LLM call plumbing**: `Fields::calls` (the planner's `membrane::llm.call`) are drained and dropped; no LLM adapter.
-- **Host callbacks** (`_Host.call`: `pronoun`, `recall`, `rerank`, the banner's built-ins): `NullHost` knows none; `resolve`,
-  `dispatch`, `vel`, `align`, `live` answer nothing.
-- **Adapters**, the worker pool, wait checks, replan, Blurp's learner and the store's write listeners that watch writes.
-- **Presence**, peers, the `/event` hub (`publish` of `field.write` / `field.pack` / `field.remove` to pages), the browser VM's
-  snapshot (`snapshot()`), the page feed.
-- **Seat facts**: `seat_facts` reads the person's settings file, the router, the minds, the backend, cloud models,
-  `agent_writes`, `nerve_pause_off`, `ledger`, `router_on`, `minds`, `seat_stt`, `seat_project`; the binary tells only the list above.
-  `answer_card` (the board's own door) is a pack's now, but nothing calls it here.
-- **The store as the seat's**: no `Store:field` seed entity, no `SQL_ARRIVED` queue item (the loop's waiter does that job), no
-  `set_store` of a seat file other than its own; the seat's collections (`c_<coll>` of the Python entity store) are not the host's
-  table (`c_field`): the two do not read each other.
-- **Plan state is not journalled**: `plan::set` writes engine-side (writer `boot`); a boot re-runs the plan each start.
-- **Error handling**: a failing write does not count `errors`, nothing is logged per write; a pack that fails to load is printed
-  once on stderr and the last good one is not kept.
-- **Shutdown**: SIGTERM stops the loop and interrupts running queries; there is no flush beyond SQLite's own, no `stop(srv)`.
-
 ## The barest agent seat: the MCP door and the chat (#1143, operator 2026-11-12)
 
 The app is packs only: `door_tools.c1f` (the model's tools), `chat.c1f` (the one chat), `chat_turn.c1f` (the turn). Rust added
 only three small things: a write with a computed property name (`<target>.[expr] = v`, `fields.rs`), the kind getters of a constructed
-entity (a kind stamp came after the birth), and `cliffvm run ... --fact name=value` (any Boot fact, JSON or text). Run it with the
-shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus the barest app folder (its `default_banner.c1f` births the banner) and
-`--fact chat_claude_bin=<path to the claude CLI>` (no default: without it a message is answered with an error and nothing runs).
+entity (a kind stamp came after the birth), and `--fact name=value` (any Boot fact, JSON or text). `cliffvm serve` starts it with the packs of `barest.packs` plus the barest app folder
+(its `default_banner.c1f` births the banner) and `chat_claude_bin` (the CLI found by `serve`; with none a message is answered with an error and nothing runs).
 
-**Routes** (no persons, no auth, one chat `membrane::Chat:main`):
+**Routes** (every one needs a verified token but the page's shell: docs/auth.md; one chat `membrane::Chat:main`):
 - `POST /mcp`: MCP over plain HTTP, JSON-RPC 2.0, one JSON answer per request: `initialize` (echoes the client's `protocolVersion`, else
   2025-03-26), `notifications/*` and any request with no id (202, no body), `ping`, `tools/list`, `tools/call`; `-32700` / `-32600` / `-32601`
   errors; a GET is a 405 (`allow: POST`: there is no SSE stream). The tools are the FIELD ops only, nothing else:
@@ -422,6 +342,7 @@ shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus t
   The #1101 `call` tool, aliases and the enter/exit context stack are out (skipped by decision).
 - `POST /membrane/chat/message {text}` -> 202 `{id}` (`<epoch ms>-<request n>`); the message is `membrane::Chat:main:message:<id>` (`<id>` = `<ms>-<request n padded to 8 digits>`; a message that names a `sid` in the body is `membrane::Chat:session:<sid>:message:<id>`, and every message has a time row `membrane::Chat:main:time:<id>:<where>`: docs/chat-keys.md; kind
   ChatMessage: text, at, tools_run), written `queued` after its birth, which starts the turn.
+  `POST /membrane/chat/message/<id>/abort` is Stop: the running turn ends as an error that keeps the answer so far plus a stopped line and its CLI is killed (a message with nothing running: 200 `true`; an unknown id: 404; `chat.c1f`, `chat_turn.c1f`).
   `GET /membrane/chat/message/<id>[?sid=<sid>]` (the id is inside its chat) -> `{id, text, state (queued | running | done | error), response, tools, turn: {state, started, ended}}`: poll it.
   THE TURN is the entity `<message>:turn` (ChatTurn: `state` written running, then done/error; `status` a getter over it, `queued` while
   there is none: a first value written with the birth and the start's write would be two writes in one round, which the loop guard refuses; `started`, `ended` = the clock; `queued_at`; `message`).
@@ -440,7 +361,7 @@ shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus t
   a 'Load older turns' button at the top fetches the next page with `before`; every 3 s (and every 700 ms while a message runs without a stream) it re-reads the newest 10 turns and draws
   the unknown or unfinished ones; a running message streams through its event stream, and its finished tools arrive with that refresh. It no longer lists entities or reads the
   per-message route (the old load: ~2,000 requests for 300 messages, each also a Request entity).
-  The UI's own message route is opencode's `POST /session/<sid>/prompt_async` (`membrane/ui/panel.js`): see "The session API" below (`packs/door_session.c1f`).
+  The page's own message route is opencode's `POST /session/<sid>/prompt_async` (`chat_view.c1f`): see "The session API" below (`packs/door_session.c1f`).
 
 **The turn** is one run of the model's CLI through the `Command` driver, in the mode the Python rung used (`claude_agent.py`):
 
@@ -454,7 +375,7 @@ env -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX
 
 Built-in tools off, no user MCP config (the config is an inline JSON string, generated by a getter from `Http:door`'s real port), no
 settings files, allowed tools exactly the membrane server's, one continuous run, the system prompt is the doctrine, the operator's four sentences
-(`docs/doctrine-barest-draft.md`) plus `Banner:admin:main`'s text (the banner, see "The banner"), the prompt is the message ALONE: no history. `--` ends the options (the
+(`docs/doctrine-barest.md`) plus `Banner:admin:main`'s text (the banner, see "The banner"), the prompt is the message ALONE: no history. `--` ends the options (the
 list-valued `--allowedTools` / `--mcp-config` would swallow a prompt). `--bare` is NOT used: per `claude --help` (2.1.323) it never
 reads OAuth or the keychain, only an API key, so it cannot use the CLI's login. The stream-json stdout is read by c1f
 (`json()` per line): the `result` line's text is the answer, else the assistant's text in order; `is_error` or a failing exit with no
@@ -462,13 +383,13 @@ result line is an error answer (with stderr); `error_max_turns` keeps what was s
 `chat_claude_bin` (no default), `chat_max_turns` (default 2048 in the pack: a THRESHOLD for the operator to approve; it is the old
 rung's per-answer tool-call ceiling).
 
-**The OpenAI-compatible turn (#1143, step 1b; `packs/chat_oai.c1f`, `native/tests/chat_openai_1143.rs`).** A model that is not a claude rung is answered over HTTP, with no process. Which models: an entry of the boot fact `cloud_models` whose `backend` is not `claude-agent` (`{name, backend, base_url, api_key_env, chat_path?}`: `name` is the model id the endpoint is asked for, `base_url` its root, the call goes to `base_url + chat_path` (default `/v1/chat/completions`), `api_key_env` the NAME of the environment variable that holds the key, `backend` a label), or a tag the local backend lists (`Model:<name>` with backend `ollama`, `seat_backend`, no key). A cloud entry with no `base_url` refuses the turn with the reason. One turn = the same system prompt the claude turn gets (the doctrine plus the banner, `ChatMessage.sys`) and the message alone (no history); the four field tools are offered as OpenAI function tools from the door's own `tools/list` (a `Fetch` of `/mcp`, nothing is copied: `Fetch:oai:<mid>:tools`); then rounds: each is ONE streamed `POST` (`stream: true`; a `Fetch` with `stream`, `lines` (a chunk is whole lines) and `keep` (the receipt also carries the whole body)). The words reach `stream_view` as the claude turn's do (each chunk appends to ONE accumulator `Chunk:<fetch>:acc`; `partial_text` reads the current round's). The ANSWER is read from the receipt, as the claude turn reads its CLI's stdout: the SSE `data:` lines give the text, the usage (the last `usage` seen; summed over the rounds into `turn.usage` as `{input_tokens, output_tokens}`, empty when the endpoint never reports it: no `stream_options` is sent), and the tool calls assembled from their deltas by `index` (the id once, the name and the arguments in pieces: the oracle's rule, `lanes.py:6487-6499` at v0.7.53). A round with tool calls runs each through the SAME door logic as `/mcp tools/call` (a `Fetch` of `/mcp` with the admin's token when the seat has one; the text is the door's own, an error of the tool (`isError`) is the text the model gets, arguments that are not a JSON object are answered `Error: ...` and not sent), appends the assistant message and the tool results (`{role: tool, tool_call_id, content}`) and opens round n+1; a round with text only is the answer; a round with calls when n reaches `chat_max_turns` ends the turn `done` with the text said so far and `(stopped at the ceiling of N turns)` (as the claude turn does). The state is explicit entities: `...:turn.oai` (the endpoint's settings), `...:turn:round:<n>` (ChatRound: `messages`; getters read the receipt), `...:turn:round:<n>:call:<i>` (ChatCall) and `Fetch:oai:<mid>:<n>[:<i>]`; a birth runs no setter, so each is told `go = true` after it is born. Each call becomes a `ChatTool` under the turn. Failure causes (turn `error`, response `error: true`): the endpoint could not be called (the driver's head: refused, timeout, an unset key variable named), an HTTP status other than 200 (with the endpoint's body), an `error` object in the stream, an answer with no text and no tool call. **The key** is read by the driver (`bearer_env` on the Fetch names the variable; the value is sent as `Authorization: Bearer`, never stored on the entity, row, journal or receipt, and masked `***` wherever the server prints it back, across the cut of two pieces too; a value under 16 characters is not masked, as in the Command driver): no pack ever sees it. Not built: history, `reasoning_content` deltas, `stream_options`, a provider registry (the oracle's `auth.PROVIDERS` rows give each provider's base and path: here the entry names them), a key check before the call (the driver refuses and the cause says which variable), more than about 20,000 events in one round's stream (one getter's step budget).
+**The OpenAI-compatible turn** (`membrane/packs/chat_oai.c1f`, `native/tests/chat_openai_1143.rs`) answers a model that is not a claude rung over HTTP (a streamed `POST` per round, the four field tools offered as function tools, the key read by the driver from a named environment variable and never stored). The pack is NOT in `barest.packs`: the release answers through the claude CLI only; the pack and its test stay for a later rung.
 
 **The claude turn's auth (the release gate, #1143: an Anthropic API key by default, the CLI's login only by opt-in).** The seat reads the key from ITS OWN environment variable
 `ANTHROPIC_API_KEY` and hands it to the `claude -p` child in the child's environment (the run's `env_from`, as the admin token; docs/auth.md). `cliffvm run` tells the packs only
 `anthropic_key_set` (a yes or no); no pack, property, row, journal line, log, reply, tool result or `argv` ever holds the value, and the Command driver masks (`***`) any secret it handed over
 wherever the child printed it (a 401 page, a debug line) in chunks and receipts: a secret split across two reads never shows (the chunk path holds an unterminated tail, and cuts only where no secret spans), and a value shorter than 16 characters (`MIN_SECRET_CHARS`, drivers.rs) is NOT masked: it is no credential and masking every occurrence would corrupt the stream-json (the 16 is the operator's approved value, 2026-11-13). With no key (unset or empty) the turn ends as an error whose text says to set `ANTHROPIC_API_KEY` and restart, and to
-start with `--fact chat_auth=login` for the login deliberately; no `claude` process starts. `--fact chat_auth=login` (or `CLAUDE_AUTH=login scripts/seat` / `scripts/seat-full`, which pass it) runs the CLI on its own login:
+start with `--fact chat_auth=login` for the login deliberately; no `claude` process starts. `--fact chat_auth=login` (or `CLAUDE_AUTH=login scripts/seat`, which passes it) runs the CLI on its own login:
 `ANTHROPIC_API_KEY` and the credentials that outrank a stored login (`ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` / `_FOUNDRY`) are removed from the child's environment (`CLAUDE_CODE_OAUTH_TOKEN` stays: it is a login token, as in the released `credential_env`) and no key is needed. The key check is one: `plan` refuses when `anthropic_key_set` is not true, and the key is named for the child (`env_from`) only when it is true. Any other `chat_auth` value is refused with the two valid ones. In key mode the credentials the CLI would rank above or in place of the key
 (`ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` / `_FOUNDRY`, `CLAUDE_CODE_OAUTH_TOKEN`) are removed from the child's environment (`env -u`), the list the released rung blanked
 (`claude_agent.py` v0.7.53: `OVERRIDING_ENV`, `LOGIN_ENV`, `credential_env`), so a stored login cannot answer. `GET /membrane/options` `background.chat_auth` shows the mode. Tests: `native/tests/chat_process.rs`
@@ -478,22 +399,6 @@ start with `--fact chat_auth=login` for the login deliberately; no `claude` proc
 through the MCP door; the whole chat with a FAKE `claude` that records its argv, calls the door's `/mcp` itself, waits while the test
 sees the message `running`, then prints stream-json; a second message proves no history is sent; a failing CLI and an unnamed one),
 `dynamic_prop_1143.rs`, `cli_facts_1143.rs`, `constructors_1143.rs`. No real `claude` is ever run by a test.
-
-**Verify on a real run** (none of this was run: the operator forbade real runs):
-- `--max-turns` is NOT listed in `claude --help` of 2.1.323 (the docs list it): confirm the CLI accepts it and what it counts (turns, not
-  tool calls). If it does not, the ceiling has no flag and needs another (`--max-budget-usd` is listed).
-- `--mcp-config` as an inline JSON string, `"type": "http"`, with `--strict-mcp-config`; that the CLI sends `initialize` then
-  `notifications/initialized` then `tools/list` to a plain-JSON server and uses the `inputSchema` as given; tools show up (not deferred
-  behind tool search) and are callable as `mcp__membrane__<tool>` under `--allowedTools 'mcp__membrane__*'` with no permission prompt.
-- `--tools ""` really leaves no built-in tool; `--setting-sources ""` loads no settings and no CLAUDE.md; whether anything else
-  (hooks, plugins, skills from the login's home) still loads. `--restricted` (not used) is the stronger switch; it also removes command-running
-  tools and WebFetch unless named.
-- the CLI's login works without `--bare` and with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` through `env`.
-- `--system-prompt-snapshot` (default on) and `--no-session-persistence` together: one run, no resume.
-- the stream-json shapes read here (`system`/`init`, `stream_event`, `assistant` and `user` messages with `tool_use` / `tool_result`
-  blocks, the `result` line with `subtype`, `is_error`, `result`) match the real CLI's.
-- a message that starts with `/tmp/...` is refused by the Command driver as an argument under a temporary folder (the driver's rule
-  looks at every argument starting with `/`).
 
 **The event stream** (#1143; `native/src/http.rs`, `drivers.rs`, `membrane/packs/door.c1f`, `chat.c1f`, `chat_turn.c1f`; tests `host_loop.rs`, `chat_process.rs`).
 Three pieces, all writes (no host callback):
@@ -513,20 +418,18 @@ Three pieces, all writes (no host callback):
 is `{id, text, state (queued | running | done | error), response (the partial answer while running, null until a word is out; the final one when done), tools
 (names; the final list when done), turn: {state, started, ended}}`. Events are snapshots (a missed one costs nothing), the last is the one with `state` done or
 error, then the connection closes. The stream's `Request` is held by its open connection while the stream is open: it is collected only
-after `end_result` (or a failed `stream`); a client that leaves early makes the next send fail, and the turn's own `end` still lands. The page (`chat.js`) opens an
-`EventSource` for a running message and polls it again only if the stream errors; `graph.js`/`app.js` still poll (3 s, hidden tab skipped): the graph needs a stream of
-its own later (not built).
+after `end_result` (or a failed `stream`); a client that leaves early makes the next send fail, and the turn's own `end` still lands. The page (`chat_view.c1f`) reads the stream of a running message and polls it again only if the stream cannot be had.
 
 **The session API** (#1143, swap step 2; `membrane/packs/door_session.c1f`, a family pack of the `session` family, loaded after `chat_turn`; tests `native/tests/session_1143.rs`, fixtures `tests/golden/session`).
 The opencode session API the page speaks, over the chat's own machinery. **A session is a chat**: `membrane::Chat:session:<sid>` (kind `ChatSession`: `stitle`, `born`, `upd`), and a message the page sends is a `ChatMessage` whose KEY holds the session id, `membrane::Chat:session:<sid>:message:<id>` (docs/chat-keys.md: `GET /session/<sid>/message` is a key range of the index, no body read); one message is TWO rows of the API: the user row (the text) and the assistant row (the turn's tools and answer). Routes (the door matches on `Request.route`, so they answer on `/ui/serve/...` too):
-`GET|POST /session`, `GET|PATCH|DELETE /session/<sid>`, `GET /session/status` (`{<sid>: {type: idle|busy}}`, a store answer: a session is busy while one of its turns is `running`), `GET /session/<sid>/message[?limit=N&before=<message id>]`, `GET /session/<sid>/message/<mid>`, `POST /session/<sid>/prompt_async` (204) and `/message` (200 `{info, parts}` when the turn ends), `POST /session/<sid>/abort` (true), `GET /event`, `GET /global/event`. Not built (404, listed in `docs/release-parity.md` 1.2): `/session/<sid>/voice`, `/predict`, `/diff`, `/todo`, `/children`, `/init` and the other stubs, `/agent`, `/config`. *The model* (`packs/door_session.c1f`, `chat_turn.c1f`, `door_models.c1f`): `GET /v1/models` lists the claude-agent rungs the launcher named (`cloud_models`) as `owned_by: membrane->claude-agent`, with or without a router (the page's picker reads that owner). A session holds a pick (`ChatSession.smodel`): `PATCH /session/<sid> {model: {modelID}}` or a `model` in the body of a message sets it (the released handler's rule: the message's pick sticks); the session row and the rows' `modelID` show it, else the SEAT'S MODEL: the seat-wide pick (`Minds:seat.loops`, what the page's first-run "Which model?" form and the gear window post as `{loops: <model>}` to `POST /membrane/options` or `/membrane/models`, OWNER only: a person gets the 403 `for the owner` and nothing changes; an unknown or ill-formed name is a 400 with the reason and the old pick stays; it is kept in the store, so it survives a restart and wins over the launcher's `minds` fact), else the launcher's default (`minds.seat_default`, `claude` when none; the name that runs with no flag). The turn runs the CLI on it: a name in the `claude-agent:` namespace the Python seat gave its rungs runs with `--model <the bare alias>`; the launcher's default (`claude`) runs with no flag (the CLI's own default); another rung runs under its own name; a model that is a `cloud_models` entry with another backend, or a tag the local backend lists, runs the OpenAI-compatible turn (see "The OpenAI-compatible turn"); any other name (an unknown one) is refused IN THE TURN (an error row that names it, nothing starts). The provider is always `membrane`. A streamed partial transcript (`voice` with `stream` and `final: false`) is answered 204 and starts no turn (nothing is stored: the released seat shows the partials, this one does not); the final transcript is the turn. Not built: the agent pick (`build`/`plan` is ignored), `claudeContinue` (the CLI is not resumed: a turn is one run with no history, so "Continue" is a fresh message), a queue (two messages of one session run side by side; the released seat queues them and says `queued, depth` in the status), the think dial.
-No security (the barest seat): one admin, no per-person chat (the Python seat's "one chat per person" is not here: `POST /session` always makes one).
+`GET|POST /session`, `GET|PATCH|DELETE /session/<sid>`, `GET /session/status` (`{<sid>: {type: idle|busy}}`, a store answer: a session is busy while one of its turns is `running`), `GET /session/<sid>/message[?limit=N&before=<message id>]`, `GET /session/<sid>/message/<mid>`, `POST /session/<sid>/prompt_async` (204) and `/message` (200 `{info, parts}` when the turn ends), `POST /session/<sid>/abort` (true), `GET /event`, `GET /global/event`. Not built (404): `/session/<sid>/voice`, `/predict`, `/diff`, `/todo`, `/children`, `/init` and the other stubs. (`/agent` and `/config` are the opencode probes the door answers itself, `door.c1f`.) *The model* (`packs/door_session.c1f`, `chat_turn.c1f`, `door_models.c1f`): `GET /v1/models` lists the claude-agent rungs the launcher named (`cloud_models`) as `owned_by: membrane->claude-agent`, with or without a router (the page's picker reads that owner). A session holds a pick (`ChatSession.smodel`): `PATCH /session/<sid> {model: {modelID}}` or a `model` in the body of a message sets it (the released handler's rule: the message's pick sticks); the session row and the rows' `modelID` show it, else the SEAT'S MODEL: the seat-wide pick (`Minds:seat.loops`, what the page's first-run "Which model?" form and the gear window post as `{loops: <model>}` to `POST /membrane/options` or `/membrane/models`, OWNER only: a person gets the 403 `for the owner` and nothing changes; an unknown or ill-formed name is a 400 with the reason and the old pick stays; it is kept in the store, so it survives a restart and wins over the launcher's `minds` fact), else the launcher's default (`minds.seat_default`, `claude` when none; the name that runs with no flag). The turn runs the CLI on it: a name in the `claude-agent:` namespace the Python seat gave its rungs runs with `--model <the bare alias>`; the launcher's default (`claude`) runs with no flag (the CLI's own default); another rung runs under its own name; a model that is a `cloud_models` entry with another backend, or a tag the local backend lists, runs the OpenAI-compatible turn (see "The OpenAI-compatible turn"); any other name (an unknown one) is refused IN THE TURN (an error row that names it, nothing starts). The provider is always `membrane`. A streamed partial transcript (`voice` with `stream` and `final: false`) is answered 204 and starts no turn (nothing is stored: the released seat shows the partials, this one does not); the final transcript is the turn. Not built: the agent pick (`build`/`plan` is ignored), `claudeContinue` (the CLI is not resumed: a turn is one run with no history, so "Continue" is a fresh message), a queue (two messages of one session run side by side; the released seat queues them and says `queued, depth` in the status), the think dial.
+There are no users (docs/auth.md): no per-person chat (the 0.7 seat's "one chat per person" is gone: `POST /session` always makes a new session).
 *Ids* follow the Python seat's `<prefix>_` and 24 digits, derived from the message so no table is kept: a session `ses_<ms:13><request n:8>000`, a message's rows `msg_<ms><n>001` (user) and `...002` (assistant), parts `prt_...010` (the user's text), `...100` (the answer's text part), `...2jj` (tool j of the turn); events `evt_...`. Limits that follow: a request number above 99,999,999 and more than 100 tools in one turn. *Parts of the assistant row*: finished, the tools the model ran in call order (`tool` parts, `completed`, with input and output; the part's `time` is the turn's), then ONE text part, the CLI's final answer (the lead-in words the model wrote between tool calls are streamed but not stored: the row is rebuilt from the entities, `ChatMessage.oc_parts`); running, what the stream has shown so far. A failed turn is the error text as its text part and `info.error {name: Error, data: {message}}`; an aborted one `MessageAbortedError`. `info` carries `tokens` and `cost` of the CLI's result line.
 *The event streams*: `Request.send` takes `{id, frames: [{event?, data}, ...]}` (several frames in one write, queued in order). The engine allows ONE write of a (entity, property) in a cascade (a second is refused: "loop: ... already written this round"), except a driver verb (`send`, `run`, ...): a command, one effect per write, run in write order. So each producer writes its OWN bus entity (`SesBus:start-<id>`, `SesBus:chunk-<id>-<n>`, `SesBus:end-<id>`: virtual entities, a list of `{type, id, properties}`), a chunk of the CLI's output and the turn's end can land in one round without one dropping the other, and the bus's setter writes the frames to every open stream (`Request.ev_on`), wrapped for `/global/event`. A chunk taken after its turn is over says nothing (the end's final parts carry the words). Three producers: the message's start (`queued`: user message and part, `session.updated`, busy, the assistant's message, `session.updated`), each chunk of the CLI's output (`Chunk.oc_go`: the answer's words, the text part opened EMPTY with the first, then a `message.part.delta` per read; a tool's part `running` when it starts and `completed` when its result line comes, up to 8 per read), and the turn's end (`ChatMessage.oc_fin`: the final parts with the SAME ids, so the page's rows are replaced, the message completed, `session.status` idle, `session.idle`, `session.updated`). A stream that opens later sees only what follows (`server.connected` first); the page loads the rows after it connects. Differences from the Python seat: no `session.diff`, no step parts, no keep-alive ping, no `membrane.*` events; the lead-in text of a turn is one text part while it streams and the final answer replaces it; inside one read of the CLI's output the words come before the tools; a turn REFUSED before it started (no `chat_claude_bin`) ends in the start's own cascade, so its end is not on the stream (the rows and `/session/status` have it).
-*The shape comparer* (`session_1143.rs`, `shape_misses`): the answers are compared with the Python seat's recorded answers (`scripts/golden_session.py --tree <v0.7.53 checked out>`; no model, the turn runner's ladder is a stub): every key of the fixture in the answer with the same JSON type, extra keys allowed, a `null` in the fixture accepts any type, each element of an answer's list matches SOME element of the fixture's list; values (ids, times) are never compared. `tests/js/page_boot.test.mjs` shows the page itself (headless Chrome) creating a session and following `/ui/serve/event`.
+*The shape comparer* (`session_1143.rs`, `shape_misses`): the answers are compared with the 0.7 seat's recorded answers (`tests/golden/session/*.json`; no model): every key of the fixture in the answer with the same JSON type, extra keys allowed, a `null` in the fixture accepts any type, each element of an answer's list matches SOME element of the fixture's list; values (ids, times) are never compared. `tests/js/page_boot.test.mjs` shows the page itself (headless Chrome) creating a session and following `/ui/serve/event`.
 
 **Open design questions**: (1) the UI's message route: DECIDED 2026-11-13: the opencode session API, simplified, for now (not built yet; this route stays until then); (2) the system prompt: DECIDED 2026-11-13: the barest
-doctrine (`docs/doctrine-barest-draft.md`, four sentences) plus the banner, for now; (3) `entity_write` writes any property of any class the door imports
+doctrine (`docs/doctrine-barest.md`, four sentences) plus the banner, for now; (3) `entity_write` writes any property of any class the door imports
 (a prop like `cmd` or `run` is a program): the barest seat has no security by decision, so the guard is only the import list; (4) the
 tool spec is an eid, not a name fragment as in the Python tool; (5) a kind's SETTER needs an ISA parent entity (`cls:chatmessage`):
 `chat_turn` puts its setters on the class `Chat` instead.

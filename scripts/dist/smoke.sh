@@ -15,7 +15,12 @@ pid=''
 cleanup() { [ -n "$pid" ] && kill "$pid" 2>/dev/null || true; [ -n "$pid" ] && wait "$pid" 2>/dev/null || true; rm -rf "$work"; }
 trap cleanup EXIT INT TERM
 cd "$work"
-env -u ANTHROPIC_API_KEY CLAUDE_BIN=/bin/sh "$d/bin/cliffvm" serve --port 0 --data-dir "$work/data" > "$log" 2>&1 &
+# SMOKE_LAUNCH names the user-facing command instead (scripts/dist/smoke_wheel.sh: the wheel's `babyseat`, which runs `cliffvm serve` itself)
+if [ -n "${SMOKE_LAUNCH:-}" ]; then
+  env -u ANTHROPIC_API_KEY CLAUDE_BIN=/bin/sh "$SMOKE_LAUNCH" --port 0 --data-dir "$work/data" > "$log" 2>&1 &
+else
+  env -u ANTHROPIC_API_KEY CLAUDE_BIN=/bin/sh "$d/bin/cliffvm" serve --port 0 --data-dir "$work/data" > "$log" 2>&1 &
+fi
 pid=$!
 port=''
 i=0

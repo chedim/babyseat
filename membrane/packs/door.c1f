@@ -121,7 +121,7 @@ Request.logout_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.cookie_name + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict' + this.secure}, 'body': {'ok': True}}
 
--- THE 401, in the RELEASED shape (jwtauth.py `send_unauthorized`, the shape the TUI, Home Assistant and curl scripts read): one message for a
+-- THE 401, in the RELEASED shape (jwtauth.py `send_unauthorized`, the shape Home Assistant and curl scripts read): one message for a
 -- missing and a refused token alike (a refusal never says which), under `error.message`, and `WWW-Authenticate: Bearer realm="membrane"`.
 Request.unauthorized getter: {'status': 401, 'headers': {'www-authenticate': 'Bearer realm="membrane"'}, 'body': {'error': {'message': 'missing or invalid token', 'type': 'unauthorized'}}}
 
@@ -139,12 +139,12 @@ Request.ms getter: num(words(replace(str(clock * 1000), '.', ' '))[0])
 Request.path_body getter: {'home': this.f_home, 'state': this.f_home + '/.local/state/opencode', 'config': this.f_home + '/.config/opencode', 'worktree': this.f_cwd, 'directory': this.f_cwd}
 Request.project_body getter: {'id': this.f_project, 'worktree': this.f_cwd, 'vcs': 'git', 'time': {'created': this.ms, 'updated': this.ms}, 'sandboxes': []}
 -- THE AGENT LIST (server.py `_agent_shapes`, tests/golden/boot/agent.json): the rows the chat's agent picker and the attached TUI read. With NO primary agent
--- the TUI's Enter does nothing, so `build` and `plan` are primary. The released list also appends the seat's live minds (the loop workers, the thinker,
+-- (opencode's TUI is not in this release) Enter does nothing there, so `build` and `plan` are primary. The released list also appends the seat's live minds (the loop workers, the thinker,
 -- the dreamer, with their claims) when it has them: those need the Python loop pool and are not here (the page's mind strip stays empty).
 Request.ag_allow getter: [{'permission': '*', 'pattern': '*', 'action': 'allow'}]
 Request.ag_body getter: [{'name': 'build', 'native': True, 'mode': 'primary', 'description': 'The default agent. Executes tools based on configured permissions.', 'permission': this.ag_allow, 'options': {}}, {'name': 'plan', 'native': True, 'mode': 'primary', 'description': 'Plan mode.', 'permission': this.ag_allow, 'options': {}}, {'name': 'general', 'native': True, 'mode': 'subagent', 'description': 'General-purpose subagent.', 'permission': this.ag_allow, 'options': {}}, {'name': 'explore', 'native': True, 'mode': 'subagent', 'description': 'Exploration subagent.', 'permission': this.ag_allow, 'options': {}}, {'name': 'watch', 'native': True, 'mode': 'subagent', 'description': 'A watch-trigger thinking loop: reacts or ignores one fired watch event through the membrane tools (the event\'s entity id rides the session title).', 'permission': this.ag_allow, 'options': {}}]
 
--- THE CONFIG (opencode.py writes the released one at launch; the page reads `model` of it, the TUI the provider): the one provider is membrane's own /v1
+-- THE CONFIG (opencode.py writes the released one at launch; the page reads `model` of it, opencode's TUI the provider): the one provider is membrane's own /v1
 -- on this door, serving the seat's default model (Boot fact `minds.seat_default`, the model the launcher picked: claude is the only one in the first swap).
 -- No model picked: no `model` keys and no models, the released config's shape without a model.
 Request.cf_model getter: str(prop(([b.minds for b in instances('Boot') if b.minds != None] or [None])[0], 'seat_default') or '')   -- the fact `minds`, or the launcher pack's default (a default is a write at `started`, so it is not in the `facts` dict)

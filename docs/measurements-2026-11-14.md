@@ -9,16 +9,16 @@
 
 ## 1. Records found (read-only), each labelled
 
-Label: M = MEASURED with a stated method, R = RECALLED (a note, no method), U = UNVERIFIED (named in the brief, no source on disk). "mem/" = `~/.claude/projects/-Users-dmitrii-chechetkin-projects-membrane/memory/`.
+Label: M = MEASURED with a stated method, R = RECALLED (a note, no method), U = UNVERIFIED (named in the brief, no source on disk). "mem/" = `~/.claude/projects/<project>/memory/`.
 
 | # | record | where | label |
 |---|---|---|---|
 | R1 | door up 50,000 rows: 6.8 s / 388 MB before lazy load, 0.33 s / 26 MB after; real repro store (470 rows, 18 MB): 4.5 s / 184 MB before, 0.37 s / 40 MB at the door, 72 MB after warm boot | docs/cliffvm.md:175 | M (release build, synthetic Note rows, one machine) |
-| R2 | empty store, all 33 packs: healthy in 0.84 s, RSS 13.9 MB | docs/release-parity.md:313 | M |
+| R2 | empty store, all 33 packs: healthy in 0.84 s, RSS 13.9 MB | the parity inventory (removed; git history) | M |
 | R3 | burst of 2 parallel 1500-chunk messages + 1 MB output: 122 MB to about 2 GB, after the fix peak about 0.2 GB | docs/cliffvm.md:132 | M (synthetic; not re-run here) |
 | R4 | idle RAM 90-211 MB; history route of 20 turns about 0.1 s | the brief only; nothing in docs/, mem/ or git messages | U |
 | R5 | reply sizes (Keep idle 12,613 B; 3 running 87,793; 10 running 264,467; mention 61,992-96,656; others under 1.5 KB) | docs/reply-size.md:5, :11-:19 | M (private seat, copy of Throwy's store, fake claude, `242948c1`) |
-| R6 | old Python seat, live, through 2026-10-15: 3,840 turns, 10.8K avg / 1.55K median tokens per turn, 4.9 calls per turn, 39.5% cache read | docs/token-economics.md:16-19 | M (`membrane stats --baseline`) |
+| R6 | old Python seat, live, through 2026-10-15: 3,840 turns, 10.8K avg / 1.55K median tokens per turn, 4.9 calls per turn, 39.5% cache read | the 0.7 token-economics page (removed; git history) | M (`membrane stats --baseline`) |
 | R7 | map-mode Memo about 18.9k input-equivalent per answer (was about 40k, long ones 111k) | mem/map-mode-breakthrough.md:20 | R |
 | R8 | "Throwy median about 18k input, 76% cache reads", "recall 22/53" | the brief; mem/MEMORY.md:67 names "recall 22/53" only | U |
 | R9 | membrane counts total prompt about 3,700/turn flat, cached_tokens 0 (opencode bench) | mem/benchmark-token-accounting.md:26 | R |

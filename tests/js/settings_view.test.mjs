@@ -184,7 +184,7 @@ scenario('a refusal of the call itself (a 403 or a failure; the seat itself neve
 
 scenario('a restart row has NO control: its value, the badge and the launch line, in text', () => {
   const w = world().open();
-  for (const id of ['access.port', 'limits.command_timeout_s', 'model.signin', 'model.cli', 'import.page', 'access.token_file']) {
+  for (const id of ['access.port', 'limits.command_timeout_s', 'model.signin', 'model.cli', 'limits.warm_rows', 'access.token_file']) {
     assert.equal(w.n(id, 'badge').text, 'Needs a restart', id);
     assert.match(w.n(id, 'how').text, /^How to change it: start the seat with --/, id);
     const mine = w.eids('DomNode:set:' + id + ':');

@@ -103,14 +103,14 @@ fn person_token(dir: &Dir, sub: &str) -> String {
 }
 
 /// (id, kind, live): the rows of the design after the operator's answers
-const ROWS: [(&str, &str, &str); 30] = [
+const ROWS: [(&str, &str, &str); 29] = [
     ("model.chat", "text", "live"), ("model.default", "readonly", "restart"), ("model.list", "readonly", "restart"), ("model.cloud", "readonly", "restart"),
     ("model.signin", "readonly", "restart"), ("model.cli", "readonly", "restart"),
     ("chat.max_steps", "number", "live"), ("chat.timeout", "number", "live"),
     ("map.hidden", "list", "live"), ("map.hidden_prefix", "list", "live"), ("map.window", "number", "live"), ("map.poll_ms", "number", "live"),
     ("map.fade_s", "readonly", "restart"),
     ("home.allow", "allowlist", "live"),
-    ("import.sources", "readonly", "restart"), ("import.history", "readonly", "restart"), ("import.page", "readonly", "restart"),
+    ("import.sources", "readonly", "restart"), ("import.history", "readonly", "restart"),
     ("access.token_life", "readonly", "restart"), ("access.token_file", "readonly", "restart"), ("access.mode", "readonly", "restart"),
     ("access.port", "readonly", "restart"),
     ("limits.command_timeout_s", "readonly", "restart"), ("limits.effect_workers", "readonly", "restart"), ("limits.warm_rows", "readonly", "restart"),

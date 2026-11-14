@@ -1,9 +1,9 @@
 #!/bin/sh
-# The payload of the binary wheel (docs/python-retirement.md, the wrapper): the dist folder, verified, in the shape the wrapper packages.
+# The payload of the binary wheel (docs/packaging-plan.md, the wrapper): the dist folder, verified, in the shape the wrapper packages.
 #   scripts/dist/assemble_wheel_payload.sh <dist folder> <payload dir>
 # THE INTERFACE (this script makes, the wrapper's setup.py/pyproject take):
 #   <payload dir>/dist/            the whole dist folder, no version folder above it:
-#       bin/cliffvm  packs/  apps/  help/  LICENSE  VERSION  MANIFEST.sha256
+#       bin/cliffvm  packs/  apps/  LICENSE  VERSION  MANIFEST.sha256
 #   The wrapper copies `<payload dir>/dist/` to `membrane/dist/` in the wheel (package-data `dist/**`, so `membrane/dist/bin/cliffvm` is what launcher.py execs with `serve`),
 #   tags the wheel `py3-none-<platform>` (one payload per platform: the binary is the platform's), and keeps the executable bit of bin/cliffvm (a wheel zip carries the mode;
 #   the launcher may `chmod +x` as a fallback). `cliffvm serve` finds packs/ apps/ above its own bin/, so nothing else is passed.

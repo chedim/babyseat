@@ -5,7 +5,7 @@ IMPORT chat_turn 1
 IMPORT semtext 1
 IMPORT proc 1
 VIRTUAL SesBus
--- THE SESSION FAMILY: the opencode session API the page and the TUI speak (#1143, swap step 2; docs/cliffvm.md "The session API"). The routes:
+-- THE SESSION FAMILY: the opencode session API the page speaks (#1143, swap step 2; docs/cliffvm.md "The session API"). The routes:
 --   GET  /session                          the sessions, oldest first            POST /session {title?}              a new session (200, the session)
 --   GET  /session/status                   {<session id>: {type: idle|busy}}
 --   GET  /session/<sid>                    the session                           PATCH /session/<sid> {title}        rename          DELETE /session/<sid>
@@ -14,14 +14,14 @@ VIRTUAL SesBus
 --   POST /session/<sid>/prompt_async {parts, model?}  start a turn (204)                 POST /session/<sid>/message {parts}   the same, answered when the turn ends
 --   POST /session/<sid>/abort              stop the turn (true)
 --   GET  /session/<sid>/voice, /predict, /todo, /children, /diff   []: the released answers of a seat with no voice lines of its own, no predictor and nothing to list for
---                                          the TUI's stubs (the chat view asks the first two beside the messages; the POST of /voice, the vote / rewrite teaching, is not here: 405)
+--                                          opencode's stubs (the chat view asks the first two beside the messages; the POST of /voice, the vote / rewrite teaching, is not here: 405)
 --   GET  /event, GET /global/event         the event streams (text/event-stream)
 -- A SESSION IS A CHAT: `membrane::Chat:session:<sid>` (the kind ChatSession: stitle, born, upd = epoch ms). A MESSAGE of the page is a ChatMessage (packs/chat.c1f) with
 -- `sid` naming its session, and the model's answer to it is its turn (chat_turn.c1f). One message = TWO rows of the opencode API: the user row (the text) and the assistant row
 -- (the turn's text and tool parts). The ids follow the Python seat's: `<prefix>_` and 24 digits, derived from the message (its milliseconds, its request number padded to 8 digits,
 -- three digits for what it is): a session `ses_<ms><n>000`; a message's user row `msg_<ms><n>001`, its assistant row `...002`, the user's text part `prt_...010`, text part k of the answer
 -- `prt_...1kk`, tool part j `prt_...2jj` (k, j < 100). The id of a message is its entity's: `membrane::Chat:session:<sid>:message:<ms>-<n>` (n padded to 8 digits; docs/chat-keys.md), so the reverse needs no table.
--- No security (the barest seat): one admin, no per-person chat. What is not here is listed in docs/release-parity.md section 1.2.
+-- No users (docs/auth.md): every verified token is the admin, no per-person chat. What is not here answers 404 (docs/cliffvm.md "The session API").
 
 -- ---- which route ----------------------------------------------------------------------------------------------------------------------------
 Request.ss_on getter: this.route == '/session' or startswith(this.route, '/session/') or this.route == '/event' or this.route == '/global/event'
@@ -231,13 +231,8 @@ Request.ml_take getter: this.ml_all
 Request.ml_users getter: [{'id': r['id'], 'h': 0, 'row': prop(r['eid'], 'oc_urow')} for r in this.ml_take]
 Request.ml_assts getter: [{'id': r['id'], 'h': 1, 'row': prop(r['eid'], 'oc_arow')} for r in this.ml_take if prop(r['eid'], 'oc_arow') != None]
 Request.ml_flat getter: [x['row'] for x in sort_by(sort_by(concat(this.ml_users, this.ml_assts), 'h'), 'id')]
--- THE LAZY HISTORY (#1143): a session imported as a header only (packs/legacy_import.c1f: its ledger `Legacy:session:<sid>` is pending or importing) gets its messages the first time it is opened:
--- `ml_ask` is true for an authed list request where the launch fact `legacy_page` (user rows per query, no default) is told; legacy_import's setter on it writes the ledger's `open` (and the reply waits (`ml_lazy`) until the ledger says done or error. A session with no ledger is native: nothing is written, nothing waits.
-Request.ml_ask getter: this.entrant and this.ml_on and len([b for b in instances('Boot') if b.legacy_page != None]) > 0 and prop('membrane::Legacy:session:' + this.ss_sid, 'state') != None
-Request.ml_lazy getter: this.ml_ask and prop('membrane::Legacy:session:' + this.ss_sid, 'state') in ['pending', 'importing']
 Request.ml_reply getter:
   WHEN this.ss_view == None: this.ss_missing
-  ELSE WHEN this.ml_lazy: None
   ELSE WHEN this.ml_all == None: None
   ELSE WHEN len([x for x in this.ml_users if x['row'] == None]) > 0: None
   ELSE WHEN this.ml_before != '' and (this.ml_cut == None or len(this.ml_cut) == 0): {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}

@@ -131,8 +131,8 @@ V.summed getter: [1, 2] + [3, 4]
 V.joined getter: concat([1, 2], [3])
 ```
 
-Builtins: `len abs min max lower strip replace startswith lines words join head sort_by before after pluck distinct concat json str num
-prop why instances referencing`, plus the readers `sql read listdir stat`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
+Builtins: `len abs min max lower strip replace startswith lines words spans join head tail sort_by before after pluck distinct group_by concat json str num plain
+unspeak dot norm distance unit fit clip ago epoch localtime prop why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
 refused when the pack loads:
 
 ```c1f-error
