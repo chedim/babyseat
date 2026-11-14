@@ -3,6 +3,7 @@ IMPORT chat 1
 IMPORT semtext 1
 IMPORT proc 1
 IMPORT boot 1
+IMPORT door 1
 VIRTUAL Chunk
 -- THE BARE CHAT'S TURN (#1143, operator 2026-11-12): a message is answered by ONE run of the model's CLI, in the mode the Python rung
 -- used (membrane/claude_agent.py): Claude's built-in tools OFF, no user MCP config, no settings files, the allowed tools exactly the
@@ -186,6 +187,8 @@ ChatMessage.fail_why getter:
   ELSE: None
 ChatMessage.answer getter:
   WHEN this.rr == None: None
+  -- a turn the person STOPPED (chat.c1f, the abort route): what was said so far (`kept`, the partial answer taken at the stop; else the finished messages' text) and a stopped line
+  ELSE WHEN this.aborted == True: strip(str(this.kept or this.spoken or '') + '\n\n(stopped from the page)')
   ELSE WHEN this.fail_why != None: this.fail_why
   ELSE WHEN this.capped: this.spoken + '\n\n(stopped at the ceiling of ' + str(this.max_turns) + ' turns)'
   ELSE WHEN strip(str(prop(this.final, 'result') or '')) != '': str(prop(this.final, 'result'))
@@ -254,3 +257,13 @@ Boot.interrupted on-setter turn-interrupted:
       membrane::Chat[i]:turn.ended = clock
       membrane::Chat[i]:turn.error = 'interrupted: the seat stopped while this turn was running'
       membrane::Chat[i]:turn:response = ChatResponse(text: 'interrupted: the seat stopped while this turn was running', error: True)
+
+-- ---- STOP (the abort route of chat.c1f): the answer so far is kept on the message, it is marked aborted, and its CLI is killed (`Command.stop`: this pack imports `proc`, which owns the verb).
+-- The id is the request's own, so a second stop of the same turn is a new write (an equal value is no write); the turn's receipt then ends it (`answer` above).
+Request.ab1_turns on-setter chat-stop:
+  WHEN this.ab1_turns != None:
+    FOR mid IN this.ab1_turns:
+      membrane::Chat[mid].kept = prop('membrane::Chat:' + mid, 'partial_text')
+      membrane::Chat[mid].aborted = True
+      membrane::Command:chat[mid].stop = {'id': 'abort-' + this.eid}
+    this.ab1_done = True

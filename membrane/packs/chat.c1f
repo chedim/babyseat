@@ -7,6 +7,7 @@ IMPORT semtext 1
 --   GET  /membrane/chat/message/<id>     {id, text, state, response, tools}: poll it until `state` is done (or error)
 --   GET  /membrane/chat/messages?limit=N&before=<id>   the HISTORY, one answer: the newest N turns (default 20), oldest first, each the
 --                                         message view plus its tools; `before` pages to older turns (see "GET: the history" below)
+--   POST /membrane/chat/message/<id>/abort    STOP (the page's Stop button): the running turn of that message ends as an error whose answer is what was said so far plus a stopped line, and its CLI is killed; a message with nothing running: 200 true; an unknown id: 404 (`?sid=` names a session, as the GETs')
 --   GET  /membrane/chat/message/<id>/events   the same message as an event stream (text/event-stream): one `message` event per change of
 --                                         `stream_view` (the partial answer and the tools' names as they are written), the last one when
 --                                         `state` is done or error, then the connection closes (docs/cliffvm.md, "The event stream")
@@ -70,7 +71,7 @@ ChatTurn.kind getter: 'turn'
 ChatTurn.status getter: this.state or 'queued'
 
 Request.o_session getter: this.route == '/membrane/chat/message' or this.route == '/membrane/chat/messages' or startswith(this.route, '/membrane/chat/message/')
-Request.m_session getter: ['POST'] if this.route == '/membrane/chat/message' else ['GET']
+Request.m_session getter: ['POST'] if (this.route == '/membrane/chat/message' or this.ab1_on) else ['GET']
 
 -- ---- POST: the message --------------------------------------------------------------------------------------------------------------
 Request.cm_text getter: strip(str(prop(this.jbody, 'text') or ''))
@@ -109,6 +110,21 @@ Request.cm_post getter:
   ELSE WHEN this.cm_sid_bad: {'status': 400, 'body': {'error': 'sid must not contain a colon'}}
   ELSE WHEN this.cm_id == None: None
   ELSE: {'status': 202, 'body': {'id': this.cm_id}}
+
+-- ---- POST: STOP (the abort of the running turn; the same stop the session door gives, packs/door_session.c1f, on the one chat's route) -------------------------------
+-- the turn is running when its state says so (its CLI is the `Command:chat:<cp>` of the message); the answer so far (`partial_text`) is kept on the message BEFORE the stop, and the turn's finish (chat_turn.c1f) writes it
+-- with the stopped line as the response. An idle message is a 200 and nothing else.
+Request.ab1_on getter: startswith(this.route, '/membrane/chat/message/') and tail(this.route, 6) == '/abort'
+Request.ab1_gid getter: replace(replace(this.route, '/membrane/chat/message/', ''), '/abort', '')
+Request.ab1_cp getter: ('session:' + this.cm_qsid + ':message:' + this.ab1_gid if this.cm_qsid != '' else 'main:message:' + this.ab1_gid) if replace(this.cm_qsid + this.ab1_gid, ':', '') == this.cm_qsid + this.ab1_gid else None
+Request.ab1_view getter: prop('membrane::Chat:' + this.ab1_cp, 'view') if this.ab1_on and this.ab1_cp != None else None
+Request.ab1_live getter: this.entrant and this.ab1_on and this.method == 'POST' and this.ab1_view != None and prop(this.ab1_view, 'state') == 'running'
+Request.ab1_turns getter: [this.ab1_cp] if this.ab1_live == True else None
+-- (the setter that stops the CLI is in chat_turn.c1f: only a pack that imports `proc` may write a Command's verb)
+Request.ab1_reply getter:
+  WHEN this.ab1_view == None: {'status': 404, 'body': {'error': 'no such message'}}
+  ELSE WHEN this.ab1_live == True and this.ab1_done != True: None
+  ELSE: {'status': 200, 'body': True}
 
 -- ---- GET: one message --------------------------------------------------------------------------------------------------------------------
 -- the id is inside its chat: `?sid=<sid>` names the session (none: the main chat), as the history's
@@ -177,6 +193,7 @@ Request.hs_get getter:
 
 Request.r_session getter:
   WHEN this.route == '/membrane/chat/message': this.cm_post
+  ELSE WHEN this.ab1_on: this.ab1_reply
   ELSE WHEN this.hs_on: this.hs_get
   ELSE WHEN this.cm_events: this.cm_stream
   ELSE: this.cm_get
