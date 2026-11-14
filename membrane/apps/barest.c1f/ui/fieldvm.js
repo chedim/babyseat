@@ -310,14 +310,14 @@ class Host {
     }
   }
 
-  /** The clipboard, for a pack's `copy` write: the text only (a string, at most 1 MB), by the async clipboard where the page may use it, else a hidden textarea and execCommand. A failure is not silent: it is written as `Conn:page.copy_error`. */
-  copy(v) {
+  /** The clipboard, for a pack's `copy` write {text, at}: the text only (a string, at most 1 MB), by the async clipboard where the page may use it, else a hidden textarea and execCommand. The answer is written back on the same node as `copy_result` {ok, why?, at}: a failure is text a pack can show, never silent. */
+  copy(eid, v) {
     const text = v && typeof v === 'object' && typeof v.text === 'string' ? v.text.slice(0, 1_000_000) : null;
     if (text === null) return;
+    const done = (ok, why) => { this.f.write(eid, 'copy_result', JSON.stringify(ok ? { ok: true, at: this.now() } : { ok: false, why, at: this.now() }), this.now()); this.flush(); };
     const fallback = () => { const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); let ok = false; try { ok = document.execCommand('copy'); } catch {} t.remove(); return ok; };
-    const fail = (why) => { if (this.f.get('Conn:page') === 'null') this.f.load('Conn:page', 'Conn', '{}'); this.f.write('Conn:page', 'copy_error', JSON.stringify(String(why)), this.now()); };
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => { if (!fallback()) fail('the browser refused the clipboard'); });
-    else if (!fallback()) fail('the browser has no clipboard');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => { if (fallback()) done(true); else done(false, 'the browser refused the clipboard'); });
+    else if (fallback()) done(true); else done(false, 'the browser has no clipboard');
   }
 
   /** A name or tag the allow-list refuses: the reason is written on the DomNode and marked on the element. */
@@ -333,7 +333,7 @@ class Host {
     if (prop === 'text') el.textContent = v == null ? '' : String(v);
     else if (prop === 'parent') this.attach(el, v, (this.get(eid) || {}).before);
     else if (prop === 'before') { if (!(this.made && this.made.has(eid))) this.attach(el, (this.get(eid) || {}).parent, v, true); }   // a node made this round is already in place
-    else if (prop === 'copy') this.copy(v);                       // a pack's `copy` {text, at}: the text goes to the clipboard (the Copy button of a code block); `at` makes a second click a new value
+    else if (prop === 'copy') this.copy(eid, v);                       // a pack's `copy` {text, at}: the text goes to the clipboard (the Copy button of a code block); `at` makes a second click a new value
     else if (prop === 'focused') {                                // a pack's focus(): the event that follows is no write (same value)
       if (v && document.activeElement !== el) el.focus(); else if (!v && document.activeElement === el) el.blur();
     }
