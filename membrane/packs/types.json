@@ -205,12 +205,16 @@
     "writes": {
       "Chat.mention": "Bool",
       "Chat.queued": "Bool",
+      "Doorbell.at": "Num",
       "Request.cm_at": "Num",
       "Request.cm_id": "Text?",
       "Request.end": "Dict",
       "Request.send": "Dict"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Doorbell"
+    ]
   },
   "chat_oai": {
     "getters": {
@@ -1497,15 +1501,28 @@
   },
   "link": {
     "getters": {
+      "Boot.lk_epoch": "Text?",
+      "Boot.lk_hold": "Num?",
+      "Boot.lk_lease": "Num?",
+      "Boot.lk_lease_hidden": "Num?",
+      "Boot.lk_max_frame": "Num?",
+      "Boot.lk_max_links": "Num?",
+      "Boot.lk_max_subs": "Num?",
+      "Boot.lk_max_value": "Num?",
+      "Boot.lk_window": "Num?",
       "Boot.old_vms": "Any",
       "Page.ns": "Text",
+      "Vm.hidden": "Any",
       "Vm.kind": "Text",
+      "Vm.last": "Any",
+      "Vm.lease_s": "Num?",
+      "Vm.peer_heard": "Any",
       "Vm.silent": "Num?",
-      "Vm.stale_s": "Num?",
       "Vm.state": "Text?"
     },
     "writes": {
       "*.retire": "Bool",
+      "Boot.lk_since": "Num",
       "Vm.connected_at": "Any",
       "Vm.page": "Entity(Page)",
       "Vm.seen": "Num"
@@ -1516,6 +1533,94 @@
     ],
     "resident": [
       "Vm"
+    ]
+  },
+  "link_route": {
+    "getters": {
+      "LinkPeer.allowed": "Bool?",
+      "LinkPeer.due": "Bool",
+      "LinkPeer.dues": "List(Dict)?",
+      "LinkPeer.gone": "Bool",
+      "LinkPeer.lease": "Num?",
+      "LinkPeer.maxf": "Num?",
+      "LinkPeer.maxv": "Num?",
+      "LinkPeer.mine": "List(Entity(LinkPeer))?",
+      "LinkPeer.row": "Dict?",
+      "LinkPeer.sig": "Text?",
+      "LinkPeer.silent": "Num?",
+      "LinkPeer.size": "Int",
+      "LinkPeer.snap": "Bool?",
+      "LinkPeer.val": "Any",
+      "LinkPeer.veto": "Text?",
+      "LinkPeer.why": "Text?",
+      "LinkPeer.window": "Num?",
+      "Request.lk_ack": "Any",
+      "Request.lk_big": "Bool",
+      "Request.lk_draft": "Dict?",
+      "Request.lk_dues": "Any",
+      "Request.lk_epoch": "Text?",
+      "Request.lk_fresh": "List(Dict)",
+      "Request.lk_hidden": "Bool",
+      "Request.lk_hold": "Num?",
+      "Request.lk_maxl": "Num?",
+      "Request.lk_n": "Any",
+      "Request.lk_ns": "Text",
+      "Request.lk_ns_ok": "Bool",
+      "Request.lk_over": "List(Dict)",
+      "Request.lk_pairs": "List(List(Any))",
+      "Request.lk_peer": "Text",
+      "Request.lk_plan": "Dict?",
+      "Request.lk_ready": "Bool",
+      "Request.lk_room": "Num?",
+      "Request.lk_shape": "Bool",
+      "Request.lk_subs": "List(Dict)",
+      "Request.lk_take": "List(Dict)",
+      "Request.lk_unkeys": "List(Text?)",
+      "Request.lk_unpairs": "List(List(Any))",
+      "Request.m_link": "List(Text)",
+      "Request.o_link": "Bool",
+      "Request.r_link": "Dict?"
+    },
+    "writes": {
+      "*.ackd": "Any",
+      "*.capped": "Bool",
+      "*.live": "Bool",
+      "*.ns": "Any",
+      "*.retire": "Bool",
+      "*.sent_n": "Any",
+      "*.sent_sig": "Any",
+      "*.sid": "Any",
+      "*.sprop": "Any",
+      "*.wid": "Any",
+      "LinkAllow.done": "Bool",
+      "LinkAllow.prefixes": "List(Text)",
+      "LinkPeer.ack": "Any",
+      "LinkPeer.cur": "Any",
+      "LinkPeer.heard": "Num",
+      "LinkPeer.hidden": "Any",
+      "LinkPeer.last_n": "Any",
+      "LinkPeer.ns": "Any",
+      "LinkPeer.out_n": "Any",
+      "LinkPeer.up": "Bool",
+      "LinkPeer.ver": "Num?",
+      "Request.lk_at": "Num",
+      "Request.lk_dup": "Bool",
+      "Request.lk_full": "Bool",
+      "Request.lk_now": "Any",
+      "Request.lk_out": "Dict?",
+      "Request.lk_reset": "Any",
+      "Request.lk_took": "Bool",
+      "Vm.connected_at": "Any",
+      "Vm.heard": "Any",
+      "Vm.peer": "Entity(LinkPeer)",
+      "Vm.was_hidden": "Bool"
+    },
+    "findings": [],
+    "virtual": [
+      "LinkPeer"
+    ],
+    "resident": [
+      "LinkAllow"
     ]
   },
   "mcp": {
