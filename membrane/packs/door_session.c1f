@@ -11,7 +11,7 @@ VIRTUAL SesBus
 --   GET  /session/<sid>                    the session                           PATCH /session/<sid> {title}        rename          DELETE /session/<sid>
 --   GET  /session/<sid>/message[?limit&before]   the rows [{info, parts}], oldest first
 --   GET  /session/<sid>/message/<mid>      one row
---   POST /session/<sid>/prompt_async {parts}  start a turn (204)                 POST /session/<sid>/message {parts}   the same, answered when the turn ends
+--   POST /session/<sid>/prompt_async {parts, model?}  start a turn (204)                 POST /session/<sid>/message {parts}   the same, answered when the turn ends
 --   POST /session/<sid>/abort              stop the turn (true)
 --   GET  /session/<sid>/voice, /predict, /todo, /children, /diff   []: the released answers of a seat with no voice lines of its own, no predictor and nothing to list for
 --                                          the TUI's stubs (the chat view asks the first two beside the messages; the POST of /voice, the vote / rewrite teaching, is not here: 405)
