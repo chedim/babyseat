@@ -43,14 +43,15 @@ fn or_strips_the_null_of_what_comes_before() {
 }
 
 #[test]
-fn casts_are_checked_and_give_a_nullable_result_unless_the_input_already_is_that_type() {
-    assert_eq!(ty("Int(v)", &[("v", "Any")]), "Int?");
+fn casts_are_checked_and_give_an_error_unless_the_input_already_is_that_type() {
+    // a failed cast is an Error (#1143), a null stays the null it was
+    assert_eq!(ty("Int(v)", &[("v", "Any")]), "(Int|Error)?");
     assert_eq!(ty("Int(v)", &[("v", "Int")]), "Int");
-    assert_eq!(ty("Int(v)", &[("v", "Text")]), "Int?");
+    assert_eq!(ty("Int(v)", &[("v", "Text")]), "Int|Error");
     assert_eq!(ty("Text(v)", &[("v", "Text")]), "Text");
-    assert_eq!(ty("Num(v)", &[("v", "Any")]), "Num?");
-    // sound but not flow-sensitive: Int(v) failing does not tell the model that Text(v) then works
-    assert_eq!(ty("Int(v) or Text(v)", &[("v", "Int|Text")]), "Int|Text");
+    assert_eq!(ty("Num(v)", &[("v", "Any")]), "(Num|Error)?");
+    // sound but not flow-sensitive: Int(v) failing does not tell the model that Text(v) then works; `or` never hides the Error
+    assert_eq!(ty("Int(v) or Text(v)", &[("v", "Int|Text")]), "Int|Text|Error");
 }
 
 #[test]

@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 // ---- types ----------------------------------------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Kind { Bool, Int, Float, Text, List(Box<Ty>), Dict, Entity(String) }
+pub enum Kind { Bool, Int, Float, Text, List(Box<Ty>), Dict, Entity(String), /** a failure (docs/c1f-error.md): a kind, never a null flag, and `or` does not strip it */ Error }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Ty { pub any: bool, pub null: bool, pub kinds: BTreeSet<Kind> }
@@ -37,6 +37,12 @@ impl Ty {
     pub fn dict() -> Ty { Ty::of(Kind::Dict) }
     pub fn list(t: Ty) -> Ty { Ty::of(Kind::List(Box::new(t))) }
     pub fn entity(c: &str) -> Ty { Ty::of(Kind::Entity(c.to_string())) }
+    pub fn error() -> Ty { Ty::of(Kind::Error) }
+    /// may it be an Error (`Any` may)
+    pub fn may_err(&self) -> bool { self.any || self.kinds.contains(&Kind::Error) }
+    /// the type without its Error kind, and whether it had one: an operation reads the rest and carries the Error on (`with_err`)
+    pub fn split_err(&self) -> (Ty, bool) { let mut t = self.clone(); let e = t.kinds.remove(&Kind::Error); (t, e) }
+    pub fn with_err(mut self, c: bool) -> Ty { if c && !self.any { self.kinds.insert(Kind::Error); } self }
     pub fn nullable(mut self) -> Ty { self.null = true; self }
     pub fn non_null(mut self) -> Ty { if !self.any { self.null = false; } self }
     pub fn null_if(self, c: bool) -> Ty { if c { self.nullable() } else { self } }
@@ -102,7 +108,7 @@ impl Ty {
             };
             match name.as_str() {
                 "Any" => Ty::any(), "None" => Ty::none(), "Never" => Ty::never(), "Bool" => Ty::bool(), "Int" => Ty::int(), "Float" => Ty::float(),
-                "Num" => Ty::num(), "Text" => Ty::text(), "Dict" => Ty::dict(),
+                "Num" => Ty::num(), "Text" => Ty::text(), "Dict" => Ty::dict(), "Error" => Ty::error(),
                 "List" => Ty::list(arg(i)?),
                 "Entity" => { let c = arg(i)?; Ty::entity(&c_of(&c)) }
                 _ => return Err(format!("type: unknown {name:?}")),
@@ -128,6 +134,7 @@ impl std::fmt::Display for Ty {
         for k in &self.kinds { if let Kind::List(e) = k { names.push(format!("List({})", e)); } }
         if self.kinds.contains(&Kind::Dict) { names.push("Dict".into()); }
         for k in &self.kinds { if let Kind::Entity(c) = k { names.push(format!("Entity({})", c)); } }
+        if self.kinds.contains(&Kind::Error) { names.push("Error".into()); }
         let body = names.join("|");
         if !self.null { write!(f, "{}", body) } else if names.len() > 1 { write!(f, "({})?", body) } else { write!(f, "{}?", body) }
     }
@@ -278,47 +285,14 @@ pub fn infer_expr(n: &Node, env: &Env) -> Ty {
         Node::Name(s) => match env.vars.get(s) { Some(t) => t.clone(), None if s == "clock" => Ty::num(), None => Ty::any() },
         Node::List(v) => Ty::list(v.iter().fold(Ty::never(), |a, x| a.join(&infer_expr(x, env)))),
         Node::Dict(v) => { for (_, x) in v { infer_expr(x, env); } Ty::dict() }
-        Node::Attr(b, a) => { let t = infer_expr(b, env); attr_ty(&t, a, env) }
+        Node::Attr(b, a) => { let (t, e) = infer_expr(b, env).split_err(); attr_ty(&t, a, env).with_err(e) }
         Node::Index(b, i) => {
-            let (bt, it) = (infer_expr(b, env), infer_expr(i, env));
-            if bt.any { return Ty::any(); }
-            if bt.kinds.is_empty() { return if bt.null { Ty::none() } else { Ty::never() }; }
-            let mut r = Ty::never();
-            let mut ok = false;
-            for k in &bt.kinds {
-                let idx_ok = |want: fn(&Kind) -> bool| it.any || it.kinds.is_empty() || it.kinds.iter().any(want);
-                match k {
-                    Kind::List(e) if idx_ok(|x| *x == Kind::Int) => { ok = true; r = r.join(e); }
-                    Kind::Dict if idx_ok(|x| *x == Kind::Text) => { ok = true; r = Ty::any(); }
-                    Kind::Entity(c) if idx_ok(|x| *x == Kind::Text) => {
-                        ok = true;
-                        r = r.join(&match const_str(i) { Some(p) if c != "*" => (env.lookup)(c, p).unwrap_or_else(Ty::any), _ => Ty::any() });
-                    }
-                    _ => {}
-                }
-            }
-            if !ok { env.find(format!("cannot index a {} by a {}", bt, it)); return Ty::any(); }
-            r.nullable()   // a miss is a null
+            let ((bt, eb), (it, ei)) = (infer_expr(b, env).split_err(), infer_expr(i, env).split_err());
+            index_ty(&bt, &it, i, env).with_err(eb || ei)
         }
-        Node::Bin(op, a, b) => { let (x, y) = (infer_expr(a, env), infer_expr(b, env)); arith_ty(*op, &x, &y, env) }
-        Node::Neg(a) => {
-            let t = infer_expr(a, env);
-            if t.any { return Ty::num().nullable(); }
-            if t.kinds.is_empty() { return t; }
-            let mut r = Ty::never();
-            let mut ok = false;
-            for k in &t.kinds {
-                match k {
-                    Kind::Int | Kind::Bool => { ok = true; r = r.join(&Ty::int()); }
-                    Kind::Float => { ok = true; r = r.join(&Ty::float()); }
-                    Kind::List(_) => { ok = true; r = r.join(&Ty::list(Ty::float())); }
-                    _ => {}
-                }
-            }
-            if !ok { env.find(format!("cannot negate {}", t)); return Ty::any(); }
-            r.null_if(t.null)
-        }
-        Node::Not(a) => { infer_expr(a, env); Ty::bool() }
+        Node::Bin(op, a, b) => { let ((x, ex), (y, ey)) = (infer_expr(a, env).split_err(), infer_expr(b, env).split_err()); arith_ty(*op, &x, &y, env).with_err(ex || ey) }
+        Node::Neg(a) => { let (t, e) = infer_expr(a, env).split_err(); neg_ty(&t, env).with_err(e) }
+        Node::Not(a) => { let (_, e) = infer_expr(a, env).split_err(); Ty::bool().with_err(e) }
         Node::Is(a, _, _) => { infer_expr(a, env); Ty::bool() }
         Node::And(v) => {
             let ts: Vec<Ty> = v.iter().map(|x| infer_expr(x, env)).collect();
@@ -343,38 +317,87 @@ pub fn infer_expr(n: &Node, env: &Env) -> Ty {
             r
         }
         Node::Compare(a, ops) => {
-            let mut left = infer_expr(a, env);
+            let (lt, mut el) = infer_expr(a, env).split_err();
+            let mut err = false;
+            let (mut left, mut left_none) = (lt, matches!(&**a, Node::Const(V::None)));
             for (op, rn) in ops {
-                let right = infer_expr(rn, env);
+                let (right, er) = infer_expr(rn, env).split_err();
+                let right_none = matches!(rn, Node::Const(V::None));
+                // `x == None` / `x != None` reads an Error (it is not null) instead of carrying it on
+                let null_test = matches!(op, Cmp::Eq | Cmp::Ne) && (left_none || right_none);
                 if matches!(op, Cmp::Lt | Cmp::Le | Cmp::Gt | Cmp::Ge)
                     && !left.any && !right.any && !left.kinds.is_empty() && !right.kinds.is_empty()
                     && !left.kinds.iter().any(|x| right.kinds.iter().any(|y| cmp_ok(x, y))) {
                     env.find(format!("cannot compare {} with {}", left, right));
                 }
-                left = right;
+                if !null_test { err |= el || er; }
+                left = right; left_none = right_none; el = er;
             }
-            Ty::bool()
+            Ty::bool().with_err(err)
         }
         Node::Let(name, v, rest) => { let t = infer_expr(v, env); infer_expr(rest, &env.bind(name, t)) }
-        Node::If(a, c, b) => { infer_expr(c, env); infer_expr(a, env).join(&infer_expr(b, env)) }
+        Node::If(a, c, b) => { let (_, e) = infer_expr(c, env).split_err(); infer_expr(a, env).join(&infer_expr(b, env)).with_err(e) }
         Node::Comp(elt, var, iter, cond) => {
-            let it = infer_expr(iter, env);
+            let (it, ei) = infer_expr(iter, env).split_err();
             if !it.any && !it.kinds.is_empty() && !it.kinds.iter().any(|k| matches!(k, Kind::List(_))) { env.find(format!("cannot iterate over {}", it)); }
             let inner = env.bind(var, it.elem());
-            if let Some(c) = cond { infer_expr(c, &inner); }
-            Ty::list(infer_expr(elt, &inner))
+            let ec = if let Some(c) = cond { infer_expr(c, &inner).split_err().1 } else { false };
+            Ty::list(infer_expr(elt, &inner)).with_err(ei || ec)
         }
         Node::Call(f, args) => call_ty(f, args, env),
         Node::Ctor(c, args) => { for (_, a) in args { infer_expr(a, env); } Ty::entity(c) }
         Node::Ent(parts) => {
-            // the class is the first segment after a namespace; a key that may be null (or is not an int or text) makes the id null
-            let mut nullable = false;
-            for p in parts { if let EntPart::Key(k) = p { let t = infer_expr(k, env); if t.maybe_null() || t.kinds.iter().any(|x| !matches!(x, Kind::Int | Kind::Text)) { nullable = true; } } }
+            // the class is the first segment after a namespace; a key that may be null (or is not an int or text) makes the id null, or an Error
+            let (mut nullable, mut err) = (false, false);
+            for p in parts { if let EntPart::Key(k) = p { let (t, e) = infer_expr(k, env).split_err(); err |= e || t.maybe_null() || t.kinds.iter().any(|x| !matches!(x, Kind::Int | Kind::Text)); nullable |= t.maybe_null(); } }
             let first = match parts.first() { Some(EntPart::Lit(t)) => t.as_str(), _ => "" };
             let cls = first.rsplit_once("::").map_or(first, |(_, r)| r).split(':').next().unwrap_or("");
-            Ty::entity(cls).null_if(nullable)
+            Ty::entity(cls).null_if(nullable).with_err(err)
         }
     }
+}
+
+fn index_ty(bt: &Ty, it: &Ty, i: &Node, env: &Env) -> Ty {
+    let (bt, it) = (bt.clone(), it.clone());
+    {
+        {
+            if bt.any { return Ty::any(); }
+            if bt.kinds.is_empty() { return if bt.null { Ty::none() } else { Ty::never() }; }
+            let mut r = Ty::never();
+            let mut ok = false;
+            for k in &bt.kinds {
+                let idx_ok = |want: fn(&Kind) -> bool| it.any || it.kinds.is_empty() || it.kinds.iter().any(want);
+                match k {
+                    Kind::List(e) if idx_ok(|x| *x == Kind::Int) => { ok = true; r = r.join(e); }
+                    Kind::Dict if idx_ok(|x| *x == Kind::Text) => { ok = true; r = Ty::any(); }
+                    Kind::Entity(c) if idx_ok(|x| *x == Kind::Text) => {
+                        ok = true;
+                        r = r.join(&match const_str(i) { Some(p) if c != "*" => (env.lookup)(c, p).unwrap_or_else(Ty::any), _ => Ty::any() });
+                    }
+                    _ => {}
+                }
+            }
+            if !ok { env.find(format!("cannot index a {} by a {}", bt, it)); return Ty::any(); }
+            r.nullable()   // a miss is a null
+        }
+    }
+}
+
+fn neg_ty(t: &Ty, env: &Env) -> Ty {
+    if t.any { return Ty::num().nullable(); }
+    if t.kinds.is_empty() { return t.clone(); }
+    let mut r = Ty::never();
+    let mut ok = false;
+    for k in &t.kinds {
+        match k {
+            Kind::Int | Kind::Bool => { ok = true; r = r.join(&Ty::int()); }
+            Kind::Float => { ok = true; r = r.join(&Ty::float()); }
+            Kind::List(_) => { ok = true; r = r.join(&Ty::list(Ty::float())); }
+            _ => {}
+        }
+    }
+    if !ok { env.find(format!("cannot negate {}", t)); return Ty::any(); }
+    r.null_if(t.null)
 }
 
 /// every operand is a cast `T(e)` of the same `e`: (e, the target kinds)
@@ -392,7 +415,15 @@ fn cast_chain(v: &[Node]) -> Option<(&Node, Vec<Kind>)> {
 }
 
 fn call_ty(f: &str, args: &[Node], env: &Env) -> Ty {
-    let tys: Vec<Ty> = args.iter().map(|x| infer_expr(x, env)).collect();
+    // a call over a value that may be an Error may be that Error (`why` reads one, `Error(..)` makes one)
+    let raw: Vec<Ty> = args.iter().map(|x| infer_expr(x, env)).collect();
+    let err = raw.iter().any(|t| t.kinds.contains(&Kind::Error));
+    let tys: Vec<Ty> = raw.iter().map(|t| t.split_err().0).collect();
+    let r = call_ty_in(f, args, &tys, env);
+    match f { "why" | "None" => r, "Error" => Ty::error(), _ => r.with_err(err) }
+}
+
+fn call_ty_in(f: &str, args: &[Node], tys: &[Ty], env: &Env) -> Ty {
     let n = tys.len();
     let any_null = tys.iter().any(|t| t.maybe_null());     // an error caused by a null is a null
     let ar = |lo: usize, hi: usize| arity(f, n, lo, hi, env);
@@ -400,13 +431,15 @@ fn call_ty(f: &str, args: &[Node], env: &Env) -> Ty {
     if let Some(target) = cast_target(f) {
         if !ar(1, 1) { return Ty::any(); }
         let t = &tys[0];
-        let inside = !t.any && !t.null && !t.kinds.is_empty() && t.kinds.iter().all(|k| target.kinds.iter().any(|x| is_instance_of(k, x)));
+        // a value of the target kind is itself; a null stays the null it was; any other kind is a failed cast (an Error)
+        let inside = !t.any && !t.kinds.is_empty() && t.kinds.iter().all(|k| target.kinds.iter().any(|x| is_instance_of(k, x)));
         let mut r = target;
         if f == "List" { if let Some(Kind::List(e)) = t.kinds.iter().find(|k| matches!(k, Kind::List(_))) { r = Ty::list((**e).clone()); } }
-        return r.null_if(!inside);
+        return r.null_if(t.maybe_null() || t.kinds.is_empty()).with_err(!inside && !t.kinds.is_empty() || t.any);
     }
     match f {
         "None" => { ar(0, 1); Ty::none() }
+        "Error" => { ar(1, 1); Ty::error() }
         "dot" => { if ar(2, 2) { chk(0, Acc::List); chk(1, Acc::List); } Ty::float().null_if(any_null) }
         "norm" => { if ar(1, 1) { chk(0, Acc::List); } Ty::float().null_if(any_null) }
         "distance" => { if ar(2, 2) { chk(0, Acc::List); chk(1, Acc::List); } Ty::float().null_if(any_null) }
@@ -431,7 +464,7 @@ fn call_ty(f: &str, args: &[Node], env: &Env) -> Ty {
                 r.null_if(t.null)
             } else {
                 let mut r = Ty::never();
-                for t in &tys { r = r.join(t); }
+                for t in tys { r = r.join(t); }
                 r
             }
         }
@@ -560,7 +593,7 @@ fn target_class(tgt: &str, cls: &str, env: &Env) -> String {
         _ => None,
     };
     if let Some(c) = lit { return c; }
-    let t = infer_expr(&node, env);
+    let t = infer_expr(&node, env).split_err().0;   // a key that may fail makes the id an Error too: the class is still the one named
     match t.kinds.iter().collect::<Vec<_>>().as_slice() { [Kind::Entity(c)] if !t.any => c.clone(), _ => "*".into() }
 }
 
