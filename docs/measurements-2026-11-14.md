@@ -110,3 +110,19 @@ python3 -I scripts/measure_facts.py  $PWD $PWD/native/target/release/cliffvm $S/
 ```
 
 Each script starts its own seat (fake claude, `--port 0`, never 4096) and kills it. `scripts/measure_lib.py` holds the helpers. Run one at a time; check `vm_stat` and the load first.
+
+## 6. Serving the rows of an imported session (w81, #1143)
+
+Private seat on a fresh store, session `ses_2de37...` imported through `legacy_import.c1f` from a read-only copy of the old store (1,360 messages = 2,720 rows; 22,647 `Chat` rows, 318 MB of message bodies). Release build, machine loaded by other agents (medians, ms).
+
+| request | before | after |
+|---|---|---|
+| `GET /session/<sid>` (trivial), whole session loaded | 82 | 29 |
+| `GET /session/<sid>/message/<mid>` (one row), whole session loaded | 81 | 29 |
+| `GET /session/<sid>/message?limit=50` | 448 | 379 |
+| `?limit=1` (the fixed floor) | 375 | 334 |
+| history route `limit=20` | 373 | 334 |
+| whole session, nothing loaded (first open, no limit) | 17,300 | 17,300 (not changed) |
+| whole session again | 3,800 | 3,550 |
+
+Where the time goes: (1) every request evaluated eight getters of `instances('Boot')`, each a walk over all loaded entities building a class list per entity (fixed: `Core::inst_cache`, `Ent::in_classes`); (2) a page request pays a floor of about 330 ms for the SQL that lists the session's message keys (`ml_rows`, `hs_rows`): `json_extract` of `sid` and `at` parses the whole body of every message, and a message body is 234 KB on average (3.3 MB at most) because the store keeps the value of every cached getter (`oc_fin_parts`, `oc_rows`, `oc_arow`, `oc_parts`, `oc_tool_parts`, `history_view`, `tool_rows` each hold the tool outputs again: 310 of the 318 MB); (3) a message nobody has loaded costs about 13 ms to load (parse of that body, 17 child entities), so a whole session at first open is 17 s. The page's cockpit reads `?limit=40` (`CHAT_PAGE`); the embedded panel's first read and the mind loop's 3 s poll read the whole session.
