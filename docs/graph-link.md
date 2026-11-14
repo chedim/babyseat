@@ -136,7 +136,7 @@ The protocol is frames; the transport carries them.
 
 **Slice 3: forwarded writes from the model to page nodes.** `door_tools.c1f` routes `entity_write` of a foreign-owned id to a `wr`; the page-side verdict getter (page pack) decides; `res` returns as the tool's reply (the Return entity pattern, docs/cliffvm.md:96: pending until the receipt). Native: none beyond slice 2. Tests: model writes `p7a::Shell:main.open`, the panel opens; a refused class answers with the reason. Risk: medium (a page that is hidden or gone: `refused: page not connected`).
 
-**Slice 4: websocket.** Section 6. Rust: `http.rs` upgrade + frames, a held non-Request connection, SHA-1; JS: `WebSocket` driver and allow-list entry. Tests: a frame round trip, close, ping, a malformed frame (never abort, docs/crash-covenant.md). Risk: medium; the frame layer is the same.
+**Slice 4: websocket.** Section 6. Rust: `http.rs` upgrade + frames, a held non-Request connection, SHA-1; JS: `WebSocket` driver and allow-list entry. Tests: a frame round trip, close, ping, a malformed frame (never abort). Risk: medium; the frame layer is the same.
 
 **Slice 5: model-authored views.** Section 7; a design of its own before any code.
 
