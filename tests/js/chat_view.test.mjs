@@ -18,7 +18,7 @@ const PACK = read('../../membrane/apps/barest.c1f/chat_view.c1f');
 const T0 = 1_000_000;
 function world(facts) {
   const f = new Field();
-  f.set_pack('dom', DOM); f.set_pack('fetch', FETCH); f.set_pack('shell_view', read('../../membrane/apps/barest.c1f/shell_view.c1f')); f.set_pack('chat_view', PACK);
+  f.set_pack('dom', DOM); f.set_pack('fetch', FETCH); f.set_pack('markdown', read('../../membrane/apps/barest.c1f/markdown.c1f')); f.set_pack('shell_view', read('../../membrane/apps/barest.c1f/shell_view.c1f')); f.set_pack('chat_view', PACK);
   assert.deepEqual(JSON.parse(f.pack_errors()), {}, 'chat_view loads once dom and fetch are there');
   const w = { f, t: T0, log: [] };
   w.flush = () => { const o = JSON.parse(f.drain()); w.log.push(...o.writes); return o.writes; };
@@ -34,6 +34,8 @@ function world(facts) {
   w.facts = (p) => { if (p) w.feed('Boot:seat', 'Boot', p); };
   w.open = () => w.feed('View:chat', 'View', { open: true });
   w.n = (k) => w.get('DomNode:chat:' + k) || {};
+  // the text a node shows: its own text and, in order of creation, that of the nodes under it (the answer is markdown: DomNodes under `ans:md`)
+  w.text = (eid) => { const kids = [...new Set(w.log.filter((e) => e.prop === 'parent').map((e) => e.eid))].filter((k) => (w.get(k) || {}).parent === eid); return ((w.get(eid) || {}).text ?? '') + kids.map((k) => w.text(k)).join(''); };
   return w;
 }
 const short = (v, n = 90) => { const t = typeof v === 'string' ? v : JSON.stringify(v); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
@@ -70,13 +72,13 @@ scenario('a page of turns is drawn as the legacy chat draws it', () => {
   const [a, b, c, d] = ['1000-1', '1001-2', '1002-3', '1003-4'];
   assert.equal(row(w, a).tag, 'li'); assert.equal(row(w, a).class, 'msg'); assert.equal(row(w, a)['data-state'], 'done');
   assert.equal(row(w, a).parent, 'DomNode:chat:list');
-  assert.equal(row(w, a, ':me').text, 'hello'); assert.equal(row(w, a, ':me').class, 'bubble me');
+  assert.equal(w.text(`DomNode:chat:row:${a}:me`), 'hello'); assert.equal(row(w, a, ':me').class, 'bubble me');
   assert.equal(row(w, a, ':who').text, 'seat · 5 s'); assert.equal(row(w, a, ':who').class, 'who');
-  assert.equal(row(w, a, ':ans').text, 'hi there'); assert.equal(row(w, a, ':ans').class, 'bubble seat'); assert.ok(!row(w, a, ':ans').hidden);
-  assert.equal(row(w, b, ':who').text, 'working'); assert.equal(row(w, b, ':ans').text, 'Working on it…'); assert.equal(row(w, b, ':ans').class, 'bubble seat pending');
+  assert.equal(w.text(`DomNode:chat:row:${a}:ans`), 'hi there'); assert.equal(row(w, a, ':ans').class, 'bubble seat'); assert.ok(!row(w, a, ':ans').hidden);
+  assert.equal(row(w, b, ':who').text, 'working'); assert.equal(w.text(`DomNode:chat:row:${b}:ans`), 'Working on it…'); assert.equal(row(w, b, ':ans').class, 'bubble seat pending');
   assert.equal(row(w, b)['data-state'], 'running');
-  assert.equal(row(w, c, ':ans').class, 'bubble note', 'an error answer is shown as what to do next'); assert.equal(row(w, c, ':ans').text, 'Name the CLI first');
-  assert.equal(row(w, d, ':who').text, 'queued'); assert.equal(row(w, d, ':ans').text, 'Waiting for a turn…'); assert.equal(row(w, d, ':ans').class, 'bubble seat pending');
+  assert.equal(row(w, c, ':ans').class, 'bubble note', 'an error answer is shown as what to do next'); assert.equal(w.text(`DomNode:chat:row:${c}:ans`), 'Name the CLI first');
+  assert.equal(row(w, d, ':who').text, 'queued'); assert.equal(w.text(`DomNode:chat:row:${d}:ans`), 'Waiting for a turn…'); assert.equal(row(w, d, ':ans').class, 'bubble seat pending');
   // the tools folded under the answer: a count, then each tool's name and its input shortened to 90
   assert.equal(row(w, a, ':tools').tag, 'details'); assert.equal(row(w, a, ':tools').class, 'tools-run');
   assert.equal(row(w, a, ':tools:sum').text, '2 tools');
@@ -121,7 +123,7 @@ scenario('typing, Enter, Send, and the double-submit guard', () => {
   assert.equal(w.get('Composer:chat').sending, false); assert.equal(w.get('Composer:chat').draft, '');
   assert.equal(w.n('input').value, ''); assert.equal(w.n('input').disabled, false); assert.equal(w.n('send').disabled, false);
   assert.equal(w.n('input').focused, true, 'focus goes back to the box');
-  assert.equal(row(w, '2000-9', ':me').text, 'hi there'); assert.equal(row(w, '2000-9', ':who').text, 'queued');
+  assert.equal(w.text(`DomNode:chat:row:${'2000-9'}:me`), 'hi there'); assert.equal(row(w, '2000-9', ':who').text, 'queued');
   assert.equal(row(w, '2000-9')['data-state'], 'queued');
   // the form's submit (the Send button) sends too; an empty draft does not
   w.write('DomNode:chat:form', 'submitted', 8);
@@ -171,7 +173,7 @@ scenario('polls: list period, active period, no overlap, and again after a send'
   w.tick(0.5); assert.equal(w.reqs('history').length, 2, 'a running turn: under the active period (700 ms)');
   w.tick(0.3); assert.equal(w.reqs('history').length, 3, 'the active poll');
   w.reply('history', 200, page([MSGS[0], { ...MSGS[1], state: 'done', response: 'finished now', turn: { started: 110, ended: 112 } }, MSGS[2]]));
-  assert.equal(row(w, '1001-2', ':ans').text, 'finished now'); assert.equal(row(w, '1001-2', ':ans').class, 'bubble seat');
+  assert.equal(w.text(`DomNode:chat:row:${'1001-2'}:ans`), 'finished now'); assert.equal(row(w, '1001-2', ':ans').class, 'bubble seat');
   assert.equal(row(w, '1001-2', ':who').text, 'seat · 2 s'); assert.equal(row(w, '1001-2')['data-state'], 'done');
   w.tick(1); assert.equal(w.reqs('history').length, 3, 'all finished: back to the list period');
   // after a send: a poll at the next tick whatever the period
@@ -200,7 +202,7 @@ scenario('Load older turns uses before and puts the older turns above', () => {
   assert.equal(row(w, '1000-1').parent, 'DomNode:chat:list'); assert.equal(row(w, '1000-1').before, 'DomNode:chat:row:1002-3');
   assert.equal(row(w, '1001-2').parent, 'DomNode:chat:list'); assert.equal(row(w, '1001-2').before, 'DomNode:chat:row:1002-3');
   assert.equal(row(w, '1002-3').before, undefined, 'the rows that were there are not moved');
-  assert.equal(row(w, '1000-1', ':me').text, 'hello');
+  assert.equal(w.text(`DomNode:chat:row:${'1000-1'}:me`), 'hello');
   assert.notEqual(w.n('list').hidden, true);
   // a failure of the older fetch says so on the button, and it can be tried again
   const v = world(); v.open(); v.reply('history', 200, page([MSGS[3]], true, '1003-4'));
@@ -259,13 +261,13 @@ scenario('a poll that never answers is aborted by its timeout, said in text, and
   const w = world(); w.open();
   assert.equal(w.asked('history').timeout_s, 10, 'the first load has a timeout (10 s tried; the fact chat_poll_timeout_s says otherwise)');
   w.reply('history', 200, page([{ ...MSGS[3] }]));                                      // a queued turn
-  assert.match(w.get('DomNode:chat:row:1003-4:ans').text, /Waiting for a turn/);
+  assert.match(w.text('DomNode:chat:row:1003-4:ans'), /Waiting for a turn/);
   w.tick(0.8); assert.equal(w.asked('history').timeout_s, 10, 'a poll has it too');
   w.fail('history', 'timeout after 10 s');                                              // the host aborted the hung poll
   assert.match(w.n('pollnote').text, /did not answer the last read of the turns \(timeout after 10 s\)/); assert.equal(w.n('pollnote').hidden, false);
   w.tick(0.8); assert.equal(w.reqs('history').length, 3, 'armed again');
   w.reply('history', 200, page([{ ...MSGS[3], state: 'done', response: 'finished', turn: { state: 'done', started: 1, ended: 2 } }]));
-  assert.equal(w.get('DomNode:chat:row:1003-4:ans').text, 'finished', 'the turn the seat finished is shown');
+  assert.equal(w.text('DomNode:chat:row:1003-4:ans'), 'finished', 'the turn the seat finished is shown');
   assert.equal(w.n('pollnote').hidden, true, 'the line goes with the good answer');
   const d = world(); d.feed('Boot:seat', 'Boot', { chat_poll_timeout_s: 3 }); d.open(); assert.equal(d.asked('history').timeout_s, 3);
 });
@@ -283,4 +285,30 @@ scenario('no View entity, nothing happens', () => {
   const w = world(); w.tick(100);
   assert.equal(w.get('Fetch:history'), null); assert.equal(w.get('DomNode:chat:root'), null);
 });
+
+// STOP: shown only while a turn runs; one click is one POST to the abort route of the running message; the receipt is read; a refusal is said in text
+scenario('Stop: shown while a turn runs, one POST, errors as text, gone when idle', () => {
+  const w = world(); w.open();
+  assert.equal(w.n('stop').tag, 'button'); assert.equal(w.n('stop').type, 'button'); assert.equal(w.n('stop').text, 'Stop');
+  assert.equal(w.n('stop').hidden, true, 'nothing runs: no Stop');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));          // 1001-2 is running
+  assert.equal(w.n('stop').hidden, false, 'a running turn: Stop');
+  w.write('DomNode:chat:stop', 'clicked', 1); w.write('DomNode:chat:stop', 'clicked', 2);
+  assert.equal(w.reqs('stop:1001-2').length, 1, 'two clicks, one stop');
+  const q = w.asked('stop:1001-2');
+  assert.equal(q.url, '/membrane/chat/message/1001-2/abort'); assert.equal(q.method, 'POST');
+  assert.equal(w.n('stop').disabled, true); assert.equal(w.n('stop').text, 'Stopping…');
+  // the seat refuses: said as text, the button is back (the turn still runs)
+  w.reply('stop:1001-2', 500, { error: 'boom' });
+  assert.match(w.n('note:bubble').text, /Stop did not reach the seat: boom/); assert.equal(w.n('stop').disabled, false); assert.equal(w.n('stop').text, 'Stop');
+  // again: taken; the next read shows the turn ended (an error that keeps the answer so far): Stop goes
+  w.write('DomNode:chat:stop', 'clicked', 3);
+  w.reply('stop:1001-2', 200, true);
+  assert.equal(w.n('note:bubble').text, '', 'a good stop clears the note');
+  w.tick(1000); w.reply('history', 200, page([{ ...MSGS[1], state: 'error', response: 'half an answer\n\n(stopped from the page)', turn: { state: 'error', started: 110, ended: 120 } }]));
+  assert.equal(w.n('stop').hidden, true, 'the turn ended: no Stop');
+  assert.match(w.text('DomNode:chat:row:1001-2:ans'), /half an answer/); assert.match(w.text('DomNode:chat:row:1001-2:ans'), /\(stopped from the page\)/);
+  assert.equal(row(w, '1001-2', ':ans').class, 'bubble note', 'the stopped turn is shown as a note');
+});
+
 console.log(`chat_view: ok (${n} scenarios)`);

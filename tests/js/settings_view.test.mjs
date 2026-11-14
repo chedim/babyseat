@@ -14,7 +14,7 @@ initSync({ module: readFileSync(fileURLToPath(new URL('fieldvm_core_bg.wasm', ui
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
 const DOM = "PACK dom 1\nDomNode.tag getter: this.tag or 'div'\n";
 const FETCH = read('../../membrane/packs/fetch.c1f');
-const PACKS = { shell_view: read('../../membrane/apps/barest.c1f/shell_view.c1f'), chat_view: read('../../membrane/apps/barest.c1f/chat_view.c1f'), settings_view: read('../../membrane/apps/barest.c1f/settings_view.c1f') };
+const PACKS = { markdown: read('../../membrane/apps/barest.c1f/markdown.c1f'), shell_view: read('../../membrane/apps/barest.c1f/shell_view.c1f'), chat_view: read('../../membrane/apps/barest.c1f/chat_view.c1f'), settings_view: read('../../membrane/apps/barest.c1f/settings_view.c1f') };
 const FEED = JSON.parse(read('./fixtures/settings_feed.json'));
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
