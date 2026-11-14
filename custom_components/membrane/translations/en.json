@@ -2,103 +2,24 @@
   "config": {
     "step": {
       "user": {
-        "title": "Membrane",
-        "description": "Where should the seat run?",
-        "menu_options": {
-          "inside": "Inside Home Assistant (needs an Ollama server; 1-3 GB of RAM)",
-          "connect": "Connect to a seat running elsewhere"
-        }
+        "title": "Connect to a seat",
+        "description": "The address of a seat you run (cliffvm) and a token for it. On the seat's machine, mint the token with `cliffvm token mint --sub ha --name \"Home Assistant\" --ttl 30d --secret-file <seat folder>/door.secret` and paste it here. See docs/home-assistant.md.",
+        "data": { "serve_url": "Seat URL (e.g. http://192.168.1.20:4096)", "serve_pass": "Token" }
       },
-      "inside": {
-        "title": "The model server",
-        "description": "The seat thinks with an Ollama server. Home Assistant has no Ollama integration set up, so give its address (this machine or another one on your network).",
-        "data": { "backend": "Ollama URL" }
-      },
-      "models": {
-        "title": "Models",
-        "description": "The Ollama server at {backend} ({source}). Pick one model to talk with and one to embed text for the field.",
-        "data": { "model": "Chat model", "embed_model": "Embedding model" }
-      },
-      "connect": {
-        "title": "An existing seat",
-        "description": "The seat's serve address. Password: the seat token (run `membrane token seat` on the seat); a seat on another machine needs it for everything that writes. Or the pair a reverse proxy in front of it asks for.",
-        "data": { "serve_url": "Seat URL", "serve_user": "User", "serve_pass": "Password (the seat token)" }
+      "reauth_confirm": {
+        "title": "The seat needs a new token",
+        "description": "The seat at {url} refused Home Assistant's token (it ran out, or the seat's key changed), or this entry has no seat yet. Mint a new one on the seat (`cliffvm token mint --sub ha --ttl 30d --secret-file <seat folder>/door.secret`) and paste it here.",
+        "data": { "serve_url": "Seat URL", "serve_pass": "Token" }
       }
     },
     "error": {
-      "no_ollama": "No Ollama server answered at that address.",
-      "no_models": "That Ollama server has no models yet: `ollama pull` one to chat with and one embedding model.",
-      "cannot_connect": "The seat didn't answer (wrong address or pair)."
-    },
-    "abort": { "already_configured": "Membrane is already set up." }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Membrane",
-        "description": "The house talks to one seat at a time; switch it from membrane home's 🦠 zoo or the Membrane seat entity.",
-        "menu_options": {
-          "settings": "Settings",
-          "add_seat": "Add a seat",
-          "pick_seat": "Edit a seat",
-          "remove_seat": "Remove a seat"
-        }
-      },
-      "settings": {
-        "title": "Membrane",
-        "data": {
-          "model": "Chat model",
-          "embed_model": "Embedding model (best left as it is once the field has grown: its memories were embedded with it)",
-          "ha_access": "Let the seat use Home Assistant (read states, call services, sense changes of the entities it mirrors) -- its own hidden, non-admin user",
-          "ha_base_url": "Home Assistant's address as the seat sees it (detached seats call this; empty: HA's own answer)",
-          "landing": "Open on membrane home (folds HA's sidebar away, as on the boat)",
-          "stt_url": "Speech server URL (whisper-server; empty: the browser listens itself)",
-          "loops": "Watch loops (1-3; fewer is lighter)"
-        }
-      },
-      "add_seat": {
-        "title": "Add a seat",
-        "description": "Another seat for the zoo -- a laptop, a phone, a server running `membrane`. Its token: run `membrane token seat` on that seat.",
-        "data": {
-          "host": "Host (the seat's address on your network, e.g. 192.168.1.107)",
-          "serve_port": "Serve port (4096: the seat's chat and field surface)",
-          "proxy_port": "Proxy port (11500: the seat's model proxy)",
-          "token": "Seat token (`membrane token seat` on the seat): a seat on another machine needs it for everything that writes",
-          "name": "Name (empty: its Blurp's own name, else the host)",
-          "stt_url": "Speech server for this seat (empty: the house's)"
-        }
-      },
-      "pick_seat": {
-        "title": "Edit a seat",
-        "data": {
-          "seat": "Seat"
-        }
-      },
-      "edit_seat": {
-        "title": "Edit {seat}",
-        "description": "The seat's address, ports and token (`membrane token seat` on the seat); Home Assistant's own seat takes a name only.",
-        "data": {
-          "host": "Host (the seat's address on your network, e.g. 192.168.1.107)",
-          "serve_port": "Serve port (4096: the seat's chat and field surface)",
-          "proxy_port": "Proxy port (11500: the seat's model proxy)",
-          "token": "Seat token (`membrane token seat` on the seat): a seat on another machine needs it for everything that writes",
-          "name": "Name (empty: its Blurp's own name, else the host)",
-          "stt_url": "Speech server for this seat (empty: the house's)"
-        }
-      },
-      "remove_seat": {
-        "title": "Remove a seat",
-        "description": "Home Assistant's own seat stays; the last seat stays.",
-        "data": {
-          "seat": "Seat"
-        }
-      }
-    },
-    "error": {
-      "no_host": "Give the seat's host."
+      "cannot_connect": "The seat didn't answer at that address.",
+      "invalid_auth": "The seat refused the token (wrong, expired, or from another seat).",
+      "invalid_url": "That is not an http:// or https:// address."
     },
     "abort": {
-      "no_seat": "That seat is gone."
+      "already_configured": "Membrane is already set up.",
+      "reauth_successful": "The new token works."
     }
   }
 }

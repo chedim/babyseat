@@ -130,11 +130,6 @@ class TestRoute(unittest.TestCase):
             self.assertEqual(code, 200)
             self.assertEqual(len(body["lines"]), 2)
 
-    def test_the_ha_relay_forwards_it_read_only(self):
-        relay =(Path(__file__).resolve().parent.parent / "custom_components" / "membrane" / "relay.py").read_text()
-        self.assertIn('"membrane/self/recent"', relay.split("READ_ONLY_EXACT = (", 1)[1].split(")", 1)[0])
-
-
 # ---- the page: pure logic in panel.js (node) ----------------------------------
 
 def _js(expr):

@@ -186,13 +186,6 @@ class TestRoute(unittest.TestCase):
         finally:
             httpd.shutdown()
 
-    def test_the_ha_relay_forwards_it_read_only(self):
-        relay = (ROOT / "custom_components" / "membrane" / "relay.py").read_text()
-        ro = relay.split("READ_ONLY_EXACT = (", 1)[1].split(")", 1)[0]
-        self.assertIn('"membrane/self/sheet"', ro)
-        self.assertNotIn('"membrane/self/sheet"', relay.split("ALLOWED_EXACT = (", 1)[1].split(")", 1)[0])
-
-
 # ---- the page: pure logic in panel.js (node) ---------------------------------------
 
 def _js(expr):
@@ -516,11 +509,6 @@ class TestDockRoute(TestRoute):
             with mock.patch("membrane.seatauth.is_loopback", lambda h: False):      # off-box
                 self.assertEqual(self._get("/membrane/toybox/state")[0], 401)
             self.assertEqual(self._get("/membrane/toybox/state", tok=J.mint(SECRET, "bob"))[0], 200)
-
-    def test_the_relay_forwards_toy_state_read_only(self):
-        relay = (ROOT / "custom_components" / "membrane" / "relay.py").read_text()
-        self.assertIn('"membrane/toybox/state"', relay.split("READ_ONLY_EXACT = (", 1)[1].split(")", 1)[0])
-
 
 def _toy(**kw):
     t = {"name": "toy:tower", "kind": "tower", "health": "ok", "reading": {"blocks": [True, True, False, False, True]},

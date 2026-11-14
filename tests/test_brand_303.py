@@ -123,9 +123,8 @@ class TestTheHomeAssistantIntegration(unittest.TestCase):
     def setUp(self):
         self.man = json.loads((ROOT / "custom_components" / "membrane" / "manifest.json").read_text())
 
-    def test_it_requires_babyseat(self):
-        v = _project()["version"]
-        self.assertEqual(self.man["requirements"], [f"babyseat=={v}"])
+    def test_it_requires_no_package(self):
+        self.assertEqual(self.man["requirements"], [])        # #1143: it connects to a seat the user runs
 
     def test_the_domain_stays_membrane(self):
         self.assertEqual(self.man["domain"], "membrane")
