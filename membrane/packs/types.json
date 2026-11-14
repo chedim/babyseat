@@ -240,7 +240,7 @@
       "Chat.ended": "Num",
       "Chat.last_turn": "Any",
       "Chat.mention": "Bool",
-      "Chat.result": "Text",
+      "Chat.result": "Any",
       "Chat.started": "Num",
       "Chat.state": "Text",
       "Chat.tool_ids": "Any",
@@ -1256,7 +1256,7 @@
       "SemText.mention_n": "Int",
       "SemText.mention_spans": "List(Dict)",
       "SemText.mentioned": "Any",
-      "SemText.mentions": "List((Entity(Identifier)|Entity(Path)|Entity(Word))?)",
+      "SemText.mentions": "List((Entity(Identifier)|Entity(Path)|Entity(Word)|Error)?)",
       "Span.armed": "Bool",
       "Span.classified": "Bool",
       "Span.parents": "List(Text?)?",
@@ -1358,7 +1358,7 @@
   "proc": {
     "getters": {
       "Command.errors": "Any",
-      "Command.ok": "Bool?",
+      "Command.ok": "(Bool|Error)?",
       "Command.output": "Any",
       "Command.partial_errors": "Any",
       "Command.partial_output": "Any",
@@ -1428,7 +1428,7 @@
       "Span.text": "Any"
     },
     "writes": {
-      "SemText.attach_result": "Entity(Span)?",
+      "SemText.attach_result": "(Entity(Span)|Error)?",
       "Span.armed": "Bool"
     },
     "findings": [],
