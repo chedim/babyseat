@@ -764,6 +764,9 @@ pub fn to_json_shown(v: &V) -> Result<serde_json::Value, Err> {
     })
 }
 
+/// The Error among operands, if any: it wins over a plain null, the first one wins among several. (An Error is contagious wherever a value is USED.)
+fn first_error(vals: &[&V]) -> Option<V> { vals.iter().find(|v| matches!(v, V::Error(_))).map(|v| (*v).clone()) }
+
 /// The null an operation on null operands gives: the first reason carried, else `absent`.
 fn null_of(vals: &[&V], what: &str) -> Option<V> {
     for v in vals { if let V::Nil(r) = v { return Some(V::Nil(r.clone())); } }
@@ -874,6 +877,7 @@ fn vec_arith(op: Op, a: &V, b: &V) -> Result<V, Err> {
 }
 
 pub fn arith(op: Op, a: &V, b: &V) -> Result<V, Err> {
+    if let Some(e) = first_error(&[a, b]) { return Ok(e); }
     if let Some(n) = null_of(&[a, b], "arithmetic") { return Ok(n); }
     if matches!(a, V::List(_)) || matches!(b, V::List(_)) { return vec_arith(op, a, b); }
     if let (V::Str(x), V::Str(y), Op::Add) = (a, b, op) { return Ok(V::Str(format!("{}{}", x, y))); }
@@ -1270,10 +1274,12 @@ fn ev_seq(n: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
     match n {
         Node::List(v) => Ok(V::List(v.iter().map(|x| ev(x, env, w, m)).collect::<Result<_, _>>()?)),
         Node::Dict(v) => Ok(V::Dict(v.iter().map(|(k, x)| Ok((k.clone(), ev(x, env, w, m)?))).collect::<Result<_, Err>>()?)),
-        Node::Not(a) => Ok(V::Bool(!truthy(&ev(a, env, w, m)?))),
-        Node::And(v) => { let mut last = V::Bool(true); for x in v { last = ev(x, env, w, m)?; if !truthy(&last) { return Ok(last); } } Ok(last) }
-        Node::Or(v) => { let mut last = V::Bool(false); for x in v { last = ev(x, env, w, m)?; if truthy(&last) { return Ok(last); } } Ok(last) }
-        Node::If(a, c, b) => if truthy(&ev(c, env, w, m)?) { ev(a, env, w, m) } else { ev(b, env, w, m) },
+        Node::Not(a) => { let v = ev(a, env, w, m)?; if let V::Error(_) = v { return Ok(v); } Ok(V::Bool(!truthy(&v))) }
+        // an Error operand is the answer (a default or a short-circuit must not hide a failure)
+        Node::And(v) => { let mut last = V::Bool(true); for x in v { last = ev(x, env, w, m)?; if matches!(last, V::Error(_)) || !truthy(&last) { return Ok(last); } } Ok(last) }
+        Node::Or(v) => { let mut last = V::Bool(false); for x in v { last = ev(x, env, w, m)?; if matches!(last, V::Error(_)) || truthy(&last) { return Ok(last); } } Ok(last) }
+        // a condition over an Error is that Error: neither arm can be chosen (an `else` would silently hide it)
+        Node::If(a, c, b) => { let cv = ev(c, env, w, m)?; if let V::Error(_) = cv { return Ok(cv); } if truthy(&cv) { ev(a, env, w, m) } else { ev(b, env, w, m) } }
         Node::Is(a, names, neg) => { let v = ev(a, env, w, m)?; Ok(V::Bool(names.iter().all(|n| is_kind(&v, n, w)) != *neg)) }
         _ => unreachable!(),
     }
@@ -1284,6 +1290,7 @@ fn ev_attr(b: &Node, a: &String, env: &Env, w: &dyn World, m: &mut Meter) -> Res
     match ev(b, env, w, m)? {
         V::Ent(e) => { if a.starts_with('_') { return Err(format!("no attribute {:?}", a)); } Ok(w.attr(&e, a)) }
         V::Nil(r) => Ok(V::Nil(r)),
+        e @ V::Error(_) => Ok(e),
         V::None => Ok(V::Nil(format!("absent: .{} of an absent value", a))),
         _ => Err("attributes are read on entities only".into()),
     }
@@ -1329,6 +1336,7 @@ fn ev_ent(parts: &[EntPart], env: &Env, w: &dyn World, m: &mut Meter) -> Result<
                 V::Int(i) => { id.push(':'); id.push_str(&i.to_string()); }
                 V::Str(t) if !t.is_empty() => { id.push(':'); id.push_str(&t); }
                 V::Nil(r) => return Ok(V::Nil(r)),
+                e @ V::Error(_) => return Ok(e),
                 V::None => return Ok(V::Nil(format!("error: the key of {} is null", id))),
                 V::Str(_) => return Ok(V::Nil(format!("error: the key of {} is empty text", id))),
                 v => return Ok(V::Nil(format!("error: the key of {} is an integer or text, got a {}", id, kind_of(&v)))),
@@ -1344,6 +1352,7 @@ fn ev_neg(a: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
         V::List(l) => Ok(floats(vec_of(&V::List(l))?.into_iter().map(|x| -x).collect())),
         V::Int(i) => Ok(V::Int(-i)),
         V::Float(f) => Ok(V::Float(-f)),
+        e @ V::Error(_) => Ok(e),
         v => if let Some(n) = null_of(&[&v], "negation") { Ok(n) } else { Err(format!("not a number: {:?}", v)) },
     }
 }
@@ -1353,6 +1362,7 @@ fn ev_index(b: &Node, i: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Resu
             let base = ev(b, env, w, m)?;
             let idx = ev(i, env, w, m)?;
             match (base, idx) {
+                (e @ V::Error(_), _) | (_, e @ V::Error(_)) => Ok(e),
                 (V::Nil(r), _) => Ok(V::Nil(r)),
                 (_, V::Nil(r)) => Ok(V::Nil(r)),
                 (V::None, _) => Ok(V::None),
@@ -1372,6 +1382,9 @@ fn ev_compare(a: &Node, ops: &[(Cmp, Node)], env: &Env, w: &dyn World, m: &mut M
             let mut left = ev(a, env, w, m)?;
             for (op, rn) in ops {
                 let right = ev(rn, env, w, m)?;
+                // `x == None` / `x != None` is the one comparison that reads an Error: it is not a null (False / True)
+                let null_test = matches!(op, Cmp::Eq | Cmp::Ne) && matches!((&left, &right), (V::Error(_), V::None | V::Nil(_)) | (V::None | V::Nil(_), V::Error(_)));
+                if !null_test { if let Some(e) = first_error(&[&left, &right]) { return Ok(e); } }
                 let ok = match op {
                     Cmp::Eq => Some(py_eq(&left, &right)),
                     Cmp::Ne => Some(!py_eq(&left, &right)),
@@ -1390,13 +1403,13 @@ fn ev_compare(a: &Node, ops: &[(Cmp, Node)], env: &Env, w: &dyn World, m: &mut M
 
 #[inline(never)]
 fn ev_comp(elt: &Node, var: &String, iter: &Node, cond: &Option<Box<Node>>, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
-            let xs = match ev(iter, env, w, m)? { V::List(l) => l, V::None | V::Nil(_) => vec![], v => return Err(format!("can't iterate over {:?}", v)) };
+            let xs = match ev(iter, env, w, m)? { V::List(l) => l, V::None | V::Nil(_) => vec![], e @ V::Error(_) => return Ok(e), v => return Err(format!("can't iterate over {:?}", v)) };
             let mut out = Vec::new();
             let mut env2 = Env::child(env);   // a scope over the enclosing one: the enclosing bindings (a local holding a long list) are looked up, never copied per iteration
             env2.vars.push((var.clone(), V::None));
             for x in xs {
                 env2.vars[0].1 = x;
-                if let Some(c) = cond { if !truthy(&ev(c, &env2, w, m)?) { continue; } }
+                if let Some(c) = cond { let cv = ev(c, &env2, w, m)?; if let V::Error(_) = cv { return Ok(cv); } if !truthy(&cv) { continue; } }
                 out.push(ev(elt, &env2, w, m)?);
             }
             Ok(V::List(out))
@@ -1405,6 +1418,8 @@ fn ev_comp(elt: &Node, var: &String, iter: &Node, cond: &Option<Box<Node>>, env:
 #[inline(never)]
 fn ev_call(f: &String, args: &[Node], env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
             let a = args.iter().map(|x| ev(x, env, w, m)).collect::<Result<Vec<_>, _>>()?;
+            // a call over an Error is that Error (`why` reads it)
+            if f != "why" { if let Some(e) = first_error(&a.iter().collect::<Vec<_>>()) { return Ok(e); } }
             let any_null = a.iter().any(nullish);
             let r = call(f, a.clone(), w);
             match r {
