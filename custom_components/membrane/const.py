@@ -19,3 +19,7 @@ SESSION_TITLE_PREFIX = "hass-"   # a seat session per Home Assistant conversatio
 CALL_PULL_S = 2.0                # how often the pending calls are asked for: the old component's batch flush (FLUSH_S, decision 11 of docs/hass-plan.md), kept as it was
 CATALOG_S = POLL_S               # how often the catalog is rebuilt and, when it changed, pushed: the old component's one minute
 STATE_MAX = 255                  # Home Assistant's own limit on a state's length (a longer one is refused by HA), not ours
+
+# THE USER A CALL RUNS AS: the old component's hidden system user (non-admin, local only, group USER); its id is kept in the entry
+HA_USER_NAME = "Membrane"
+CONF_HA_USER_ID = "ha_user_id"

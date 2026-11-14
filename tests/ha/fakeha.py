@@ -42,6 +42,20 @@ class ServiceNotFound(HomeAssistantError):
     pass
 
 
+class Unauthorized(HomeAssistantError):
+    """Home Assistant's own refusal of a context user: it carries no message (str() is empty), only what it was about."""
+    def __init__(self, context=None, user_id=None, entity_id=None, config_entry_id=None, perm_category=None, permission=None):
+        super().__init__()
+        self.context, self.user_id, self.entity_id = context, user_id, entity_id
+        self.config_entry_id, self.perm_category, self.permission = config_entry_id, perm_category, permission
+
+
+class FakeUser:
+    def __init__(self, uid, name, system_generated, group_ids, local_only):
+        self.id, self.name, self.system_generated = uid, name, system_generated
+        self.group_ids, self.local_only, self.is_admin = list(group_ids), local_only, "system-admin" in group_ids
+
+
 class SupportsResponse:
     """HA's enum: NONE (no data back), OPTIONAL (the caller may ask for it), ONLY (the data is the point)."""
     NONE, OPTIONAL, ONLY = "none", "optional", "only"
@@ -85,6 +99,8 @@ class FakeServices:
     def __init__(self):
         self._reg = {}
         self.calls = []
+        self.contexts = []                        # the Context of each call that reached a handler, in order
+        self.policy = None                        # fn(user_id, domain, service, data) -> raises Unauthorized to refuse, as HA's permission model does
 
     def register(self, domain, service, handler, supports=SupportsResponse.NONE):
         self._reg.setdefault(domain, {})[service] = (handler, supports)
@@ -114,6 +130,9 @@ class FakeServices:
             raise HomeAssistantError(f"Service {domain}.{service} does not support responses")
         if not return_response and sup == SupportsResponse.ONLY:
             raise HomeAssistantError(f"Service {domain}.{service} requires a response")
+        if self.policy is not None and context is not None and context.user_id:
+            self.policy(context.user_id, domain, service, dict(service_data or {}, **(target or {})))
+        self.contexts.append(context)
         data = dict(service_data or {})
         if target:
             data.update(target)
@@ -210,11 +229,25 @@ class FakeHass:
         self.registry = FakeEntityRegistry()
         self.exposed = set()                      # the entity ids exposed to Assist
         self.descriptions = {}                    # the services' descriptions, as async_get_all_descriptions answers
-        self.auth = types.SimpleNamespace(async_get_user=self._get_user)
+        self.created_users = []                   # every async_create_system_user call: (name, group_ids, local_only)
+        self.auth = types.SimpleNamespace(async_get_user=self._get_user, async_get_users=self._get_users,
+                                          async_create_system_user=self._create_system_user, async_remove_user=self._remove_user)
         self.tasks = []
 
     async def _get_user(self, uid):
         return self.users.get(uid)
+
+    async def _get_users(self):
+        return list(self.users.values())
+
+    async def _create_system_user(self, name, *, group_ids=None, local_only=None):
+        self.created_users.append((name, list(group_ids or []), local_only))
+        u = FakeUser(f"sys-{len(self.created_users)}", name, True, group_ids or [], local_only)
+        self.users[u.id] = u
+        return u
+
+    async def _remove_user(self, user):
+        self.users.pop(user.id, None)
 
     def async_create_task(self, coro):
         import asyncio
@@ -340,13 +373,15 @@ def load(monkeypatch, session=None):
         "homeassistant": ha,
         "homeassistant.config_entries": _mod("homeassistant.config_entries", ConfigFlow=ConfigFlow, ConfigEntry=FakeConfigEntry,
                                              ConfigFlowResult=dict),
-        "homeassistant.core": _mod("homeassistant.core", HomeAssistant=FakeHass, callback=lambda f: f, ServiceCall=ServiceCall,
+        "homeassistant.core": _mod("homeassistant.core", HomeAssistant=FakeHass, callback=lambda f: f, ServiceCall=ServiceCall, Context=Context,
                                    SupportsResponse=SupportsResponse, ServiceResponse=dict),
         "homeassistant.const": _mod("homeassistant.const", Platform=types.SimpleNamespace(
             CONVERSATION="conversation", SENSOR="sensor", BINARY_SENSOR="binary_sensor", SELECT="select")),
         "homeassistant.exceptions": _mod("homeassistant.exceptions", ConfigEntryAuthFailed=ConfigEntryAuthFailed,
                                          ConfigEntryNotReady=ConfigEntryNotReady, HomeAssistantError=HomeAssistantError,
-                                         ServiceNotFound=ServiceNotFound),
+                                         ServiceNotFound=ServiceNotFound, Unauthorized=Unauthorized),
+        "homeassistant.auth": _mod("homeassistant.auth"),
+        "homeassistant.auth.const": _mod("homeassistant.auth.const", GROUP_ID_USER="system-users", GROUP_ID_ADMIN="system-admin"),
         "homeassistant.components.sensor": _mod("homeassistant.components.sensor", SensorEntity=_Entity,
                                                 SensorDeviceClass=types.SimpleNamespace(TIMESTAMP="timestamp")),
         "homeassistant.components.binary_sensor": _mod("homeassistant.components.binary_sensor", BinarySensorEntity=_Entity,

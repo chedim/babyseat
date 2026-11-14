@@ -19,9 +19,9 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import services
-from .const import CONF_SERVE_PASS, CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_SERVE_USER
+from .const import CONF_HA_USER_ID, CONF_SERVE_PASS, CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_SERVE_USER
 from .coordinator import SeatHealth
-from .house import House
+from .house import House, find_user
 from .seat_client import SeatClient, SeatSessionGone
 
 _LOGGER = logging.getLogger(__name__)
@@ -101,7 +101,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         entry.data.get(CONF_SERVE_USER) or DEFAULT_SERVE_USER)
     health = SeatHealth(hass, entry, client)
     await health.async_config_entry_first_refresh()          # ConfigEntryAuthFailed -> reauth; the seat down -> HA retries
-    house = House(hass, client)
+    house = House(hass, client, entry)
+    await house.ensure_user()                                 # the user every call runs as: created once, found again after
     entry.runtime_data = SeatData(client, health, house)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     services.register(hass, entry)
@@ -112,3 +113,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     services.unregister(hass)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """The integration is removed: the hidden user goes with it (a removal that finds none is quiet)."""
+    user = await find_user(hass, entry.data.get(CONF_HA_USER_ID))
+    if user is not None:
+        await hass.auth.async_remove_user(user)
