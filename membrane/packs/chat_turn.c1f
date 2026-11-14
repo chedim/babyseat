@@ -65,7 +65,7 @@ ChatMessage.note getter:
 -- A banner with no `text` (the model's pack left it null) is SHOWN, not skipped: the turn runs with the banner error in the banner's slot, so the model can repair it (Help:banner).
 ChatMessage.banner_slot getter:
   WHEN this.over: None
-  ELSE: this.banner_text if this.banner_text != None else 'BANNER ERROR: your banner `Banner:owner:main` has no `text` (the reason: ' + (why(this.banner_text) or 'it has no text property') + '). Give `Banner.text` a value again, in a pack that defines it; Help:banner shows how.'
+  ELSE: this.banner_text if this.banner_text != None and not (this.banner_text is Error) else 'BANNER ERROR: your banner `Banner:owner:main` has no `text` (the reason: ' + (why(this.banner_text) or 'it has no text property') + '). Give `Banner.text` a value again, in a pack that defines it; Help:banner shows how.'
 ChatMessage.sys getter:
   WHEN this.over: None
   ELSE: join([this.note, this.banner_slot], '\n\n')
@@ -163,7 +163,7 @@ Chat.answer on-setter turn-finish:
     FOR e IN [x for x in this.evs if prop(x, 'type') == 'user']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_result']:
         body = prop(b, 'content')
-        membrane::Chat:message[this.mid]:turn:tool[prop(b, 'tool_use_id')].result = Text(body) or join([prop(c, 'text') for c in (List(body) or [])], '\n')
+        membrane::Chat:message[this.mid]:turn:tool[prop(b, 'tool_use_id')].result = body if body is Text else join([prop(c, 'text') for c in (body if body is List else [])], '\n')
 
 
 -- ---- after the answer: the raw output is dropped ----------------------------------------------------------------------------------------------

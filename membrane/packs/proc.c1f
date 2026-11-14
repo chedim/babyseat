@@ -11,7 +11,7 @@ RESIDENT Command
 
 -- A command that outlives its `timeout_s` is killed (the whole process group: SIGTERM, then SIGKILL after 2 s) and its receipt says `status: timeout`, `rc: 124`,
 -- `killed: true`. `timeout_s` is the model's own estimate of the longest the command may run: in the run value (`run = {id, cmd, timeout_s: 600}`) or set on the entity
--- before the run; without it the boot fact `command_timeout_s` applies (120 s); 0 or less is refused. A timed-out run's RESULT props are reasoned nulls (`why(x)` reads
+-- before the run; without it the boot fact `command_timeout_s` applies (120 s); 0 or less is refused. A timed-out run's RESULT props are Errors (`x is Error`; `why(x)` reads
 -- the remedy: start it again with a bigger timeout_s): `output`, `errors`, `ok`, `rc`; what was collected before the kill stays in `partial_output` and `partial_errors`.
 -- (`run_rc` is the raw receipt value, 124 for a timeout; read `rc` for the checked one.)
 -- the limit a run without `timeout_s` gets: the boot fact, else 120 (the same default as drivers.rs; this one is for what the pending reply shows)
@@ -19,16 +19,16 @@ Command.timeout_default getter: ([b.command_timeout_s for b in instances('Boot')
 Command.timed_out getter: this.run_result != None and prop(this.run_result, 'status') == 'timeout'
 Command.timeout_why getter: str(this.eid) + ' timed out after ' + str(prop(this.run_result, 'timeout_s')) + ' s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}'
 Command.ok getter:
-  WHEN this.timed_out: None(this.timeout_why)
+  WHEN this.timed_out: Error(this.timeout_why)
   ELSE: this.run_rc == 0 if this.run_rc != None else None
 Command.rc getter:
-  WHEN this.timed_out: None(this.timeout_why)
+  WHEN this.timed_out: Error(this.timeout_why)
   ELSE: this.run_rc
 Command.output getter:
-  WHEN this.timed_out: None(this.timeout_why)
+  WHEN this.timed_out: Error(this.timeout_why)
   ELSE: prop(this.run_result, 'stdout') if this.run_result else None
 Command.errors getter:
-  WHEN this.timed_out: None(this.timeout_why)
+  WHEN this.timed_out: Error(this.timeout_why)
   ELSE: prop(this.run_result, 'stderr') if this.run_result else None
 Command.partial_output getter: prop(this.run_result, 'stdout') if this.timed_out else None
 Command.partial_errors getter: prop(this.run_result, 'stderr') if this.timed_out else None

@@ -119,8 +119,8 @@ Request.op_mind_keys getter: [k for k in ['loops', 'cortex', 'workers', 'loops_a
 -- a number that is not a bool, finite, in (0, 1]; a whole number >= 1 (a JSON 1.0 is a float: not whole)
 Request.op_share_v getter: prop(this.jbody, 'self_cpu_share')
 Request.op_keep_v getter: prop(this.jbody, 'code_runs_keep')
-Request.op_share_ok getter: this.op_share_v == None or (str(this.op_share_v) != 'True' and str(this.op_share_v) != 'False' and this.op_share_v == this.op_share_v + 0 and this.op_share_v > 0 and this.op_share_v <= 1)
-Request.op_keep_ok getter: this.op_keep_v == None or (str(this.op_keep_v) != 'True' and str(this.op_keep_v) != 'False' and this.op_keep_v == this.op_keep_v + 0 and this.op_keep_v >= 1 and str(this.op_keep_v) == str(num(words(replace(str(this.op_keep_v), '.', ' '))[0])))
+Request.op_share_ok getter: this.op_share_v == None or ((this.op_share_v is Int or this.op_share_v is Float) and this.op_share_v > 0 and this.op_share_v <= 1)
+Request.op_keep_ok getter: this.op_keep_v == None or (this.op_keep_v is Int and this.op_keep_v >= 1)
 Request.op_nonempty getter: len(this.jbody) > 0
 Request.op_err getter:
   WHEN not this.m_opts or not this.m_post: None

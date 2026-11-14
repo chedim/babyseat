@@ -66,7 +66,7 @@ fn a_getter_that_errors_is_a_null_with_the_error_as_its_reason_not_a_stale_value
     assert!(c.docs["T:1"].props.get("e").map(|v| v.is_null()).unwrap_or(true), "the stale 2 must not stay: {:?}", c.docs["T:1"].props);   // a null is an absent key
     let chain = f.why_chain(&c, "T:1", "f");
     assert_eq!(names(&chain), vec!["f", "e"], "{chain:?}");
-    assert!(origin(&chain).starts_with("error:") && origin(&chain).contains("len"), "{}", origin(&chain));
+    assert!(origin(&chain).contains("len"), "{}", origin(&chain));
 }
 
 #[test]

@@ -1,0 +1,174 @@
+//! Where an `Error` is born (#1143, docs/c1f-error.md section (a), operator decisions 2026-11-13): a failed cast, a bad entity-literal key, a
+//! failed parse (`json`), a getter body that raised, the step budget, the self-time kill (the Trip), and a pack's own `Error('reason')`.
+//! What stays null: a missing property, `.x` of an absent value, `pending: ...`, a collected virtual entity, `f of a null`.
+//! Old routes are unchanged: an Error is a plain null there (`Core.docs`), and it reads back as an Error through `why`/`failed`.
+use membrane_vm::expr::{self, eval, parse, parse_block, World, V};
+use membrane_vm::fields::Fields;
+use membrane_vm::vm::{Core, Host, Write};
+use serde_json::{json, Value as J};
+use std::collections::HashMap;
+
+struct W;
+impl World for W { fn attr(&self, _: &str, _: &str) -> V { V::None } }
+fn run(src: &str, env: &[(&str, V)]) -> V {
+    let env: HashMap<String, V> = env.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+    eval(&parse_block(src).or_else(|_| parse(src)).unwrap(), &env, &W).unwrap_or_else(|e| panic!("{src}: {e}"))
+}
+fn reason(v: &V) -> Option<String> { if let V::Error(r) = v { Some(r.clone()) } else { None } }
+
+#[test]
+fn a_failed_cast_is_an_error_a_cast_of_a_null_is_that_null() {
+    for (src, want) in [("Int('a')", "not-a-type: int expected, got text"), ("Int(3.0)", "not-a-type: int expected, got float"), ("Text(3)", "not-a-type: text expected, got int"),
+                        ("List({})", "not-a-type: list expected, got dict"), ("Num('3')", "not-a-type: num expected, got text")] {
+        assert_eq!(reason(&run(src, &[])).as_deref(), Some(want), "{src}");
+    }
+    assert_eq!(reason(&run("Int('a') + 1", &[])).as_deref(), Some("not-a-type: int expected, got text"));
+    assert!(matches!(run("Int('a') == None", &[]), V::Bool(false)));
+    assert!(matches!(run("Int(n) == None", &[("n", V::None)]), V::Bool(true)), "a null stays the null it was");
+    assert!(matches!(run("Int(p)", &[("p", V::Nil("pending: read(/a)".into()))]), V::Nil(_)));
+    assert!(matches!(run("Int(3)", &[]), V::Int(3)));
+}
+
+#[test]
+fn a_bad_entity_literal_key_is_an_error_a_null_key_keeps_its_own_null() {
+    let r = run("Goal:g[None]", &[]);
+    assert!(reason(&r).is_some_and(|t| t.contains("the key of Goal:g is null")), "{r:?}");
+    let r = run("Goal:g['']", &[]);
+    assert!(reason(&r).is_some_and(|t| t.contains("empty text")), "{r:?}");
+    let r = run("Goal:g[[1]]", &[]);
+    assert!(reason(&r).is_some_and(|t| t.contains("integer or text")), "{r:?}");
+    let r = run("Goal:g[k]", &[("k", V::Nil("pending: read(/a)".into()))]);
+    assert!(matches!(r, V::Nil(_)), "a key that is a null with a reason is that null: {r:?}");
+}
+
+#[test]
+fn json_of_text_that_is_not_json_stays_a_plain_null_until_the_operator_decides() {
+    // OPEN DECISION (docs/c1f-error.md, (a)): `json(text)` on bad text could be an Error, but ~17 pack lines read `json(x) or {}` / `json(x) != None`
+    // as "not JSON is fine"; making it an Error needs each one rewritten. Until decided it is unchanged: a plain null with no reason.
+    assert!(matches!(run("json('{not json')", &[]), V::None));
+    assert!(matches!(run("json('{\"a\": 1}')", &[]), V::Dict(_)));
+    assert!(matches!(run("json(n)", &[("n", V::None)]), V::None));
+}
+
+#[test]
+fn an_operation_that_failed_because_of_a_null_stays_a_null() {
+    // `f of a null`: the failure belongs to the earlier absence
+    let r = run("lower(n)", &[("n", V::None)]);
+    assert!(!matches!(r, V::Error(_)), "{r:?}");
+    let r = run("n.x", &[("n", V::None)]);
+    assert!(matches!(r, V::Nil(_)), "{r:?}");
+}
+
+// ---- in the field ------------------------------------------------------------------------------------------------------------
+
+struct H;
+impl Host for H {
+    fn resolve(&self, s: &str) -> Option<String> { Some(s.to_string()) }
+    fn resolve_exact(&self, s: &str) -> Option<String> { Some(s.to_string()) }
+    fn dispatch(&self, _: &str, _: &str) -> Option<String> { None }
+    fn vel(&self, _: &str, _: f64, _: f64) -> bool { false }
+    fn align(&self, _: &str, _: f64) -> bool { false }
+    fn live(&self, _: &str, _: bool) -> Option<String> { None }
+}
+fn world(pack: &str, props: J) -> (Core, Fields) {
+    let mut f = Fields::goalgraph();
+    f.set_pack("t", pack).unwrap_or_else(|e| panic!("{e}"));
+    let mut c = Core::new();
+    c.load("Box:a".into(), "Box".into(), props.as_object().unwrap().clone(), None, 0.0);
+    let mut seq = 0;
+    f.rebuild(&mut c, 1.0, &mut seq);
+    (c, f)
+}
+fn val(c: &Core, p: &str) -> J { c.docs["Box:a"].props.get(p).cloned().unwrap_or(J::Null) }
+fn failed(c: &Core, p: &str) -> bool { c.failed.contains(&("Box:a".to_string(), p.to_string())) }
+fn why(c: &Core, p: &str) -> Option<String> { c.why.get(&("Box:a".to_string(), p.to_string())).cloned() }
+
+#[test]
+fn a_getter_body_that_raised_is_an_error_with_the_raised_text_and_a_receipt_still_names_the_getter() {
+    let (c, f) = world("PACK t 1\nBox.bad getter: this.w + 'a'\nBox.is_bad getter: this.bad is Error\nBox.bad_none getter: this.bad == None\nBox.fine getter: this.w + 1\n", json!({"w": 1}));
+    assert_eq!(val(&c, "bad"), J::Null);
+    assert!(failed(&c, "bad"));
+    assert!(why(&c, "bad").is_some_and(|r| !r.starts_with("error") && r.contains("a")), "{:?}", why(&c, "bad"));
+    assert_eq!(val(&c, "is_bad"), json!(true));
+    assert_eq!(val(&c, "bad_none"), json!(false));
+    assert_eq!(val(&c, "fine"), json!(2), "the rest of the engine runs");
+    assert!(f.refusals.iter().any(|r| r["reason"].as_str().is_some_and(|s| s.contains("error in getter Box.bad"))), "{:?}", f.refusals);
+}
+
+#[test]
+fn over_the_step_budget_is_an_error() {
+    expr::set_eval_budget(Some(50));
+    let long = (0..100).map(|i| format!("this.w + {i}")).collect::<Vec<_>>().join(" + ");
+    let (c, _f) = world(&format!("PACK t 1\nBox.total getter: {long}\nBox.is_err getter: this.total is Error\nBox.fine getter: this.w + 1\n"), json!({"w": 1}));
+    expr::set_eval_budget(None);
+    assert_eq!(val(&c, "total"), J::Null);
+    assert!(failed(&c, "total"));
+    assert_eq!(why(&c, "total").as_deref(), Some("budget exceeded (50 steps)"));
+    assert_eq!(val(&c, "is_err"), json!(true));
+    assert_eq!(val(&c, "fine"), json!(2));
+}
+
+mod time {
+    use super::*;
+    use std::cell::Cell;
+    const MS: u64 = 1_000_000;
+    thread_local! { static NOW: Cell<u64> = const { Cell::new(0) }; static STEP: Cell<u64> = const { Cell::new(0) }; }
+    fn fake() -> u64 { NOW.with(|n| { let v = n.get(); n.set(v + STEP.with(|s| s.get())); v }) }
+    fn use_clock(step_ms: u64) { NOW.with(|n| n.set(0)); STEP.with(|s| s.set(step_ms * MS)); expr::set_clock(Some(fake)); }
+    fn long() -> String {
+        let items = (0..600).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+        format!("PACK t 1\nBox.slow getter: this.w + len([x for x in [{items}]])\nBox.dep getter: this.slow + 1\nBox.dep_err getter: this.dep is Error\n")
+    }
+
+    #[test]
+    fn a_self_time_kill_is_an_error_and_so_is_what_reads_it() {
+        use_clock(6);
+        let (c, _f) = world(&long(), json!({"w": 1}));
+        expr::set_clock(None);
+        assert_eq!(val(&c, "slow"), J::Null);
+        assert!(failed(&c, "slow"));
+        assert_eq!(why(&c, "slow").as_deref(), Some("timeout 12 ms (allowance 10 ms)"));
+        assert_eq!(val(&c, "dep_err"), json!(true), "a getter reading the kill returns the same Error");
+        assert_eq!(why(&c, "dep").as_deref(), Some("timeout 12 ms (allowance 10 ms)"));
+    }
+
+    #[test]
+    fn the_trip_rebuild_gives_the_error_again_and_a_fresh_evaluation_clears_it() {
+        use_clock(6);
+        let (c, _f) = world(&long(), json!({"w": 1}));
+        assert_eq!(c.docs.get("Trip:Box:a#slow").expect("the kill is recorded as a Trip entity").props["active"], json!(true));
+        // a replay: a fresh world where the Trip arrives after the node evaluated (fast)
+        use_clock(0);
+        let (mut c2, mut f2) = world(&long(), json!({"w": 1}));
+        assert!(!failed(&c2, "slow"), "evaluated in time on its own");
+        let mut seq = 100;
+        c2.load("Trip:Box:a#slow".into(), "Trip".into(), Default::default(), None, 2.0);
+        f2.born(&mut c2, &H, "Trip:Box:a#slow", 2.0, &mut seq);
+        for (p, v) in [("node", json!("Box:a.slow")), ("self_ms", json!(12)), ("allowance_ms", json!(10)), ("at", json!(1.0)), ("active", json!(true))] {
+            seq += 1;
+            let w = Write { eid: "Trip:Box:a#slow".into(), prop: p.into(), new: v, old: J::Null, writer: "driver:trip".into(), chain: json!({}), seq };
+            c2.hear(w.clone(), None, 2.0);
+            f2.react(&mut c2, &H, w, 2.0, &mut seq);
+        }
+        expr::set_clock(None);
+        assert!(failed(&c2, "slow"), "the Trip applies: the node is the Error");
+        assert_eq!(why(&c2, "slow").as_deref(), Some("timeout 12 ms (allowance 10 ms)"));
+        // an input moves, in time: the node gets a fresh chance
+        use_clock(0);
+        seq += 1;
+        let w = Write { eid: "Box:a".into(), prop: "w".into(), new: json!(7), old: J::Null, writer: "person".into(), chain: json!({}), seq };
+        c2.hear(w.clone(), None, 3.0);
+        f2.react(&mut c2, &H, w, 3.0, &mut seq);
+        expr::set_clock(None);
+        assert!(!failed(&c2, "slow"));
+        assert_eq!(val(&c2, "slow"), json!(607));
+    }
+}
+
+#[test]
+fn what_stays_null_is_not_an_error() {
+    let (c, _f) = world("PACK t 1\nBox.missing getter: this.price\nBox.missing_err getter: this.price is Error\nBox.sub getter: this.price + 1\nBox.sub_err getter: this.sub is Error\nBox.note getter: None('not applicable')\nBox.note_err getter: this.note is Error\n", json!({}));
+    for p in ["missing", "sub", "note"] { assert!(!failed(&c, p), "{p}"); }
+    for p in ["missing_err", "sub_err", "note_err"] { assert_eq!(val(&c, p), json!(false), "{p}"); }
+    assert!(why(&c, "missing").is_some_and(|r| r.starts_with("absent")), "a missing property keeps its `absent` why");
+}

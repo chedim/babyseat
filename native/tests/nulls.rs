@@ -81,9 +81,10 @@ fn none_called_with_a_reason_is_a_null_that_says_why() {
 }
 
 // ---- casts: a checked narrowing, spelled as the type's capitalized name -------------------------------------------------------
-// Int(x) is x when x is an int; otherwise None('not-a-type: int expected, got text'). A null stays the null it was (SQL's
+// Int(x) is x when x is an int; otherwise an Error('not-a-type: int expected, got text') (a failure, #1143). A null stays the null it was (SQL's
 // CAST(NULL AS int) is NULL, and its reason survives). `Int(v) or Text(v)` is the union of two casts.
 fn is_nil_why(r: &V, want: &str) -> bool { why(r).map(|w| w == want).unwrap_or(false) }
+fn is_err_why(r: &V, want: &str) -> bool { matches!(r, V::Error(w) if w == want) }
 
 #[test]
 fn a_cast_gives_the_value_back_when_it_has_the_type() {
@@ -96,13 +97,13 @@ fn a_cast_gives_the_value_back_when_it_has_the_type() {
 }
 
 #[test]
-fn a_cast_of_a_value_that_does_not_have_the_type_is_a_null_that_says_so() {
+fn a_cast_of_a_value_that_does_not_have_the_type_is_an_error_that_says_so() {
     for (src, want) in [("Int('a')", "not-a-type: int expected, got text"), ("Int(3.0)", "not-a-type: int expected, got float"),
                         ("Float(3)", "not-a-type: float expected, got int"), ("Text(3)", "not-a-type: text expected, got int"),
                         ("Bool(1)", "not-a-type: bool expected, got int"), ("Num('3')", "not-a-type: num expected, got text"),
                         ("List({})", "not-a-type: list expected, got dict"), ("Dict([])", "not-a-type: dict expected, got list")] {
         let r = run(src, &[]).unwrap();
-        assert!(is_nil_why(&r, want), "{src} -> {:?}", why(&r));
+        assert!(is_err_why(&r, want), "{src} -> {r:?}");
     }
 }
 
@@ -114,11 +115,13 @@ fn a_cast_of_a_null_is_that_null() {
 }
 
 #[test]
-fn casts_compose_with_or_as_a_union_and_propagate_like_any_null() {
-    assert!(py_eq(&run("Int(v) or Text(v)", &[("v", V::Str("x".into()))]).unwrap(), &V::Str("x".into())));
+fn a_failed_cast_is_an_error_that_or_does_not_hide_and_a_union_is_written_with_is() {
+    // `Int(v) or Text(v)` used to be the union of two casts; a failed cast is an Error now and `or` never hides an Error: the union is `is`
+    assert!(is_err_why(&run("Int(v) or Text(v)", &[("v", V::Str("x".into()))]).unwrap(), "not-a-type: int expected, got text"));
+    assert!(py_eq(&run("v if v is Int or v is Text else None", &[("v", V::Str("x".into()))]).unwrap(), &V::Str("x".into())));
     assert!(py_eq(&run("Int(v) or Text(v)", &[("v", V::Int(4))]).unwrap(), &V::Int(4)));
-    assert!(is_nil_why(&run("Int('a') + 1", &[]).unwrap(), "not-a-type: int expected, got text"));
-    assert!(py_eq(&run("Int('a') == None", &[]).unwrap(), &V::Bool(true)));
+    assert!(is_err_why(&run("Int('a') + 1", &[]).unwrap(), "not-a-type: int expected, got text"));
+    assert!(py_eq(&run("Int('a') == None", &[]).unwrap(), &V::Bool(false)), "an Error is not null");
 }
 
 #[test]

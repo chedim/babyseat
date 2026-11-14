@@ -34,7 +34,7 @@ Casts `Int Float Num Text Bool List Dict` check a type (`Int('a')` is a null say
 -- reads Box:a.why = null
 -- reads Box:a.gone = "absent: Box:a.price"
 -- reads Box:a.row_gone = "absent: Box:a.price"
-Box.n getter: Int(this.raw) or 0
+Box.n getter: this.raw if this.raw is Int else 0
 Box.gone getter: why(this.price)
 Box.row getter: [this.raw, this.price]
 Box.row_gone getter: why(this.row[1])

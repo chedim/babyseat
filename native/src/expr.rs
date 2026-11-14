@@ -929,7 +929,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
                 | ("List", V::List(_)) | ("Dict", V::Dict(_)) => true,
                 _ => false,
             };
-            Ok(if ok { v.clone() } else { V::Nil(format!("not-a-type: {} expected, got {}", f.to_lowercase(), kind_of(v))) })
+            Ok(if ok { v.clone() } else { V::Error(format!("not-a-type: {} expected, got {}", f.to_lowercase(), kind_of(v))) })
         }
         // Error('reason') makes a failure: the remedy is part of the text (docs/c1f-error.md)
         "Error" => { argn(1)?; Ok(V::Error(py_str(&a[0]))) }
@@ -1337,9 +1337,9 @@ fn ev_ent(parts: &[EntPart], env: &Env, w: &dyn World, m: &mut Meter) -> Result<
                 V::Str(t) if !t.is_empty() => { id.push(':'); id.push_str(&t); }
                 V::Nil(r) => return Ok(V::Nil(r)),
                 e @ V::Error(_) => return Ok(e),
-                V::None => return Ok(V::Nil(format!("error: the key of {} is null", id))),
-                V::Str(_) => return Ok(V::Nil(format!("error: the key of {} is empty text", id))),
-                v => return Ok(V::Nil(format!("error: the key of {} is an integer or text, got a {}", id, kind_of(&v)))),
+                V::None => return Ok(V::Error(format!("the key of {} is null", id))),
+                V::Str(_) => return Ok(V::Error(format!("the key of {} is empty text", id))),
+                v => return Ok(V::Error(format!("the key of {} is an integer or text, got a {}", id, kind_of(&v)))),
             },
         }
     }

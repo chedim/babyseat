@@ -132,7 +132,7 @@ Request.cl_gp getter: 'Pack:cliffg' + this.cl_n
 Request.cl_sp getter: 'Pack:cliffs' + this.cl_n
 Request.cl_ge getter: 'Cliffg' + this.cl_n + ':x'
 Request.cl_se getter: 'Cliffs' + this.cl_n + ':x'
-Request.cl_gtext getter: 'PACK cliffg' + this.cl_n + ' 1\nCliffg' + this.cl_n + '.val getter:\n' + join(['  ' + l for l in lines(this.cl_code)], '\n') + '\nCliffg' + this.cl_n + '.shown getter: {\'v\': this.val, \'why\': why(this.val)}\n'
+Request.cl_gtext getter: 'PACK cliffg' + this.cl_n + ' 1\nCliffg' + this.cl_n + '.val getter:\n' + join(['  ' + l for l in lines(this.cl_code)], '\n') + '\nCliffg' + this.cl_n + '.shown getter: {\'v\': this.val, \'why\': why(this.val), \'failed\': this.val is Error}\n'
 Request.cl_stext getter: 'PACK cliffs' + this.cl_n + ' 1\nIMPORT door 1\nIMPORT fs 1\nIMPORT proc 1\nIMPORT fetch 1\nIMPORT store 1\nCliffs' + this.cl_n + '.go on-setter run:\n  ALWAYS:\n' + join(['    ' + l for l in lines(this.cl_code)], '\n') + '\n'
 Request.cl_start getter: this.cl_code if this.cl_on else None
 Request.cl_start on-setter cliff-load:
@@ -160,7 +160,8 @@ Request.cl_shown getter: prop(this.cl_ge, 'shown') if this.cl_mode == 'value' el
 Request.cl_out getter:
   WHEN this.cl_final != None: this.cl_final
   ELSE WHEN this.cl_mode == 'error': {'text': 'the block did not load.\nas a value: ' + str(prop(this.cl_gp, 'error')) + '\nas writes: ' + str(prop(this.cl_sp, 'error')), 'err': True}
-  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'why') != None: {'text': str(prop(this.cl_shown, 'why')) if startswith(str(prop(this.cl_shown, 'why')), 'error') else 'error: ' + str(prop(this.cl_shown, 'why')), 'err': True}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'failed') == True: {'text': 'Error: ' + str(prop(this.cl_shown, 'why')), 'err': True}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'why') != None: {'text': 'error: ' + str(prop(this.cl_shown, 'why')), 'err': True}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'v') == None: {'text': 'null', 'err': False}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None: {'text': str(prop(this.cl_shown, 'v')), 'err': False}
   ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': 'ran the writes of the block\nreactions: ' + str(this.reactions) + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}
@@ -194,6 +195,7 @@ Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json
 Request.mc_r_val getter: prop(this.mc_r_id, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None else None
 Request.mc_r_text getter:
   WHEN this.mc_tool != 'entity_read' or this.mc_r_bad != None: None
+  ELSE WHEN this.mc_r_prop != None and this.mc_r_val is Error: 'Error: ' + str(why(this.mc_r_val))
   ELSE WHEN this.mc_r_prop != None and this.mc_r_val == None: this.mc_r_id + ' has no ' + str(this.mc_r_prop) + (': ' + str(why(this.mc_r_val)) if why(this.mc_r_val) != None and not startswith(str(why(this.mc_r_val)), 'absent:') else '')
   ELSE WHEN this.mc_r_prop != None: str(this.mc_r_val)
   ELSE WHEN this.mc_r_rows == None: None
@@ -231,7 +233,7 @@ Request.mc_text getter:
   ELSE WHEN this.mc_tool == 'entity_read': this.mc_r_text
   ELSE WHEN this.mc_tool == 'run_cliff': prop(this.cl_out, 'text')
   ELSE: this.mc_q_text
-Request.mc_is_err getter: (not this.mc_known) or this.mc_bad != None or startswith(str(this.mc_text or ''), 'refused') or (this.mc_tool == 'run_cliff' and prop(this.cl_out, 'err') == True)
+Request.mc_is_err getter: (not this.mc_known) or this.mc_bad != None or startswith(str(this.mc_text or ''), 'refused') or (this.mc_tool == 'entity_read' and this.mc_r_val is Error) or (this.mc_tool == 'run_cliff' and prop(this.cl_out, 'err') == True)
 Request.mc_call getter: {'content': [{'type': 'text', 'text': this.mc_text}], 'isError': this.mc_is_err} if this.mc_text != None else None
 
 -- ---- the answers ----------------------------------------------------------------------------------------------------------------------------------

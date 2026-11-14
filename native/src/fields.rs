@@ -102,7 +102,7 @@ fn trip_eid(eid: &str, prop: &str) -> String { format!("{TRIP_PREFIX}{eid}#{prop
 /// The null's reason a Trip entity stands for, in the words of the live trip.
 fn trip_reason(core: &Core, trip: &str) -> String {
     let n = |p: &str| core.docs.get(trip).and_then(|t| t.props.get(p)).and_then(|v| v.as_u64()).unwrap_or(0);
-    format!("error: {}", crate::expr::timeout_reason(n("self_ms"), n("allowance_ms")))
+    crate::expr::timeout_reason(n("self_ms"), n("allowance_ms"))
 }
 
 /// writer prefix of an own-name store (rule 6): it fires getters but not setters
@@ -761,7 +761,7 @@ impl Fields {
             match core.docs.get(&trip).map(|t| t.props.get("active") == Some(&json!(true))) {
                 Some(true) => {
                     let reason = trip_reason(core, &trip);
-                    core.note_why(&(eid.to_string(), g.prop.clone()), Some(&crate::vm::Note::Null(reason)));
+                    core.note_why(&(eid.to_string(), g.prop.clone()), Some(&crate::vm::Note::Error(reason)));
                     core.locals.remove(&(eid.to_string(), g.prop.clone()));
                     return Some(J::Null);
                 }
@@ -831,14 +831,14 @@ impl Fields {
                 // killed by the time allowance: the one outcome that is not deterministic, so it is the one recorded (as a Trip entity)
                 let (n, m) = crate::expr::parse_timeout(&e).unwrap_or((0, 0));
                 self.write_trip(core, &trip, eid, &g.prop, n, m, now);
-                core.note_why(&key2, Some(&crate::vm::Note::Null(format!("error: {}", e))));
+                core.note_why(&key2, Some(&crate::vm::Note::Error(e.clone())));
                 Some(J::Null)
             }
             Err(e) => {
                 // an error is a null with the error as its reason (it no longer keeps a stale value); the receipt still says where
                 let reason = format!("error in getter {}.{}: {}; the value is null", g.cls, g.prop, e);
                 self.receipt(core, eid, &format!("getter:{}", g.prop), reason, J::Null, seq, now);
-                core.note_why(&key2, Some(&crate::vm::Note::Null(format!("error: {}", e))));
+                core.note_why(&key2, Some(&crate::vm::Note::Error(e.clone())));
                 Some(J::Null)
             }
         }

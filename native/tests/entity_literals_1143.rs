@@ -22,6 +22,7 @@ fn ev(src: &str, env: &[(&str, V)]) -> V {
 fn eqv(a: &V, b: &V) { assert!(expr::py_eq(a, b), "{a:?} != {b:?}"); }
 fn ent(v: V) -> String { match v { V::Ent(e) => e, o => panic!("not an entity: {o:?}") } }
 fn nil(v: V) -> String { match v { V::Nil(r) => r, o => panic!("not a reasoned null: {o:?}") } }
+fn fail(v: V) -> String { match v { V::Error(r) => r, o => panic!("not an Error: {o:?}") } }
 
 #[test]
 fn an_unquoted_name_is_an_entity_in_an_expression() {
@@ -58,14 +59,14 @@ fn a_bare_name_in_brackets_is_a_variable_never_a_literal_segment() {
 }
 
 #[test]
-fn a_key_that_is_not_an_int_or_text_is_a_reasoned_null() {
+fn a_key_that_is_not_an_int_or_text_is_an_error() {
     for (src, kind) in [("Goal:g[1.5]", "float"), ("Goal:g[[1]]", "list"), ("Goal:g[{'a': 1}]", "dict"), ("Goal:g[True]", "bool")] {
-        let r = nil(ev(src, &[]));
-        assert!(r.starts_with("error:") && r.contains(kind), "{src}: {r}");
+        let r = fail(ev(src, &[]));
+        assert!(r.contains("key") && r.contains(kind), "{src}: {r}");
     }
-    let r = nil(ev("Goal:g[None]", &[]));
-    assert!(r.starts_with("error:") && r.contains("null"), "{r}");
-    assert!(nil(ev("Goal:g['']", &[])).starts_with("error:"));
+    let r = fail(ev("Goal:g[None]", &[]));
+    assert!(r.contains("null"), "{r}");
+    assert!(fail(ev("Goal:g['']", &[])).contains("empty text"));
 }
 
 #[test]

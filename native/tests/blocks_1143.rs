@@ -236,7 +236,7 @@ fn over_the_budget_is_a_reasoned_null_not_an_error_or_a_hang() {
     assert_eq!(val(&c, "total"), J::Null);
     assert_eq!(val(&c, "fine"), json!(2), "only the expensive node trips");
     let chain = f.why_chain(&c, "Box:a", "total");
-    assert_eq!(chain[0]["reason"], json!("error: budget exceeded (50 steps)"), "{chain:?}");
+    assert_eq!(chain[0]["reason"], json!("budget exceeded (50 steps)"), "{chain:?}");
 }
 
 #[test]

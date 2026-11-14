@@ -794,7 +794,7 @@ fn a_clifflet_reads_and_joins_several_entities_in_one_call_and_its_errors_say_wh
     let (t, e) = cliff(port, "None('nothing here yet')");
     assert!(e && t == "error: nothing here yet", "{t}");
     let (t, e) = cliff(port, "1 / 0");
-    assert!(e && t.starts_with("error: "), "{t}");
+    assert!(e && t.starts_with("Error: "), "a failure shows its kind: {t}");
     let (t, e) = cliff(port, "  ");
     assert!(e && t.contains("run_cliff needs code"), "{t}");
     assert!(terminate(&mut run));
@@ -1415,15 +1415,18 @@ fn a_command_past_its_timeout_s_is_killed_with_its_whole_process_group_and_keeps
 }
 
 #[test]
-fn a_timed_out_commands_result_props_are_reasoned_nulls_that_tell_the_remedy_and_the_partial_output_stays() {
+fn a_timed_out_commands_result_props_are_errors_that_tell_the_remedy_and_the_partial_output_stays() {
     let (mut run, port) = start("to2", MCP_PACKS, &[]);
     put_wait(port, "Command:t2", "run", json!({"id": "t2", "cmd": ["sh", "-c", "echo partial-line; sleep 62.5"], "timeout_s": 1}), 30.0);
     let want = "Command:t2 timed out after 1 s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}";
     for p in ["output", "ok", "rc"] {
         let (t, e) = cliff(port, &format!("prop('Command:t2', '{p}')"));
-        assert!(e && t == format!("error: {want}"), "{p}: {t}");
+        assert!(e && t == format!("Error: {want}"), "{p}: {t}");
     }
-    // a model-style getter over it keeps the null and the reason
+    // entity_read shows the kind too, and says it is an error
+    let (t, e) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "output"}));
+    assert!(e && t == format!("Error: {want}"), "entity_read: {t}");
+    // a model-style getter over it keeps the Error and the reason
     let pack = "PACK shx 1\nSh.out getter: prop('Command:t2', 'output')\nSh.len getter: this.out + '!'\n";
     put(port, "Pack:shx", "text", json!(pack));
     wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:shx", "prop": "state"})).0 == "loaded").then_some(()));

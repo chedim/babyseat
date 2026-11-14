@@ -71,7 +71,7 @@ fn a_runaway_evaluation_trips_at_the_backstop_for_that_node_only() {
     assert_eq!(val(&c, "slow"), J::Null);
     assert_eq!(val(&c, "fine"), json!(2), "the rest of the engine keeps running (two clock reads: 6 ms)");
     let chain = f.why_chain(&c, "Box:a", "slow");
-    assert_eq!(chain[0]["reason"], json!("error: timeout 12 ms (allowance 10 ms)"), "{chain:?}");
+    assert_eq!(chain[0]["reason"], json!("timeout 12 ms (allowance 10 ms)"), "{chain:?}");
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn the_end_of_an_evaluation_checks_the_clock_too() {
     let (c, f, _) = world("PACK t 1\nBox.fine getter: this.w + 1\n");
     unuse_clock();
     assert_eq!(val(&c, "fine"), J::Null);
-    assert_eq!(f.why_chain(&c, "Box:a", "fine")[0]["reason"], json!("error: timeout 12 ms (allowance 10 ms)"));
+    assert_eq!(f.why_chain(&c, "Box:a", "fine")[0]["reason"], json!("timeout 12 ms (allowance 10 ms)"));
 }
 
 #[test]

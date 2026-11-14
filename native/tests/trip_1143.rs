@@ -99,9 +99,10 @@ fn why_says_the_reason_and_points_at_the_trip() {
     let (c, f, _) = world(&long_dep());
     real_clock();
     let chain = f.why_chain(&c, "Box:a", "slow");
-    assert_eq!(chain[0]["reason"], json!("error: timeout 12 ms (allowance 10 ms)"), "{chain:?}");
+    assert_eq!(chain[0]["reason"], json!("timeout 12 ms (allowance 10 ms)"), "{chain:?}");
     assert_eq!(chain[0]["trip"], json!(TRIP), "{chain:?}");
-    assert_eq!(val(&c, "Box:a", "dep"), json!("None"), "a reader sees the null, the rest of the engine runs");
+    assert_eq!(val(&c, "Box:a", "dep"), J::Null, "a reader of the kill is that Error (stored null), the rest of the engine runs");
+    assert_eq!(f.why_chain(&c, "Box:a", "dep")[0]["reason"], json!("timeout 12 ms (allowance 10 ms)"));
 }
 
 #[test]
@@ -196,7 +197,7 @@ fn replay_of_a_second_kill_on_the_same_node() {
     let (rc, rf) = replay(&journal);
     assert_eq!(rc.docs["Box:a"].props, c.docs["Box:a"].props);
     assert_eq!(rc.docs[TRIP].props, c.docs[TRIP].props);
-    assert_eq!(reason(&rf, &rc), json!("error: timeout 16 ms (allowance 10 ms)"));
+    assert_eq!(reason(&rf, &rc), json!("timeout 16 ms (allowance 10 ms)"));
 }
 
 #[test]
