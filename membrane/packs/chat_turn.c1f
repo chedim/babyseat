@@ -127,7 +127,7 @@ Chunk.part on-setter partial-in:
 ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')
 ChatMessage.rc getter: prop(this.rr, 'rc')
 -- THE STREAM IS READ IN SMALL EVALUATIONS (#1143, a live turn that ended `error` with no cause): a long turn's stdout is a megabyte of lines, and one getter that parsed them all
--- passed the self-time allowance (a Trip: its Error flowed on into `failed`). The result line is read on its own (`rlines`, `finals`: one line parsed), and `evs` skips the
+-- cost 11 ms against the old 10 ms self-time allowance (a Trip: its Error flowed on into `failed`; time no longer decides a value, but the stream is still read in small steps). The result line is read on its own (`rlines`, `finals`: one line parsed), and `evs` skips the
 -- `stream_event` partials (the bulk, 90% of the bytes: they were the live text, the finished messages say the same). `evl` is `evs` or an empty list: a stream that could not be read costs
 -- the tools and the spoken text, never the answer the result line gave.
 ChatMessage.rlines getter: [l for l in lines(str(prop(this.rr, 'stdout') or '')) if '"result"' in l]

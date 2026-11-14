@@ -1,6 +1,6 @@
 //! Eval accounting (#1143): how much work each getter and setter does, always on and cheap. Per (kind, class, property, pack) the table counts the
 //! evaluations, their SELF time (the evaluation's own clock time, minus the time it waited in host calls, which is counted apart as `wait`, minus
-//! the evaluations nested inside it, which count themselves) and their steps. Nothing here changes a value, writes a row or a journal line, or
+//! the evaluations nested inside it, which count themselves) and their steps, and how many of them were SLOW (self time over the former allowance: measured, never a limit). Nothing here changes a value, writes a row or a journal line, or
 //! reacts: the host reads the table on a tick and tells it to `Stats:eval` (`host.rs`, shipped pack `stats`).
 //!
 //! The table is a fixed `Vec` of `SLOTS` entries, open addressing on an FNV hash of the key: a key's strings are copied once, when its slot is first taken;
@@ -22,18 +22,22 @@ pub const OTHER: &str = "(other)";
 
 /// One key's counts as the host reads them. `ns` is self time without the waits, `wait_ns` the time in host calls (a `sql(...)`, a file read).
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Row { pub kind: String, pub cls: String, pub prop: String, pub pack: String, pub calls: u64, pub ns: u64, pub wait_ns: u64, pub steps: u64 }
+pub struct Row { pub kind: String, pub cls: String, pub prop: String, pub pack: String, pub calls: u64, pub ns: u64, pub wait_ns: u64, pub steps: u64, pub slow: u64 }
 
 #[derive(Clone, Copy, Default)]
-struct Acc { calls: u64, ns: u64, wait_ns: u64, steps: u64 }
+struct Acc { calls: u64, ns: u64, wait_ns: u64, steps: u64, slow: u64 }
 impl Acc {
-    fn add(&mut self, ns: u64, wait_ns: u64, steps: u64) { self.calls += 1; self.ns = self.ns.saturating_add(ns); self.wait_ns = self.wait_ns.saturating_add(wait_ns); self.steps = self.steps.saturating_add(steps); }
+    fn add(&mut self, ns: u64, wait_ns: u64, steps: u64) {
+        self.calls += 1; self.ns = self.ns.saturating_add(ns); self.wait_ns = self.wait_ns.saturating_add(wait_ns); self.steps = self.steps.saturating_add(steps);
+        // SLOW: this ONE evaluation's self time passed the former allowance (`expr::eval_time_ms`, default 10 ms). A flag for the reader, never a limit.
+        if ns > expr::eval_time_ms().saturating_mul(1_000_000) { self.slow += 1; }
+    }
 }
 struct Entry { kind: u8, cls: Box<str>, prop: Box<str>, pack: Box<str>, win: Acc, life: Acc }
 impl Entry {
     fn row(&self, a: Acc) -> Row {
         Row { kind: (if self.kind == 0 { KIND_GETTER } else { KIND_SETTER }).into(), cls: self.cls.to_string(), prop: self.prop.to_string(), pack: self.pack.to_string(),
-              calls: a.calls, ns: a.ns, wait_ns: a.wait_ns, steps: a.steps }
+              calls: a.calls, ns: a.ns, wait_ns: a.wait_ns, steps: a.steps, slow: a.slow }
     }
 }
 
@@ -101,12 +105,12 @@ impl Table {
     pub fn clear(&mut self) { *self = Table::new(); }
 }
 
-/// The top `n` rows by self time, as the list `Stats:eval.top` holds: {class, prop, pack, kind, calls, ms, wait_ms, steps}.
+/// The top `n` rows by self time, as the list `Stats:eval.top` holds: {class, prop, pack, kind, calls, ms, wait_ms, steps, slow}.
 pub fn rows_json(rows: &[Row], n: usize) -> J {
     let mut v: Vec<&Row> = rows.iter().collect();
     v.sort_by(|a, b| b.ns.cmp(&a.ns).then(b.calls.cmp(&a.calls)).then(a.cls.cmp(&b.cls)).then(a.prop.cmp(&b.prop)));
     let ms = |ns: u64| (ns as f64 / 1e6 * 1000.0).round() / 1000.0;
-    J::Array(v.into_iter().take(n).map(|r| json!({"class": r.cls, "prop": r.prop, "pack": r.pack, "kind": r.kind, "calls": r.calls, "ms": ms(r.ns), "wait_ms": ms(r.wait_ns), "steps": r.steps})).collect())
+    J::Array(v.into_iter().take(n).map(|r| json!({"class": r.cls, "prop": r.prop, "pack": r.pack, "kind": r.kind, "calls": r.calls, "ms": ms(r.ns), "wait_ms": ms(r.wait_ns), "steps": r.steps, "slow": r.slow})).collect())
 }
 
 // ---- the process's one table, and the guard the field's evaluations take --------------------------------------------------------

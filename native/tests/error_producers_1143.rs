@@ -1,5 +1,5 @@
 //! Where an `Error` is born (#1143, docs/c1f-error.md section (a), operator decisions 2026-11-13): a failed cast, a bad entity-literal key, a
-//! failed parse (`json`), a getter body that raised, the step budget, the self-time kill (the Trip), and a pack's own `Error('reason')`.
+//! failed parse (`json`), a getter body that raised, the step budget (time never makes one: the clock decides no value), and a pack's own `Error('reason')`.
 //! What stays null: a missing property, `.x` of an absent value, `pending: ...`, a collected virtual entity, `f of a null`.
 //! Old routes are unchanged: an Error is a plain null there (`Core.docs`), and it reads back as an Error through `why`/`failed`.
 use membrane_vm::expr::{self, eval, parse, parse_block, World, V};
@@ -124,54 +124,14 @@ mod time {
     }
 
     #[test]
-    fn a_self_time_kill_is_an_error_and_so_is_what_reads_it() {
-        use_clock(6);
+    fn a_slow_evaluation_is_not_an_error_and_so_is_nothing_that_reads_it() {
+        use_clock(6);   // 12 ms of self time against the 10 ms former allowance: it used to be an Error
         let (c, _f) = world(&long(), json!({"w": 1}));
         expr::set_clock(None);
-        assert_eq!(val(&c, "slow"), J::Null);
-        assert!(failed(&c, "slow"));
-        assert_eq!(why(&c, "slow").as_deref(), Some("timeout 12 ms (allowance 10 ms)"));
-        assert_eq!(val(&c, "dep_err"), json!(true), "a getter reading the kill returns the same Error");
-        assert_eq!(why(&c, "dep").as_deref(), Some("timeout 12 ms (allowance 10 ms)"));
+        assert_eq!(val(&c, "slow"), json!(601));
+        assert!(!failed(&c, "slow"));
+        assert_eq!(val(&c, "dep"), json!(602));
+        assert_eq!(val(&c, "dep_err"), json!(false));
+        assert!(!c.docs.keys().any(|k| k.starts_with("Trip:")), "no kill is recorded");
     }
-
-    #[test]
-    fn the_trip_rebuild_gives_the_error_again_and_a_fresh_evaluation_clears_it() {
-        use_clock(6);
-        let (c, _f) = world(&long(), json!({"w": 1}));
-        assert_eq!(c.docs.get("Trip:Box:a#slow").expect("the kill is recorded as a Trip entity").props["active"], json!(true));
-        // a replay: a fresh world where the Trip arrives after the node evaluated (fast)
-        use_clock(0);
-        let (mut c2, mut f2) = world(&long(), json!({"w": 1}));
-        assert!(!failed(&c2, "slow"), "evaluated in time on its own");
-        let mut seq = 100;
-        c2.load("Trip:Box:a#slow".into(), "Trip".into(), Default::default(), None, 2.0);
-        f2.born(&mut c2, &H, "Trip:Box:a#slow", 2.0, &mut seq);
-        for (p, v) in [("node", json!("Box:a.slow")), ("self_ms", json!(12)), ("allowance_ms", json!(10)), ("at", json!(1.0)), ("active", json!(true))] {
-            seq += 1;
-            let w = Write { eid: "Trip:Box:a#slow".into(), prop: p.into(), new: v, old: J::Null, writer: "driver:trip".into(), chain: json!({}), seq };
-            c2.hear(w.clone(), None, 2.0);
-            f2.react(&mut c2, &H, w, 2.0, &mut seq);
-        }
-        expr::set_clock(None);
-        assert!(failed(&c2, "slow"), "the Trip applies: the node is the Error");
-        assert_eq!(why(&c2, "slow").as_deref(), Some("timeout 12 ms (allowance 10 ms)"));
-        // an input moves, in time: the node gets a fresh chance
-        use_clock(0);
-        seq += 1;
-        let w = Write { eid: "Box:a".into(), prop: "w".into(), new: json!(7), old: J::Null, writer: "person".into(), chain: json!({}), seq };
-        c2.hear(w.clone(), None, 3.0);
-        f2.react(&mut c2, &H, w, 3.0, &mut seq);
-        expr::set_clock(None);
-        assert!(!failed(&c2, "slow"));
-        assert_eq!(val(&c2, "slow"), json!(607));
-    }
-}
-
-#[test]
-fn what_stays_null_is_not_an_error() {
-    let (c, _f) = world("PACK t 1\nBox.missing getter: this.price\nBox.missing_err getter: this.price is Error\nBox.sub getter: this.price + 1\nBox.sub_err getter: this.sub is Error\nBox.note getter: None('not applicable')\nBox.note_err getter: this.note is Error\n", json!({}));
-    for p in ["missing", "sub", "note"] { assert!(!failed(&c, p), "{p}"); }
-    for p in ["missing_err", "sub_err", "note_err"] { assert_eq!(val(&c, p), json!(false), "{p}"); }
-    assert!(why(&c, "missing").is_some_and(|r| r.starts_with("absent")), "a missing property keeps its `absent` why");
 }

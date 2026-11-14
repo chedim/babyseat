@@ -36,14 +36,12 @@ pub fn eval_budget() -> u64 {
     *ENV.get_or_init(|| std::env::var("MEMBRANE_EVAL_BUDGET").ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|n| *n > 0).unwrap_or(DEFAULT_EVAL_BUDGET))
 }
 
-/// The self-time allowance of ONE getter or setter evaluation, in ms (operator-approved 2026-11-12; a dial, tuned later).
-/// Overridden by the env MEMBRANE_EVAL_TIME_MS.
+/// The FORMER self-time allowance of one evaluation, in ms (a dial, overridden by the env MEMBRANE_EVAL_TIME_MS). Since 2026-11-13 it limits
+/// NOTHING (the one limit that changes a value is the step budget, which is deterministic): it is the threshold above which `stats.rs`
+/// counts an evaluation as `slow`.
 pub const DEFAULT_EVAL_TIME_MS: u64 = 10;
-/// The step counter doubles as the in-evaluation backstop: every this many steps the clock is read, so a runaway loop inside
-/// ONE evaluation trips the allowance before it ends. A power of two.
-pub const TIME_CHECK_EVERY: u64 = 256;
 
-/// A monotonic clock in nanoseconds. Injectable (`set_clock`), so a test needs no sleep.
+/// A monotonic clock in nanoseconds (it times the evaluations for `stats.rs`, and never decides a value). Injectable (`set_clock`), so a test needs no sleep.
 pub type ClockFn = fn() -> u64;
 
 thread_local! {
@@ -53,12 +51,12 @@ thread_local! {
     static WAITED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// Pin the allowance on this thread (tests); None goes back to the env / default.
+/// Pin the slow threshold on this thread (tests); None goes back to the env / default.
 pub fn set_eval_time_ms(n: Option<u64>) { TIME_OVERRIDE.with(|o| o.set(n)); }
 /// Inject the clock on this thread (tests); None goes back to the real one.
 pub fn set_clock(c: Option<ClockFn>) { CLOCK_OVERRIDE.with(|o| o.set(c)); }
 
-/// The allowance an evaluation starts with: the thread's override, else MEMBRANE_EVAL_TIME_MS, else the default.
+/// The slow threshold (the former allowance): the thread's override, else MEMBRANE_EVAL_TIME_MS, else the default.
 pub fn eval_time_ms() -> u64 {
     if let Some(n) = TIME_OVERRIDE.with(|o| o.get()) { return n; }
     static ENV: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
@@ -66,7 +64,7 @@ pub fn eval_time_ms() -> u64 {
 }
 
 /// The browser build: std's Instant panics on wasm32-unknown-unknown, so the clock is the host's `Date.now` (milliseconds,
-/// which is all a 10 ms allowance needs; the same import works in a page, a worker and Node).
+/// which is all a 10 ms threshold needs; the same import works in a page, a worker and Node).
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 fn real_clock() -> u64 {
     #[wasm_bindgen::prelude::wasm_bindgen]
@@ -97,45 +95,22 @@ pub fn waiting<T>(f: impl FnOnce() -> T) -> T {
     r
 }
 
-/// The one place an evaluation's cost is counted: `charge` a step, ask if it is `exceeded`, say the `reason`; and its self-time
-/// (`check_time`: two clock reads per evaluation, plus one every `TIME_CHECK_EVERY` steps).
+/// The one place an evaluation's cost is counted: `charge` a step, ask if it is `exceeded`, say the `reason`. Steps only: the clock
+/// never decides a value (the same getter on the same data gives the same result on any machine, in any build).
+/// A native builtin's own cost is not counted: a call is one step however large its input.
 #[derive(Debug)]
-pub struct Budget { used: u64, limit: u64, t0: u64, waited0: u64, allow_ns: u64 }
+pub struct Budget { used: u64, limit: u64 }
 
 impl Budget {
-    pub fn new() -> Budget {
-        Budget { used: 0, limit: eval_budget(), t0: now_ns(), waited0: WAITED.with(|w| w.get()), allow_ns: eval_time_ms().saturating_mul(1_000_000) }
-    }
+    pub fn new() -> Budget { Budget { used: 0, limit: eval_budget() } }
     pub fn charge(&mut self, n: u64) -> Result<(), Err> {
-        let before = self.used;
         self.used = self.used.saturating_add(n);
         if self.exceeded() { return Err(self.reason()); }
-        if self.used / TIME_CHECK_EVERY != before / TIME_CHECK_EVERY { self.check_time()?; }
         Ok(())
     }
     pub fn used(&self) -> u64 { self.used }
     pub fn exceeded(&self) -> bool { self.used > self.limit }
     pub fn reason(&self) -> Err { format!("budget exceeded ({} steps)", self.limit) }
-    /// Self-time so far: elapsed minus the time spent waiting in host calls.
-    fn self_ns(&self) -> u64 {
-        let waited = WAITED.with(|w| w.get()).saturating_sub(self.waited0);
-        now_ns().saturating_sub(self.t0).saturating_sub(waited)
-    }
-    /// Over the allowance: `timeout N ms (allowance M ms)` (N rounded up).
-    pub fn check_time(&self) -> Result<(), Err> {
-        let ns = self.self_ns();
-        if ns > self.allow_ns { Err(timeout_reason(ns.div_ceil(1_000_000), self.allow_ns / 1_000_000)) } else { Ok(()) }
-    }
-}
-
-/// The words of a time trip.
-pub fn timeout_reason(self_ms: u64, allowance_ms: u64) -> String { format!("timeout {self_ms} ms (allowance {allowance_ms} ms)") }
-/// `(N, M)` out of a `timeout N ms (allowance M ms)` error; None for any other error.
-pub fn parse_timeout(e: &str) -> Option<(u64, u64)> {
-    let r = e.strip_prefix("timeout ")?;
-    let (n, r) = r.split_once(" ms (allowance ")?;
-    let m = r.strip_suffix(" ms)")?;
-    Some((n.parse().ok()?, m.parse().ok()?))
 }
 
 /// What one evaluation carries: its budget, its depth, and (when asked) the locals it bound, in order.
@@ -1215,13 +1190,12 @@ fn kind_of(v: &V) -> &'static str {
               V::List(_) => "list", V::Dict(_) => "dict", V::Ent(_) => "entity" }
 }
 
-/// Evaluate within the step budget (`Budget`): over it, the error is `budget exceeded (N steps)`; over the self-time allowance,
-/// `timeout N ms (allowance M ms)`.
+/// Evaluate within the step budget (`Budget`): over it, the error is `budget exceeded (N steps)`. Time limits nothing.
 pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err> {
     let mut m = Meter { b: Budget::new(), depth: 0, locals: None };
     let r = ev(n, &Env::root(env), w, &mut m);
     crate::stats::add_steps(m.b.used());
-    r.and_then(|v| m.b.check_time().map(|_| v))
+    r
 }
 
 /// `eval`, and the locals the block bound while it ran (in order): what `Why` prints.
@@ -1229,7 +1203,6 @@ pub fn eval_locals(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> (Result
     let mut m = Meter { b: Budget::new(), depth: 0, locals: Some(vec![]) };
     let r = ev(n, &Env::root(env), w, &mut m);
     crate::stats::add_steps(m.b.used());
-    let r = r.and_then(|v| m.b.check_time().map(|_| v));
     (r, m.locals.unwrap_or_default())
 }
 

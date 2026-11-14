@@ -124,7 +124,7 @@ The reply of an `entity_write` of `mention` lists every property the cascade wro
 ### Thresholds flagged for the operator
 MENTION_CAP = 400 per layer (`SemText.mention_cap`; none was given). `related_n` has no default: the asker gives it. The frequency divisor of `related` is the count itself (no number).
 Open: a cut for the entities mentioned by very many sentences (their `mentioned_in` grows without bound and `related` reads it whole; one evaluation past the step budget answers a
-reasoned null); the self-time allowance of a getter or setter (10 ms) applies to the mention setter of a big text.
+reasoned null); the step budget of a getter or setter applies to the mention setter of a big text (time limits nothing).
 
 ### Not built
 Vectors and embeddings (sentences carry none), paragraphs, syntax, coreference, the recall index, the field engine's use of the legs, a collection of stored Word entities, the

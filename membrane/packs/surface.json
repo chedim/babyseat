@@ -910,19 +910,6 @@
       "Store"
     ]
   },
-  "trip": {
-    "imports": [],
-    "classes": [
-      "Trip"
-    ],
-    "members": 1,
-    "writes": [],
-    "claims": [],
-    "boot_facts": [],
-    "resident": [
-      "Trip"
-    ]
-  },
   "turn": {
     "imports": [],
     "classes": [

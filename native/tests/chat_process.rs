@@ -1624,7 +1624,7 @@ fn a_turn_whose_cli_sends_a_wrong_token_fails_visibly() {
 
 // ---- a turn that finished with an answer but whose output was too big to read in one evaluation (#1143, the live "error with no cause") ------
 // The live finding: a 115 s turn, rc 0, a result line, 1 MB of stream-json: `ChatMessage.evs` parsed every line in ONE getter and passed the 10 ms self-time
-// allowance (a `Trip:...#evs` entity, `timeout N ms (allowance 10 ms)`), the Trip's Error flowed into `finals`/`failed`, and the turn ended `error` with no response
+// allowance (it was a `Trip:...#evs` entity and an Error; time no longer decides a value, #1143), the Error flowed into `finals`/`failed`, and the turn ended `error` with no response
 // (the response write carried an Error, which setters refuse) and no cause. The fake pads its stream with N lines to make the same size.
 #[test]
 fn a_turn_with_a_final_answer_is_done_even_when_its_output_is_too_big_to_read_in_one_evaluation() {

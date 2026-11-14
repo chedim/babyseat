@@ -69,9 +69,7 @@ fn client(port: u64, path: &str) -> std::sync::mpsc::Receiver<String> {
 fn the_stamping_rules_are_fields_lives() {
     assert_eq!(stamp_writer("answer"), "trigger:field:answer");
     assert_eq!(stamp_writer("field:getter:x"), "trigger:field:getter:x");
-    assert_eq!(stamp_writer("field:driver:trip"), "host:driver:trip");
     assert_eq!(stamp_born_writer("Request"), "trigger:field:create");
-    assert_eq!(stamp_born_writer("Trip"), "host:driver:trip");
     assert!(is_outside("host:door") && is_outside("person") && !is_outside("trigger:field:answer"));
 }
 
@@ -109,12 +107,12 @@ fn a_live_run_is_journalled_outside_only_and_replays_to_the_same_state() {
     let (ra, rb) = (ra.unwrap(), rb.unwrap());
     assert!(ra.starts_with("HTTP/1.1 200") && ra.ends_with("hello /one True"), "{ra}");
     assert!(rb.starts_with("HTTP/1.1 404"), "{rb}");
-    // a time kill (injected clock: every read of it is 6 ms): the Trip is an outside write
+    // a slow evaluation (injected clock: every read of it is 6 ms) is no kill any more: time decides no value, and nothing extra is journalled
     use_clock(6);
     h.write("Box:a", "w", json!(2), "person");
     use_clock(0);
-    assert_eq!(h.get("Box:a", "slow"), J::Null, "killed: the reasoned null");
-    assert_eq!(h.get("Trip:Box:a#slow", "active"), json!(true));
+    assert_eq!(h.get("Box:a", "slow"), json!(602), "the slow getter keeps its value");
+    assert!(h.rows().keys().all(|k| !k.starts_with("Trip:")), "no kill is recorded");
     h.pump();
     let live = state(&h);
 
@@ -127,8 +125,7 @@ fn a_live_run_is_journalled_outside_only_and_replays_to_the_same_state() {
     assert!(has(&|l| matches!(l, Line::Born { eid, cls, writer, .. } if eid.starts_with("Request:") && cls == "Request" && writer == "host:door")));
     assert_eq!(j.iter().filter(|l| matches!(l, Line::Born { cls, .. } if cls == "Request")).count(), 2);
     assert!(has(&|l| matches!(l, Line::Write { eid, prop, new, writer, .. } if eid == "Box:a" && prop == "w" && new == &json!(2) && writer == "person")));
-    assert!(has(&|l| matches!(l, Line::Born { cls, writer, .. } if cls == "Trip" && writer == "host:driver:trip")));
-    assert!(has(&|l| matches!(l, Line::Write { eid, prop, writer, .. } if eid.starts_with("Trip:") && prop == "active" && writer == "host:driver:trip")));
+    assert!(!has(&|l| matches!(l, Line::Born { cls, .. } if cls == "Trip")), "no Trip line");
     assert!(!has(&|l| matches!(l, Line::Write { prop, .. } if prop == "reply" || prop == "respond" || prop == "slow")), "derived writes are not journalled");
     // the rows carry the stamps
     let rows = h.rows();
@@ -136,7 +133,6 @@ fn a_live_run_is_journalled_outside_only_and_replays_to_the_same_state() {
     assert_eq!(req["writers"]["reply"], json!("trigger:field:getter:reply"));
     assert_eq!(req["writers"]["respond"], json!("trigger:field:direct:consumed"), "the answer was written by the setter, then the driver consumed the slot");
     assert_eq!(req["writers"]["method"], json!("host:door"));
-    assert_eq!(rows["Trip:Box:a#slow"]["writers"]["active"], json!("host:driver:trip"));
     assert_eq!(rows["Box:a"]["writers"]["w"], json!("person"));
     // and the stored journal is the in-memory one (a later process replays it)
     assert_eq!(h.journal_stored().unwrap(), j);

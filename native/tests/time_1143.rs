@@ -1,5 +1,5 @@
-//! The per-evaluation time allowance (operator-approved 2026-11-12): a getter or setter evaluation whose SELF time passes the
-//! allowance (a dial, default 10 ms) is a reasoned null for that node only. The clock is injected, so nothing sleeps.
+//! Time decides no value (operator 2026-11-13; before it, a getter or setter whose SELF time passed a 10 ms allowance was a reasoned null).
+//! The former allowance is now only the `slow` threshold of `stats` (a dial, default 10 ms). The clock is injected, so nothing sleeps.
 use membrane_vm::expr;
 use membrane_vm::fields::Fields;
 use membrane_vm::syntax::parse_full;
@@ -57,60 +57,46 @@ fn the_default_step_budget_is_one_hundred_thousand() {
 }
 
 #[test]
-fn the_default_time_allowance_is_ten_ms() {
+fn the_former_allowance_is_still_ten_ms_as_the_slow_threshold() {
     assert_eq!(expr::DEFAULT_EVAL_TIME_MS, 10);
     assert_eq!(expr::eval_time_ms(), 10);
-    assert_eq!(expr::TIME_CHECK_EVERY, 256);
 }
 
 #[test]
-fn a_runaway_evaluation_trips_at_the_backstop_for_that_node_only() {
-    use_clock(6);   // start 0, the backstop at step 256 reads 6, at step 512 reads 12: over 10
+fn a_runaway_evaluation_is_not_killed_by_time_even_over_many_clock_reads() {
+    use_clock(6);   // a clock that jumps 6 ms at every read: far over 10 ms by the end of a 600-element comprehension
     let (c, f, _) = world(&long());
     unuse_clock();
-    assert_eq!(val(&c, "slow"), J::Null);
-    assert_eq!(val(&c, "fine"), json!(2), "the rest of the engine keeps running (two clock reads: 6 ms)");
-    let chain = f.why_chain(&c, "Box:a", "slow");
-    assert_eq!(chain[0]["reason"], json!("timeout 12 ms (allowance 10 ms)"), "{chain:?}");
+    assert_eq!(val(&c, "slow"), json!(600));
+    assert_eq!(val(&c, "fine"), json!(2));
+    assert!(f.why_chain(&c, "Box:a", "slow").is_empty(), "not a null: nothing to explain");
 }
 
 #[test]
-fn the_end_of_an_evaluation_checks_the_clock_too() {
-    use_clock(12);   // a short getter: start 0, end 12
-    let (c, f, _) = world("PACK t 1\nBox.fine getter: this.w + 1\n");
+fn a_short_getter_over_the_former_allowance_keeps_its_value() {
+    use_clock(12);
+    let (c, _, _) = world("PACK t 1\nBox.fine getter: this.w + 1\n");
     unuse_clock();
-    assert_eq!(val(&c, "fine"), J::Null);
-    assert_eq!(f.why_chain(&c, "Box:a", "fine")[0]["reason"], json!("timeout 12 ms (allowance 10 ms)"));
+    assert_eq!(val(&c, "fine"), json!(2));
 }
 
 #[test]
-fn a_setter_evaluation_trips_the_same_way() {
+fn a_setter_evaluation_over_the_former_allowance_writes() {
     use_clock(12);
     let (mut c, mut f, mut s) = world("PACK t 1\nBox.w on-setter s:\n  WHEN this.w > 1:\n    this.out = 1\n");
     poke(&mut c, &mut f, &mut s, 5);
     unuse_clock();
-    assert_eq!(val(&c, "out"), J::Null, "the setter wrote nothing");
-    let r = val(&c, "refused").as_str().unwrap_or("").to_string();
-    assert!(r.contains("timeout 12 ms (allowance 10 ms)"), "{r}");
+    assert_eq!(val(&c, "out"), json!(1), "the setter wrote");
+    assert_eq!(val(&c, "refused"), J::Null);
 }
 
 #[test]
-fn time_spent_waiting_in_a_host_call_is_not_self_time() {
-    use_clock(3);   // start 0, wait start 3, +100 inside, wait end 106, end 109: 109 elapsed - 103 waited = 6
+fn time_spent_waiting_in_a_host_call_changes_nothing() {
+    use_clock(3);
     let (mut c, mut f, mut s) = world("PACK t 1\nBox.h getter: waits(this.w)\n");
     poke(&mut c, &mut f, &mut s, 2);
     unuse_clock();
-    assert_eq!(val(&c, "h"), json!(1), "no trip: it was waiting, not computing");
-}
-
-#[test]
-fn the_allowance_is_a_dial() {
-    use_clock(12);
-    expr::set_eval_time_ms(Some(20));
-    let (c, _, _) = world("PACK t 1\nBox.fine getter: this.w + 1\n");
-    expr::set_eval_time_ms(None);
-    unuse_clock();
-    assert_eq!(val(&c, "fine"), json!(2));
+    assert_eq!(val(&c, "h"), json!(1));
 }
 
 #[test]

@@ -92,7 +92,7 @@ A bare line `name = expr` (no dotted target; a write always has one, like `this.
   unchanged (no "via" chain). Stored, a derived Error is a plain null with its kind in `Core.failed` beside the reason in `Core.why` (so every old route sees null;
   `entity_read` and `run_cliff` print `Error: <reason>`); a setter or constructor that writes an Error is refused with a `refused` receipt and the old value stays; an
   Error inside a list or dict is kept inside one evaluation and is a plain null across a store. Made by: a failed cast (`not-a-type: ...`), a bad entity-literal key,
-  a getter body that raised, the step budget, the self-time kill (the Trip), a timed-out `Command` (`proc.c1f`), and a pack's own `Error('reason')`. Still null:
+  a getter body that raised, the step budget, a timed-out `Command` (`proc.c1f`), and a pack's own `Error('reason')`. Still null:
   a missing property, `.x` of an absent value, `pending: ...`, a collected virtual entity, `f of a null`. `json(text)` of text that is not JSON is an Error (`not-json: ...`; the packs that meant "not JSON is fine" read `j = json(x)` then `{} if j is Error else j`). `Num` is a value kind that Int and Float extend: `x is Num` is true for an Int or a Float, `x is (Int, Num)` holds for an Int, `x is (Float, Text)` is a parse error. The names `Error` and `Num` are reserved (no class, no local).
 - a local that holds a reasoned null passes it on like any value; `Why(...)` (`why_chain`) lists the locals of the getter evaluation it explains
   (`locals: {name: value}`, a null shows its reason);
@@ -149,39 +149,26 @@ A constructor of a foreign-prefix entity (`Config:x = Voice(...)`) computes the 
 is written after the birth, and the entity is born again for the getters. A SETTER of a kind still needs an ISA parent entity
 (`cls:voice`): a setter on a kind reaches only entities whose parent chain holds that entity; write the setter on the class instead.
 
-## Limits: the step budget and the time allowance (dials)
+## Limits: the step budget (a dial); time limits nothing
 The old caps (an expression at most 64 nodes / 400 characters) are removed from the native VM; `membrane/ch.py` keeps them for its own
 triggers (parity for the caps is intentionally dropped). Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is an Error `budget exceeded (N steps)` (a getter's
 `Why` shows it, a receipt says where), never a hang or a panic. The default is 100,000 steps (`DEFAULT_EVAL_BUDGET`), overridden by the env
 `MEMBRANE_EVAL_BUDGET`. `VEC_MAX` (8192) stays. Structural limits that are not size caps: expressions nest at most 64 deep and
 evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All accounting lives in `expr::Budget`.
+**A native builtin's own cost is not counted**: a call (`json(text)`, `sort`, `len` ...) is one step however large its input, so a getter that
+hands a 1 MB stream to one builtin spends a handful of steps (operator, 2026-11-13: no per-input charges for now).
 
-**The time allowance.** Each getter or setter EVALUATION (not an AST node) also has a SELF-TIME allowance, default 10 ms
-(`DEFAULT_EVAL_TIME_MS`, env `MEMBRANE_EVAL_TIME_MS`; both approved by the operator 2026-11-12, to be tuned). Self-time is the
-elapsed time minus the time spent in host calls that wait on I/O (`expr::waiting`: the synchronous `Host::call`; `sql`, `jsonl`,
-`read`, `listdir`, `stat` and the `call_later` functions only ask and return a pending null at once, so there is nothing to
-subtract there). Over it, that node (only) becomes an Error `timeout N ms (allowance M ms)` (N rounded up); `Why`
-prints it like the budget's reason; the rest of the engine keeps running. The clock is read twice per evaluation (start, end),
-and the step counter doubles as the in-evaluation backstop: every `TIME_CHECK_EVERY` (256) steps it reads the clock again, so a
-runaway loop inside one evaluation trips before it ends. The clock is injectable (`expr::set_clock`) for tests.
-**A kill is recorded, a timing is not** (operator, 2026-11-12). A time trip is the one outcome that is not deterministic, so
-exactly the kills are written down, as TRIP ENTITIES (`membrane/packs/trip.c1f` declares the class, so the host mirrors it): when
-a getter evaluation is killed the engine writes `Trip:<eid>#<prop>` {`node`, `self_ms`, `allowance_ms`, `at`, `active`} the way an effect
-receipt arrives (writer `field:driver:trip`, a `born` then one write per property), so a journal that keeps the outside writes keeps
-the kill and needs no new line type. An evaluation that finishes in time writes nothing: there is no timing log. The budget trip
-(`budget exceeded`) is deterministic and is not recorded.
-- **While it applies.** A node whose own Trip is `active` IS the Error `timeout N ms (allowance M ms)` (read from the
-  Trip's numbers; nothing is evaluated), and `Why` points at the Trip (`trip: <eid>`). It applies until one of the node's inputs changes:
-  then the node is evaluated fresh, and a fresh evaluation that does not trip writes `active: false` (the kill stays as history; this
-  write is derived, not journalled); one that trips again rewrites the Trip (a new `self_ms`/`at`, `active` written true again).
-- **No loop.** The engine's own Trip write is applied to its mirror at once and is not an input of the node: the node is not
-  re-evaluated for it, and the write is never fed back.
-- **Replay.** A replay re-evaluates the node (fast: it does not trip), then the journalled Trip arrives and the node recomputes to the
-  same null: the final state equals the live run. If an input changes in the same round as a Trip arrives, the input wins.
-- **Not covered.** A SETTER's trip is a `refused` receipt on every run, not a node with a lifetime: it is not recorded yet. A Trip
-  that is already in a restored state is not applied after a restart (the first evaluation is a fresh chance).
-- **Host duty.** The host must journal the `field:driver:trip` writes as outside writes (today `fields_live.py` stamps every engine
-  write `trigger:field:*`, which replay treats as derived), and feed them back on replay like any outside write.
+**Time decides no value** (operator, 2026-11-13). Until then a getter or setter evaluation whose self time passed 10 ms became an Error
+`timeout N ms (allowance M ms)` and was recorded as a `Trip:<eid>#<prop>` entity. That made a value depend on the machine's load (the same
+getter on the same data tripped or not; a real chat turn lost its answer to an 11 ms `ChatMessage.evs`) and broke "the journal is the image, replay
+is the test". Now a getter's result depends only on its inputs and the step budget; an evaluation that runs long returns its normal value, in the
+native VM and in the browser VM alike. The Trip class, its pack and the `field:driver:trip` writes are gone (a `Trip:*` row an old store
+still holds is an ordinary entity).
+
+Time stays MEASURED: `Stats:eval` (docs/cliffvm.md) keeps per-getter self time (the clock minus the time spent in host calls that wait
+on I/O, `expr::waiting`) and counts, and a `slow` counter per row: the evaluations whose own self time passed the FORMER allowance, a flag
+for the reader that changes nothing. The threshold is `DEFAULT_EVAL_TIME_MS` (10), overridden by the env `MEMBRANE_EVAL_TIME_MS`; the clock
+is injectable (`expr::set_clock`) for tests.
 
 ## The contracts are executable
 `native/tests/contracts.rs` fails when a contract is broken: every shipped pack loads together (view packs that import `dom` are

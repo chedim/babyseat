@@ -1471,16 +1471,6 @@
       "Store"
     ]
   },
-  "trip": {
-    "getters": {
-      "Trip.reason": "Text"
-    },
-    "writes": {},
-    "findings": [],
-    "resident": [
-      "Trip"
-    ]
-  },
   "turn": {
     "getters": {
       "Ctx.depth": "Int",

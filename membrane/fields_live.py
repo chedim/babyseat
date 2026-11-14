@@ -58,22 +58,16 @@ def pack_name(eid: str, d) -> str:
     e = str(eid)
     return e.rsplit("pack:", 1)[1] if "pack:" in e else e
 WRITER = "trigger:field:"
-# A time kill (`Trip:<node>`) comes from the VM host, not from a c1f setter, and it cannot be re-derived on replay (it depends on how
-# long something took): the journal must take it as an OUTSIDE write, so it is not stamped `trigger:*`.
-TRIP_WRITER = "field:driver:trip"
-TRIP_CLASS = "Trip"
 
 
 def stamp_writer(engine_writer: str) -> str:
-    """The store writer for an engine write: `trigger:field:<setter>` (derived, replay recomputes it), except a trip (outside)."""
-    if engine_writer == TRIP_WRITER:
-        return "host:" + engine_writer.removeprefix("field:")
+    """The store writer for an engine write: `trigger:field:<setter>` (derived, replay recomputes it)."""
     return WRITER + engine_writer.removeprefix("field:")
 
 
 def stamp_born_writer(cls: str) -> str:
-    """The writer for an entity a setter (or the engine) created: a Trip is outside, anything else is the engine's own."""
-    return stamp_writer(TRIP_WRITER) if cls == TRIP_CLASS else WRITER + "create"
+    """The writer for an entity a setter (or the engine) created: the engine's own."""
+    return WRITER + "create"
 LLM_EID = MEMBRANE_NS + "llm"
 
 

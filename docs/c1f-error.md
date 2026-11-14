@@ -5,7 +5,7 @@ note says, with the operator's decisions of 2026-11-13: `V::Error`, `is` / `is n
 null with the kind in `Core.failed` beside `Core.why`, a setter writing an Error refused with a `refused` receipt, `Error('reason')`, the reserved name `Error`,
 `why(x)` reading an Error, inference as a kind (`T|Error`), one `types.json` regenerate commit. Differences and open points:
 (1) the Error carries its reason only (no separate `source` field: a getter that reads an Error returns it unchanged, and `Why` names the getter);
-(2) the `error: ` prefix is gone from failure reasons (`budget exceeded (N steps)`, `timeout N ms (allowance M ms)`, `not-a-type: ...`, the key errors): the kind says it;
+(2) the `error: ` prefix is gone from failure reasons (`budget exceeded (N steps)`, `not-a-type: ...`, the key errors): the kind says it;
 (3) `json(text)` of bad text is now an Error (`not-json: ...`, follow-up 2026-11-13; the ~17 pack lines that read `json(x) or {}` / `json(x) != None` as "not JSON is fine" read a local and test `is Error`; the door answers a malformed body as before); refused
 writes stay `refused` receipt TEXT (they are not values); `run_cliff` shows a null with a reason as `null: <reason>` (not an error) and an Error as `Error: <reason>` (an error);
 (4) the cast union `Int(v) or Text(v)` no longer works (a failed cast is an Error and `or` never hides it): it is written `v if v is Int or v is Text else ...`;
@@ -18,8 +18,7 @@ PROPAGATES through getters unchanged (no "via" chain), and the check is the oper
 byte-identical (an Error serialises as null there); only `entity_read` and `run_cliff` show the kind. Three things in the brief do not
 match the tree and need your call first: (1) c1f has NO `??` today (the default is `or`, which also fires on False/0/empty; the null-only
 default is `x if x != None else d`, `docs/c1f-stdlib.md:43`); (2) `is` is currently a parse error (`native/src/expr.rs:414`, listed as
-dropped at `docs/c1f-stdlib.md:118`), so this note adds it; (3) `Trip` is already a class (`native/src/fields.rs:94`), so `x is Trip` is
-legal today for entities. Decisions that need numbers/names/defaults are in the last section; none is chosen here.
+dropped at `docs/c1f-stdlib.md:118`), so this note adds it; (3) `x is <Class>` is legal for entities (any class name; `Trip` was the example then; 2026-11-13 the Trip class is gone). Decisions that need numbers/names/defaults are in the last section; none is chosen here.
 
 ## Today: one kind, `V::Nil(reason)`
 
@@ -36,7 +35,7 @@ absence are told apart only by the reason's PREFIX (`error: ...`), e.g. `door_to
 |---|---|
 | getter body raised (bad operand, no attribute, sql/read/stat driver `Err`) `fields.rs:827-833` | null, `error: <e>` + a receipt |
 | step budget `budget exceeded (N steps)` `expr.rs:23,118`, via 827-833 | null |
-| self-time kill `timeout 11 ms (allowance 10 ms)` `expr.rs:124-132`, `fields.rs:99-100,757-760,822-826` (Trip: the Error applies until an input changes) | null, `error: timeout ...` |
+| (REMOVED 2026-11-13: a self-time kill `timeout N ms (allowance M ms)` and its Trip entity. Time decides no value; the step budget is the one limit that gives an Error, docs/c1f-stdlib.md) | |
 | `Command` timed-out run: `output errors ok rc` `membrane/packs/proc.c1f:20-31` (`None(this.timeout_why)`) | null, remedy text |
 | failed cast `Int('a')` -> `not-a-type: ...` `expr.rs:836` | null |
 | bad constructor key `error: the key of ... ` `expr.rs:1209-1212` | null (and the write creates nothing) |
@@ -90,8 +89,7 @@ Rule of thumb: **an Error is contagious everywhere a value is USED, and never hi
 ## (c) Storage
 
 A derived Error is NEVER stored: the stored cell is JSON null (as now) and `core.why` gains a kind (`why: (eid, prop) -> (Null|Error, text)`,
-`vm.rs:199`, written at `fields.rs:757-760,818-832`) so a read gives `Err` back (`vm.rs:289`) and a null stays a null. The Trip path rebuilds
-an Error from the Trip entity (`fields.rs:97-100`), unchanged. A SETTER that writes an Error (`X.p = <Error value>`, or an `entity_write`
+`vm.rs:199`, written at `fields.rs:757-760,818-832`) so a read gives `Err` back (`vm.rs:289`) and a null stays a null. (The Trip path that rebuilt an Error from a Trip entity is removed, 2026-11-13.) A SETTER that writes an Error (`X.p = <Error value>`, or an `entity_write`
 whose value expression is one): the write is REFUSED, nothing is stored, the old value stays; the setter's receipt `refused` (the same
 property as `fields.rs:1125`) carries `refused: <reason> (an Error is never stored; ...)`; the door reply of `entity_write` is
 `refused: ...` (`door_tools.c1f:117`). Alternative: store as null with `why` (what a null write does now). Recommend refuse: a refused
@@ -121,7 +119,7 @@ Packs that rely on failure = null: (1) `proc.c1f:20-31` become `Error(...)`-valu
 makes a null today); `door_tools.c1f:112` (`status == 'timeout'` text) and `163,197,234` drop the `startswith('error')` sniff for `is Error`.
 (2) Every pack that does `x or default` on a failure site now gets the Error (not the default): grep `or` over `Command.*`, casts and
 reads; each is a one-line decision (`x if x != None ...` is the old behaviour for nulls). (3) Tests that assert a failure is null /
-`why` starts with `error:`: `native/tests/*` for budget, timeout (Trip), key errors, `cliffvm.md` examples pinned by `help_1143.rs`
+`why` starts with `error:`: `native/tests/*` for budget, key errors, `cliffvm.md` examples pinned by `help_1143.rs`
 (every `Help:` example) and the docs examples; golden fixtures must not change (a unit check: each golden route through an Error site
 returns null). A grep of `'error'`, `startswith(`, `why(`, `timed out` over packs and tests enumerates them. Order of risk: packs
 first (behaviour), then help pages (text), then types.json (data).
@@ -129,9 +127,9 @@ first (behaviour), then help pages (text), then types.json (data).
 ## (g) The `is` grammar
 
 `comp_op` (`expr.rs:406-419`) gets `is` as a comparison operator with a name or a parenthesised name list on the right:
-`x is Error`, `x is Trip`, `x is (Trip, Place)` (ALL must match: an entity that has both classes in its `parents`). Value kinds are the
+`x is Error`, `x is Task`, `x is (Task, Place)` (ALL must match: an entity that has both classes in its `parents`). Value kinds are the
 `kind_of` names (`expr.rs:1097`: `int float text bool list dict`, entity) plus `Error`; the right side is written as a bare name, in
-its own spelling (`Error`, `Trip`, and for values `Int Float Text Bool List Dict`, the same spellings the casts use, `expr.rs:347`).
+its own spelling (`Error`, a class name, and for values `Int Float Text Bool List Dict`, the same spellings the casts use, `expr.rs:347`).
 `x is A or x is B` is the "any" form, no new syntax. An entity is `Class`-matched by `parents`, nearest first, root `Entity`
 (`vm.rs:81-85,942` `in_classes`/`is_a`); a non-entity matched against a class is False. Null: `x == None`, no `is Null`. Interaction:
 `is` has comparison precedence, so `a == b is Error` chains like Python comparisons: recommend it is a parse error to mix `is` into a
@@ -146,7 +144,7 @@ list at `docs/c1f-stdlib.md:118` and the `Is` parse error are part of the build.
    (the golden-safe rule), `py_eq(Err, None)` false. No producers yet.
 2. RED: operator table (b): arithmetic, compare, `or`/`and`/`not`, calls, index, WHEN/if, containers in one evaluation; GREEN in `expr.rs`.
 3. RED: storage (c): derived Error not stored, `why` carries the kind, getter propagation through a getter chain with the source named,
-   Trip rebuild gives an Error, a setter writing an Error is refused (receipt + door reply); GREEN in `fields.rs`/`vm.rs`.
+   a setter writing an Error is refused (receipt + door reply); GREEN in `fields.rs`/`vm.rs`.
 4. RED: producers (a): budget, timeout, cast, key, getter raise, `json` failure, Command timeout in `proc.c1f`; golden/route tests
    assert old routes byte-identical; `entity_read` and `run_cliff` show `Error: <reason>` (`door_tools.c1f:163,197`).
 5. RED: infer (d) plus the regenerated `types.json`; the pack migration (f) one pack per commit.

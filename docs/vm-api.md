@@ -97,13 +97,10 @@ A birth carries the entity's content, which a bare `(eid, None, eid)` can't rebu
   `trigger:*` writes, in order. The final state must match too. A native VM passes the
   same test on the same journals (`tests/test_journal_971.py`).
 
-Limits an evaluation runs under (native): a step budget (default 100,000, env `MEMBRANE_EVAL_BUDGET`) and a self-time allowance
-(default 10 ms, env `MEMBRANE_EVAL_TIME_MS`; the time spent in host calls that wait is not counted). Over either, the node is a
-Error (`budget exceeded (N steps)`, `timeout N ms (allowance M ms)`). The budget is deterministic. The time trip is not, so
-replay needs it recorded: the kills only, never timings. A kill is a `Trip:<eid>#<prop>` entity written as a host write after the
-evaluation (like an effect receipt: writer `field:driver:trip`), which the journal keeps as an outside write; on replay the node
-evaluates, the journalled Trip arrives, and the node recomputes to the same null. It applies until an input of the node changes
-(see docs/c1f-stdlib.md, Limits). The host must journal those writes as outside writes (open: `fields_live.py` stamps them `trigger:*`).
+Limits an evaluation runs under (native): a step budget (default 100,000, env `MEMBRANE_EVAL_BUDGET`); over it the node is an
+Error (`budget exceeded (N steps)`). The budget is deterministic, and it is the only limit that changes a value: time decides nothing
+(2026-11-13; the former 10 ms self-time allowance and its `Trip` entities are gone, so a replay needs no recorded kills). Time is only
+measured: `Stats:eval` flags a `slow` evaluation (self time over `MEMBRANE_EVAL_TIME_MS`, default 10). See docs/c1f-stdlib.md, Limits.
 
 ## 6. The native VM (`native/`, `membrane/ch_native.py`, #971 step 3)
 

@@ -16,12 +16,12 @@ Box.total getter:
   base + tax
 ```
 
-## No node cap, a step budget, a 10 ms allowance
+## No node cap, a step budget
 
-An expression may be as long as it needs. Each evaluation has a step budget (100,000 steps) and a time allowance of 10 ms of its own
-time (waiting on a read does not count). An evaluation over either becomes an Error with the reason (`budget exceeded`, `timeout N ms`);
-the rest of the field keeps running. A time kill is recorded as an entity `Trip:<eid>#<prop>` ({node, self_ms, allowance_ms, at, active}):
-list them with entity_query `kind:Trip`.
+An expression may be as long as it needs. Each evaluation has a step budget (100,000 steps); over it the evaluation becomes an Error with the reason (`budget exceeded`) and
+the rest of the field keeps running. Time limits nothing: a slow getter returns its normal value, and the same getter on the same data gives the same
+result on any machine. A native builtin counts as one step however large its input. Time is only measured: `Stats:eval.top` has a `slow` count per getter
+(evaluations that took more than 10 ms of their own time).
 
 ## Nulls carry a reason
 
@@ -44,11 +44,11 @@ Box.why getter: None('waiting for a price') if this.price == None else this.pric
 ## Errors: a failure is not a null
 
 A null is "not set, absent, not applicable" (it keeps its reason). An ERROR is a failure: it carries its reason, and the reason says what to do. A failed cast, a getter
-that raised, a block over its step budget or time allowance, a command that timed out, an entity key that is null or empty text, and `Error('reason')` in a pack are Errors.
+that raised, a block over its step budget, a command that timed out, an entity key that is null or empty text, and `Error('reason')` in a pack are Errors.
 `x is Error` tests one, `why(x)` reads its text, and `x == None` is FALSE for it. An Error spreads: arithmetic, `x[i]`, `x.a`, comparisons, `not`, `and`, `or`, an `if` or
 `WHEN` condition and every call over an Error give that same Error (the first one wins), a getter that reads an Error returns it unchanged, and a `WHEN` over an Error does
 NOT fall through to the next arm. So `or` never hides one: `x or 0` over an Error is the Error; write `0 if x is Error else x`. `x is not Error`, `x is Int` (kinds `Int Float Num
-Text Bool List Dict Error`; `Num` is an Int or a Float, so `x is (Int, Num)` holds for an Int, while `x is (Float, Text)` is a parse error: kinds that can never match together), `x is Trip` (an entity of that class, by its `parents`, nearest first, ending at `Entity`) and `x is (Trip, Place)` (all of them) read a value without
+Text Bool List Dict Error`; `Num` is an Int or a Float, so `x is (Int, Num)` holds for an Int, while `x is (Float, Text)` is a parse error: kinds that can never match together), `x is Task` (an entity of that class, by its `parents`, nearest first, ending at `Entity`) and `x is (Task, Place)` (all of them) read a value without
 spreading it. Stored, a derived Error is a plain null (the old routes see null; `entity_read` and `run_cliff` print `Error: <reason>`; `run_cliff` prints a null with a reason as `null: <reason>`, not an error); `json(text)` of text that is not JSON is an Error (`j = json(t)` then `{} if j is Error else j`); a setter that writes an Error is
 refused, so a failure is never stored as if it were a value. In a list or dict an Error is kept while one expression runs and is a plain null once stored.
 

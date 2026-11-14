@@ -124,8 +124,8 @@ Request.mc_w_text getter:
 -- The block is loaded as two scratch packs at once, `cliffg<n>` (the block as a getter: a value) and `cliffs<n>` (the block as an on-setter body: writes; privileged,
 -- so it may write any class like entity_write does), each with its own class. Whichever loads runs: a block that is a value runs as the getter (its entity is
 -- born by a write), one whose last line is a write runs as the setter (`go`), and one that loads as neither answers with both loader errors. The answer is read
--- from the scratch entity, then the packs, the entity and any trip entity are retired: nothing accumulates. The getter runs under the engine's step budget and
--- time allowance (docs/c1f-stdlib.md): a runaway block answers with that reason and the seat stays up. A write's reactions come from the host like entity_write's.
+-- from the scratch entity, then the packs and the entity are retired: nothing accumulates. The getter runs under the engine's step budget
+-- (docs/c1f-stdlib.md; time limits nothing): a runaway block answers with that reason and the seat stays up. A write's reactions come from the host like entity_write's.
 Request.cl_code getter: str(prop(this.mc_args, 'code') or '')
 Request.cl_bad getter: 'run_cliff needs code (a block of lines; the last one is the value)' if this.mc_tool == 'run_cliff' and strip(this.cl_code) == '' else None
 Request.cl_on getter: this.mc_tool == 'run_cliff' and this.cl_bad == None and not this.mc_deny

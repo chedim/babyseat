@@ -4,7 +4,7 @@
 //!   - hears OUTSIDE writes (the door's requests, the boot's facts, a person's write) and gives them to the engine;
 //!   - drains the engine's output (`Fields::out`) and applies every write to the store with the writer stamped as
 //!     fields_live.stamp_writer / stamp_born_writer do: `trigger:field:<setter>` for the engine's own writes (replay
-//!     re-derives them), `host:...` for a Trip (a time kill cannot be re-derived: it depends on how long something took);
+//!     re-derives them);
 //!   - runs the clock (`Fields::tick`) and settles what the drivers' threads finished (queries, files, commands);
 //!   - keeps the JOURNAL of the outside writes only. Replay = apply the journal to a fresh engine: the engine writes are
 //!     computed again, never read from the journal.
@@ -22,8 +22,6 @@ use crate::vm::{Core, Host as EngineHost, Write};
 /// The size the write-ahead log may reach before a tick truncates it (a threshold, flagged for the operator: SQLite resets the log at about 4 MB but never shrinks the file, and a reader holding a snapshot stops the reset).
 pub const WAL_LIMIT_BYTES: u64 = 8 << 20;
 pub const WRITER: &str = "trigger:field:";
-pub const TRIP_WRITER: &str = "field:driver:trip";
-pub const TRIP_CLASS: &str = "Trip";
 /// the collection (table `c_field`) of the entity rows: k = eid, body = {cls, props, writers}
 pub const ROWS: &str = "c_field";
 /// the journal's collection (table `c_journal`): k = sequence number, body = a line
@@ -37,20 +35,17 @@ pub const PACK_CLASS: &str = "Pack";
 pub const PACK_WRITER: &str = "pack";
 /// The pack the host itself marks privileged (packs/boot.c1f): the root of trust.
 
-/// The store writer for an engine write (fields_live.stamp_writer): derived, except a trip (outside).
+/// The store writer for an engine write (fields_live.stamp_writer): derived.
 pub fn stamp_writer(engine_writer: &str) -> String {
-    if engine_writer == TRIP_WRITER { return format!("host:{}", engine_writer.trim_start_matches("field:")); }
     format!("{WRITER}{}", engine_writer.trim_start_matches("field:"))
 }
 
 /// The store stamp of what a setter wrote while triggered by a VIRTUAL entity: OUTSIDE (journalled), since the trigger is not in the journal and a replay could not
-/// derive the write again (the Trip's way: `host:` stamps).
+/// derive the write again (`host:` stamps).
 pub fn stamp_virtual_writer(engine_writer: &str) -> String { format!("host:virtual:{}", engine_writer.trim_start_matches("field:")) }
 
-/// The writer for an entity the engine created (fields_live.stamp_born_writer): a Trip is outside.
-pub fn stamp_born_writer(cls: &str) -> String {
-    if cls == TRIP_CLASS { stamp_writer(TRIP_WRITER) } else { format!("{WRITER}create") }
-}
+/// The writer for an entity the engine created (fields_live.stamp_born_writer).
+pub fn stamp_born_writer(_cls: &str) -> String { format!("{WRITER}create") }
 
 /// The class an eid names: after a `namespace::`, up to the next colon (`membrane::Chat:main` is `Chat`).
 pub fn class_of_eid(eid: &str) -> String {
@@ -374,7 +369,7 @@ impl Host {
     /// The time a write applied now is stamped with: its round's (an outside write's own time), else the clock.
     fn stamp_ts(&self) -> f64 { match self.round_ts.load(Ordering::SeqCst) { 0 => self.now(), b => f64::from_bits(b) } }
 
-    /// `engine_writer` is what the engine sees (a Trip arrives as `driver:trip`, the way an effect's receipt does), `stamp` what the store keeps.
+    /// `engine_writer` is what the engine sees `stamp` what the store keeps.
     pub(crate) fn inject_write(&self, ts: f64, eid: &str, prop: &str, new: J, engine_writer: &str, stamp: &str) {
         let _t = self.txn();
         let _r = self.round_at(ts);
@@ -407,13 +402,8 @@ impl Host {
         {
             let mut g = self.eng();
             let (core, f, seq) = &mut *g;
-            if cls == TRIP_CLASS {
-                core.load(eid.into(), cls.into(), props, None, ts);
-                f.born(core, &NullHost, eid, ts, seq);        // a kill arrives like an effect's receipt: its node is dirty, as "the kill, nothing else"
-            } else {
-                f.arrive(core, eid.into(), cls.into(), props, ts);
-                f.settle(core, &NullHost, ts, seq);
-            }
+            f.arrive(core, eid.into(), cls.into(), props, ts);
+            f.settle(core, &NullHost, ts, seq);
         }
         self.drain_apply();
     }
@@ -425,7 +415,6 @@ impl Host {
             match l {
                 Line::Born { ts, writer, eid, cls, props } => self.inject_born(*ts, eid, cls, props.clone(), writer, writer),
                 Line::Write { ts, writer, eid, prop, new } => {
-                    // a time kill arrives the way an effect's receipt does (`driver:trip`), not as a `host:` writer
                     let seen = writer.strip_prefix("host:").unwrap_or(writer);
                     self.inject_write(*ts, eid, prop, new.clone(), seen, writer)
                 }
@@ -672,7 +661,7 @@ impl Host {
     }
 
     /// Start-up, after the packs: the RESIDENT classes' rows arrive in the engine (their class, their props, the `parents` stamp among them), so what the model wrote
-    /// (a banner line, a trip, a message) outlives the process; every other stored row of a LAZY class is only NOTED (`Core::unloaded`: eid -> class) and loads
+    /// (a banner line, a message) outlives the process; every other stored row of a LAZY class is only NOTED (`Core::unloaded`: eid -> class) and loads
     /// when something refers to it (`fault_wanted`, `Fields::ensure`) or in the background (`warm_step`). A VIRTUAL class's row (an older run stored it) is neither. The rows
     /// come back as they are, with one exception: a prop a GETTER wrote (`trigger:field:getter:*`, `trigger:field:rebuild`) is not read back: the rebuild that follows
     /// computes it again from the restored inputs, so a getter that changed since the row was stored shows its new value. No setter runs and nothing is journalled or
