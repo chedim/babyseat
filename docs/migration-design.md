@@ -53,11 +53,10 @@ A session with no `owner` (126 of 130 [copy]) belongs to the operator: `owner = 
 - `started` is not written on the imported turns: a turn that has `started` makes the session-event setter (`oc_fin`, `door_session.c1f`) emit stream events and rewrite the session's `upd` when it is read. Without it the assistant row's `time.created` is the user row's (a 40 to 60 ms difference in
   the copy); the true times are in `legacy_src`.
 
-### Lazy import (not built: needs a pack hook, Decision 2)
+### Lazy import (built 2026-11-14, #1143)
 
-"A session's messages arrive when it is first opened" needs the route that opens a session (`GET /session/<sid>/message`, `door_session.c1f` `ml_reply`) to WAIT for the import of a `pending` session. Smallest proposal: one arm in `ml_reply` (`WHEN the ledger of this sid is pending or importing: None`, the reply held, as it
-already waits for its rows) and one setter in `legacy_import.c1f` that writes `Legacy:seat.import = {id, sessions: [sid], page: <the fact legacy_page>}` on that request. It adds one fact (the page size, which has no default) and one line in another pack's reply. Until then the explicit request does the same by hand:
-`Legacy:seat.import = {id, sessions: ['<sid>'], page: <n>}`. The batch below is the cutover path.
+The headers (`Legacy:seat.list = {id}`: every old session as a `ChatSession` plus a `pending` ledger) come at once; a session's messages are imported the first time it is opened. With the launch fact `legacy_page` (user rows per query; NO default) told, `GET /session/<sid>/message` of a session whose ledger is `pending` or `importing` writes the ledger's `open` (`Request.ml_ask`, a setter in `legacy_import.c1f`) and the reply WAITS (`ml_lazy` in `door_session.c1f`) until the ledger says `done` (or `error`: the rows that made it). A second open finds `done` and does nothing; a native session has no ledger and is never touched; without the fact nothing is opened lazily. The seat runs the wanted sessions one at a time with the same pages as the eager path (a getter, `waiting`, lists the ledgers with `open`; `beat` starts the first one when the seat is idle, a run that ends picks the next wanted session before the rest of an eager queue). `import sessions: 'all'` stays as the eager path. A session now ends on an EMPTY page (one query more per session), because the message list reads the store the moment `done` is written, and the last page's rows are in the store only after that cascade's commit. `RESIDENT Legacy`: the seat and the ledgers are always loaded.
+Measured on the real store (read-only, a private seat, release build, page 50): see the numbers in the report of the change; tests `legacy_import_1143.rs` (`an_open_*`, `two_opens_*`) and `legacy_routes_1143.rs` (`the_first_open_*`, `without_the_legacy_page_fact_*`, `opening_a_native_session_*`).
 
 ### Cutover runbook, phase 1 (with rollback)
 

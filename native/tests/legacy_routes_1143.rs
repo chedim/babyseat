@@ -286,3 +286,71 @@ fn measure_the_import_of_every_session_of_a_real_store_read_only() {
     assert!(!dir.join("claude-was-run").exists());
     assert_eq!(errs.to_string(), "0");
 }
+
+#[test]
+fn the_first_open_of_a_session_imports_its_messages_and_a_second_open_does_nothing() {
+    let fx = tmp("legacy-lazy");
+    let old = fx.join("old.sqlite");
+    legacy_fixture::make_legacy(&old);
+    let fact = format!("sql_sources=[{{\"name\": \"legacy\", \"path\": \"{}\", \"mode\": \"ro\"}}]", old.display());
+    let (_run, port, dir) = seat_facts("legacy-lazy", NEVER, false, &[&fact, "legacy_page=2"]);
+    let w = mcp(port, "entity_write", json!({"spec": "Legacy:seat", "prop": "list", "value": {"id": "h1"}}));
+    assert!(w["result"].is_object(), "{w}");
+    wait("the headers", || (read_prop(port, "Legacy:session:xcl_d", "state") == json!("pending")).then_some(()));
+    // headers only: the list shows every session, no message is in yet
+    let (_, l) = api(port, "GET", "/session", J::Null);
+    assert_eq!(l.as_array().unwrap().len(), 4);
+    assert_eq!(read_prop(port, "Legacy:session:ses_a", "state"), json!("pending"));
+    // the first open: the same route a native session answers, with the rows
+    let (st, rows) = api(port, "GET", "/session/ses_a/message", J::Null);
+    assert_eq!(st, 200);
+    assert_eq!(rows.as_array().unwrap().len(), 4, "{rows:?}");
+    assert_eq!(rows[0]["parts"][0]["text"], "where do we start?");
+    assert_eq!(read_prop(port, "Legacy:session:ses_a", "state"), json!("done"));
+    // the others are untouched
+    assert_eq!(read_prop(port, "Legacy:session:ses_b", "state"), json!("pending"));
+    assert_eq!(read_prop(port, "Legacy:session:ses_c", "state"), json!("pending"));
+    // a second open runs no query
+    let q = read_prop(port, "SqlQuery:legacy:msgs", "run_result");
+    let (_, again) = api(port, "GET", "/session/ses_a/message", J::Null);
+    assert_eq!(again, rows);
+    assert_eq!(read_prop(port, "SqlQuery:legacy:msgs", "run_result"), q, "no page query for a done session");
+    // an empty session opens to an empty list; two sessions opened together both come
+    let (st, e) = api(port, "GET", "/session/xcl_d/message", J::Null);
+    assert_eq!((st, e), (200, json!([])));
+    let (p2, p3) = (port, port);
+    let t1 = std::thread::spawn(move || api(p2, "GET", "/session/ses_b/message", J::Null));
+    let t2 = std::thread::spawn(move || api(p3, "GET", "/session/ses_c/message", J::Null));
+    let (b, c) = (t1.join().unwrap(), t2.join().unwrap());
+    assert_eq!(b.0, 200); assert_eq!(c.0, 200);
+    assert_eq!(b.1.as_array().unwrap().len(), 2, "{:?}", b.1);
+    assert_eq!(c.1.as_array().unwrap().len(), 2, "{:?}", c.1);
+    assert_eq!(read_prop(port, "Legacy:session:ses_b", "state"), json!("done"));
+    assert_eq!(read_prop(port, "Legacy:session:ses_c", "state"), json!("done"));
+    assert!(!dir.join("claude-was-run").exists());
+}
+
+#[test]
+fn without_the_legacy_page_fact_an_open_imports_nothing_and_a_native_session_is_unchanged() {
+    let fx = tmp("legacy-nolazy");
+    let old = fx.join("old.sqlite");
+    legacy_fixture::make_legacy(&old);
+    let fact = format!("sql_sources=[{{\"name\": \"legacy\", \"path\": \"{}\", \"mode\": \"ro\"}}]", old.display());
+    let (_run, port, _dir) = seat_facts("legacy-nolazy", NEVER, false, &[&fact]);
+    mcp(port, "entity_write", json!({"spec": "Legacy:seat", "prop": "list", "value": {"id": "h1"}}));
+    wait("the headers", || (read_prop(port, "Legacy:session:xcl_d", "state") == json!("pending")).then_some(()));
+    let (st, rows) = api(port, "GET", "/session/ses_a/message", J::Null);
+    assert_eq!((st, rows), (200, json!([])), "lazy is off without the fact");
+    assert_eq!(read_prop(port, "Legacy:session:ses_a", "state"), json!("pending"));
+}
+
+#[test]
+fn opening_a_native_session_writes_no_ledger_when_the_page_fact_is_told() {
+    let (_run, port, _dir) = seat_facts("legacy-native", NEVER, false, &["legacy_page=2"]);
+    let (st, s) = api(port, "POST", "/session", json!({"title": "native"}));
+    assert_eq!(st, 200);
+    let sid = s["id"].as_str().unwrap().to_string();
+    let (st, rows) = api(port, "GET", &format!("/session/{sid}/message"), J::Null);
+    assert_eq!((st, rows), (200, json!([])));
+    assert!(read_prop(port, &format!("Legacy:session:{sid}"), "state").is_null() && read_prop(port, &format!("Legacy:session:{sid}"), "open").is_null(), "no ledger made for a native session");
+}

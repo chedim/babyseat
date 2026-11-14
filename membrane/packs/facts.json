@@ -145,6 +145,10 @@
    "wired": false,
    "why": "second SQLite files to open as entities (membrane/packs/sql.c1f, native/src/sqldrv.rs): a LIST of {name, path, mode} (mode ro, the default, opens the file read-only and immutable; rw may write); each entry SEEDS `SqlSource:<name>` as if it were written by hand, and a source that already has a path is left alone; the seat's own store is refused; told by `--fact sql_sources='[{\"name\": \"lex\", \"path\": \"/data/words.sqlite\"}]'`"
   },
+  "legacy_page": {
+   "wired": false,
+   "why": "the lazy history import (membrane/packs/legacy_import.c1f, door_session.c1f; #1143): how many old user rows one query reads when a session imported as a header only is opened for the first time (GET /session/<sid>/message imports its messages, once, and answers). NO default: unset, an open imports nothing (the eager `Legacy:seat.import` stays); told by `--fact legacy_page=<n>`"
+  },
   "effect_workers": {
    "wired": false,
    "why": "the cap on Command / File / Fetch / SqlQuery effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"

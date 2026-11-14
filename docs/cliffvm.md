@@ -282,7 +282,7 @@ SQLite file (the old store of the migration, the lexicon, a scratch database) is
 - Not decided by the build (listed for the operator): a default `max_rows`, the 256-statement cache, whether an `rw` source may create a missing file, the worker slot a busy source holds.
 
 ### The chat history import (`membrane/packs/legacy_import.c1f`, #1143, migration phase 1)
-The previous seat's chat history (sessions and messages) is imported from the read-only `SqlSource:legacy` by `Legacy:seat.list = {id}` (the headers) and `Legacy:seat.import = {id, sessions, page}` (the messages; `page` has no default), with a ledger entity `Legacy:session:<sid>` per old session. The
+The previous seat's chat history (sessions and messages) is imported from the read-only `SqlSource:legacy` by `Legacy:seat.list = {id}` (the headers) and `Legacy:seat.import = {id, sessions, page}` (the messages; `page` has no default), with a ledger entity `Legacy:session:<sid>` per old session. With the launch fact `legacy_page` a session's messages are imported lazily, the first time `GET /session/<sid>/message` opens it (the reply waits for the ledger's `done`). The
 whole description (mapping, owner rule, runbook, measured numbers, decisions) is `docs/migration-design.md` "Phase 1"; the model's own page is `Help:legacy`.
 
 ## The host loop (`native/src/host.rs`)

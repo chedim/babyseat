@@ -87,4 +87,5 @@ yours: it follows the field's rules from then on, and the old row stays as it wa
 ```
 
 A getter can do the same on a schedule of your own: it reads `SqlQuery:<name>.rows` and a setter on it writes the entities (Help:packs shows getters and setters). The messages of a session that is still `pending` in its ledger can be
-imported with `Legacy:seat.import = {id, sessions: ['<session id>'], page: <n>}`; the batch and the headers are described at the top of the `legacy_import` pack.
+imported with `Legacy:seat.import = {id, sessions: ['<session id>'], page: <n>}`; the batch and the headers are described at the top of the `legacy_import` pack. Where the seat was started with the fact `legacy_page`, a `pending` session
+imports itself the first time it is opened (the page, or `GET /session/<id>/message`) and its ledger turns `done`.

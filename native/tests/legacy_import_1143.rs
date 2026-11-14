@@ -25,12 +25,13 @@ fn ticking() -> Box<dyn Fn() -> f64 + Send + Sync> {
     Box::new(move || 1_800_000_000.0 + n.fetch_add(1, Ordering::SeqCst) as f64)
 }
 const PACKS: &[&str] = &["entity", "boot", "fs", "proc", "fetch", "sql", "store", "door", "semtext", "mentions", "chat", "chat_turn", "door_session", "door_auth", "legacy_import", "legacy_persons"];
-fn host_at(d: &std::path::Path) -> Host {
+fn host_at(d: &std::path::Path) -> Host { host_facts(d, Map::new()) }
+fn host_facts(d: &std::path::Path, facts: Map<String, J>) -> Host {
     let h = Host::open({ let mut o = Options::new(Some(store_path(d))); o.clock = ticking(); o }).unwrap();
     for n in PACKS { h.load_pack(n, &pack(n)).unwrap_or_else(|e| panic!("pack {n}: {e}")); }
     h.load_stored_entities();
     h.rebuild();
-    membrane_vm::host::boot_started(&h, &Map::new(), true);
+    membrane_vm::host::boot_started(&h, &facts, true);
     h.pump();
     h
 }
@@ -386,4 +387,54 @@ fn writing_the_headers_grows_linearly_with_the_number_of_sessions() {
     let b = list_wall_s(600);
     eprintln!("list: 150 sessions {a:.2} s, 600 sessions {b:.2} s, ratio {:.1}", b / a);
     assert!(b < 8.0 * a, "writing the headers cost {a} s for 150 sessions but {b} s for 600: super-linear");
+}
+
+#[test]
+fn an_open_of_a_pending_session_imports_it_alone_when_the_page_fact_is_told_and_queues_behind_a_running_one() {
+    let d = tmp("open");
+    let old = d.join("old.sqlite");
+    make_legacy(&old);
+    let h = host_facts(&d, props(json!({"legacy_page": 2})));
+    legacy_source(&h, &old);
+    h.write("membrane::Legacy:seat", "list", json!({"id": "1"}), "person");
+    pump_until(&h, "the headers", |h| !h.get("membrane::Chat:session:xcl_d", "stitle").is_null());
+    h.write("membrane::Legacy:session:ses_a", "open", json!("r1"), "person");
+    h.pump();
+    settled(&h);
+    assert_eq!(h.get("membrane::Legacy:session:ses_a", "state"), json!("done"), "{}", h.get("membrane::Legacy:seat", "refused"));
+    assert_eq!(h.get("membrane::Legacy:session:ses_b", "state"), json!("pending"));
+    assert_eq!(h.get("membrane::Chat:message:1790000010000-10", "sid"), json!("ses_a"));
+}
+
+#[test]
+fn an_open_during_a_running_import_waits_for_it_and_is_imported_once_after_it() {
+    let d = tmp("open-queue");
+    let old = d.join("old.sqlite");
+    make_legacy(&old);
+    let h = host_facts(&d, props(json!({"legacy_page": 1})));
+    legacy_source(&h, &old);
+    h.write("membrane::Legacy:seat", "list", json!({"id": "0"}), "person");
+    pump_until(&h, "the headers", |h| !h.get("membrane::Chat:session:xcl_d", "stitle").is_null());
+    import(&h, json!({"id": "i1", "sessions": ["ses_a"], "page": 1}));
+    h.write("membrane::Legacy:session:ses_b", "open", json!("r1"), "person");
+    h.write("membrane::Legacy:session:ses_b", "open", json!("r2"), "person");
+    pump_until(&h, "ses_b", |h| h.get("membrane::Legacy:session:ses_b", "state") == json!("done"));
+    assert_eq!(h.get("membrane::Legacy:session:ses_a", "state"), json!("done"));
+    assert_eq!(h.get("membrane::Legacy:session:ses_c", "state"), json!("pending"));
+    assert_eq!(h.get("membrane::Chat:message:1790000210000-20", "sid"), json!("ses_b"));
+}
+
+#[test]
+fn two_opens_at_once_are_both_imported_one_after_the_other() {
+    let d = tmp("open-two");
+    let old = d.join("old.sqlite");
+    make_legacy(&old);
+    let h = host_facts(&d, props(json!({"legacy_page": 1})));
+    legacy_source(&h, &old);
+    h.write("membrane::Legacy:seat", "list", json!({"id": "1"}), "person");
+    pump_until(&h, "the headers", |h| !h.get("membrane::Chat:session:xcl_d", "stitle").is_null());
+    h.write("membrane::Legacy:session:ses_b", "open", json!("r1"), "person");
+    h.write("membrane::Legacy:session:ses_c", "open", json!("r2"), "person");
+    pump_until(&h, "both done", |h| h.get("membrane::Legacy:session:ses_b", "state") == json!("done") && h.get("membrane::Legacy:session:ses_c", "state") == json!("done"));
+    assert_eq!(h.get("membrane::Legacy:session:ses_a", "state"), json!("pending"));
 }
