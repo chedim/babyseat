@@ -14,7 +14,7 @@ RESIDENT LinkAllow
 -- STATE, NOT EVENTS (docs/graph-link.md section 11): per page ONE `LinkPeer:<ns>` (RAM, held by `Vm:<ns>.peer`) and per subscription ONE `LinkPeer:<ns>:k_...` row, a colon child of it (collected with it). A sub's `val` is a GETTER over the
 -- entity it names (so the dependency engine is the subscription), `ver` counts its changes, `sig` = ver + verdict is what the page last acked (`ackd`): the sub is DUE while they differ. So many changes between two polls are ONE value,
 -- the last (coalescing), a lost reply is sent again (nothing is acked), and the memory per link is its subscriptions. A page that is `link_window` (8) frames behind gets a RESYNC snapshot of every subscription instead of a queue.
--- The frame number that carried a value is its revision for the page (`feed_vals` rev); the epoch is the seat's boot, a page that sees it change resubscribes everything.
+-- The frame number that carried a value is its revision for the page (`feed_vals` rev); the epoch is the seat's boot, a page that sees it change resubscribes everything, and so does a page that is told `reset`: the seat meets a counter above 1 from a page it does not know (a restart, an expired lease).
 -- POLICY (decision 11) is DATA: `LinkAllow:<name>` {prefixes} entities (any pack, the operator or the model writes them); a subscription is served only when the seat id starts with a listed prefix. The seed is two entities,
 -- `LinkAllow:setting` {prefixes: ['Setting:']} and `LinkAllow:doorbell` {prefixes: ['Doorbell:']} (the chat page's doorbell). `Chat:` is NEVER served, whatever the list says. Everyone with a valid token is the admin (a tokenless request is the door's 401); there are no per-person rights.
 -- The CAPS (decision 8): `link_max_subs` 200 per link (the rest are answered `refused`, not queued), `link_max_links` 16 per seat (the 17th link is answered `refused: too many links`), `link_max_value` 65536 characters a value (a bigger
@@ -62,7 +62,7 @@ Request.lk_plan getter:
   WHEN this.lk_ready != True: None
   ELSE WHEN this.lk_n <= (prop(this.lk_peer, 'last_n') or 0): {'kind': 'dup'}
   ELSE WHEN prop(this.lk_peer, 'ns') == None and len([p for p in instances('LinkPeer') if p.sid == None]) >= this.lk_maxl: {'kind': 'full'}
-  ELSE: {'kind': 'take', 'ns': this.lk_ns, 'n': this.lk_n, 'ack': this.lk_ack, 'hidden': this.lk_hidden, 'unkeys': this.lk_unkeys, 'take': this.lk_take, 'over': this.lk_over, 'quick': len(this.lk_subs) + len(this.lk_unkeys) > 0 or this.lk_hidden != (prop(this.lk_peer, 'hidden') == True) or prop(this.lk_peer, 'last_n') == None or prop(this.jbody, 'resync') == True or this.lk_hidden, 'mine': prop(this.lk_peer, 'mine') or []}
+  ELSE: {'kind': 'take', 'ns': this.lk_ns, 'n': this.lk_n, 'ack': this.lk_ack, 'hidden': this.lk_hidden, 'unkeys': this.lk_unkeys, 'take': this.lk_take, 'over': this.lk_over, 'unknown': prop(this.lk_peer, 'last_n') == None and this.lk_n != 1, 'quick': len(this.lk_subs) + len(this.lk_unkeys) > 0 or this.lk_hidden != (prop(this.lk_peer, 'hidden') == True) or prop(this.lk_peer, 'last_n') == None or prop(this.jbody, 'resync') == True or this.lk_hidden, 'mine': prop(this.lk_peer, 'mine') or []}
 -- (the setter reads ONLY the plan, the one value computed last: a getter read inside a setter may be one round old)
 Request.lk_plan on-setter link-frame:
   WHEN this.lk_plan != None and this.lk_took != True and prop(this.lk_plan, 'kind') == 'dup':
@@ -102,6 +102,7 @@ Request.lk_plan on-setter link-frame:
       (prop(w, 'key')).live = True
     this.lk_at = clock
     this.lk_now = prop(pl, 'quick')
+    this.lk_reset = prop(pl, 'unknown')
     this.lk_took = True
 
 -- the page's row holds itself by its Vm (a virtual row is collected when nothing holds it)
@@ -117,7 +118,7 @@ Request.lk_draft getter:
   ELSE WHEN this.lk_full == True: {'v': 1, 'refused': 'too many links (the most is ' + str(this.lk_maxl) + ' per seat)', 'epoch': this.lk_epoch, 'n': 0, 'vals': []}
   ELSE WHEN this.lk_took != True: None
   ELSE WHEN prop(this.lk_peer, 'cur') != this.eid: {'v': 1, 'superseded': True, 'epoch': this.lk_epoch, 'n': prop(this.lk_peer, 'out_n') or 0, 'vals': []}
-  ELSE WHEN len(this.lk_dues) > 0 or this.lk_now == True or this.lk_hidden or clock - this.lk_at >= this.lk_hold: {'v': 1, 'epoch': this.lk_epoch, 'n': (prop(this.lk_peer, 'out_n') or 0) + (1 if len(this.lk_dues) > 0 else 0), 'resync': prop(this.lk_peer, 'snap') == True, 'vals': [d['row'] for d in this.lk_dues]}
+  ELSE WHEN len(this.lk_dues) > 0 or this.lk_now == True or this.lk_hidden or clock - this.lk_at >= this.lk_hold: {'v': 1, 'epoch': this.lk_epoch, 'n': (prop(this.lk_peer, 'out_n') or 0) + (1 if len(this.lk_dues) > 0 else 0), 'resync': prop(this.lk_peer, 'snap') == True, 'reset': this.lk_reset == True, 'vals': [d['row'] for d in this.lk_dues]}
   ELSE: None
 Request.lk_draft on-setter link-reply:
   WHEN this.lk_draft != None and this.lk_out == None:

@@ -344,3 +344,20 @@ fn the_chat_doorbell_rings_when_a_message_is_posted_and_is_not_under_chat() {
     assert_eq!(v.len(), 1, "a message arriving is one change of the doorbell: {r}");
     assert_ne!(v[0]["value"], before);
 }
+
+#[test]
+fn a_page_the_seat_does_not_know_with_a_late_counter_is_told_to_resubscribe() {
+    let run = start(&tmp("reset"), &[]);
+    let ns = snap(run.port)["page"].as_str().unwrap().to_string();
+    let (_, r) = frame(run.port, &ns, 1, 0, &[(STEPS, "current")], &[], false);
+    assert_ne!(r["reset"], json!(true), "a first frame is not a reset: {r}");
+    // a seat that restarted (or a link that expired) meets a page at frame 57: it knows nothing of its subscriptions
+    let other = snap(run.port)["page"].as_str().unwrap().to_string();
+    let (_, r) = frame(run.port, &other, 57, 40, &[], &[], false);
+    assert_eq!(r["reset"], json!(true), "the page must send every subscription again: {r}");
+    assert_eq!(vals(&r).len(), 0);
+    // the full set comes in the next frame and is served as from a new page
+    let (_, r) = frame(run.port, &other, 58, 0, &[(STEPS, "current")], &[], false);
+    assert_ne!(r["reset"], json!(true), "{r}");
+    assert_eq!(vals(&r).len(), 1);
+}
