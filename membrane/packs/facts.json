@@ -177,10 +177,6 @@
    "wired": false,
    "why": "the quota probe interval the page shows, seconds (released PROBE_S 600); a `--fact` setting, default 600"
   },
-  "map_tile_k": {
-   "wired": false,
-   "why": "the field map's tile size `tile_k` in the empty 3D projection (released 150); a `--fact` setting, default 150"
-  },
   "field_tau_s": {
    "wired": false,
    "why": "the field current's fade `tau_s` / options `current_tau_s`, seconds (released 180.0); a `--fact` setting, default 180.0"
