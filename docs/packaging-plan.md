@@ -202,3 +202,13 @@ What is lost at step 3 for users of the dropped items (Ollama, cloud keys, peers
 15. The `membrane update` / autolatest door: dropped from the product, kept as the operator's tool [yes].
 16. Gates list and the by-hand `!` lines (section g); whether the release waits for RP D1 (Ollama) first.
 17. The estimate: 14-22 rounds for packaging (26-40 with the migration), as the budget.
+
+## Decided (operator, 2026-11-14)
+
+| # | decision | answer |
+|---|---|---|
+| 1 | packs as files in a version-stamped folder, not embedded | yes |
+| 2 | launcher shape | the defaults live in c1f (a serve app of packs and facts, no hidden Rust defaults); `cliffvm serve` only finds the install folder and runs it; any Python command only executes it |
+| 3 | Home Assistant integration frozen on `babyseat==0.7.53` | NO (what replaces it: open, see the question asked on 2026-11-14) |
+| 4 | version | `0.7.60` (not `0.8.0`) |
+| 5 | default bind | `127.0.0.1` |
