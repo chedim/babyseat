@@ -175,3 +175,26 @@ fn the_edges_route_lists_an_entitys_owner_children_and_refs_from_one_row_and_the
     // only the one row's body was read: the other entities stay unloaded
     assert_eq!(call(run.port, "run_cliff", json!({"code": "len(instances('Gr'))"})), "0");
 }
+
+#[test]
+fn the_entity_route_lists_one_entitys_class_and_properties_from_its_row_and_loads_nothing() {
+    let dir = tmp("entityrow");
+    let run = start(&dir, &["warm_rows=0"]);
+    put(run.port, "Gr:a");
+    call(run.port, "entity_write", json!({"spec": "Gr:a", "prop": "note", "value": "hello world"}));
+    call(run.port, "entity_write", json!({"spec": "Gr:a", "prop": "n", "value": 7}));
+    call(run.port, "entity_write", json!({"spec": "Gr:a", "prop": "link", "value": {"$ref": "Gr:b"}}));
+    drop(run);
+    let run = start(&dir, &["warm_rows=0"]);
+    let get = |q: &str| { let (s, b) = http(run.port, "GET", &format!("/ui/fieldvm/entity{q}"), ""); (s, serde_json::from_str::<J>(&b).unwrap_or(J::Null)) };
+    assert_eq!(get("").0, 400, "no eid, no answer");
+    assert_eq!(get("?eid=Gr:nowhere").0, 404, "an entity that does not exist");
+    let (st, e) = get("?eid=Gr:a");
+    assert_eq!(st, 200, "{e}");
+    assert_eq!((e["eid"].clone(), e["cls"].clone()), (json!("Gr:a"), json!("Gr")), "{e}");
+    let props: std::collections::BTreeMap<String, String> = e["props"].as_array().unwrap().iter().map(|p| (p["k"].as_str().unwrap().to_string(), p["v"].to_string())).collect();
+    assert_eq!(props["note"], "\"hello world\"", "{e}");
+    assert_eq!(props["n"], "7", "{e}");
+    assert!(props["link"].contains("Gr:b") && props["link"].contains("$ref"), "an object value is its JSON text: {e}");
+    assert_eq!(call(run.port, "run_cliff", json!({"code": "len(instances('Gr'))"})), "0", "only the one row's body was read");
+}

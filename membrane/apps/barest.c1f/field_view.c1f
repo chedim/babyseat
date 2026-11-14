@@ -1,10 +1,11 @@
 PACK field_view 1
 IMPORT dom 1
 IMPORT fetch 1
+IMPORT shell_view 1
 -- THE FIELD AS A 3D GRAPH, A VIEW PACK (#1143, operator 2026-11-14: "the field as a 3D graph, the graph growing around it, the cap following the field's activity").
 -- It runs in the PAGE's field engine (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f, and does not run it), the way chat_view.c1f does, and draws
 -- the field's entities as an SVG scene with a 3D layout that it computes itself: no JavaScript logic, only the shell's DOM mount (ui/fieldvm.js).
---   DomNode:mount:field   the page's own element the view's root sits in (the shell registers it: ui/chatmount.js `mountField`)
+--   DomNode:shell:slot:field   the shell's slot the view's root sits in (shell_view.c1f: the view registers `Nav:field` when the shell opens, draws when `Nav:field` first becomes active, and does no periodic work while it is not active)
 --   Scene:field   the view: the window, the polls, the camera (the basis rx/ry/rz), the clock; the page's shell (ui/chatmount.js) births it {open: true} when the page asks for the pack view
 --   Dot:<eid>     one entity of the field: `raw` is the row of the seat's active window ({id, cls, updated, parent}), `p` its place in space; everything drawn is a getter of those
 --   Fetch:wire    the write STREAM `GET /ui/fieldvm/events` (Fetch with stream: true): one Chunk per `field.write` frame {type, eid, cls, prop, ts}; a frame draws, moves or removes a dot at once, no poll
@@ -23,11 +24,20 @@ IMPORT fetch 1
 
 Scene.tick getter: clock
 
+-- the shell's contract (shell_view.c1f): registered when the shell opens, drawn the first time the view is shown (a page whose Field is never opened never draws it)
+Shell.open on-setter field-register:
+  WHEN this.open:
+    ('Nav:field').title = 'Field'
+    ('Nav:field').order = 20
+Nav.active on-setter field-activate:
+  WHEN this.eid == 'Nav:field' and this.active == True and not prop('Scene:field', 'open'):
+    ('Scene:field').open = True
+
 -- ---- the scene: the skeleton, the settings, the first call ----
 Scene.open on-setter field-draw:
   WHEN this.open:
     ('DomNode:f:root').tag = 'div'
-    ('DomNode:f:root').parent = 'DomNode:mount:field'
+    ('DomNode:f:root').parent = 'DomNode:shell:slot:field'
     ('DomNode:f:root').class = 'fieldview'
     ('DomNode:f:head').parent = 'DomNode:f:root'
     ('DomNode:f:head').tag = 'div'
@@ -79,20 +89,11 @@ Scene.open on-setter field-draw:
     ('DomNode:f:legend').parent = 'DomNode:f:body'
     ('DomNode:f:legend').tag = 'ul'
     ('DomNode:f:legend').class = 'flegend'
-    ('DomNode:f:side').parent = 'DomNode:f:body'
-    ('DomNode:f:side').tag = 'div'
-    ('DomNode:f:side').class = 'fside'
-    ('DomNode:f:side').hidden = True
-    ('DomNode:f:sidehead').parent = 'DomNode:f:side'
-    ('DomNode:f:sidehead').tag = 'div'
-    ('DomNode:f:sidehead').class = 'fsidehead'
-    ('DomNode:f:edges').parent = 'DomNode:f:side'
-    ('DomNode:f:edges').tag = 'ul'
-    ('DomNode:f:edges').class = 'fedges'
     ('DomNode:f:note').parent = 'DomNode:f:root'
     ('DomNode:f:note').tag = 'div'
     ('DomNode:f:note').class = 'fnote'
     ('DomNode:f:note').hidden = True
+    ('Nav:field').filled = True
     this.window = ([b.field_window for b in instances('Boot') if b.field_window != None] or [150])[0]
     this.poll_ms = ([b.field_poll_ms for b in instances('Boot') if b.field_poll_ms != None] or [2000])[0]
     this.tick_ms = 100
@@ -121,7 +122,7 @@ Scene.open on-setter field-draw:
 -- ---- the poll: `poll_ms` after the last answer, one request at a time, not while the tab is hidden ----
 -- the poll is the FALLBACK: it runs only while the stream is down (and asks for the stream again)
 Scene.tick on-setter field-poll:
-  WHEN this.open and not this.polling and not this.wired and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= this.poll_ms / 1000:
+  WHEN this.open and prop('Nav:field', 'active') != False and not this.polling and not this.wired and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= this.poll_ms / 1000:
     n = (this.seq or 0) + 1
     this.seq = n
     this.polling = True
@@ -135,7 +136,7 @@ Fetch.mv getter:
   bd = json(str(prop(rq, 'body') or ''))
   jb = {} if bd is Error else bd
   hs = prop(rq, 'http_status')
-  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'edge_eid': prop(jb, 'eid'), 'owner': prop(jb, 'owner'), 'children': prop(jb, 'children'), 'refs': prop(jb, 'refs'), 'nodes': prop(jb, 'nodes'), 'total': prop(jb, 'n_total'), 'hidden': prop(jb, 'hidden'), 'prefixes': prop(jb, 'hidden_prefixes'), 'why': (str(prop(prop(jb, 'error'), 'message')) if prop(jb, 'error') else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'edge_eid': prop(jb, 'eid'), 'cls': prop(jb, 'cls'), 'props': prop(jb, 'props'), 'owner': prop(jb, 'owner'), 'children': prop(jb, 'children'), 'refs': prop(jb, 'refs'), 'nodes': prop(jb, 'nodes'), 'total': prop(jb, 'n_total'), 'hidden': prop(jb, 'hidden'), 'prefixes': prop(jb, 'hidden_prefixes'), 'why': (str(prop(prop(jb, 'error'), 'message')) if prop(jb, 'error') else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
 
 Fetch.mv on-setter field-answer:
   WHEN this.eid == 'Fetch:map':
@@ -317,7 +318,7 @@ Scene.legend on-setter field-legend:
 -- forces on a Dot: every other Dot pushes it away (the weight rep / (d^2 + 1)^2 along the line: the whole push is a few vector operations over the lists of every place, taken once per tick),
 -- its owner and its children pull it to `rest` apart (the spring), a pull to the middle; the step is capped and scaled by the heat.
 Scene.tick on-setter field-step:
-  WHEN this.open:
+  WHEN this.open and prop('Nav:field', 'active') != False:
     ps = [d.p for d in instances('Dot') if d.p != None]
     this.xs = [p[0] for p in ps]
     this.ys = [p[1] for p in ps]
@@ -344,7 +345,7 @@ Dot.go on-setter field-force:
 
 -- ---- the camera: the basis turns by the small constant (c, s) about the vertical axis each tick while `spin` ----
 Scene.tick on-setter field-turn:
-  WHEN this.open and this.spin:
+  WHEN this.open and this.spin and prop('Nav:field', 'active') != False:
     nx = unit(this.rx * [this.turn_c] + this.rz * [this.turn_s])
     nz = unit(this.rz * [this.turn_c] - this.rx * [this.turn_s])
     this.rx = nx
@@ -385,8 +386,6 @@ DomNode.clicked on-setter field-click:
     ('Scene:field').window = max(5, num(before(str(prop('Scene:field', 'window') / 2), '.')))
   ELSE WHEN this.eid == 'DomNode:f:wmore':
     ('Scene:field').window = prop('Scene:field', 'window') * 2
-  ELSE WHEN startswith(this.eid, 'DomNode:f:e:') and this.target != None:
-    ('Scene:field').selected = this.target
   ELSE WHEN startswith(this.eid, 'DomNode:f:c:'):
     ('Scene:field').selected = None if prop('Scene:field', 'selected') == after(this.eid, 'DomNode:f:c:') else after(this.eid, 'DomNode:f:c:')
 Scene.spin on-setter field-spin-label:
@@ -406,11 +405,6 @@ Scene.info getter:
   WHEN this.selected == None: None
   ELSE WHEN prop('Dot:' + str(this.selected), 'rid') != None: prop('Dot:' + str(this.selected), 'rid') + ' · ' + prop('Dot:' + str(this.selected), 'kind') + ' · ' + str(prop('Dot:' + str(this.selected), 'mass')) + ' under it · changed ' + before(str(prop('Dot:' + str(this.selected), 'age')), '.') + ' s ago'
   ELSE: str(this.selected) + ' (not in view)'
-Scene.info on-setter field-info:
-  ALWAYS:
-    ('DomNode:f:side').hidden = this.info == None
-    ('DomNode:f:sidehead').text = this.info or ''
-
 -- ---- the EDGE LIST of the selected entity (operator 2026-11-14: it replaces the card's "near"): the owner, the children and what it points at by `$ref`, each with its kind, from `GET /ui/fieldvm/edges` ----
 -- a click on a row selects that entity (it may be out of the window: the panel still lists its edges), so the graph can be walked
 Scene.selected on-setter field-edges-ask:
@@ -428,12 +422,41 @@ Scene.edge_rows getter:
     e = this.edges_here
     all = concat(concat([{'key': 'owner:' + str(prop(prop(e, 'owner'), 'id')), 'id': prop(prop(e, 'owner'), 'id'), 'text': 'owner · ' + str(prop(prop(e, 'owner'), 'id'))}] if prop(e, 'owner') != None else [], [{'key': 'child:' + str(prop(c, 'id')), 'id': prop(c, 'id'), 'text': 'child · ' + str(prop(c, 'id'))} for c in (prop(e, 'children') or [])]), [{'key': 'ref:' + str(prop(r, 'id')), 'id': prop(r, 'id'), 'text': 'ref → ' + str(prop(r, 'id'))} for r in (prop(e, 'refs') or [])])
     all if len(all) > 0 else [{'key': 'none', 'id': None, 'text': 'no owner, no children, no references'}]
-Scene.edge_rows on-setter field-edges-draw:
-  WHEN this.edge_rows != None:
-    FOR r IN this.edge_rows:
-      ('DomNode:f:e:' + prop(r, 'key')).parent = 'DomNode:f:edges'
-      ('DomNode:f:e:' + prop(r, 'key')).tag = 'li'
-      ('DomNode:f:e:' + prop(r, 'key')).text = prop(r, 'text')
-      ('DomNode:f:e:' + prop(r, 'key')).target = prop(r, 'id')
-    FOR x IN [x for x in instances('DomNode') if startswith(x.eid, 'DomNode:f:e:') and not (x.eid in ['DomNode:f:e:' + prop(r, 'key') for r in this.edge_rows])]:
-      (x.eid).retire = True
+
+-- ---- the DETAIL PANEL (the shell's slide-over, shell_view.c1f; operator 2026-11-14): a click on a node opens it from the right over the chat with the entity's id and class, its properties and its edges ----
+-- the properties come from `GET /ui/fieldvm/entity` (the one row: class and props, nothing loaded on the seat), the edges from `GET /ui/fieldvm/edges`; a click on an edge row (the panel's `picked`) selects that
+-- entity; closing the panel (the scrim, Close, Esc: `Panel.open` false) clears the selection.
+Scene.selected on-setter field-entity-ask:
+  WHEN this.selected != None:
+    n = (this.seq or 0) + 1
+    this.seq = n
+    ('Fetch:entity').request = {'id': 'entity-' + str(n), 'url': '/ui/fieldvm/entity?eid=' + replace(str(this.selected), ' ', '%20')}
+Fetch.mv on-setter field-entity-answer:
+  WHEN this.eid == 'Fetch:entity' and prop(this.mv, 'ok'):
+    ('Scene:field').ent = {'eid': prop(this.mv, 'edge_eid'), 'cls': prop(this.mv, 'cls'), 'props': prop(this.mv, 'props')}
+  ELSE WHEN this.eid == 'Fetch:entity':
+    ('Scene:field').ent = {'eid': prop('Scene:field', 'selected'), 'cls': None, 'props': None, 'why': prop(this.mv, 'why')}
+Scene.ent_here getter: this.ent if this.ent != None and this.selected != None and prop(this.ent, 'eid') == this.selected else None
+Scene.doc getter:
+  WHEN this.selected == None: None
+  ELSE:
+    pr = prop(this.ent_here, 'props')
+    prow = [{'key': 'b:' + str(prop(p, 'k')), 'label': str(prop(p, 'k')), 'text': str(prop(p, 'v'))} for p in (pr or [])]
+    erow = [{'key': 'd' + ('1' if startswith(str(prop(r, 'key')), 'owner') else ('2' if startswith(str(prop(r, 'key')), 'child') else ('3' if startswith(str(prop(r, 'key')), 'ref') else '4'))) + ':' + str(prop(r, 'key')), 'label': prop(r, 'text'), 'text': prop(r, 'text'), 'target': prop(r, 'id')} for r in this.edge_rows]
+    {'title': str(this.selected), 'sub': (str(prop(this.ent_here, 'cls')) + ' · ' if prop(this.ent_here, 'cls') != None else '') + str(this.info), 'note': ('Reading the properties…' if this.ent_here == None else ('The properties could not be read: ' + str(prop(this.ent_here, 'why')) + '.' if pr == None else '')), 'rows': concat(concat(concat([{'key': 'a:head', 'label': 'Properties', 'head': True}], prow if len(prow) > 0 else [{'key': 'b-none', 'label': 'No stored properties.'}] if pr != None else []), [{'key': 'c:head', 'label': 'Edges', 'head': True}]), erow)}
+Scene.doc on-setter field-panel:
+  WHEN this.doc != None:
+    ('Panel:detail').owner = 'field'
+    ('Panel:detail').title = prop(this.doc, 'title')
+    ('Panel:detail').sub = prop(this.doc, 'sub')
+    ('Panel:detail').note = prop(this.doc, 'note')
+    ('Panel:detail').rows = prop(this.doc, 'rows')
+    ('Panel:detail').open = True
+  ELSE WHEN prop('Panel:detail', 'owner') == 'field' and prop('Panel:detail', 'open'):
+    ('Panel:detail').open = False
+Panel.open on-setter field-panel-closed:
+  WHEN this.owner == 'field' and this.open == False and prop('Scene:field', 'selected') != None:
+    ('Scene:field').selected = None
+Panel.picked on-setter field-panel-pick:
+  WHEN this.owner == 'field' and this.picked != None:
+    ('Scene:field').selected = this.picked

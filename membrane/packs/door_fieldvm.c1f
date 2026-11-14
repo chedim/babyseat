@@ -48,19 +48,19 @@ FieldVm.done getter: this.listed and len([f for f in this.files if f.text == Non
 FieldVm.pairs getter: [[f.stem, f.text] for f in this.files if f.view]
 FieldVm.rows getter: sql("SELECT json_group_object(json_extract(value, '$[0]'), json_extract(value, '$[1]')) AS packs FROM json_each(?)", this.pairs) if this.done else None
 -- THE FIELD VIEW'S SETTINGS ride the same entity: `field_window` (how many of the most recently active entities the field view keeps, launch fact, none by default: the pack's tried value stands) and
--- `field_poll_ms` (the period of its calls); its switch is `ui_views.field` (apps/barest.c1f/field_view.c1f, ui/chatmount.js `mountField`).
--- THE CHAT VIEW'S SETTINGS AND ITS SWITCH (the bare chat as a view pack, apps/barest.c1f/chat_view.c1f, docs/ui-rebuild-plan.md (d)): `views` says which renderer owns
--- each view, `{"chat": "legacy" | "pack"}`, from the seat fact `ui_views` (a JSON dict: --fact 'ui_views={"chat":"pack"}'); a view the fact does not name, or no fact, is `legacy`.
+-- `field_poll_ms` (the period of its calls); the field view is the page's Field view (apps/barest.c1f/field_view.c1f, drawn by the shell: shell_view.c1f).
+-- THE VIEWS' SETTINGS (the bare chat, apps/barest.c1f/chat_view.c1f; the shell, shell_view.c1f; docs/ui-rebuild-plan.md): `views` (from the seat fact `ui_views`) is still reported, but the page no longer
+-- reads it: the chat and the field are the page's views. The shell's and the chat's facts (shell_status_ms, shell_panel_chars, chat_poll_timeout_s) ride with the chat's.
 -- The legacy chat's constants ride as ONE entity, `Boot:seat`, holding the facts the view reads (chat_page_size ... chat_tool_chars; a fact not given is null: the pack's own
--- default, the value chat.js had, stands). A seat that does not run the view pack is unaffected: the page asks for `views` only when the URL or a fact wants it.
+-- default, the value the old chat.js had, stands).
 FieldVm.snapshot getter:
   WHEN this.rows != None and len(this.rows) > 0:
     pk = json(prop(this.rows[0], 'packs'))
     bt = ([b for b in instances('Boot')] or [None])[0]
-    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars'), 'field_window': prop(bt, 'field_window'), 'field_poll_ms': prop(bt, 'field_poll_ms')}}], 'views': {'chat': prop(prop(bt, 'ui_views'), 'chat') or 'legacy', 'field': prop(prop(bt, 'ui_views'), 'field') or 'legacy'}}
+    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars'), 'field_window': prop(bt, 'field_window'), 'field_poll_ms': prop(bt, 'field_poll_ms'), 'chat_poll_timeout_s': prop(bt, 'chat_poll_timeout_s'), 'shell_status_ms': prop(bt, 'shell_status_ms'), 'shell_panel_chars': prop(bt, 'shell_panel_chars')}}], 'views': {'chat': prop(prop(bt, 'ui_views'), 'chat') or 'legacy', 'field': prop(prop(bt, 'ui_views'), 'field') or 'legacy'}}
   ELSE: None
 
-Request.o_fieldvm getter: this.route in ['/ui/fieldvm', '/ui/fieldvm/active', '/ui/fieldvm/events', '/ui/fieldvm/edges']
+Request.o_fieldvm getter: this.route in ['/ui/fieldvm', '/ui/fieldvm/active', '/ui/fieldvm/events', '/ui/fieldvm/edges', '/ui/fieldvm/entity']
 Request.m_fieldvm getter: ['GET']
 Request.fv_seat getter: ([s for s in instances('FieldVm') if s.eid == 'FieldVm:seat'] or [None])[0]
 Request.fv_body getter: this.fv_seat.snapshot if this.fv_seat != None else None
@@ -109,8 +109,20 @@ Request.fe_answer getter:
   ELSE WHEN this.fe_owner == None or this.fe_kids == None or this.fe_refs == None: None
   ELSE: {'status': 200, 'body': {'eid': this.fe_eid, 'owner': (this.fe_owner[0] if len(this.fe_owner) > 0 else None), 'children': this.fe_kids, 'refs': this.fe_refs}}
 
+-- ONE ENTITY'S PROPERTIES (the shell's detail panel, ui shell_view.c1f / field_view.c1f): `GET /ui/fieldvm/entity?eid=<eid>` answers `{eid, cls, props: [{k, v}]}` from the ONE row (its class column and its body's
+-- props: a text is the text, a number or a bool its value, an object or a list its JSON text), 404 when there is no such row, 400 without `eid`. The entity stays unloaded.
+Request.fn_eid getter: strip(concat([r[1] for r in this.qpairs if r[0] == 'eid'], [''])[0])
+Request.fn_row getter: sql("SELECT cls FROM c_field WHERE k = ?", this.fn_eid) if this.route == '/ui/fieldvm/entity' and this.fn_eid != '' else None
+Request.fn_props getter: sql("SELECT j.key AS k, CASE WHEN j.type IN ('object', 'array') THEN json(j.value) ELSE j.value END AS v FROM c_field c, json_each(c.body, '$.props') j WHERE c.k = ? ORDER BY j.key", this.fn_eid) if this.route == '/ui/fieldvm/entity' and this.fn_eid != '' else None
+Request.fn_answer getter:
+  WHEN this.fn_eid == '': {'status': 400, 'body': {'error': {'message': 'eid is required', 'type': 'membrane_error'}}}
+  ELSE WHEN this.fn_row == None or this.fn_props == None: None
+  ELSE WHEN len(this.fn_row) == 0: {'status': 404, 'body': {'error': {'message': 'no such entity', 'type': 'membrane_error'}}}
+  ELSE: {'status': 200, 'body': {'eid': this.fn_eid, 'cls': prop(this.fn_row[0], 'cls'), 'props': this.fn_props}}
+
 Request.r_fieldvm getter:
-  WHEN this.route == '/ui/fieldvm/edges': this.fe_answer
+  WHEN this.route == '/ui/fieldvm/entity': this.fn_answer
+  ELSE WHEN this.route == '/ui/fieldvm/edges': this.fe_answer
   ELSE WHEN this.route == '/ui/fieldvm/active': this.fa_answer
   ELSE WHEN this.fv_events: {'status': 200, 'stream': True}
   ELSE: {'status': 200, 'body': this.fv_body} if this.fv_body != None else None

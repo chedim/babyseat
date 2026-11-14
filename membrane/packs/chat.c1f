@@ -69,8 +69,20 @@ Request.cm_go getter: this.method == 'POST' and this.route == '/membrane/chat/me
 Request.cm_go on-setter chat-stamp:
   WHEN this.cm_go:
     this.cm_at = clock
+-- an optional `sid` in the body names a session (packs/door_session.c1f, the page's session switcher): the message and its turn carry it, as the session API's own messages do
+Request.cm_sid getter: strip(str(prop(this.jbody, 'sid') or ''))
+Request.cm_at on-setter chat-message-sid:
+  WHEN this.cm_at != None and this.cm_sid != '':
+    id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + replace(this.eid, 'Request:', '')
+    membrane::Chat:main = Chat(name: 'main')
+    membrane::Chat:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at, sid: this.cm_sid)
+    membrane::Chat:message[id]:body = SemText(text: this.cm_text)
+    membrane::Chat:message[id]:body.mention = True
+    membrane::Chat:message[id]:turn = ChatTurn(message: 'membrane::Chat:message:' + id, queued_at: this.cm_at, sid: this.cm_sid)
+    membrane::Chat:message[id].queued = True
+    this.cm_id = id
 Request.cm_at on-setter chat-message:
-  WHEN this.cm_at != None:
+  WHEN this.cm_at != None and this.cm_sid == '':
     id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + replace(this.eid, 'Request:', '')
     membrane::Chat:main = Chat(name: 'main')
     membrane::Chat:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
@@ -110,7 +122,12 @@ Request.hs_limit getter: max(1, (num(([q[1] for q in this.qpairs if q[0] == 'lim
 Request.hs_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [None])[0]
 -- the message ids come from the STORE (a message is lazy: `instances` would list only the loaded ones); each is then read by eid, which loads it. `at` orders them, then the request number in the id.
 -- rows are None while the query runs: the reply waits for them.
-Request.hs_rows getter: sql('SELECT k, json_extract(body, \'$.props.at\') AS at FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ?', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%') if this.hs_on else []
+-- `sid` = a session id: only that session's turns; `sid=` (empty): the turns of no session; no `sid`: every turn
+Request.hs_sid getter: ([q[1] for q in this.qpairs if q[0] == 'sid'] or [None])[0]
+Request.hs_rows getter:
+  WHEN not this.hs_on: []
+  ELSE WHEN this.hs_sid == None: sql('SELECT k, json_extract(body, \'$.props.at\') AS at FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ?', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%')
+  ELSE: sql('SELECT k, json_extract(body, \'$.props.at\') AS at FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ? AND coalesce(json_extract(body, \'$.props.sid\'), \'\') = ?', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.hs_sid)
 Request.hs_all getter: sort_by(sort_by([{'eid': prop(r, 'k'), 'id': replace(prop(r, 'k'), 'membrane::Chat:message:', ''), 'at': prop(r, 'at'), 'n': num(after(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-'))} for r in this.hs_rows], 'n', True), 'at', True) if this.hs_rows != None else None
 Request.hs_cut getter: ([r for r in this.hs_all if r['id'] == this.hs_before] or [None])[0]
 Request.hs_older getter: [r for r in this.hs_all if this.hs_before == None or r['at'] < this.hs_cut['at'] or (r['at'] == this.hs_cut['at'] and r['n'] < this.hs_cut['n'])]

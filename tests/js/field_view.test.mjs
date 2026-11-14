@@ -18,7 +18,7 @@ const PACK = read('../../membrane/apps/barest.c1f/field_view.c1f');
 const T0 = 1_000_000;
 function world(facts) {
   const f = new Field();
-  f.set_pack('dom', DOM); f.set_pack('fetch', FETCH); f.set_pack('field_view', PACK);
+  f.set_pack('dom', DOM); f.set_pack('fetch', FETCH); f.set_pack('shell_view', read('../../membrane/apps/barest.c1f/shell_view.c1f')); f.set_pack('field_view', PACK);
   assert.deepEqual(JSON.parse(f.pack_errors()), {}, 'field_view loads once dom and fetch are there');
   const w = { f, t: T0, log: [] };
   w.flush = () => {
@@ -186,47 +186,64 @@ scenario('the pointer: a drag turns the camera, a wheel zooms, a hover does noth
   assert.equal(w.get('Scene:field').zoom, 0.25, 'the zoom stops at its floor');
 });
 
-scenario('a click on a dot selects it: its words show, its neighbours get a label; again deselects', () => {
+scenario('a click on a dot selects it: its neighbours get a label, the detail panel opens (id, class, words); again deselects and closes it', () => {
   const w = world(); w.open(); w.reply(200, rows(...BASE)); w.ticks(2);
-  assert.equal(w.n('side').hidden, true);
+  const panel = () => w.get('Panel:detail') || {};
+  assert.ok(!panel().open, 'nothing is open until something is selected');
   assert.equal(w.get('DomNode:f:t:Chat:1:a').hidden, true);
   w.write('DomNode:f:c:Chat:1', 'clicked', w.t);
   assert.equal(w.get('Scene:field').selected, 'Chat:1');
-  assert.match(w.n('sidehead').text, /^Chat:1 · Chat · 2 under it · changed \d+ s ago$/);
-  assert.equal(w.n('side').hidden, false);
+  assert.equal(panel().open, true); assert.equal(panel().owner, 'field'); assert.equal(panel().title, 'Chat:1');
+  assert.match(panel().sub, /^Chat:1 · Chat · 2 under it · changed \d+ s ago$/, 'the words, before the seat has said the class');
   assert.equal(w.get('DomNode:f:t:Chat:1').hidden, false); assert.equal(w.get('DomNode:f:t:Chat:1:a').hidden, false, 'the children are labelled');
   assert.equal(w.get('DomNode:f:t:Goal:x').hidden, true, 'a stranger is not');
   assert.equal(w.get('DomNode:f:c:Chat:1').stroke, 'currentColor');
   w.write('DomNode:f:c:Chat:1', 'clicked', w.t + 1);
-  assert.ok(w.get('Scene:field').selected == null); assert.equal(w.n('side').hidden, true);
+  assert.ok(w.get('Scene:field').selected == null); assert.equal(panel().open, false, 'deselecting closes the panel');
 });
 
-scenario('the click detail lists the EDGES of the selected entity (owner, children, refs), each with its kind, from the seat', () => {
+scenario('the panel closed by the shell clears the selection; the panel is not re-opened by it', () => {
   const w = world(); w.open(); w.reply(200, rows(...BASE)); w.ticks(2);
-  const edgeReq = () => (w.get('Fetch:edges') || {}).request;
-  const answer = (b) => w.write('Fetch:edges', 'request_result', { id: edgeReq().id, status: 'ok', rc: 0, head: '200', http_status: 200, headers: {}, body: JSON.stringify(b), started: w.t, finished: w.t, ms: 1 });
-  const eRows = () => [...new Set(w.log.filter((e) => e.eid.startsWith('DomNode:f:e:')).map((e) => e.eid))].filter((e) => w.get(e)).map((e) => w.get(e).text);
-  assert.equal(edgeReq(), undefined, 'nothing is asked until something is selected');
+  w.write('DomNode:f:c:Chat:1', 'clicked', w.t);
+  w.write('Panel:detail', 'open', false);
+  assert.ok(w.get('Scene:field').selected == null, 'closing the panel deselects the dot');
+  assert.equal(w.get('Panel:detail').open, false);
+  assert.equal(w.get('DomNode:f:c:Chat:1').stroke, undefined);
+});
+
+scenario('the panel holds the entity properties and the EDGES of the selection (owner, children, refs), each with its kind, from the seat', () => {
+  const w = world(); w.open(); w.reply(200, rows(...BASE)); w.ticks(2);
+  const edgeReq = () => (w.get('Fetch:edges') || {}).request, entReq = () => (w.get('Fetch:entity') || {}).request;
+  const answer = (x, b) => w.write('Fetch:' + x, 'request_result', { id: (w.get('Fetch:' + x).request).id, status: 'ok', rc: 0, head: '200', http_status: 200, headers: {}, body: JSON.stringify(b), started: w.t, finished: w.t, ms: 1 });
+  const panel = () => w.get('Panel:detail') || {};
+  const row = (key) => (panel().rows || []).find((r) => r.key === key);
+  assert.equal(edgeReq(), undefined, 'nothing is asked until something is selected'); assert.equal(entReq(), undefined);
   w.write('DomNode:f:c:Chat:1:a', 'clicked', w.t);
   assert.equal(edgeReq().url, '/ui/fieldvm/edges?eid=Chat:1:a&n=150', 'the selection asks for its edges (n = the window)');
-  answer({ eid: 'Chat:1:a', owner: { id: 'Chat:1', cls: 'Chat' }, children: [{ id: 'Chat:1:a:x', cls: 'Chat' }, { id: 'Chat:1:a:y', cls: 'Chat' }], refs: [{ id: 'Goal:x', cls: 'Goal' }] });
-  assert.deepEqual(eRows(), ['owner · Chat:1', 'child · Chat:1:a:x', 'child · Chat:1:a:y', 'ref → Goal:x'], 'a row per edge, the kind shown');
-  assert.equal(w.get('DomNode:f:e:ref:Goal:x').parent, 'DomNode:f:edges');
-  // a row is a way to move along the graph: a click selects that entity (and asks for ITS edges)
-  w.write('DomNode:f:e:owner:Chat:1', 'clicked', w.t + 1);
-  assert.equal(w.get('Scene:field').selected, 'Chat:1'); assert.equal(edgeReq().url, '/ui/fieldvm/edges?eid=Chat:1&n=150');
-  assert.match(w.n('sidehead').text, /^Chat:1 · Chat · 2 under it/, 'the header follows the selection');
+  assert.equal(entReq().url, '/ui/fieldvm/entity?eid=Chat:1:a', 'and for its properties');
+  assert.equal(panel().note, 'Reading the properties…');
+  answer('entity', { eid: 'Chat:1:a', cls: 'Chat', props: [{ k: 'note', v: 'hello' }, { k: 'n', v: 7 }, { k: 'link', v: '{"$ref":"Goal:x"}' }] });
+  assert.equal(panel().note, ''); assert.match(panel().sub, /^Chat · Chat:1:a · Chat/);
+  assert.deepEqual([row('b:note').text, row('b:n').text, row('b:link').text], ['hello', '7', '{"$ref":"Goal:x"}'], 'every property, its value as text');
+  answer('edges', { eid: 'Chat:1:a', owner: { id: 'Chat:1', cls: 'Chat' }, children: [{ id: 'Chat:1:a:x', cls: 'Chat' }, { id: 'Chat:1:a:y', cls: 'Chat' }], refs: [{ id: 'Goal:x', cls: 'Goal' }] });
+  const edges = panel().rows.filter((r) => r.key.startsWith('d'));
+  assert.deepEqual(edges.map((r) => r.text), ['owner · Chat:1', 'child · Chat:1:a:x', 'child · Chat:1:a:y', 'ref → Goal:x'], 'a row per edge, the kind shown');
+  assert.deepEqual(edges.map((r) => r.target), ['Chat:1', 'Chat:1:a:x', 'Chat:1:a:y', 'Goal:x'], 'each a link');
+  // a row is a way to move along the graph: the shell writes `picked`; the selection follows and asks for ITS edges and properties
+  w.write('Panel:detail', 'picked', 'Chat:1');
+  assert.equal(w.get('Scene:field').selected, 'Chat:1'); assert.equal(edgeReq().url, '/ui/fieldvm/edges?eid=Chat:1&n=150'); assert.equal(entReq().url, '/ui/fieldvm/entity?eid=Chat:1');
+  assert.equal(panel().title, 'Chat:1');
   // an answer for an entity that is no longer selected is not shown
-  answer({ eid: 'Chat:1:a', owner: null, children: [], refs: [{ id: 'Stale:1', cls: 'Stale' }] });
-  assert.ok(!eRows().includes('ref → Stale:1') || w.get('DomNode:f:e:ref:Stale:1') == null, 'a stale answer is dropped');
-  // the answer for the selection replaces the rows; none at all says so
-  w.write('Fetch:edges', 'request', { id: 'edges-x', url: edgeReq().url });
-  answer({ eid: 'Chat:1', owner: null, children: [], refs: [] });
-  assert.equal(w.get('DomNode:f:e:owner:Chat:1'), null, 'the old rows left the page');
-  assert.equal(w.get('DomNode:f:e:none').text, 'no owner, no children, no references');
-  // deselect: the list goes
+  answer('edges', { eid: 'Chat:1:a', owner: null, children: [], refs: [{ id: 'Stale:1', cls: 'Stale' }] });
+  assert.ok(!panel().rows.some((r) => r.text === 'ref → Stale:1'), 'a stale answer is dropped');
+  // the answer for the selection replaces the rows; none at all says so; a failed read of the properties is text
+  answer('edges', { eid: 'Chat:1', owner: null, children: [], refs: [] });
+  assert.equal(row('d4:none').text, 'no owner, no children, no references');
+  w.write('Fetch:entity', 'request_result', { id: entReq().id, status: 'ok', rc: 0, head: '404', http_status: 404, headers: {}, body: JSON.stringify({ error: { message: 'no such entity' } }), started: w.t, finished: w.t, ms: 1 });
+  assert.equal(panel().note, 'The properties could not be read: no such entity.');
+  // deselect: the panel closes
   w.write('DomNode:f:c:Chat:1', 'clicked', w.t + 2);
-  assert.equal(w.get('DomNode:f:e:none'), null);
+  assert.equal(panel().open, false);
 });
 
 scenario('the window buttons halve and double it, and the next call asks for the new size', () => {

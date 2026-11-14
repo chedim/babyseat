@@ -1107,6 +1107,33 @@ fn fill(port: u16, n: usize) -> Vec<String> {
     ids
 }
 
+/// a message sent with a `sid` (the shell's session switcher, #1143): the history route answers one session's turns with `?sid=<id>`, the sid-less chat with `?sid=` (empty), all of them with no `sid`
+#[test]
+fn a_message_may_name_a_session_and_the_history_route_filters_by_it() {
+    let ds = std::fs::read_to_string(format!("{}/../membrane/packs/door_session.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let (mut run, port, _dir) = fake_seat_script("histsid", &[], &[("door_session.c1f", ds.as_str())], QUICK);
+    let (st, s1) = http(port, "POST", "/session", r#"{"title":"one"}"#);
+    assert_eq!(st, 200, "{s1}");
+    let sid = serde_json::from_str::<J>(&s1).unwrap()["id"].as_str().unwrap().to_string();
+    let post = |text: &str, sid: Option<&str>| {
+        let body = match sid { Some(s) => json!({"text": text, "sid": s}), None => json!({"text": text}) };
+        let (st, b) = http(port, "POST", "/membrane/chat/message", &body.to_string());
+        assert_eq!(st, 202, "{b}");
+        serde_json::from_str::<J>(&b).unwrap()["id"].as_str().unwrap().to_string()
+    };
+    let a = post("in-session", Some(&sid));
+    let b = post("main-chat", None);
+    for id in [&a, &b] { wait("a message done", || (view(port, id)["state"] == "done").then_some(())); }
+    assert_eq!(texts(&history(port, &format!("?sid={sid}"))), vec!["in-session"]);
+    assert_eq!(texts(&history(port, "?sid=")), vec!["main-chat"], "an empty sid is the chat with no session");
+    assert_eq!(texts(&history(port, "")).len(), 2, "no sid at all: every turn, as before");
+    // the session's turn is the session's: the opencode API's rows know it
+    let (st, rows) = http(port, "GET", &format!("/session/{sid}/message"), "");
+    assert_eq!(st, 200, "{rows}");
+    assert!(rows.contains("in-session"), "{rows}");
+    assert!(terminate(&mut run));
+}
+
 #[test]
 fn the_history_route_pages_the_newest_turns_oldest_first_with_their_tools_and_a_cursor_to_older_ones() {
     let (mut run, port, _dir) = fake_seat_script("history", &[], &[], QUICK);
@@ -1268,90 +1295,6 @@ fn instances_of_a_kind_lists_the_loaded_entities_that_carry_it_in_their_parents(
     assert!(terminate(&mut run));
 }
 
-
-// ---- the page: one request for the newest turns, a 'load older' button (ui/chat.js run under node with a fake DOM and a counted fetch) -------
-fn node_ok() -> bool { Command::new("node").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false) }
-fn chat_js() -> std::path::PathBuf { std::path::PathBuf::from(format!("{}/../membrane/apps/barest.c1f/ui/chat.js", env!("CARGO_MANIFEST_DIR"))) }
-
-#[test]
-fn chat_js_is_valid_and_its_load_is_one_history_request_then_one_per_load_older_click() {
-    if !node_ok() { println!("note: node is not on PATH, chat.js is not run"); return; }
-    let ui = chat_js().parent().unwrap().to_path_buf();
-    let d = tmp("chatjs");
-    // chat.js is an ES module with no import of the MCP helpers (it lists and reads no entity): copied as .mjs
-    let src = std::fs::read_to_string(ui.join("chat.js")).unwrap();
-    assert!(!src.contains("mcp.js"), "the chat page no longer reads entities one by one");
-    std::fs::write(d.join("chat.mjs"), src).unwrap();
-    std::fs::write(d.join("package.json"), "{\"type\":\"module\"}").unwrap();
-    let o = Command::new("node").arg("--check").arg(d.join("chat.mjs")).output().unwrap();
-    assert!(o.status.success(), "node --check chat.js: {}", String::from_utf8_lossy(&o.stderr));
-    std::fs::write(d.join("run.mjs"), HARNESS).unwrap();
-    let o = Command::new("node").arg(d.join("run.mjs")).current_dir(&d).output().unwrap();
-    let _ = std::fs::remove_dir_all(&d);
-    assert!(o.status.success(), "harness failed: {}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-}
-
-const HARNESS: &str = r#"
-const calls = [];
-const mk = (id, state) => ({ id, text: 't' + id, state, response: state === 'done' ? 'a' + id : null, tools: [], tool_calls: state === 'done' ? [{ name: 'entity_read', input: { spec: 'x' }, result: 'r' }] : [], turn: { state, started: 1, ended: 2 } });
-const ids = Array.from({ length: 45 }, (_, i) => String(1000 + i) + '-' + (i + 1));
-const page = (limit, before) => {
-  const end = before ? ids.indexOf(before) : ids.length, start = Math.max(0, end - limit);
-  return { messages: ids.slice(start, end).map((i) => mk(i, 'done')), more: start > 0, next: start > 0 ? ids[start] : null };
-};
-globalThis.fetch = async (url) => {
-  calls.push(String(url));
-  const u = new URL(String(url), 'http://x');
-  if (u.pathname !== '/membrane/chat/messages') return { ok: false, status: 404, json: async () => ({}) };
-  const j = page(Number(u.searchParams.get('limit') || 20), u.searchParams.get('before'));
-  return { ok: true, status: 200, json: async () => j };
-};
-class El {
-  constructor(tag) { this.tag = tag; this.children = []; this.parent = null; this.dataset = {}; this.className = ''; this.listeners = {}; this._text = ''; this.scrollTop = 0; this.scrollHeight = 0; this.clientHeight = 0; this.disabled = false; this.value = ''; }
-  get isConnected() { let e = this; while (e.parent) e = e.parent; return e.root === true; }
-  get nextSibling() { if (!this.parent) return null; const c = this.parent.children; return c[c.indexOf(this) + 1] || null; }
-  get firstChild() { return this.children[0] || null; }
-  set textContent(t) { this._text = t; } get textContent() { return this._text; }
-  adopt(c) { for (const x of c) { x.remove && x.remove(); x.parent = this; } }
-  append(...c) { this.adopt(c); this.children.push(...c); }
-  prepend(...c) { this.adopt(c); this.children.unshift(...c); }
-  insertBefore(n, ref) { this.adopt([n]); const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); }
-  replaceChildren(...c) { for (const x of this.children) x.parent = null; this.children = []; this.append(...c); }
-  addEventListener(n, f) { (this.listeners[n] = this.listeners[n] || []).push(f); }
-  remove() { if (this.parent) { this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; } }
-  focus() {}
-  walk(f) { f(this); for (const c of this.children) c.walk(f); }
-}
-globalThis.document = { hidden: false, createElement: (t) => new El(t) };
-const { startChat } = await import('./chat.mjs');
-const ui = { log: Object.assign(new El('ol'), { root: true }), form: new El('form'), input: new El('textarea'), send: new El('button') };
-startChat(ui);
-await new Promise((r) => setTimeout(r, 400));
-const hist = () => calls.filter((c) => c.startsWith('/membrane/chat/messages'));
-const must = (c, m) => { if (!c) { console.log(calls); throw new Error(m); } };
-must(calls.length === 1 && hist().length === 1 && /limit=20/.test(calls[0]), 'the load is ONE history request for 20 turns: ' + calls);
-let lis = 0, btn = null;
-ui.log.walk((e) => { if (e.tag === 'li' && /\bmsg\b/.test(e.className)) lis++; if (e.tag === 'button' && /older/i.test(e.textContent)) btn = e; });
-must(lis === 20, 'twenty turns drawn, got ' + lis);
-must(btn, 'a load older button');
-btn.listeners.click[0]({ preventDefault() {} });
-await new Promise((r) => setTimeout(r, 300));
-must(hist().length === 2 && /before=1025-26/.test(calls[1]), 'one more request, before the oldest drawn: ' + calls);
-lis = 0; btn = null;
-ui.log.walk((e) => { if (e.tag === 'li' && /\bmsg\b/.test(e.className)) lis++; if (e.tag === 'button' && /older/i.test(e.textContent)) btn = e; });
-must(lis === 40, 'forty turns drawn, got ' + lis);
-btn.listeners.click[0]({ preventDefault() {} });
-await new Promise((r) => setTimeout(r, 300));
-lis = 0; btn = null;
-ui.log.walk((e) => { if (e.tag === 'li' && /\bmsg\b/.test(e.className)) lis++; if (e.tag === 'button' && /older/i.test(e.textContent)) btn = e; });
-must(lis === 45 && !btn, 'all 45 drawn and the button gone, got ' + lis);
-const order = []; ui.log.walk((e) => { if (e.tag === 'li' && /\bmsg\b/.test(e.className)) order.push(e.children[0]._text); });
-must(order[0] === 't1000-1' && order[44] === 't1044-45' && order.every((t, i) => i === 0 || t > order[i - 1]), 'oldest first across the pages: ' + order);
-// the periodic refresh does not re-list or re-read finished turns
-await new Promise((r) => setTimeout(r, 3500));
-must(!calls.some((c) => c.startsWith('/membrane/chat/message/')), 'finished turns are not fetched one by one: ' + calls);
-process.exit(0);
-"#;
 
 /// a CLI that streams many partial lines, a few ms apart: the driver pushes each read as a Chunk entity
 const CHATTY: &str = r#"#!/usr/bin/env python3
