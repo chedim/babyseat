@@ -1,4 +1,6 @@
-# Retiring the Python seat (plan only, #1143, 2026-11-14)
+# Retiring the Python seat (#1143, 2026-11-14)
+
+**Status (2026-11-14, branch `w106-pyexec`): steps 1-8 are DONE locally (section 8); step 9 (packaging) and step 10 (docs) are open.** The plan below is the original, unedited.
 
 Docs only: nothing deleted, nothing built, no seat touched, no tag or branch created. Tree: `w105-pyretire` at `b41dc9c9` (= `memo-hotfix-0753`, 516 commits after tag `v0.7.53`).
 Method: read-only `git ls-files`, `grep`, and one static `ast` pass over every tracked `.py` (does it import the top-level `membrane` package?). Nothing from the old seat or the old test suite was run.
@@ -222,3 +224,21 @@ Git history keeps everything: `git show python-seat-last:membrane/server.py`, br
 9. System `python3` in tests (fake `claude` scripts, `http.server`): leave for now [leave]; a later PR makes them `sh`/`node` so the repo has no Python except HA and the wrapper.
 10. Doctrine/neutrality pins (#1120): a Rust or c1f check of the shipped packs replaces the dropped Python doctrine tests [yes, small], or drop them.
 11. `tests/golden/` stays as frozen recordings of v0.7.53 (the oracle for `native/tests`) with the generating scripts deleted [yes].
+
+## 8. What was done (branch `w106-pyexec`, one commit per step, nothing pushed)
+
+| step | result |
+|---|---|
+| 1 preserve | annotated tag `python-seat-last` on `a8a46016` (the head before the retirement). **The branch name `release-0.7.5` is TAKEN** (it is the 0.7.5 release branch, `1b163e9a`, checked out in a worktree), so the patch line is the new local branch `release-0.7.53` at `v0.7.53`; the stale `release-0.7` is untouched. Nothing is pushed. |
+| 2 CI | `validate.yml` gains `cargo` (ubuntu + macOS), `js` (every `tests/js/*.test.mjs`, headless Chrome), `ha` (`tests/ha` against a built `cliffvm`) and `wasm` (`native/build-web.sh`, then `git diff --exit-code` on the app's `ui/`). Not run on a runner yet (nothing is pushed). |
+| 3 contracts | `native/tests/contracts.rs` reads `native/src/{cli,host}.rs` and `scripts/seat` for the wired facts; five facts the Rust launcher never writes (`agent_writes`, `nerve_pause_off`, `ledger`, `seat_project`, `seat_stt`) are now `wired: false` in `membrane/packs/facts.json` (they were wired by the Python launcher). |
+| 4 dead tooling | `experiments/` (79 files), `benchmark/`, `.opencode/`, `run.sh`, `requirements.txt`, `pyrightconfig.json`, `BETA.md`, the golden recorders, `fetch-cbl.sh`, the two voice scripts, four unreferenced golden boot fixtures; `tests/golden/README.md` says the recordings are frozen. `.rd.lock` kept (what writes it is unproven). |
+| 5 pins | `tests/wrapper/{test_versions,test_license}.py` (version, licence, both console scripts, the shim's pin, the HA domain); `test_ha_brand.py` moved to `tests/ha/`. |
+| 6 Python tests | all 656 `tests/*.py` and `tests/{fixtures,data}` gone, with the `tests` and `native-vm` CI jobs; `native/tests/neutral_text_1143.rs` pins the model-facing text (the Help topics of the barest app, the chat turn's doctrine, the default banner): no software-only phrases (the #1120 list), no product name (`babyseat`, `opencode`, `Claude Code`). |
+| 7 package | 157 modules of the seat package, the viewer pages, fonts, `three.min.js`, `doctrine.md` (and the root symlink), `skills/` gone; `membrane/` is `{__init__,launcher,__main__}.py`, `CHANGELOG.md`, `packs/`, `apps/`, `ui/` (now empty), `help/`. `pyproject.toml` has no dependencies and `membrane.launcher:main` for both scripts; `setup.py` is `setup()` plus a TODO (the binary build is step 9). |
+| 8 PyO3 | `py.rs`, `db.rs`, `.cargo/`, `build.sh` gone; `pyo3` and the `python` feature gone; `default = ["bin"]`. **`cdylib` stays in `crate-type`: wasm-pack needs it for the browser build** (the plan said to drop it). |
+| plumbing | `fieldvm.js`, `fieldvm_core.js`, the wasm, `fieldvm_version.js` and `favicon.svg` moved into `membrane/apps/barest.c1f/ui/`; the old page (13 files) and `page_boot`/`stats_empty` tests deleted; no launch passes `--ui-dir` (the flag stays). |
+
+**Release-note text for the patch line (decision 5; not in CHANGELOG).** "babyseat 0.7.60 is the Rust seat; `pip install -U babyseat` moves a Python-seat install to it. The Python seat's patch releases (`0.7.5N`) rank below 0.7.60 for pip, so `pip install -U` never reaches them: stay on the Python seat with `pip install babyseat==0.7.5N` (pinned). The retired Python seat is preserved at the tag `python-seat-last` and its patch line at the branch `release-0.7.53`."
+
+**TODO (packaging round, step 9; owned by the packaging agent):** the wheel build (`setup.py` Exec build of `cliffvm`, the `membrane/dist/{bin,packs,apps,ui,help}` layout, the `py3-none-<platform>` tag, the no-binary-fails-loudly sdist), `wheels.yml`, `publish.yml`, `docker.yml`, `Dockerfile`, `install.sh`, and the last `membrane-seat` 0.7.60 shim (its `shim/` stays as is: `pyproject.toml`, `README.md`, `LICENSE`, `.gitignore`; the publish job copies the package in, which now means only the three wrapper files: change that copy to `__init__.py`, `launcher.py`, `__main__.py`). The launcher execs `cliffvm serve`, which does not exist yet (`native/src/cli.rs` has `run`, `token`, `--version`).
