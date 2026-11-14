@@ -234,7 +234,20 @@ ONE write starts a command: the `cmd` rides in the run value (it is kept on the 
 -- receipt Command:solo.run_result.stdout = "one write\n"
 ```
 
-`File:<name>.write`, `Fetch:<name>.request` and `Store:<name>.run` follow the same shape: write, then read the receipt back.
+`File:<name>.write` and `Store:<name>.run` follow the same shape: write, then read the receipt back.
+
+## Fetch: an outbound http call
+
+`Fetch:<name>.request` is ONE write whose value is a dict; `url` and `method` are keys of that dict, not properties of the entity. The keys: `id` (names the call; the receipt carries it back), `url` (`http://` or `https://`, required),
+`method` (default `GET`), `headers` (a dict of text), `body` (text, or any value, sent as its JSON), `timeout_s` (default 60: connect and each read), `stream` (true: the body arrives as entities, below), `ca_pem` (PEM text of an extra trusted root, for a private CA).
+The receipt is `Fetch:<name>.request_result`: `{id, status, rc, head, http_status, headers, body}`. `status` is `ok` when the server answered (any http status: read `http_status`), else `error` with `rc` 1 (the connection) or 2
+(the request: not an http url, a bad `ca_pem`) and `head` saying what failed. `headers` come back with lowercase names. With `stream: true` the receipt has no `body`; the body arrives as entities `Chunk:<fetch eid>:<n>`, each `{fetch, id, n, data, done}`, the last one with `done: true` (and an `error` when the read failed).
+
+```c1f-run
+-- write Fetch:probe.request = {"id": "f1", "url": "not a url"}
+-- receipt Fetch:probe.request_result.status = "error"
+-- receipt Fetch:probe.request_result.rc = 2
+```
 
 What `entity_write` returns: the line `wrote <entity>.<prop>`, then for a write that starts an effect the `receipt:` JSON line (`id`, `status`, `rc`, `ok`, `started`, `finished` as epoch
 seconds, `ms`, `stdout_bytes`, `stderr_bytes`) with a `stdout:` and a `stderr:` line (the whole text as `stdout`, or, past 16 KB, `stdout_head` and `stdout_tail` = the first and last 8192 characters

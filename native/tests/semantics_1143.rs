@@ -72,3 +72,58 @@ fn str_of_a_container_shows_the_reason_of_a_null_inside_it() {
     assert!(h.get("Box:a", "t2").as_str().is_some_and(|x| x.contains("boom")));
     assert_eq!(h.get("Box:a", "t3"), json!("[null]"), "a null with no reason stays null");
 }
+
+// ---- item 4: a class a pack counts with `instances` is declared RESIDENT by the pack that owns it; a trigger takes a new value each time ----
+const WATCH: &str = "Keep.line getter: 'k ' + str(this.title)\n\
+Watch.keeps_now getter: len([k for k in instances('Keep') if k.done != True])\n\
+Watch.snap on-setter snapshot:\n  ALWAYS:\n    this.last_keeps = this.keeps_now\n\
+Watch.alert getter: 'ALERT' if this.last_keeps != None and this.keeps_now < this.last_keeps else ''\n";
+
+fn store_file(tag: &str) -> String {
+    std::env::temp_dir().join(format!("sem-{tag}-{}-{}.sqlite3", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())).to_string_lossy().to_string()
+}
+fn open(file: &str) -> Host { let mut o = Options::new(Some(file.to_string())); o.effects = false; Host::open(o).unwrap() }
+
+#[test]
+fn a_class_the_owner_declares_resident_is_counted_whole_after_a_restart_where_a_lazy_one_is_not() {
+    let file = store_file("resident");
+    {
+        let h = open(&file);
+        h.load_pack("plan", &format!("PACK plan 1\n{WATCH}")).unwrap();
+        h.rebuild();
+        for i in 0..6 { h.born(&format!("Keep:k{i}"), "Keep", json!({"title": format!("t{i}")}).as_object().unwrap().clone(), "person"); }
+        h.born("Watch:main", "Watch", Default::default(), "person");
+        h.pump();
+    }
+    let count = |header: &str| {
+        let h = open(&file);
+        h.set_warm_rows(0);
+        h.load_pack("plan", &format!("PACK plan 1\n{header}{WATCH}")).unwrap();
+        h.load_stored_entities();
+        h.rebuild();
+        h.pump();
+        h.get("Watch:main", "keeps_now")
+    };
+    let lazy = count("");
+    assert!(lazy.as_i64().unwrap_or(0) < 6, "a lazy class lists only what is loaded: {lazy}");
+    assert_eq!(count("RESIDENT Keep\n"), json!(6), "the owner declares it RESIDENT: every stored Keep is counted");
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn a_write_of_the_value_a_property_holds_runs_no_setter_and_a_new_value_does() {
+    // the door's `entity_write` is a setter that writes `<entity>.<prop> = <value>` (door_tools.c1f `mcp-write`): a write by the field, which changes nothing when the value is the held one
+    let h = host(&format!("PACK sem 1\n{WATCH}Door.go on-setter w:\n  ALWAYS:\n    Watch:main.snap = this.go\n"));
+    born(&h, "Watch:main", json!({}));
+    born(&h, "Door:d", json!({}));
+    let keep = |i: usize| { h.born(&format!("Keep:k{i}"), "Keep", json!({"title": "t"}).as_object().unwrap().clone(), "person"); h.pump(); };
+    let go = |v: i64| { h.write("Door:d", "go", json!(v), "person"); h.pump(); };
+    (0..3).for_each(keep);
+    go(1);
+    assert_eq!(h.get("Watch:main", "last_keeps"), json!(3), "the first snap");
+    keep(3);
+    go(1);          // the door is written again and writes 1 again: the held value, nothing runs
+    assert_eq!(h.get("Watch:main", "last_keeps"), json!(3), "writing 1 over 1 runs nothing: the alert would stay");
+    go(2);          // a new value runs it
+    assert_eq!(h.get("Watch:main", "last_keeps"), json!(4));
+}

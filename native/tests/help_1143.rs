@@ -81,7 +81,7 @@ fn run(b: &Block, n: usize) {
 }
 
 /// A ```cliff block is a clifflet (the `run_cliff` tool, packs/door_tools.c1f): its non-directive lines are loaded the way the door loads them, as the body of a getter
-/// (`cliff`, the value is read) or of an on-setter (`cliff-write`, the writes run). Directives: `-- given <eid> <json>`, `-- value <json>` (the value), `-- error: <text>`
+/// (`cliff`, the value is read) or of an on-setter (`cliff-write`, the writes run). Directives: `-- given <eid> <json>`, `-- value <json>` (the value), `-- text <text>` (its printout, `str` of the value), `-- error: <text>`
 /// (the loader's message or the null's reason holds the text), `-- reads <eid>.<prop> = <json>` (after a `cliff-write` ran).
 fn run_cliff(b: &Block, at: &str) {
     let h = host();
@@ -96,7 +96,7 @@ fn run_cliff(b: &Block, at: &str) {
         }
     }
     let want_err = b.body.lines().find_map(|l| l.strip_prefix("-- error: ")).map(str::trim);
-    let text = if write { format!("PACK cliffx 1\nCliffx.go on-setter run:\n  ALWAYS:\n{}", indent(4)) } else { format!("PACK cliffx 1\nCliffx.val getter:\n{}Cliffx.shown getter: {{'v': this.val, 'why': why(this.val)}}\n", indent(2)) };
+    let text = if write { format!("PACK cliffx 1\nCliffx.go on-setter run:\n  ALWAYS:\n{}", indent(4)) } else { format!("PACK cliffx 1\nCliffx.val getter:\n{}Cliffx.shown getter: {{'v': this.val, 'why': why(this.val), 'text': str(this.val)}}\n", indent(2)) };
     let loaded = h.load_pack("cliffx", &text);
     if let Some(w) = want_err {
         if let Err(e) = &loaded { assert!(e.contains(w), "{at}: the loader said {e:?}, the help says it holds {w:?}"); return; }
@@ -127,6 +127,10 @@ fn run_cliff(b: &Block, at: &str) {
     if let Some(w) = want_err {
         let why = shown["why"].as_str().unwrap_or("");
         assert!(why.contains(w), "{at}: the null's reason is {why:?}, the help says it holds {w:?}");
+        return;
+    }
+    if let Some(t) = b.body.lines().find_map(|l| l.strip_prefix("-- text ")) {
+        assert_eq!(shown["text"].as_str().unwrap_or(""), t.trim(), "{at}: the printout of the clifflet is not what the help says");
         return;
     }
     let want: J = serde_json::from_str(b.body.lines().find_map(|l| l.strip_prefix("-- value ")).unwrap_or_else(|| panic!("{at}: a cliff block says `-- value <json>` or `-- error: <text>`"))).unwrap();
