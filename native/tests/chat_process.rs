@@ -851,7 +851,7 @@ fn a_clifflet_that_writes_lands_its_writes_and_returns_their_reactions() {
 #[test]
 fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accumulates() {
     let (mut run, port) = start_env("cliff3", MCP_PACKS, &[], &[("MEMBRANE_EVAL_BUDGET", "1000")]);
-    for i in 0..14 { put(port, &format!("Note:r{i}"), "n", json!(i)); }
+    for i in 0..40 { put(port, &format!("Note:r{i}"), "n", json!(i)); }
     let (t, e) = cliff(port, "[e.n for e in instances('Note') if e.n > 0 and len([1 for f in instances('Note')]) > 0]");
     assert!(e && t.contains("budget exceeded"), "{t}");
     assert_eq!(call(port, "entity_read", json!({"spec": "Note:r3", "prop": "n"})).0, "3", "the seat is up");
