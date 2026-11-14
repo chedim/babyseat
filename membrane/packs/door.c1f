@@ -96,7 +96,11 @@ Request.fwdh getter: lower(str(prop(this.headers, 'forwarded') or ''))
 Request.https getter: this.proto == 'https' or 'proto=https' in this.fwdh or 'proto="https"' in this.fwdh
 Request.cookie_name getter: ([prop(h.listen_result, 'cookie') for h in instances('Http') if prop(h.listen_result, 'cookie') != None] or ['membrane_jwt'])[0]
 Request.secure getter: '; Secure' if this.https else ''
-Request.login_token getter: prop(json(this.body or ''), 'token') if this.method == 'POST' and this.route == '/ui/login' else None
+Request.login_token getter:
+  WHEN this.method == 'POST' and this.route == '/ui/login':
+    lj = json(this.body or '')
+    None if lj is Error else prop(lj, 'token')
+  ELSE: None
 Request.login_shape getter: this.route == '/ui/login' and this.method == 'POST' and this.ct == 'application/json' and len(this.body or '') <= 16384
 Request.login_has getter: this.login_token != None and len(str(this.login_token)) > 0
 Request.login_ask getter: {'id': 'login', 'token': this.login_token} if this.login_shape and this.login_has else None
@@ -149,7 +153,11 @@ Request.cf_port getter: ([prop(h.listen_result, 'port') for h in instances('Http
 -- (a dict with a DATA key has no c1f form -- `dict(rows)` is a proposed builtin, docs/c1f-stdlib.md --: the one models row is read from JSON text, only for a name
 -- that needs no escaping; any other name leaves the list empty)
 Request.cf_safe getter: this.cf_model != '' and '"' not in this.cf_model and '\\' not in this.cf_model
-Request.cf_models getter: (json('{"' + this.cf_model + '": {"name": "' + this.cf_model + '"}}') or {}) if this.cf_safe else {}
+Request.cf_models getter:
+  WHEN this.cf_safe:
+    cj = json('{"' + this.cf_model + '": {"name": "' + this.cf_model + '"}}')
+    {} if cj is Error else (cj or {})
+  ELSE: {}
 Request.cf_provider getter: {'membrane': {'npm': '@ai-sdk/openai-compatible', 'name': 'Membrane (field)', 'options': {'baseURL': 'http://127.0.0.1:' + str(this.cf_port) + '/v1'}, 'models': this.cf_models}}
 Request.cf_body getter:
   WHEN this.cf_model != '': {'$schema': 'https://opencode.ai/config.json', 'autoupdate': False, 'share': 'disabled', 'provider': this.cf_provider, 'model': 'membrane/' + this.cf_model, 'small_model': 'membrane/' + this.cf_model, 'mcp': {}}
@@ -188,7 +196,11 @@ Request.family getter:
 -- facts: the launcher's facts as ONE dict (Boot:seat.facts). jbody: the body as JSON ({} when there is none or it is not JSON).
 -- qpairs: the query as rows [[k, v], ...] (undecoded). person: the verified name (the token's name, else its subject).
 Request.facts getter: ([b.facts for b in instances('Boot') if b.facts != None] or [{}])[0]
-Request.jbody getter: (json(this.body) or {}) if len(this.body or '') > 0 else {}
+Request.jbody getter:
+  WHEN len(this.body or '') > 0:
+    jb = json(this.body)
+    {} if jb is Error else (jb or {})
+  ELSE: {}
 Request.qpairs getter: [head(concat(words(replace(p, '=', ' ')), ['']), 2) for p in words(replace(this.query or '', '&', ' '))]
 Request.person getter: (prop(this.claims, 'name') or this.sub) if this.authed == True else None
 

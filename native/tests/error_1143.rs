@@ -86,6 +86,7 @@ fn is_that_cannot_be_read_is_a_parse_error() {
         ("1 is 3", "is"), ("1 is 'a'", "is"), ("1 is x.y", "is"), ("1 is", "is"), ("1 is (", "is"), ("1 is ()", "is"),
         ("1 is (Int, Text)", "never"),                  // two value kinds that can never both match
         ("1 is (Int, Error)", "never"), ("p is (Trip, Int)", "never"), ("1 is (Float, Int)", "never"),
+        ("1 is (Float, Text)", "never"), ("1 is (Num, Text)", "never"), ("1 is (Num, Error)", "never"),
         ("a == b is Error", "chain"), ("a is Error == b", "chain"), ("a is Int is Int", "chain"), ("a < b is Int", "chain"),
     ] {
         let e = parse(src).err().unwrap_or_else(|| panic!("{src} parsed"));
@@ -149,4 +150,16 @@ fn an_error_made_in_a_pack_is_error_of_a_reason() {
 fn truthy_of_an_error_is_never_asked_by_a_getter() {
     // `truthy` is the plain-Rust helper other code calls; an Error is not true (the evaluator never reaches it: it propagates first)
     assert!(!truthy(&err()));
+}
+
+#[test]
+fn num_is_a_value_kind_that_int_and_float_extend() {
+    // operator decision 2026-11-13: `Num` is Int or Float; an Int is also a Num, so `(Int, Num)` all-must-match holds for an Int
+    for (src, want) in [("1 is Num", true), ("1.5 is Num", true), ("'a' is Num", false), ("True is Num", false), ("None is Num", false), ("[1] is Num", false),
+                        ("1 is not Num", false), ("'a' is not Num", true), ("1 is (Int, Num)", true), ("1.5 is (Int, Num)", false),
+                        ("1.5 is (Float, Num)", true), ("1 is (Float, Num)", false), ("1 is (Num, Num)", true), ("1 is (Num,)", true)] {
+        assert_eq!(truth(src, &[]), want, "{src}");
+    }
+    assert!(!truth("e is Num", &[("e", err())]));
+    assert!(parse("1 is (Int, Num)").is_ok() && parse("1 is (Float, Num)").is_ok());
 }

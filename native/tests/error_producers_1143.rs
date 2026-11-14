@@ -42,12 +42,15 @@ fn a_bad_entity_literal_key_is_an_error_a_null_key_keeps_its_own_null() {
 }
 
 #[test]
-fn json_of_text_that_is_not_json_stays_a_plain_null_until_the_operator_decides() {
-    // OPEN DECISION (docs/c1f-error.md, (a)): `json(text)` on bad text could be an Error, but ~17 pack lines read `json(x) or {}` / `json(x) != None`
-    // as "not JSON is fine"; making it an Error needs each one rewritten. Until decided it is unchanged: a plain null with no reason.
-    assert!(matches!(run("json('{not json')", &[]), V::None));
+fn json_of_text_that_is_not_json_is_an_error_with_a_reason() {
+    // operator decision 2026-11-13: bad text is a failed parse, an Error (the packs that meant "not JSON is fine" test it with `is Error`)
+    for bad in ["json('{not json')", "json('')", "json('nope')"] {
+        assert!(matches!(run(bad, &[]), V::Error(ref r) if r.starts_with("not-json")), "{bad}: {:?}", run(bad, &[]));
+    }
     assert!(matches!(run("json('{\"a\": 1}')", &[]), V::Dict(_)));
-    assert!(matches!(run("json(n)", &[("n", V::None)]), V::None));
+    assert!(matches!(run("json(n)", &[("n", V::None)]), V::None), "a null stays a null");
+    assert!(matches!(run("json(e)", &[("e", V::Error("x".into()))]), V::Error(ref r) if r == "x"), "an Error propagates");
+    assert!(matches!(run("json('{bad') == None", &[]), V::Bool(false)), "an Error is not a null");
 }
 
 #[test]

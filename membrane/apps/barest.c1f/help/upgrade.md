@@ -47,9 +47,9 @@ A null is "not set, absent, not applicable" (it keeps its reason). An ERROR is a
 that raised, a block over its step budget or time allowance, a command that timed out, an entity key that is null or empty text, and `Error('reason')` in a pack are Errors.
 `x is Error` tests one, `why(x)` reads its text, and `x == None` is FALSE for it. An Error spreads: arithmetic, `x[i]`, `x.a`, comparisons, `not`, `and`, `or`, an `if` or
 `WHEN` condition and every call over an Error give that same Error (the first one wins), a getter that reads an Error returns it unchanged, and a `WHEN` over an Error does
-NOT fall through to the next arm. So `or` never hides one: `x or 0` over an Error is the Error; write `0 if x is Error else x`. `x is not Error`, `x is Int` (kinds `Int Float
-Text Bool List Dict Error`), `x is Trip` (an entity of that class, by its `parents`, nearest first, ending at `Entity`) and `x is (Trip, Place)` (all of them) read a value without
-spreading it. Stored, a derived Error is a plain null (the old routes see null; `entity_read` and `run_cliff` print `Error: <reason>`); a setter that writes an Error is
+NOT fall through to the next arm. So `or` never hides one: `x or 0` over an Error is the Error; write `0 if x is Error else x`. `x is not Error`, `x is Int` (kinds `Int Float Num
+Text Bool List Dict Error`; `Num` is an Int or a Float, so `x is (Int, Num)` holds for an Int, while `x is (Float, Text)` is a parse error: kinds that can never match together), `x is Trip` (an entity of that class, by its `parents`, nearest first, ending at `Entity`) and `x is (Trip, Place)` (all of them) read a value without
+spreading it. Stored, a derived Error is a plain null (the old routes see null; `entity_read` and `run_cliff` print `Error: <reason>`; `run_cliff` prints a null with a reason as `null: <reason>`, not an error); `json(text)` of text that is not JSON is an Error (`j = json(t)` then `{} if j is Error else j`); a setter that writes an Error is
 refused, so a failure is never stored as if it were a value. In a list or dict an Error is kept while one expression runs and is a plain null once stored.
 
 ```c1f

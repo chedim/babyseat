@@ -45,7 +45,11 @@ FieldVm.files getter: [f for f in instances('FvFile')]
 FieldVm.done getter: this.listed and len([f for f in this.files if f.text == None]) == 0
 FieldVm.pairs getter: [[f.stem, f.text] for f in this.files if f.view]
 FieldVm.rows getter: sql("SELECT json_group_object(json_extract(value, '$[0]'), json_extract(value, '$[1]')) AS packs FROM json_each(?)", this.pairs) if this.done else None
-FieldVm.snapshot getter: {'packs': (json(prop(this.rows[0], 'packs')) or {}), 'entities': []} if (this.rows != None and len(this.rows) > 0) else None
+FieldVm.snapshot getter:
+  WHEN this.rows != None and len(this.rows) > 0:
+    pk = json(prop(this.rows[0], 'packs'))
+    {'packs': ({} if pk is Error else (pk or {})), 'entities': []}
+  ELSE: None
 
 Request.o_fieldvm getter: this.route == '/ui/fieldvm'
 Request.m_fieldvm getter: ['GET']

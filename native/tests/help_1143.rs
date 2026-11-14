@@ -95,7 +95,7 @@ fn run_cliff(b: &Block, at: &str) {
             h.pump();
         }
     }
-    let want_err = b.body.lines().find_map(|l| l.strip_prefix("-- error: ")).map(str::trim);
+    let want_err = b.body.lines().find_map(|l| l.strip_prefix("-- error: ").or_else(|| l.strip_prefix("-- null: "))).map(str::trim);   // `-- null: <reason>` is how run_cliff prints a null with a reason
     let text = if write { format!("PACK cliffx 1\nCliffx.go on-setter run:\n  ALWAYS:\n{}", indent(4)) } else { format!("PACK cliffx 1\nCliffx.val getter:\n{}Cliffx.shown getter: {{'v': this.val, 'why': why(this.val), 'text': str(this.val)}}\n", indent(2)) };
     let loaded = h.load_pack("cliffx", &text);
     if let Some(w) = want_err {
@@ -233,4 +233,14 @@ fn the_doctrine_in_the_chat_turn_is_the_operators_four_sentences_and_the_help_te
     assert!(c.contains("entity_query `kind:Help`") && c.contains("Help:banner") && c.contains("Help:packs"), "Help:c1f lists the topics and how to list them");
     let b = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help/banner.md")).unwrap();
     assert!(b.contains("Banner.text") && b.contains("default_banner"), "Help:banner teaches the replacement");
+}
+
+#[test]
+fn the_help_says_what_num_json_and_a_null_with_a_reason_do() {
+    // operator decisions 2026-11-13: Num is a value kind, json(bad text) is an Error, run_cliff prints `null: <reason>` (not an error)
+    let rd = |t: &str| std::fs::read_to_string(repo().join(format!("membrane/apps/barest.c1f/help/{t}.md"))).unwrap();
+    let (c, u, l) = (rd("c1f"), rd("upgrade"), rd("cliff"));
+    assert!(c.contains("`x is Num`") && c.contains("`json(text)`") && c.contains("is an Error"), "Help:c1f");
+    assert!(u.contains("`Int Float Num") && u.contains("`null: <reason>`") && u.contains("`json(text)` of text that is not JSON is an Error"), "Help:upgrade");
+    assert!(l.contains("`null: <the reason>`") && !l.contains("`error: <the reason>`"), "Help:cliff");
 }

@@ -787,12 +787,12 @@ fn a_clifflet_reads_and_joins_several_entities_in_one_call_and_its_errors_say_wh
     assert_eq!((v["count"].clone(), v["big"].clone()), (json!(3), json!(["Note:b", "Note:c"])), "{t}");
     // a one-line value, a plain number, a null
     assert_eq!(cliff(port, "1 + 2"), ("3".to_string(), false));
-    assert_eq!(cliff(port, "None").0, "null");
+    assert_eq!(cliff(port, "None"), ("null".to_string(), false), "a plain null prints null");
     // the error shapes: a block that does not load says the loader's words, a null with a reason says it, an empty block says what is needed
     let (t, e) = cliff(port, "[x for x in");
     assert!(e && t.contains("the block did not load") && t.contains("not an expression"), "{t}");
     let (t, e) = cliff(port, "None('nothing here yet')");
-    assert!(e && t == "error: nothing here yet", "{t}");
+    assert!(!e && t == "null: nothing here yet", "a null with a reason says it and is not an error (operator 2026-11-13): {t}");
     let (t, e) = cliff(port, "1 / 0");
     assert!(e && t.starts_with("Error: "), "a failure shows its kind: {t}");
     let (t, e) = cliff(port, "  ");

@@ -108,7 +108,7 @@ Chat.plan on-setter turn-start:
 -- them (docs/cliffvm.md, "Garbage collection"): while the command runs its in-flight effect holds them, and when its receipt is taken they are held by nothing.
 ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.mid
 -- each chunk parses its OWN lines once (getters cached on the chunk) and hands what it said to the accumulator below, so a new chunk costs one parse, not a re-parse of everything before it
-Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if prop(e, 'type') == 'stream_event']
+Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if e is not Error and prop(e, 'type') == 'stream_event']
 Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
 Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
 ChatMessage.partial_text getter: '' if this.over else str(prop('Chunk:' + this.cmd_eid + ':acc', 'text') or '')
@@ -125,7 +125,7 @@ Chunk.part on-setter partial-in:
 -- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
 ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')
 ChatMessage.rc getter: prop(this.rr, 'rc')
-ChatMessage.evs getter: [e for e in [json(l) for l in lines(str(prop(this.rr, 'stdout') or ''))] if prop(e, 'type') != None]
+ChatMessage.evs getter: [e for e in [json(l) for l in lines(str(prop(this.rr, 'stdout') or ''))] if e is not Error and prop(e, 'type') != None]
 ChatMessage.finals getter: [e for e in this.evs if prop(e, 'type') == 'result']
 ChatMessage.final getter: this.finals[-1]
 ChatMessage.texts getter: [join([prop(b, 'text') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'text'], '') for e in this.evs if prop(e, 'type') == 'assistant']

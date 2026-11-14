@@ -128,12 +128,15 @@ fn replace_swaps_every_occurrence() {
 }
 
 #[test]
-fn json_of_text_that_is_not_json_is_none_so_a_default_can_follow() {
-    // a body that is not JSON must not abort the getter: `json(x) or {}` is the whole idiom
+fn json_of_text_that_is_not_json_is_an_error_so_a_default_is_chosen_by_is_error() {
+    // a body that is not JSON must not abort the getter: it is an Error (a null to every old route), and `{} if j is Error else j` is the idiom
+    // (`json(x) or {}` no longer defaults: `or` never hides an Error; operator 2026-11-13)
     assert_eq!(ev("json(body)", json!({"body": "nope"})), json!(null));
-    assert_eq!(ev("json(body) or {}", json!({"body": "nope"})), json!({}));
+    assert_eq!(ev("{} if json(body) is Error else json(body)", json!({"body": "nope"})), json!({}));
+    assert_eq!(ev("json(body) is Error", json!({"body": "nope"})), json!(true));
+    assert_eq!(ev("json(body) or {}", json!({"body": "nope"})), json!(null), "`or` does not hide the Error");
     assert_eq!(ev("json(body)", json!({"body": "{\"a\": 1}"})), json!({"a": 1}));
-    assert_eq!(ev("json(body)", json!({"body": ""})), json!(null));
+    assert_eq!(ev("json(body) is Error", json!({"body": ""})), json!(true));
     assert_eq!(ev("json(body)", json!({"body": null})), json!(null));
 }
 

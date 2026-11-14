@@ -38,8 +38,16 @@ Request.vo_slug getter: join(words(plain(replace(replace(replace(replace(replace
 Request.vo_go getter: this.route == '/membrane/voice' and this.method == 'POST' and this.vo_person != ''
 Request.vo_in_q getter: sql("SELECT json_extract(body, '$.props') AS p FROM c_field WHERE k = ?", 'membrane::Config:voice:in:' + this.vo_slug) if this.vo_go else None
 Request.vo_out_q getter: sql("SELECT json_extract(body, '$.props') AS p FROM c_field WHERE k = ?", 'membrane::Config:voice:out:' + this.vo_slug) if this.vo_go else None
-Request.vo_in getter: (json(prop(this.vo_in_q[0], 'p')) or {}) if len(this.vo_in_q or []) > 0 else {}
-Request.vo_out getter: (json(prop(this.vo_out_q[0], 'p')) or {}) if len(this.vo_out_q or []) > 0 else {}
+Request.vo_in getter:
+  WHEN len(this.vo_in_q or []) > 0:
+    voj = json(prop(this.vo_in_q[0], 'p'))
+    {} if voj is Error else (voj or {})
+  ELSE: {}
+Request.vo_out getter:
+  WHEN len(this.vo_out_q or []) > 0:
+    voj = json(prop(this.vo_out_q[0], 'p'))
+    {} if voj is Error else (voj or {})
+  ELSE: {}
 Request.vo_in_view getter: {'on': prop(this.vo_in, 'on'), 'mode': prop(this.vo_in, 'mode'), 'device': prop(this.vo_in, 'device'), 'session': prop(this.vo_in, 'session'), 'log': prop(this.vo_in, 'heard') or []}
 Request.vo_out_view getter: {'on': prop(this.vo_out, 'on'), 'mode': prop(this.vo_out, 'mode'), 'device': prop(this.vo_out, 'device'), 'session': prop(this.vo_out, 'session'), 'log': prop(this.vo_out, 'said') or []}
 Request.vo_body getter: {'ok': True, 'in': this.vo_in_view, 'out': this.vo_out_view}
@@ -57,8 +65,16 @@ Request.vs_in_q getter: sql("SELECT json_extract(body, '$.props') AS p FROM c_fi
 Request.vs_out_q getter: sql("SELECT json_extract(body, '$.props') AS p FROM c_field WHERE k = ?", this.vs_out_eid) if this.vs_go else None
 -- both reads have landed (a row or none: a person with no entities yet is made by the constructors below)
 Request.vs_landed getter: this.vs_in_q != None and this.vs_out_q != None
-Request.vs_in getter: (json(prop(this.vs_in_q[0], 'p')) or {}) if len(this.vs_in_q or []) > 0 else {}
-Request.vs_out getter: (json(prop(this.vs_out_q[0], 'p')) or {}) if len(this.vs_out_q or []) > 0 else {}
+Request.vs_in getter:
+  WHEN len(this.vs_in_q or []) > 0:
+    vsj = json(prop(this.vs_in_q[0], 'p'))
+    {} if vsj is Error else (vsj or {})
+  ELSE: {}
+Request.vs_out getter:
+  WHEN len(this.vs_out_q or []) > 0:
+    vsj = json(prop(this.vs_out_q[0], 'p'))
+    {} if vsj is Error else (vsj or {})
+  ELSE: {}
 Request.vs_ready getter: this.vs_go and this.vs_landed
 -- each value is the one the body asks for, else the one the entity has (voice_io.set_state)
 Request.vs_in_on getter: (not not prop(this.jbody, 'in_on')) if prop(this.jbody, 'in_on') != None else (prop(this.vs_in, 'on') or False)
@@ -95,7 +111,11 @@ Request.stt_reply getter:
 Request.pl_dir getter: str(prop(this.facts, 'seat_data_dir') or '')
 Request.pl_path getter: this.pl_dir + '/page-voice.log'
 -- a line is kept when it is at most 4096 bytes of JSON; the body's newlines go (one record per line)
-Request.pl_ok getter: this.route == '/ui/log' and len(this.body or '') <= 4096 and json(this.body or '') != None and this.pl_dir != ''
+Request.pl_ok getter:
+  WHEN this.route == '/ui/log' and len(this.body or '') <= 4096 and this.pl_dir != '':
+    pj = json(this.body or '')
+    pj is not Error and pj != None
+  ELSE: False
 Request.pl_file getter: ([f for f in instances('File') if f.eid == 'File:' + str(this.conn)] or [None])[0]
 Request.pl_info getter: this.pl_file.info if this.pl_file != None else None
 Request.pl_big getter: prop(this.pl_info, 'exists') == True and prop(this.pl_info, 'size') > 2000000

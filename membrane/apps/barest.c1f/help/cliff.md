@@ -42,10 +42,10 @@ concat([[p.eid, p.state] for p in instances('Pack') if startswith(p.eid, 'Pack:d
 
 ## A value that is null says why
 
-A FAILURE (an Error: a failed cast, a getter that raised, a command that timed out, a block over its budget) comes back as `Error: <the reason>`; a null with a reason comes back as `error: <the reason>`; a plain null is the text `null`. A missing property is a null that says `absent: <entity>.<property>`. A null INSIDE a list or a dict keeps its reason too, written `{"$null": "<reason>"}` in the text you read (a null with no reason stays `null`):
+A FAILURE (an Error: a failed cast, a getter that raised, a command that timed out, a block over its budget) comes back as `Error: <the reason>`; a null with a reason comes back as `null: <the reason>` (not an error: nothing failed); a plain null is the text `null`. A missing property is a null that says `absent: <entity>.<property>`. A null INSIDE a list or a dict keeps its reason too, written `{"$null": "<reason>"}` in the text you read (a null with no reason stays `null`):
 
 ```cliff
--- error: nothing measured yet
+-- null: nothing measured yet
 None('nothing measured yet')
 ```
 
