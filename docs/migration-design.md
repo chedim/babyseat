@@ -7,9 +7,10 @@ session scratchpad and opened with `immutable=1`. No live store was opened; the 
 
 ## 0. Important first
 
-1. **The old store stays a read-only file; the new seat reads it through ONE new read-only connection and converts an entity the first time something
-   touches it.** A converted row is an ordinary `c_field` row, so lazy load, `updated` and unload need no change. Needs one native piece that is
-   not there: a second read-only SQL source (`--legacy <path>`), plus a small ledger table (`c_legacy_done`). Decisions 1 and 2.
+1. **The old store stays a read-only file; the new seat reads it through a read-only `SqlSource` (the Sql driver) and converts an entity the first time something
+   touches it.** A converted row is an ordinary `c_field` row, so lazy load, `updated` and unload need no change. The native piece is built (2026-11-14,
+   `docs/cliffvm.md` "The Sql driver", `Help:sql`): the old store is `SqlSource:legacy` (`ro`: opened read-only with SQLite's immutable setting) and every read is a `SqlQuery`
+   entity; no builtin. Left to build: a small ledger table (`c_legacy_done`). Decisions 1 and 2.
 2. **Only about 11% of the bytes are "things a user sees"** [copy]: chat (sessions + messages 12.7 MB), entities (39.5 MB), files (1.4 MB) = 53.6 MB of 517 MB.
    The other 89% is recall data (events, sentences, terms, entity_states, deltas, relations, claims, annotations, chunks, 463 MB) plus a 57 MB float16
    vectors file. Recommend: convert the 11%, leave the 89% where it is and read it in place until native recall owns rows (Decision 10).
@@ -61,22 +62,27 @@ Size drivers: events, entity_states, chunks, annotations, relations (each 48-87 
 
 ## 2. Convert on touch, in cliffvm terms (b)
 
-**Three paths, never mixed:** `--store new.sqlite` (the seat's, writable), `--legacy <old>/field.sqlite3` (read-only, a NEW connection opened like
-`sqlexec.rs:33-36`: `SQLITE_OPEN_READ_ONLY` + `PRAGMA query_only`; WAL readers never block the Python writer), and the vectors dir (untouched).
-The pack `legacy.c1f` (c1f only, a family pack like `door_session`) holds EVERY rule; Rust only provides the connection and the miss hook.
+**Three paths, never mixed:** `--store new.sqlite` (the seat's, writable), `SqlSource:legacy` (`path` = `<old>/field.sqlite3`, `mode` `ro`: the Sql driver opens a NEW connection read-only with the immutable URI and `query_only`; declared by
+the launch fact `--fact sql_sources='[{"name": "legacy", "path": "<old>/field.sqlite3"}]'` or written by hand), and the vectors dir (untouched). **Immutable means the file must
+not change while the seat runs**: it ignores the old store's WAL, so the source is a SNAPSHOT of the old store (the cutover's step 3 makes one), never the file the Python seat is
+still writing; the rehearsal below reads a `cp -c` clone for the same reason (decision 19).
+The pack `legacy.c1f` (c1f only, a family pack like `door_session`) holds EVERY rule; Rust provides the miss hook; the reads are `SqlQuery` entities.
 
 ```
 -- legacy.c1f (sketch, not final syntax)
 PACK legacy 1
 LEGACY_CONV getter: 1                                   -- the converter version (Decision 4)
-Legacy.q_session getter: legacy_sql("SELECT body FROM c_sessions WHERE k = ?", this.sid)
+SqlQuery:legacy:session.source = 'legacy'                -- written once (a setter at boot)
+SqlQuery:legacy:session.sql = 'SELECT body FROM c_sessions WHERE k = ?'
+Legacy.want_session setter: SqlQuery:legacy:session.run = {id: this.sid, args: [this.sid]}   -- the same id never runs twice
+Legacy.q_session getter: SqlQuery:legacy:session.rows            -- None until the receipt lands, an Error with the reason when the file is gone
 Legacy.eid_of(old) = ...                                -- PURE: old key -> new eid (section 5)
 ('Chat:session:' + sid) = ChatSession(stitle: s.title, born: s.time.created, upd: s.time.updated,
                                       legacy_src: {coll:'sessions', k: sid, conv: LEGACY_CONV, sha: sha(body)})
 ```
 
 **Touch = the miss.** `stored_loader` (`host.rs:77-82`) answers a reference to an eid from `c_field`. On a MISS, with a legacy source attached, the host births the
-virtual entity `Legacy:want:<old key>` (an arrival, like a door request); the pack's setter reads `legacy_sql` (async: Pending, as every `sql`), then writes the birth
+virtual entity `Legacy:want:<old key>` (an arrival, like a door request); the pack's setter runs a `SqlQuery` on `SqlSource:legacy` (a write; async: its receipt lands when the read ends), then writes the birth
 of the real entity and the ledger row, in ONE round (one commit). The first reader sees `None` (as any getter waiting on an async read) and the getter recomputes
 when the entity arrives. "The VM cannot make an entity from a read" (`semtext-and-legs.md:93`), so the birth is always a write by the pack, never by the reader.
 
@@ -151,13 +157,13 @@ computes `eid_of(old)` and goes the same way: no alias table (the function is pu
 
 ## 6. Cutover runbook (f)
 
-The Python seat runs until the minute of cutover. **Rehearsal (any number of times, no downtime):** start cliffvm on a second port with `--store rehearsal.sqlite --legacy <live
-old store>`; the live file is only read. Delete `rehearsal.sqlite` afterwards (Decision 14: the final store starts EMPTY).
+The Python seat runs until the minute of cutover. **Rehearsal (any number of times, no downtime):** start cliffvm on a second port with `--store rehearsal.sqlite --fact sql_sources='[{"name": "legacy", "path": "<a clone of the old store>"}]'`; the source is read-only and
+immutable, so the rehearsal reads a clone (`cp -c`) and never the file the Python seat is writing. Delete `rehearsal.sqlite` afterwards (Decision 14: the final store starts EMPTY).
 
 1. Announce; `GET /session/status` all idle (restart rule). Wait for the Python message store's cadence flush (`FLUSH_MIN_S = 5.0`, `server.py:663`) plus a margin (Decision 14).
 2. Stop the Python seat (clean exit: the store closes with `wal_checkpoint(TRUNCATE)`, `sqlitedb.py:286`; the writer lock is released). Check the lock is free.
 3. Snapshot: `cp -c` (APFS clone) the store dir to `<.membrane>/legacy.v0753/`, `chmod -R a-w`; record sha256 + size of `field.sqlite3` and `SELECT count(*)` of every `c_` table into `legacy.v0753/ledger.json`. This is the golden ledger and the rollback source.
-4. Start cliffvm on the SAME port with `--store <.membrane>/cliffvm.sqlite3 --legacy legacy.v0753/field.sqlite3 --secret-file <.membrane>/jwt.secret`. Door answers at once (the lazy boot: 0.12 s at 5,000 rows, `cliffvm.md:175`; `c_field` is empty).
+4. Start cliffvm on the SAME port with `--store <.membrane>/cliffvm.sqlite3 --fact sql_sources='[{"name": "legacy", "path": "legacy.v0753/field.sqlite3"}]' --secret-file <.membrane>/jwt.secret`. Door answers at once (the lazy boot: 0.12 s at 5,000 rows, `cliffvm.md:175`; `c_field` is empty).
 5. Verify: (a) `sha256` of the legacy file equals the ledger (read-only proof); (b) `cliffvm legacy verify` reports per collection `old N = converted + skipped + dropped` using the dry-run touch of every key into a scratch store, and the sample of 20 sessions + 50 entities compared old vs new; (c) the recorded Python golden answers for `/session`, `/session/<sid>/message`, `/membrane/chat/messages` (`scripts/golden_session.py`) match by shape (`session_1143.rs` `shape_misses`); (d) the owner opens the page, sees the last session and its history; a Python-minted token is accepted.
 6. Rollback (any time before the first new write matters): stop cliffvm; restart Python on the original `.membrane` (it was never written; only the lock moved). After new writes: `cliffvm legacy reverse` (section 3), then start Python on `<dir>`.
 
@@ -172,7 +178,7 @@ ordering must use `at`/`n`, not the id); (3) the 5 s message flush (messages fro
 
 Tests (red first, `native/tests/legacy_1143.rs`):
 - GOLDEN FIXTURE `tests/golden/legacy/` built by a script from the REAL COPY with text replaced by stubs (3 sessions, 6 messages, one row of each eid shape in section 5, a file row); the real copy itself is used only by an `#[ignore]` test reading `LEGACY_COPY=<path>` for counts and timing, never committed.
-- read-only: sha256 of the legacy file identical after any run; an attempt to write through `legacy_sql` is refused.
+- read-only: sha256 of the legacy file identical after any run; an attempt to write through the `ro` source is refused by SQLite itself (a `SqlQuery` INSERT on `SqlSource:legacy` reads as an Error).
 - lazy: boot over the fixture, `c_field` empty; a first touch makes exactly the rows of the unit; a second touch makes none (idempotent); touch order A,B equals B,A (dump compare).
 - crash: kill -9 between touch and commit: no ledger row without the entity (one round, one commit).
 - retire: retire a converted entity, touch again: stays gone.
@@ -185,7 +191,7 @@ Tests (red first, `native/tests/legacy_1143.rs`):
 
 | round | content | rounds |
 |---|---|---|
-| R1 | `--legacy` read-only SQL source + `legacy_sql` builtin; no-table answers empty, never hangs (the three fresh-store hangs of `release-parity.md`); `c_legacy_done` at open; fixture builder | 1-2 |
+| R1 | `SqlSource:legacy` + `SqlQuery` (the Sql driver, built); no-table answers empty, never hangs (the three fresh-store hangs of `release-parity.md`); `c_legacy_done` at open; fixture builder | 1-2 |
 | R2 | `eid_of` + the section-5 rule table, pure c1f + a table test over the copy's key shapes | 1 |
 | R3 | sessions + messages: touch by id, list from key index, history page, session/message routes; owner mapping | 2-3 |
 | R4 | entities by class (`Decision`, `Goal`, `Task`, `Config`, `Banner`, `Command`, `Message`, `Component`), `Legacy` fallback, `Settings:seat` + files rows | 2-3 |
@@ -199,7 +205,7 @@ Total **12-18** (R1-R8 = 11-16, R9 +1-2). Nothing here touches the live seat; th
 
 ## 9. Decisions for the operator (I chose none; my recommendation in brackets)
 
-1. Legacy access: a second read-only connection `--legacy` with a `legacy_sql` builtin [yes] vs `ATTACH` on the main connection vs copying tables in.
+1. Legacy access: DECIDED (2026-11-14) a second read-only SQLite file as entities, `SqlSource:legacy` + `SqlQuery` (no builtin, no `--legacy` flag) vs `ATTACH` on the main connection vs copying tables in.
 2. The ledger as a host-created table `c_legacy_done` [yes] vs ledger rows as entities.
 3. Touch unit: session = unit (all messages), entities by eid, lists from the legacy key index [yes] vs per message.
 4. Converter version starts at 1; the stamp lives in `legacy_src.conv` and the ledger [yes].
@@ -217,3 +223,4 @@ Total **12-18** (R1-R8 = 11-16, R9 +1-2). Nothing here touches the live seat; th
 16. Message order key: the old `n`, then `at` (kept in `legacy_at`).
 17. Keep the ledger's `retired` tombstones forever [yes] vs a purge after N days (a number).
 18. The estimate: 12-18 rounds without recall data, accepted as the budget for step 4.
+19. The immutable read-only source ignores the old store's WAL: the rehearsal and the cutover read a clone/snapshot of the old store, never the live file [yes], vs a `ro` mode that is not immutable (a later change to the driver, one more mode).

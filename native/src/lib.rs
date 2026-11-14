@@ -64,3 +64,5 @@ pub fn evaluate_json(src: &str, env_json: &str) -> Result<String, String> {
     let v = expr::eval(&node, &env, &NoWorld)?;
     Ok(expr::to_json(&v)?.to_string())
 }
+#[cfg(feature = "store")]
+pub mod sqldrv;

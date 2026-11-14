@@ -8,6 +8,8 @@
 //!     File:<...>.write  = {id, content, append}     File.move = {id, to}     File.delete = {id}
 //!     Command:<...>.run = {id, args}  (the entity's cmd, or the `cmd` in the run value (also stored on the entity): an argument list, or a string run by `sh -c`; cwd;
 //!                                     env_from {VAR: ENV_VAR}: secrets named, read here, never stored)
+//!     SqlQuery:<...>.run = {id, args, max_rows}  (a prepared statement on a second SQLite file: sqldrv.rs)
+//!     SqlQuery:<...>.run = {id, args, max_rows}  (a prepared statement on a second SQLite file, sqldrv.rs; the receipt carries the rows)
 //!     Command.stop      = {id}        (kills the running child; its run's receipt says so)
 //! - Reach (the operator): everything the VM's OS user can do. Entity scripts and peers never trigger an effect
 //!   (fields.rs checks the writer). Per-token scopes are a later release.
@@ -133,7 +135,7 @@ fn receipt(id: &J, rc: i64, head: String, extra: Map<String, J>) -> J {
 }
 
 /// The driver verbs the engine runs: (class, verb).
-pub const VERBS: [(&str, &str); 14] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run"), ("Http", "listen"), ("Request", "respond"), ("Request", "verify"), ("Request", "mint"), ("Request", "stream"), ("Request", "send"), ("Request", "end"), ("Fetch", "request")];
+pub const VERBS: [(&str, &str); 15] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run"), ("Http", "listen"), ("Request", "respond"), ("Request", "verify"), ("Request", "mint"), ("Request", "stream"), ("Request", "send"), ("Request", "end"), ("Fetch", "request"), ("SqlQuery", "run")];
 
 /// Run one effect (the engine calls this for a write of a driver verb). `props` are the entity's.
 pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map<String, J>) {
@@ -172,6 +174,10 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 }
                 r
             }));
+        }
+        ("SqlQuery", "run") => {                           // a second SQLite file (sqldrv.rs): the receipt is data, rows included; the source's props come in `props` (fields.rs)
+            let (req2, props2, h) = (req.clone(), props.clone(), st.clone_handle());   // the handle keeps the seat's store path (the own-store refusal reads it)
+            st.effect_limited(eid, verb, Box::new(move |_, eid| crate::sqldrv::run(&h, eid, &req2, &props2)));
         }
         ("Request", "verify") => {                         // a token the request carries: checked with its door's secret
             let (req2, http) = (req.clone(), props.get("http").and_then(|h| h.as_str()).unwrap_or("").to_string());

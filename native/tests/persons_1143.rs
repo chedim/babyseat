@@ -20,7 +20,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
     let d = std::env::temp_dir().join(format!("cliffvm-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(d.join("packs")).unwrap();
-    for n in ["boot.c1f", "door.c1f", "door_auth.c1f", "door_tools.c1f", "entity.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f"] {
+    for n in ["boot.c1f", "door.c1f", "door_auth.c1f", "door_tools.c1f", "entity.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f"] {
         let src = format!("{}/../membrane/packs/{n}", env!("CARGO_MANIFEST_DIR"));
         if let Ok(t) = std::fs::read_to_string(src) { std::fs::write(d.join("packs").join(n), t).unwrap(); }
     }

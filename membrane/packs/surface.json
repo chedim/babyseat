@@ -593,6 +593,7 @@
       "fs",
       "proc",
       "fetch",
+      "sql",
       "store"
     ],
     "classes": [
@@ -938,6 +939,29 @@
     "boot_facts": [],
     "virtual": [
       "Span"
+    ]
+  },
+  "sql": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "SqlQuery",
+      "SqlSource"
+    ],
+    "members": 17,
+    "writes": [
+      "SqlSource:*.mode",
+      "SqlSource:*.path"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "sql_sources"
+    ],
+    "resident": [
+      "SqlSource",
+      "SqlQuery"
     ]
   },
   "stats": {

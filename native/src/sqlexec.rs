@@ -53,7 +53,7 @@ fn word(e: &rusqlite::Error) -> String {
     }
 }
 
-fn bind(v: &J) -> SqlValue {
+pub(crate) fn bind(v: &J) -> SqlValue {
     match v {
         J::Null => SqlValue::Null,
         J::Bool(b) => SqlValue::Integer(*b as i64),
@@ -63,7 +63,7 @@ fn bind(v: &J) -> SqlValue {
     }
 }
 
-fn cell(v: ValueRef<'_>) -> J {
+pub(crate) fn cell(v: ValueRef<'_>) -> J {
     match v {
         ValueRef::Null | ValueRef::Blob(_) => J::Null,
         ValueRef::Integer(i) => J::from(i),

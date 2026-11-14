@@ -20,7 +20,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
     d
 }
 
-const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f"];
+const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f"];
 
 fn start(tag: &str, dir: Option<std::path::PathBuf>) -> (Run, u16) {
     let dir = dir.unwrap_or_else(|| tmp(tag));

@@ -78,6 +78,8 @@ pub struct Shared {
     secrets: HashMap<String, Vec<u8>>,
     /// a running command's child process, by its entity (Command.stop kills it)
     children: HashMap<String, Arc<Mutex<Option<std::process::Child>>>>,
+    /// the open connections of the Sql driver (sqldrv.rs), by their SqlSource entity
+    sources: HashMap<String, crate::sqldrv::SourceSlot>,
     done: u64,
     /// the barest seat (operator 2026-11-12): the door verifies nothing (every request is `authed`), and a listen that names no host binds `bind`
     plain: bool,
@@ -289,6 +291,19 @@ impl Store {
             g.done += 1;
             sh.1.notify_all();
         }).expect("a thread for an effect");
+    }
+
+    /// The connection slot of a SqlSource entity (sqldrv.rs): made empty at first use, kept for the life of the process.
+    pub fn sql_source(&self, eid: &str) -> crate::sqldrv::SourceSlot {
+        self.sh.0.lock().unwrap_or_else(|e| e.into_inner()).sources.entry(eid.to_string()).or_default().clone()
+    }
+
+    /// A receipt for an entity that is not the one the effect runs on (the Sql driver tells the SqlSource how its open went): taken by the engine's next round.
+    pub fn note_receipt(&self, eid: &str, verb: &str, rec: J) {
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.receipts.push((eid.to_string(), verb.to_string(), rec));
+        g.done += 1;
+        self.sh.1.notify_all();
     }
 
     /// The limit of a Command run that states no `timeout_s` (the boot fact `command_timeout_s`); 0 = the default.

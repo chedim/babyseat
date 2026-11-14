@@ -37,7 +37,10 @@ pub const PACK_WRITER: &str = "pack";
 
 /// The store writer for an engine write (fields_live.stamp_writer): derived.
 pub fn stamp_writer(engine_writer: &str) -> String {
-    format!("{WRITER}{}", engine_writer.trim_start_matches("field:"))
+    // a RECORDED receipt (the Sql driver's: the answer of a file the replay must not ask again) is OUTSIDE, so it is journalled
+    let w = engine_writer.trim_start_matches("field:");
+    if w.starts_with("record:") { return format!("host:{w}"); }
+    format!("{WRITER}{w}")
 }
 
 /// The store stamp of what a setter wrote while triggered by a VIRTUAL entity: OUTSIDE (journalled), since the trigger is not in the journal and a replay could not

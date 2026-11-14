@@ -3,7 +3,7 @@
 A pack is a text of getters and setters over entities. A getter is a cached value that recomputes when what it read changes. A
 setter runs when its property is written. Acting is writing. Every code block below is loaded and run by a test, so it is real.
 
-The help is a set of entities, one per topic: `entity_query` `kind:Help` lists them and `entity_read {spec: "Help:<topic>"}` reads one. `Help:c1f` (this page) is the language, `Help:packs` writing and loading a pack, `Help:banner` your banner, `Help:cliff` a block of the language run in one call (the `run_cliff` tool), `Help:semtext` a text read by its sentences, words and the things it mentions, `Help:upgrade` what is new. The tools you hold are entity_query (find entities: `kind:<Class>` and `name~:<prefix>`, joined with `&`), entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect); `run_cliff` (one call: a small block of the language that reads, filters, joins and may write; `Help:cliff`); everything else is an entity you make and write to.
+The help is a set of entities, one per topic: `entity_query` `kind:Help` lists them and `entity_read {spec: "Help:<topic>"}` reads one. `Help:c1f` (this page) is the language, `Help:packs` writing and loading a pack, `Help:banner` your banner, `Help:cliff` a block of the language run in one call (the `run_cliff` tool), `Help:semtext` a text read by its sentences, words and the things it mentions, `Help:sql` a second SQLite file read and written as entities, `Help:upgrade` what is new. The tools you hold are entity_query (find entities: `kind:<Class>` and `name~:<prefix>`, joined with `&`), entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect); `run_cliff` (one call: a small block of the language that reads, filters, joins and may write; `Help:cliff`); everything else is an entity you make and write to.
 
 ## Getters
 
@@ -265,6 +265,8 @@ The receipt is `Fetch:<name>.request_result`: `{id, status, rc, head, http_statu
 -- receipt Fetch:probe.request_result.status = "error"
 -- receipt Fetch:probe.request_result.rc = 2
 ```
+
+`SqlSource:<name>` and `SqlQuery:<name>.run` follow the same shape for a second SQLite file (`Help:sql`): write the source's `path`, the query's `source` and `sql`, then `run = {id, args}` and read `rows`.
 
 What `entity_write` returns: the line `wrote <entity>.<prop>`, then for a write that starts an effect the `receipt:` JSON line (`id`, `status`, `rc`, `ok`, `started`, `finished` as epoch
 seconds, `ms`, `stdout_bytes`, `stderr_bytes`) with a `stdout:` and a `stderr:` line (the whole text as `stdout`, or, past 16 KB, `stdout_head` and `stdout_tail` = the first and last 8192 characters

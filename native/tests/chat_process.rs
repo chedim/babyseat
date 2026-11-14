@@ -99,7 +99,7 @@ fn terminate(run: &mut Run) -> bool {
     false
 }
 
-const MCP_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f"];
+const MCP_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f"];
 
 #[test]
 fn the_mcp_door_speaks_the_handshake_lists_the_field_tools_and_runs_them() {
@@ -188,7 +188,7 @@ if os.path.exists(errp):
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Final answer to: " + prompt + ((" key=" + (_k or "")) if os.path.exists(os.path.join(here, "echo_key")) else ""), "num_turns": 3, "duration_ms": 4321, "total_cost_usd": 0.0123, "usage": {"input_tokens": 11, "cache_creation_input_tokens": 22, "cache_read_input_tokens": 33, "output_tokens": 44}, "session_id": "fake-1"})
 "#;
 
-const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f"];
+const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f"];
 
 /// the seat's folder holds the fake; the binary is told its path as a fact
 fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) { fake_seat_with(tag, extra, &[]) }
@@ -1868,7 +1868,7 @@ fn a_keep_write_with_running_turns_answers_small_the_written_in_full_the_rest_as
 
 #[test]
 fn a_mention_write_answers_small_the_words_and_spans_as_counts() {
-    let (mut run, port) = start("b2mention", &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f"], &[]);
+    let (mut run, port) = start("b2mention", &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f"], &[]);
     // earlier texts that hold the same words: the shared Word entities' lists have grown
     for i in 0..6 {
         let (t, e) = cliff(port, &format!("Note:body:o{i} = SemText(text: 'The dogs chase the cats near the old barn number {i}. The rain falls on the house.')\nNote:body:o{i}.mention = True"));

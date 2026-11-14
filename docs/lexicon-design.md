@@ -4,9 +4,9 @@
 (wiped at reboot) and a copy in `~/.membrane/wordnet` (34 MB, the files Throwy's `wnq.sh` greps today). WordNet **3.1** is NOT on disk; I recommend 3.0, so
 no download is needed. (2) Do not make the lexicon entities in the seat's store: 265k rows would cost ~60 MB of `c_field`, a slower boot and a bigger
 journal for a table that never changes. Keep it a **read-only SQLite file** (measured: 20 MB, 206,941 senses, 161,832 relation rows) built offline by a
-shell tool from the WordNet files, and read in place. (3) That needs **one new native piece**: a second read-only SQL source and a `lexsql(...)`
-builtin (the same piece `docs/migration-design.md` R1 wants for `--legacy`). Everything else (lemmatising, synonym/broader/narrower coverage,
-idiom match, Throwy's TOPIC CHECK) is SQL plus getters. No Python at runtime, no network. Every number, threshold and builtin below is a DECISION
+shell tool from the WordNet files, and read in place. (3) That needs **one native piece, now built as entities and not as a builtin**: the `Sql` driver (`SqlSource:<name>`, `SqlQuery:<name>`, `docs/cliffvm.md`
+"The Sql driver", `Help:sql`; the same piece `docs/migration-design.md` R1 uses for the old store). The lexicon is `SqlSource:lex` (read-only, immutable) and its queries are `SqlQuery` entities. Everything else (lemmatising, synonym/broader/narrower coverage,
+idiom match, Throwy's TOPIC CHECK) is SQL plus getters. No Python at runtime, no network. Every number and threshold below is a DECISION
 (list at the end); I chose none, "recommended" is only my reading.
 
 ## (a) The data source
@@ -38,7 +38,7 @@ bytes measured with `sense` + `rel` of the kinds `@ @i & #m #p %m %p` + both ind
 with glosses, left out). One bulk table read with one indexed lookup per word: no row is a VM entity, so boot, RAM, journal and `warm_rows` do not
 change for an idle seat (SQLite maps pages on demand; the first lookup costs page reads, not a load; not timed here).
 **Entities born on touch, virtual.** What a pack holds is two VIRTUAL classes (never stored, collected at the end of the round, `docs/cliffvm.md`
-storage modes): `Synset:id:<offset><pos>` (`lemmas`, `broader`, `narrower` getters over `lexsql`) and nothing for `Lemma`: a lemma already has an
+storage modes): `Synset:id:<offset><pos>` (`lemmas`, `broader`, `narrower` getters over the rows of a `SqlQuery`) and nothing for `Lemma`: a lemma already has an
 entity, **`Word:lemma:<lemma>` (link, do not replace)**; add getters to `Word` (`senses`, `syns`, `broader`, `narrower`) that read the file by `this.lemma`.
 A multiword lemma is `Word:lemma:kick_the_bucket` (underscores as WordNet writes it; a text's words are joined with `_` before the lookup).
 Edges stay in the file; none is written into `Word.mentioned_in` (writing synonym edges would multiply every common word's list: see (d)).
@@ -50,12 +50,16 @@ Today `sql(query, args)` reads only the seat's own store (`native/src/sqlexec.rs
 `Pending`), so the file needs a way in. Options, from least to most native:
 1. **No native piece:** a `Command` runs `sqlite3 lexicon.sqlite "..."` (what Throwy does with `wnq.sh`: grep over 15 MB per word, one process per batch).
    Works today, async, but a process per ask and a `sqlite3` binary on PATH. Fine as the stop-gap, not as the SemText path (it would run per mention).
-2. **A second read-only SQL source + `lexsql(query, args...)`** (recommended): the boot names the file (`--lexicon <path>`, or a `--source lex=<path>`
-   shared with `--legacy`), the host opens it `SQLITE_OPEN_READ_ONLY | immutable=1` (a separate file, never a WAL: the "one SQLite per process" hazard
-   of #1111 is about one WAL file opened twice, not two files), and `lexsql` has exactly `sql`'s contract (async `Pending`, cached getter value,
-   interrupt, no row cap). No file attached: the getter reads `Error('lexicon: no lexicon attached')`, never hangs. Needs: the executor
-   (a copy of `NativeSqlExec` over another path, ~40 lines), the CLI flag, the builtin, and a `Store` handle. One generic form,
-   `ro_sql(name, query, args...)` with named sources, would serve the lexicon and `legacy` (migration R1) with one builtin.
+2. **The Sql driver: a second SQLite file as entities** (decided, built): `SqlSource:lex.path = '<seat>/.membrane/lexicon.sqlite'` (mode `ro`, the default: the file is
+   opened read-only with SQLite's immutable setting, so it must not change while the seat runs; a launch may pre-declare it with `--fact sql_sources='[{"name": "lex", "path": "..."}]'`,
+   and the model may write the source by hand). The statement is a prepared `SqlQuery:<name>` (`source = 'lex'`, `sql = '...'`, written once and kept in the connection's
+   statement cache); a run is a write, `SqlQuery:<name>.run = {id, args: [...]}`, its receipt carries `rows` (a list of dicts) and the entity's `rows` getter reads it.
+   No file, or a file that will not open: `rows` and the source's `opened` read as `Error` with the reason, never a hang (a failed run is a receipt, not a crash). A run is an
+   effect of the existing worker pool, so a slow query never holds the VM; the receipt is journalled, so a replay never asks the file again; the same `id` is the same run.
+   No new builtin and no change to `sql()`. The notation below: a sketch's `lexrows(Q, args)` is SHORTHAND, not a builtin: a setter writes the entity
+   `SqlQuery:lex:<hash of Q and args>` (`source`, `sql = Q`) and `.run = {id: <that hash>, args}` once (the same id never runs twice), and a getter reads its `rows`
+   (`None` until the receipt lands). One entity per distinct question, because only the latest receipt stays on an entity.
+   Tests of the driver: `native/tests/sql_driver_1143.rs`.
 3. **Convert on touch** (the migration design's idea): a miss on `Word:lemma:x` copies that word's rows into `c_field`. It only pays when a
    consumer wants a stored fact; the lexicon is read-only and large, so reading in place is smaller. Not recommended.
 
@@ -67,14 +71,14 @@ no `sqlite3`/`awk` in the toolchain; a Python build script is not allowed. The b
 from the WordNet files (kept in `~/.membrane/wordnet`, not `/tmp`), not committed (20 MB): the repo carries the script, the fixture and the notice.
 
 ## (d) SemText integration
-**One query per text, never one per span.** Each mention today costs no query; a per-span `lexsql` would be up to 400 (`mention_cap`) async reads. So
+**One query per text, never one per span.** Each mention today costs no query; a per-span query would be up to 400 (`mention_cap`) async reads. So
 the lexicon is read in batches off the text's word list:
 ```c1f
 -- the distinct lowercase surfaces of the text, capped as the mention is (`mention_cap` unchanged)
 SemText.lex_words getter: head(distinct([lower(w['text']) for w in this.words]), this.mention_cap)
 -- surface -> base form, in ONE read (rows {w, base}); morph is data: exceptions first, then the detachment rules in `seq` order, a candidate counts only if it is a lemma
 SemText.lex_base getter:
-  lexsql("SELECT w.value AS w, COALESCE((SELECT base FROM exc WHERE form=w.value LIMIT 1),
+  lexrows("SELECT w.value AS w, COALESCE((SELECT base FROM exc WHERE form=w.value LIMIT 1),
           (SELECT substr(w.value,1,length(w.value)-length(m.suffix))||m.repl FROM morph m
             WHERE w.value LIKE '%'||m.suffix AND EXISTS (SELECT 1 FROM sense s WHERE s.lemma = substr(w.value,1,length(w.value)-length(m.suffix))||m.repl)
             ORDER BY m.seq LIMIT 1), w.value) AS base FROM json_each(?) w", json(this.lex_words))
@@ -88,9 +92,9 @@ the part of speech in order (noun: `s`->``, `ses`->`s`, `ves`->`f`, `xes`->`x`, 
 the id of NEW `Word:lemma:<x>` entities only (`hous` entities already in a seat stay): a migration question, flagged. Without a lexicon, mentions run as
 today (the fallback).
 **Mentions keep their rules.** `mention_cap` stays 400 per layer; spans, `mention_table`, `record-mentions` are unchanged; the only edit in
-`mentions.c1f` is `Span.lemma` (above), so a mention costs ONE extra async read (a few hundred indexed lookups, not timed here) and its first
+`mentions.c1f` is `Span.lemma` (above), so a mention costs ONE extra query run (a few hundred indexed lookups, not timed here) and its first
 round waits for the rows, as the other getters wait for `forms`. The mention does not write synonym edges.
-**`related` over synonyms: at ask time, not stored.** `SemText.related_syn` (new getter, dial `syn_cap` like `related_n`): one `lexsql` returns, for the text's
+**`related` over synonyms: at ask time, not stored.** `SemText.related_syn` (new getter, dial `syn_cap` like `related_n`): one query returns, for the text's
 `mentions`, the lemmas of their synsets plus one step up (`@`, `@i`) and down (`~` by the `dst` index), at most `syn_cap` per word, then it reads the
 existing `edge_rows` of those `Word` entities (a word nobody has said has no entity and no edges) and ranks as `related` does, each shared entity
 `1/count`, scaled by a hop weight (a decision: same synset, broader, narrower each get a number). Cost: one read plus the `edge_rows` of at most
@@ -113,13 +117,13 @@ Throwy's `Pack:semwatch` already has the right decisions in c1f and only the plu
 the lexicon it becomes (the Keep text is a SemText `Sw:kb`; its `lex_base` is the keep side; `Watch.last_user_txt` is `Sw:ub`):
 ```c1f
 Watch.cover getter:                      -- rows {w, alts}: each long user word and the lemmas that count as the same thing
-  lexsql("WITH u AS (SELECT DISTINCT value w FROM json_each(?1)),
+  lexrows("WITH u AS (SELECT DISTINCT value w FROM json_each(?1)),
           s AS (SELECT u.w, e.syn FROM u JOIN sense e ON e.lemma=u.w),
           n AS (SELECT w,syn FROM s UNION SELECT s.w, r.dst FROM s JOIN rel r ON r.syn=s.syn AND r.kind IN ('@','@i')
                 UNION SELECT s.w, r.syn FROM s JOIN rel r ON r.dst=s.syn AND r.kind IN ('@','@i'))
           SELECT n.w, e.lemma FROM n JOIN sense e ON e.syn=n.syn", json(this.user_bases))
 Watch.sem_miss getter: [w for w in this.user_bases if len([r for r in this.cover if r['w'] == w and r['lemma'] in this.keep_bases]) == 0 and not (w in this.keep_bases)]
-Watch.sem_idi  getter: lexsql(<the phrase query above>, json(this.user_bases), 4)
+Watch.sem_idi  getter: lexrows(<the phrase query above>, json(this.user_bases), 4)
 Watch.sem_flag getter: 'TOPIC CHECK: user words in no Keep (synonyms/idioms checked): ' + join(head(this.sem_miss, 6), ', ') + '. Keep what matters.' if len(this.sem_miss) >= 2 else ''
 ```
 `user_bases` / `keep_bases` = `Sw:ub.lex_base` / `Sw:kb.lex_base` (`lex_base` returns pairs; the pack reads the base column). Deleted from Throwy's pack: the suffix
@@ -129,12 +133,12 @@ loop (`sem_sufs`), `sem_phr` window comprehension, `syn_cmd`, `Sh:synq`, `wnq.sh
 ## (f) Tests and a build plan (red first, each round its own failing test)
 Golden lookups (fixture = the real build, and a tiny hand-made 40-row dict for CI so no WordNet is needed): `boat` -> `vessel`, `watercraft` (hypernym),
 `vessel` -> `boat` (hyponym); `kicks the bucket` -> `kick_the_bucket`, same synset as `pass_away` (00358431v); `houses` -> `house`, `ran` -> `run`,
-`geese` -> `goose` (exception), `studies` -> `study`; no lexicon attached -> `Error`, never a hang; a read-only proof (sha256 of the file unchanged,
-a write through `lexsql` refused); the build is reproducible (same fixture, same bytes); `mention` of a 300-word text issues exactly one `lexsql`.
+`geese` -> `goose` (exception), `studies` -> `study`; no lexicon attached or a missing file -> `Error` with the reason, never a hang; a read-only proof (sha256 of the file unchanged,
+a write on the read-only source refused (a `ro` source: SQLite's own refusal)); the build is reproducible (same fixture, same bytes); `mention` of a 300-word text issues exactly one query run.
 | round | red test, then the work | est. |
 |---|---|---|
 | L1 | the build script over the tiny fixture: tables, indexes, notice; golden counts | 1 |
-| L2 | `--lexicon`/source + `lexsql` (read-only, async, no-file = Error, immutable); decision on `ro_sql` | 1-2 |
+| L2 | the lexicon as `SqlSource:lex` + the `SqlQuery` shorthand `lexrows` over it (the Sql driver is built; read-only, async, no-file = Error, immutable) | 1 |
 | L3 | `exc`/`morph` rows + `lex_base` (golden base forms), `Span.lemma` + fallback; one query per mention | 1-2 |
 | L4 | `Word` getters + `Synset` virtual class, golden synonym/broader/narrower | 1 |
 | L5 | idiom windows (golden: `kick_the_bucket`; 5-word cap; sentence bound) | 1 |
@@ -149,7 +153,7 @@ rewrites a lower one: `related` reads them as separate edge kinds with their own
 2. **Sense and synonym:** same synset = synonym; hypernym/hyponym = broader/narrower, weaker. The `Synset` virtual class and `Word` getters of (b).
 3. **Phrase / idiom** over the sentence layer: the window match of (d); a phrase lemma and its synset siblings (`kick_the_bucket` ~ `pass_away`).
 4. **Weighting by rarity and link type:** extends `related`: today each shared entity counts 1/(entries of its `mentioned_in`); a hop adds a link weight
-   (same synset > broader/narrower) times that rarity. Only numbers change; the edge reads stay one `lexsql` plus cached `edge_rows`.
+   (same synset > broader/narrower) times that rarity. Only numbers change; the edge reads stay one query plus cached `edge_rows`.
 5. **Roles** (predicate-argument per sentence, so "A bought B" matches "B was sold by A"). No layer gives a parse today: the tokenizer stops at spans, WordNet
    has verb frames but no syntax. It would need either a native piece (a small deterministic parser compiled into a core pack, like `spans`, English only, with
    a size and an accuracy we would have to measure on held-out sentences), or the MODEL writing the roles as entities per sentence (`Role:<text>:<n>` with
@@ -175,8 +179,8 @@ own licence, build and morphology, loaded as another named read-only source, nev
 ## Decisions for the operator (I chose none; "reco" is my reading)
 1. Data: WordNet 3.0 (on disk, no download; reco) or 3.1 (a download, URL and size above, unverified)? Wiktionary idioms: no for now (reco), or later as a separate CC BY-SA file?
 2. The file holds only `@ @i & #m #p %m %p` and no glosses (20.3 MB, reco) or all kinds and glosses (48 MB)? Which kinds count as "synonym", "broader", "narrower"?
-3. The native piece: a second read-only source with `lexsql` (reco), a generic `ro_sql(name, ...)` shared with `--legacy`, or only the `Command` + `sqlite3` stop-gap? The flag name (`--lexicon`).
-4. Builtins added: `lexsql` (or `ro_sql`); none else. Defaults: no lexicon attached = the crude `SemPlural` rule stays (reco).
+3. The native piece: DECIDED (2026-11-14), the Sql driver (`SqlSource`/`SqlQuery` entities, no builtin); open: the launch fact (`sql_sources`) or a hand-written `SqlSource:lex` for the lexicon, and the path of the file.
+4. Builtins added: none. Defaults: no lexicon attached = the crude `SemPlural` rule stays (reco).
 5. Build tool: `awk` + `sqlite3` script (reco) or Rust `cliffvm lexicon build`; where the built file lives (`<seat>/.membrane/lexicon.sqlite`), and whether the repo ships the licence + fixture only.
 6. Lemmatisation: the morphy rules as data (reco) and the CHANGE of new `Word` ids (`hous` -> `house`): accept, with old entities left, or migrate them?
 7. Numbers: `mention_cap` 400 (kept), `syn_cap` per word, hop weights (same synset / broader / narrower), idiom window 5 words (4 underscores), the min word length 6 Throwy used, how many senses count per word (Throwy took the first 6 synsets, 16 pointers).
