@@ -127,3 +127,6 @@ reasoned null); the self-time allowance of a getter or setter (10 ms) applies to
 Vectors and embeddings (sentences carry none), paragraphs, syntax, coreference, the recall index, the field engine's use of the legs, a collection of stored Word entities, the
 mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, embeddings budget,
 untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).
+
+
+**Cost notes (w36, #1143).** `SemText.related` reads each entity's cached `edge_rows` (a getter of Word / Identifier / Path: the entity's edges as JSON rows, rebuilt when its `mentioned_in` changes) instead of rebuilding every edge's text on every ask; the asking text's own rows are dropped after the grouping. `mention_done` reads the spans the mention setter listed (`mention_spans`) and waits for their `forms`. `group_by` finds a text key's group through a hash. The rest of the cost of `related` is linear in the edges walked; a cut on the edges of a very common word is an open operator decision (nothing is cut).

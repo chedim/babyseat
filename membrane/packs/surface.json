@@ -732,7 +732,7 @@
       "Span",
       "Word"
     ],
-    "members": 25,
+    "members": 28,
     "writes": [
       "Identifier:*.mentioned_in",
       "Identifier:*=Identifier()",

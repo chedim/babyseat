@@ -952,9 +952,14 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
             let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None | V::Nil(_) => &none, _ => return Err("group_by(rows, key): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let key = text_of(&a[1])?;
             let mut groups: Vec<(V, Vec<V>)> = vec![];
+            let mut by_text: HashMap<String, usize> = HashMap::new();   // a text key finds its group at once (a text equals only a text); any other key scans the groups
             for r in l {
                 let k = match r { V::Dict(d) => d.iter().find(|(x, _)| *x == key).map(|(_, y)| y.clone()).unwrap_or(V::None), _ => V::None };
-                match groups.iter_mut().find(|(g, _)| py_eq(g, &k)) { Some(g) => g.1.push(r.clone()), None => groups.push((k, vec![r.clone()])) }
+                if let V::Str(t) = &k {
+                    match by_text.get(t) { Some(&i) => groups[i].1.push(r.clone()), None => { by_text.insert(t.clone(), groups.len()); groups.push((k, vec![r.clone()])); } }
+                    continue;
+                }
+                match groups.iter_mut().find(|(g, _)| !matches!(g, V::Str(_)) && py_eq(g, &k)) { Some(g) => g.1.push(r.clone()), None => groups.push((k, vec![r.clone()])) }
             }
             Ok(V::List(groups.into_iter().map(|(k, rows)| V::Dict(vec![("key".into(), k), ("rows".into(), V::List(rows))])).collect()))
         }
@@ -1102,7 +1107,7 @@ fn kind_of(v: &V) -> &'static str {
 /// `timeout N ms (allowance M ms)`.
 pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err> {
     let mut m = Meter { b: Budget::new(), depth: 0, locals: None };
-    let r = ev(n, env, w, &mut m);
+    let r = ev(n, &Env::root(env), w, &mut m);
     crate::stats::add_steps(m.b.used());
     r.and_then(|v| m.b.check_time().map(|_| v))
 }
@@ -1110,13 +1115,25 @@ pub fn eval(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> Result<V, Err>
 /// `eval`, and the locals the block bound while it ran (in order): what `Why` prints.
 pub fn eval_locals(n: &Node, env: &HashMap<String, V>, w: &dyn World) -> (Result<V, Err>, Vec<(String, V)>) {
     let mut m = Meter { b: Budget::new(), depth: 0, locals: Some(vec![]) };
-    let r = ev(n, env, w, &mut m);
+    let r = ev(n, &Env::root(env), w, &mut m);
     crate::stats::add_steps(m.b.used());
     let r = r.and_then(|v| m.b.check_time().map(|_| v));
     (r, m.locals.unwrap_or_default())
 }
 
-fn ev(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+/// The names an evaluation sees: the caller's map, then the scopes a `let` or a comprehension opens over it (innermost last). A scope holds only ITS OWN bindings:
+/// opening one copies nothing of the enclosing ones.
+pub struct Env<'a> { root: Option<&'a HashMap<String, V>>, parent: Option<&'a Env<'a>>, vars: Vec<(String, V)> }
+impl<'a> Env<'a> {
+    fn root(m: &'a HashMap<String, V>) -> Env<'a> { Env { root: Some(m), parent: None, vars: vec![] } }
+    fn child(p: &'a Env<'a>) -> Env<'a> { Env { root: None, parent: Some(p), vars: vec![] } }
+    fn get(&self, name: &str) -> Option<&V> {
+        if let Some((_, v)) = self.vars.iter().rev().find(|(k, _)| k == name) { return Some(v); }
+        match (self.parent, self.root) { (Some(p), _) => p.get(name), (None, Some(r)) => r.get(name), _ => None }
+    }
+}
+
+fn ev(n: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
     m.b.charge(1)?;
     if m.depth >= EVAL_DEPTH_MAX { return Err(format!("nested more than {} deep", EVAL_DEPTH_MAX)); }
     m.depth += 1;
@@ -1125,7 +1142,7 @@ fn ev(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Resul
     r
 }
 
-fn ev_node(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_node(n: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
     // each arm with real work is its own function: this frame stays small, so a deep expression costs little stack
     match n {
         Node::Const(v) => Ok(v.clone()),
@@ -1145,7 +1162,7 @@ fn ev_node(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> 
 }
 
 #[inline(never)]
-fn ev_seq(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_seq(n: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
     match n {
         Node::List(v) => Ok(V::List(v.iter().map(|x| ev(x, env, w, m)).collect::<Result<_, _>>()?)),
         Node::Dict(v) => Ok(V::Dict(v.iter().map(|(k, x)| Ok((k.clone(), ev(x, env, w, m)?))).collect::<Result<_, Err>>()?)),
@@ -1158,7 +1175,7 @@ fn ev_seq(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> R
 }
 
 #[inline(never)]
-fn ev_attr(b: &Node, a: &String, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_attr(b: &Node, a: &String, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
     match ev(b, env, w, m)? {
         V::Ent(e) => { if a.starts_with('_') { return Err(format!("no attribute {:?}", a)); } Ok(w.attr(&e, a)) }
         V::Nil(r) => Ok(V::Nil(r)),
@@ -1169,7 +1186,7 @@ fn ev_attr(b: &Node, a: &String, env: &HashMap<String, V>, w: &dyn World, m: &mu
 
 /// a long `a + b + c ...` is a deep left spine: walk it as a loop, not by recursion
 #[inline(never)]
-fn ev_bin(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_bin(n: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
     let mut ops: Vec<(Op, &Node)> = vec![];
     let mut cur = n;
     while let Node::Bin(op, a, b) = cur { ops.push((*op, &**b)); cur = &**a; }
@@ -1183,13 +1200,13 @@ fn ev_bin(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> R
 }
 
 #[inline(never)]
-fn ev_let(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
-    let mut env2 = env.clone();
+fn ev_let(n: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    let mut env2 = Env::child(env);
     let mut cur = n;
     while let Node::Let(name, val, rest) = cur {
         let v = ev(val, &env2, w, m)?;
         if let Some(l) = m.locals.as_mut() { l.push((name.clone(), v.clone())); }
-        env2.insert(name.clone(), v);
+        env2.vars.push((name.clone(), v));
         cur = &**rest;
     }
     ev(cur, &env2, w, m)
@@ -1198,7 +1215,7 @@ fn ev_let(n: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> R
 /// An entity literal's id: its text, each `[key]` appended as `:<key>`. A key is an integer or text; a null key is the null it was
 /// (its reason kept), any other kind is a reasoned null (`error: ...`): the entity is not named, so nothing is created.
 #[inline(never)]
-fn ev_ent(parts: &[EntPart], env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_ent(parts: &[EntPart], env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
     let mut id = String::new();
     for p in parts {
         match p {
@@ -1217,7 +1234,7 @@ fn ev_ent(parts: &[EntPart], env: &HashMap<String, V>, w: &dyn World, m: &mut Me
 }
 
 #[inline(never)]
-fn ev_neg(a: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_neg(a: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
     match ev(a, env, w, m)? {
         V::List(l) => Ok(floats(vec_of(&V::List(l))?.into_iter().map(|x| -x).collect())),
         V::Int(i) => Ok(V::Int(-i)),
@@ -1227,7 +1244,7 @@ fn ev_neg(a: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> R
 }
 
 #[inline(never)]
-fn ev_index(b: &Node, i: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_index(b: &Node, i: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
             let base = ev(b, env, w, m)?;
             let idx = ev(i, env, w, m)?;
             match (base, idx) {
@@ -1246,7 +1263,7 @@ fn ev_index(b: &Node, i: &Node, env: &HashMap<String, V>, w: &dyn World, m: &mut
         }
 
 #[inline(never)]
-fn ev_compare(a: &Node, ops: &[(Cmp, Node)], env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_compare(a: &Node, ops: &[(Cmp, Node)], env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
             let mut left = ev(a, env, w, m)?;
             for (op, rn) in ops {
                 let right = ev(rn, env, w, m)?;
@@ -1267,12 +1284,13 @@ fn ev_compare(a: &Node, ops: &[(Cmp, Node)], env: &HashMap<String, V>, w: &dyn W
         }
 
 #[inline(never)]
-fn ev_comp(elt: &Node, var: &String, iter: &Node, cond: &Option<Box<Node>>, env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_comp(elt: &Node, var: &String, iter: &Node, cond: &Option<Box<Node>>, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
             let xs = match ev(iter, env, w, m)? { V::List(l) => l, V::None | V::Nil(_) => vec![], v => return Err(format!("can't iterate over {:?}", v)) };
             let mut out = Vec::new();
-            let mut env2 = env.clone();
+            let mut env2 = Env::child(env);   // a scope over the enclosing one: the enclosing bindings (a local holding a long list) are looked up, never copied per iteration
+            env2.vars.push((var.clone(), V::None));
             for x in xs {
-                env2.insert(var.clone(), x);
+                env2.vars[0].1 = x;
                 if let Some(c) = cond { if !truthy(&ev(c, &env2, w, m)?) { continue; } }
                 out.push(ev(elt, &env2, w, m)?);
             }
@@ -1280,7 +1298,7 @@ fn ev_comp(elt: &Node, var: &String, iter: &Node, cond: &Option<Box<Node>>, env:
         }
 
 #[inline(never)]
-fn ev_call(f: &String, args: &[Node], env: &HashMap<String, V>, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+fn ev_call(f: &String, args: &[Node], env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
             let a = args.iter().map(|x| ev(x, env, w, m)).collect::<Result<Vec<_>, _>>()?;
             let any_null = a.iter().any(nullish);
             let r = call(f, a.clone(), w);

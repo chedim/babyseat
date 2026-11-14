@@ -113,3 +113,47 @@ fn overhead_report() {
         println!("eval_stats {} : {:.0} ns per poke (one getter evaluation each)", if on { "ON " } else { "OFF" }, t.elapsed().as_nanos() as f64 / n as f64);
     }
 }
+
+// #1143 (w36): a rebuild settles a chain of getters that read each other across entities over several passes. A getter whose inputs did
+// not change in a pass is NOT evaluated again: `Command.timeout_default` was evaluated 16 times per Command at every boot (the passes
+// ran to their cap, every getter of every entity each time).
+#[test]
+fn a_rebuild_does_not_evaluate_a_getter_whose_inputs_did_not_change() {
+    stats::set_on(true);
+    let pack = "PACK sr 1\nStatsR.dbl getter: this.w * 2\nStatsR.d getter: (prop(this.up, 'd') + 1) if this.up != None else 0\n";
+    let mut f = Fields::goalgraph();
+    f.set_pack("sr", pack).unwrap();
+    let mut c = Core::new();
+    let n = 12;
+    for i in 0..n {
+        let mut p = json!({"w": 1}).as_object().unwrap().clone();
+        if i + 1 < n { p.insert("up".into(), json!({"$ref": format!("StatsR:e{:02}", i + 1)})); }
+        c.load(format!("StatsR:e{:02}", i), "StatsR".into(), p, None, 0.0);
+    }
+    let before = row("StatsR", "dbl", KIND_GETTER).map_or(0, |r| r.calls);
+    let mut seq = 0;
+    f.rebuild(&mut c, 1.0, &mut seq);
+    assert_eq!(c.docs["StatsR:e00"].props["d"], json!(n - 1), "the chain settles");
+    let calls = row("StatsR", "dbl", KIND_GETTER).unwrap().calls - before;
+    assert_eq!(calls, n as u64, "`dbl` reads only `w`: once per entity, not once per pass");
+}
+
+// #1143 (w36): a comprehension (or a `let`) opens a scope over the block's locals; it must not COPY them. `SemText.related` held ~1000 rows in a local
+// and ran ~1400 inner comprehensions: each copied the local (a 10x cost, 60 ms against a 10 ms allowance). The self time of one evaluation here is
+// well under a second when nothing is copied and many seconds when every iteration copies the 3000-row local.
+#[test]
+fn a_comprehension_inside_a_block_does_not_copy_the_blocks_locals() {
+    stats::set_on(true);
+    let pack = "PACK sl 1\nStatsL.go getter:\n  big = [{'a': i, 'b': 'xxxxxxxx'} for i in this.nums]\n  len([len([1 for y in [1, 2]]) for x in this.nums])\n";
+    let mut f = Fields::goalgraph();
+    f.set_pack("sl", pack).unwrap();
+    let mut c = Core::new();
+    let nums: Vec<i64> = (0..3000).collect();
+    c.load("StatsL:a".into(), "StatsL".into(), json!({"nums": nums}).as_object().unwrap().clone(), None, 0.0);
+    let mut seq = 0;
+    let before = row("StatsL", "go", KIND_GETTER).map_or(0, |r| r.ns);
+    f.rebuild(&mut c, 1.0, &mut seq);
+    let ns = row("StatsL", "go", KIND_GETTER).expect("evaluated").ns - before;
+    assert_eq!(c.docs["StatsL:a"].props["go"], json!(3000));
+    assert!(ns < 500_000_000, "{} ms for one evaluation: the locals were copied per iteration", ns / 1_000_000);
+}

@@ -1222,7 +1222,9 @@
   },
   "mentions": {
     "getters": {
+      "Identifier.edge_rows": "Text",
       "Identifier.texts": "Int",
+      "Path.edge_rows": "Text",
       "Path.texts": "Int",
       "SemAllCaps.form": "Text",
       "SemCapital.form": "Text",
@@ -1245,12 +1247,14 @@
       "Span.forms": "List(Text?)?",
       "Span.sentence_no": "Int",
       "Span.target": "(Entity(Identifier)|Entity(Path)|Entity(Word))?",
+      "Word.edge_rows": "Text",
       "Word.texts": "Int"
     },
     "writes": {
       "Identifier.mentioned_in": "List(Any)",
       "Path.mentioned_in": "List(Any)",
       "SemText.mention_n": "Int",
+      "SemText.mention_spans": "List(Dict)",
       "SemText.mentioned": "Bool?",
       "SemText.mentions": "List((Entity(Identifier)|Entity(Path)|Entity(Word))?)",
       "Span.armed": "Bool",

@@ -145,3 +145,14 @@ fn tail_is_the_mirror_of_head() {
     assert_eq!(ev("tail('héllo', 2)", e.clone()), json!("lo"));
     assert_eq!(ev("tail([1, 2, 3], 2)", e), json!([2, 3]));
 }
+
+// #1143 (w36): group_by finds a text key's group through a hash; every other key still groups by Python equality (1 == 1.0, a text never equals a number), first-seen order.
+#[test]
+fn group_by_keeps_first_seen_order_and_python_equality_with_text_and_number_keys() {
+    let rows = json!([{"k": "1", "v": 1}, {"k": 1, "v": 2}, {"k": "1", "v": 3}, {"k": 1.0, "v": 4}, {"k": null, "v": 5}, {"k": "", "v": 6}, {"k": null, "v": 7}]);
+    let g = ev("group_by(r, 'k')", json!({"r": rows}));
+    let keys: Vec<serde_json::Value> = g.as_array().unwrap().iter().map(|x| x["key"].clone()).collect();
+    assert_eq!(keys, vec![json!("1"), json!(1), json!(null), json!("")]);
+    let vs: Vec<Vec<i64>> = g.as_array().unwrap().iter().map(|x| x["rows"].as_array().unwrap().iter().map(|r| r["v"].as_i64().unwrap()).collect()).collect();
+    assert_eq!(vs, vec![vec![1, 3], vec![2, 4], vec![5, 7], vec![6]]);
+}

@@ -988,28 +988,37 @@ impl Fields {
         // A getter that reads the same getter on ANOTHER entity (a tree's depth through its children) cannot be ordered by class level:
         // the parent may be computed before its children. So the pass repeats until nothing changes (bounded: a chain of references
         // longer than REBUILD_PASSES settles in the live rounds that follow, since each change marks its readers dirty).
+        // Pass 0 computes every getter once. A later pass computes ONLY the getters whose inputs a write of the previous pass changed (the
+        // dependency table the computing learns: `mark` queues them in `dirty`): a getter that read nothing that moved is not evaluated again.
+        self.dirty.clear();
         for pass in 0..REBUILD_PASSES {
-            let mut changed = false;
-            for &gi in &order {
-                let cls = self.getters[gi].cls.clone();
-                let mut es: Vec<String> = of_kind(core, &cls);
-                es.sort();
-                for e in es {
-                    if !self.is_node(core, &e, gi) { continue; }
-                    let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
-                    let prop = self.getters[gi].prop.clone();
-                    let was = core.docs.get(&e).and_then(|d| d.props.get(&prop)).cloned();
-                    if was.as_ref() == Some(&v) || (v.is_null() && was.is_none()) { continue; }
-                    changed = true;
-                    *seq += 1;
-                    let w = Write { eid: e.clone(), prop: prop.clone(), new: v, old: J::Null, writer: "field:rebuild".into(), chain: json!({}), seq: *seq };
-                    if pass == 0 || !self.out.iter().rev().take(64).any(|o| o["eid"] == json!(w.eid) && o["prop"] == json!(w.prop) && o["new"] == w.new) {
-                        self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
-                    }
-                    core.hear(w, None, now);
+            let mut work: Vec<(usize, String)> = vec![];
+            if pass == 0 {
+                for &gi in &order {
+                    let mut es: Vec<String> = of_kind(core, &self.getters[gi].cls);
+                    es.sort();
+                    work.extend(es.into_iter().map(|e| (gi, e)));
                 }
+            } else {
+                work = std::mem::take(&mut self.dirty).into_iter().map(|(_, e, gi)| (gi, e)).collect();   // lowest level first, then id order
             }
-            if !changed { break; }
+            if work.is_empty() { break; }
+            for (gi, e) in work {
+                if !self.is_node(core, &e, gi) { continue; }
+                let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
+                let prop = self.getters[gi].prop.clone();
+                let was = core.docs.get(&e).and_then(|d| d.props.get(&prop)).cloned();
+                if was.as_ref() == Some(&v) || (v.is_null() && was.is_none()) { continue; }
+                *seq += 1;
+                let w = Write { eid: e.clone(), prop: prop.clone(), new: v, old: J::Null, writer: "field:rebuild".into(), chain: json!({}), seq: *seq };
+                if pass == 0 || !self.out.iter().rev().take(64).any(|o| o["eid"] == json!(w.eid) && o["prop"] == json!(w.prop) && o["new"] == w.new) {
+                    self.out.push(json!({"eid": w.eid, "prop": w.prop, "new": w.new, "writer": w.writer}));
+                }
+                let newv = w.new.clone();
+                core.hear(w, None, now);
+                self.mark(&e, &prop);
+                self.mark_refs(&prop, &was.unwrap_or(J::Null), &newv);
+            }
         }
         self.dirty.clear();
     }

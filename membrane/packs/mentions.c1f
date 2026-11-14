@@ -81,6 +81,7 @@ SemText.mention on-setter mention-spans:
     ps = head(this.paths, cap)
     this.mentioned = None
     this.mention_n = len(ws) + len(ids) + len(ps)
+    this.mention_spans = concat([{'l': 'w', 'start': r['start']} for r in ws], [{'l': 'i', 'start': r['start']} for r in ids], [{'l': 'p', 'start': r['start']} for r in ps])
     FOR r IN ws:
       Span:of[this.skey]['w'][r['start']] = Span(of: this, layer: 'word', start: r['start'], end: r['end'])
       Span:of[this.skey]['w'][r['start']].armed = True
@@ -99,10 +100,12 @@ Span.target getter:
   ELSE WHEN this.layer == 'path': Path:path[this.lemma]
   ELSE: None
 
--- the classified spans of this text, as rows; only while a mention is under way (a text that was mentioned, or never, reads nothing of the spans)
+-- the classified spans of this text, as rows; only while a mention is under way (a text that was mentioned, or never, reads nothing of the spans). It reads the spans the
+-- setter listed (`mention_spans`: layer letter + start), not every Span of the field, and their `forms` (that puts it above the spans' own getters in the level order, so it
+-- waits for all of them: about one evaluation per span, not one per span that classifies)
 SemText.mention_done getter:
   WHEN this.mention == None or this.mentioned == True: []
-  ELSE: [{'id': s.layer + ':' + s.lemma, 'layer': s.layer, 'k': s.lemma, 'sent': s.sentence_no} for s in instances('Span') if s.of == this and s.classified == True]
+  ELSE: [{'id': s.layer + ':' + s.lemma, 'layer': s.layer, 'k': s.lemma, 'sent': s.sentence_no} for s in [Span:of[this.skey][r['l']][r['start']] for r in (this.mention_spans or [])] if s.forms != None and s.classified == True]
 SemText.mention_table getter:
   WHEN this.mention_n == None or this.mention_n == 0 or len(this.mention_done) != this.mention_n: None
   ELSE: group_by(this.mention_done, 'id')
@@ -128,6 +131,10 @@ SemText.mention_table on-setter record-mentions:
 Word.texts getter: len(this.mentioned_in or [])
 Identifier.texts getter: len(this.mentioned_in or [])
 Path.texts getter: len(this.mentioned_in or [])
+-- the edges of an entity as JSON rows (`SemText.related` below): built ONCE per entity, when its `mentioned_in` changes, not once per ask; `w` = 1 / the number of its entries
+Word.edge_rows getter: join([str({'key': e['text'] + '#' + str(e['sentence']), 'text': e['text'], 'sent': e['sentence'], 'w': 1 / len(this.mentioned_in)}) for e in this.mentioned_in], ',') if this.mentioned_in else ''
+Identifier.edge_rows getter: join([str({'key': e['text'] + '#' + str(e['sentence']), 'text': e['text'], 'sent': e['sentence'], 'w': 1 / len(this.mentioned_in)}) for e in this.mentioned_in], ',') if this.mentioned_in else ''
+Path.edge_rows getter: join([str({'key': e['text'] + '#' + str(e['sentence']), 'text': e['text'], 'sent': e['sentence'], 'w': 1 / len(this.mentioned_in)}) for e in this.mentioned_in], ',') if this.mentioned_in else ''
 
 -- ---- RECALL BY EDGES: `SemText.related` ----------------------------------------------------------------------------------------------
 -- Which OTHER sentences, in other texts, mention the same things? Ask by writing the dial on a text:  `<semtext>.related_n = 5`  and read  `<semtext>.related`
@@ -139,13 +146,13 @@ Path.texts getter: len(this.mentioned_in or [])
 --     `dot(weights, ones)` (c1f has no sum). Ties keep the order the edges came in. No threshold: the divisor is the count itself.
 --   * It is computed only while `related_n` is set (a getter is eager: with no dial nothing is read, and no row of text or entity is touched). `related_n` has NO default: the
 --     asker says how many. A text that was never mentioned (no `mentions`) answers null.
---   * COST: it reads the `mentioned_in` of every entity of the text, so a very common word makes it linear in the number of entries of that word; one evaluation
+--   * COST: it reads the cached `edge_rows` of every entity of the text (built once per entity, not per ask), so a very common word makes it linear in the number of entries of that word; one evaluation
 --     past the step budget answers a reasoned null (`budget exceeded`), never a wrong list. Flagged for the operator: whether very common entities should be skipped by a cut.
---   * The edges are flattened through JSON text (c1f has no nested comprehension): each entity makes the text of its rows, the texts are joined and parsed once.
+--   * The edges are flattened through JSON text (c1f has no nested comprehension): each entity makes the text of its rows (`edge_rows`), the texts are joined and parsed once; the asking text's own rows are dropped after the grouping.
 SemText.related getter:
   WHEN this.related_n == None or this.mentions == None: None
   ELSE:
-    parts = [join([str({'key': e['text'] + '#' + str(e['sentence']), 'text': e['text'], 'sent': e['sentence'], 'w': 1 / len(prop(m, 'mentioned_in'))}) for e in prop(m, 'mentioned_in') if e['text'] != this.eid], ',') for m in this.mentions]
+    parts = [prop(m, 'edge_rows') for m in this.mentions]
     hits = json('[' + join([p for p in parts if p != ''], ',') + ']')
-    rows = [{'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'shared': len(g['rows']), 'score': dot([r['w'] for r in g['rows']], [1 for r in g['rows']])} for g in group_by(hits, 'key')]
+    rows = [{'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'shared': len(g['rows']), 'score': dot([r['w'] for r in g['rows']], [1 for r in g['rows']])} for g in group_by(hits, 'key') if g['rows'][0]['text'] != this.eid]
     [{'semtext': r['text'], 'sentence_index': r['sent'], 'text': prop(prop(r['text'], 'sentences')[r['sent']], 'text'), 'shared': r['shared']} for r in head(sort_by(rows, 'score', True), this.related_n)]
