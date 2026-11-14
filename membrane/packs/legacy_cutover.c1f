@@ -1,0 +1,127 @@
+PACK legacy_cutover 1
+IMPORT boot 1
+IMPORT sql 1
+IMPORT legacy_import 1
+-- THE AUTOMATIC HISTORY CUTOVER (#1143, operator 2026-11-14: "history cutover: automatic"). A user who upgrades from the Python seat (0.7.x) starts this seat once and finds all the history in the one chat,
+-- doing nothing. At the seat's start this pack FINDS the old store, declares it as the read-only `SqlSource:legacy`, and runs the history import (packs/legacy_import.c1f) in the BACKGROUND: the newest
+-- session first, and inside a session the newest questions first, so the page shows the recent history at once and the older turns appear as the import goes on. Nothing is converted but the chat
+-- history (docs/migration-design.md "Phase 1"). Written in c1f; no builtin and no host hook.
+--   Legacy:cutover   the LEDGER {state: importing | done | absent | error, path, reason, started, checked} and what it says: `total`, `done`, `batch`, `line` (the plain text the chat view shows while
+--                    importing, or the reason of an error; none when there is nothing to say), `history` (the Settings row's text)
+-- THE SEARCH ORDER (first hit wins; a place holds `field.sqlite/field.sqlite3`, the Python seat's own layout; the stat of each is asked, a file is a hit):
+--   1 the fact `legacy_path` (the launcher's `--legacy <path>`): a file, or a folder that holds the store (the `.membrane` folder, the `field.sqlite` folder, or the folder of `field.sqlite3`). A NAMED path that
+--     holds no store is an error with the path, never a fallback to another place; 1b a source the launch already declared as `legacy` (the fact `sql_sources`, or one an earlier start kept) is used as it is;
+--   2 `<seat_data_dir>`  3 `<seat_data_dir>/.membrane`  4 `<seat_cwd>/.membrane` (the Python seat's cwd folder)  5 `<seat_home>/membrane/.membrane` (the Python seat's default home folder, restarts.py)
+--   6 `/config/membrane/.membrane` (the Home Assistant component's seat folder)
+-- A place with no store is nothing: no error and no notice. When no place has one, the ledger says `absent` and later starts do nothing (a store that appears later is picked up only when the user passes its path).
+-- ONCE: `done` ends it for good (later starts look at the ledger and nothing else). `importing` and `error` are tried again at the next start: the import resumes from the per-session ledgers
+-- (`Legacy:session:<sid>`, packs/legacy_import.c1f), a session that is done is never read again.
+-- BATCH: the fact `legacy_batch` = user rows one query reads (default 5: measured on the real store, 20 stalled the seat up to 3.5 s a page). Each page's entities leave the engine at once (legacy_import.c1f), so the memory stays a few batches.
+
+LegacySeat.cx_boot getter: ([prop(b, 'started') for b in instances('Boot') if prop(b, 'started') != None] or [None])[0]
+LegacySeat.cx_fact getter: ([str(prop(b, 'legacy_path')) for b in instances('Boot') if prop(b, 'legacy_path') != None and str(prop(b, 'legacy_path')) != ''] or [None])[0]
+LegacySeat.cx_batch getter: ([prop(b, 'legacy_batch') for b in instances('Boot') if prop(b, 'legacy_batch') != None] or [5])[0]
+LegacySeat.cx_declared getter: prop('SqlSource:legacy', 'path')
+LegacySeat.cx_state getter: prop('membrane::Legacy:cutover', 'state')
+LegacySeat.cx_named getter: this.cx_fact if this.cx_fact != None else this.cx_declared
+LegacySeat.cx_data getter: str(([prop(b, 'seat_data_dir') for b in instances('Boot') if prop(b, 'seat_data_dir') != None] or [''])[0])
+LegacySeat.cx_cwd getter: str(([prop(b, 'seat_cwd') for b in instances('Boot') if prop(b, 'seat_cwd') != None] or [''])[0])
+LegacySeat.cx_home getter: str(([prop(b, 'seat_home') for b in instances('Boot') if prop(b, 'seat_home') != None] or [''])[0])
+-- the places, in order: the roots told as facts (a root that is not told is left out)
+LegacySeat.cx_roots getter: concat([x for x in [this.cx_data, this.cx_data + '/.membrane' if this.cx_data != '' else '', this.cx_cwd + '/.membrane' if this.cx_cwd != '' else '', this.cx_home + '/membrane/.membrane' if this.cx_home != '' else ''] if x != ''], ['/config/membrane/.membrane'])
+LegacySeat.cx_cands getter:
+  WHEN not this.cx_active: []
+  ELSE WHEN this.cx_fact != None: [this.cx_fact, this.cx_fact + '/field.sqlite3', this.cx_fact + '/field.sqlite/field.sqlite3']
+  ELSE WHEN this.cx_declared != None: [this.cx_declared]
+  ELSE: [r + '/field.sqlite/field.sqlite3' for r in this.cx_roots]
+-- the search runs until the ledger ends it: not `done`; `absent` only when the user passes a path now
+LegacySeat.cx_active getter: this.cx_boot != None and this.cx_state != 'done' and (this.cx_state != 'absent' or this.cx_fact != None)
+-- the stat of each place, one getter each (a `stat` inside a list comprehension is not waited for: the five getters are the most places there are: 3 for a named path, 5 conventional)
+LegacySeat.cx_s0 getter: stat(this.cx_cands[0]) if len(this.cx_cands) > 0 else None
+LegacySeat.cx_s1 getter: stat(this.cx_cands[1]) if len(this.cx_cands) > 1 else None
+LegacySeat.cx_s2 getter: stat(this.cx_cands[2]) if len(this.cx_cands) > 2 else None
+LegacySeat.cx_s3 getter: stat(this.cx_cands[3]) if len(this.cx_cands) > 3 else None
+LegacySeat.cx_s4 getter: stat(this.cx_cands[4]) if len(this.cx_cands) > 4 else None
+LegacySeat.cx_f0 getter:
+  WHEN len(this.cx_cands) <= 0: ''
+  ELSE WHEN this.cx_s0 == None: None
+  ELSE: this.cx_cands[0] if prop(this.cx_s0, 'kind') == 'file' else ''
+LegacySeat.cx_f1 getter:
+  WHEN len(this.cx_cands) <= 1: ''
+  ELSE WHEN this.cx_s1 == None: None
+  ELSE: this.cx_cands[1] if prop(this.cx_s1, 'kind') == 'file' else ''
+LegacySeat.cx_f2 getter:
+  WHEN len(this.cx_cands) <= 2: ''
+  ELSE WHEN this.cx_s2 == None: None
+  ELSE: this.cx_cands[2] if prop(this.cx_s2, 'kind') == 'file' else ''
+LegacySeat.cx_f3 getter:
+  WHEN len(this.cx_cands) <= 3: ''
+  ELSE WHEN this.cx_s3 == None: None
+  ELSE: this.cx_cands[3] if prop(this.cx_s3, 'kind') == 'file' else ''
+LegacySeat.cx_f4 getter:
+  WHEN len(this.cx_cands) <= 4: ''
+  ELSE WHEN this.cx_s4 == None: None
+  ELSE: this.cx_cands[4] if prop(this.cx_s4, 'kind') == 'file' else ''
+LegacySeat.cx_probe getter: [this.cx_f0, this.cx_f1, this.cx_f2, this.cx_f3, this.cx_f4]
+LegacySeat.cx_ready getter: len(this.cx_cands) > 0 and len([x for x in this.cx_probe if x == None]) == 0
+LegacySeat.cx_pick getter:
+  WHEN not this.cx_ready: None
+  ELSE: {'path': ([x for x in this.cx_probe if x != None and x != ''] or [None])[0]}
+
+-- not found, and a path was named: an error with the path (never a fallback to another place)
+LegacySeat.cx_pick on-setter legacy-cutover-named-missing:
+  WHEN this.cx_pick != None and this.cx_launched != this.cx_boot and prop(this.cx_pick, 'path') == None and this.cx_named != None:
+    this.cx_launched = this.cx_boot
+    FOR c IN ([1] if this.cx_state == None else []):
+      membrane::Legacy:cutover = LegacyCutover(state: 'error')
+    membrane::Legacy:cutover.state = 'error'
+    membrane::Legacy:cutover.checked = clock
+    membrane::Legacy:cutover.reason = "The earlier seat's store was not found at " + str(this.cx_named) + ". Pass the path of its field.sqlite3 file (or of its .membrane folder) to look again."
+-- not found anywhere: nothing is touched but this one row, and later starts do nothing
+LegacySeat.cx_pick on-setter legacy-cutover-absent:
+  WHEN this.cx_pick != None and this.cx_launched != this.cx_boot and prop(this.cx_pick, 'path') == None and this.cx_named == None:
+    this.cx_launched = this.cx_boot
+    FOR c IN ([1] if this.cx_state == None else []):
+      membrane::Legacy:cutover = LegacyCutover(state: 'absent')
+    membrane::Legacy:cutover.state = 'absent'
+    membrane::Legacy:cutover.checked = clock
+-- found: the source is declared read-only and the whole history is imported in the background
+LegacySeat.cx_pick on-setter legacy-cutover-found:
+  WHEN this.cx_pick != None and this.cx_launched != this.cx_boot and prop(this.cx_pick, 'path') != None:
+    this.cx_launched = this.cx_boot
+    FOR c IN ([1] if this.cx_state == None else []):
+      membrane::Legacy:cutover = LegacyCutover(state: 'importing')
+    membrane::Legacy:cutover.state = 'importing'
+    membrane::Legacy:cutover.path = prop(this.cx_pick, 'path')
+    membrane::Legacy:cutover.started = clock
+    membrane::Legacy:cutover.reason = None
+    SqlSource:legacy.path = prop(this.cx_pick, 'path')
+    SqlSource:legacy.mode = 'ro'
+
+-- the import is asked for at the next beat, not in the round of the decision: the seat's own start (legacy_import.c1f) writes `running` in that round, and one field write of it a round is the rule
+LegacySeat.cx_beat getter: clock if this.cx_state == 'importing' and this.cx_launched != None and this.cx_launched == this.cx_boot and this.cx_asked != this.cx_boot and this.running == False and clock > prop('membrane::Legacy:cutover', 'started') else None
+LegacySeat.cx_beat on-setter legacy-cutover-import:
+  WHEN this.cx_beat != None:
+    this.cx_asked = this.cx_boot
+    this.import = {'id': 'cutover:' + str(this.cx_boot), 'sessions': 'all', 'page': this.cx_batch}
+
+-- the import ended (the seat is idle again): done, or an error with its reason (a store with no `c_sessions`, a file that is not a database, a session that could not be read)
+LegacySeat.running on-setter legacy-cutover-end:
+  WHEN this.running == False and this.cx_state == 'importing' and this.cx_launched != None and this.cx_launched == this.cx_boot and this.cur == None:
+    bad = [l for l in instances('Legacy') if l.kind == 'legacy_session' and l.state == 'error']
+    wy = this.refused if this.refused != None else (str(len(bad)) + ' of your earlier conversations could not be imported (the first, ' + replace(bad[0].eid, 'membrane::Legacy:session:', '') + ': ' + str(bad[0].reason) + '). The seat tries them again at its next start.' if len(bad) > 0 else None)
+    membrane::Legacy:cutover.state = 'error' if wy != None else 'done'
+    membrane::Legacy:cutover.reason = wy
+    membrane::Legacy:cutover.ended = clock
+
+LegacyCutover.kind getter: 'legacy_cutover'
+LegacyCutover.batch getter: prop('membrane::Legacy:seat', 'cx_batch')
+LegacyCutover.total getter: len([l for l in instances('Legacy') if l.kind == 'legacy_session' and l.state != 'skipped'])
+LegacyCutover.done getter: len([l for l in instances('Legacy') if l.kind == 'legacy_session' and l.state == 'done'])
+LegacyCutover.line getter:
+  WHEN this.state == 'importing': 'Importing your earlier conversations: ' + ('reading the list. ' if this.total == 0 else str(this.done) + ' of ' + str(this.total) + '. ') + 'Older turns appear as this proceeds.'
+  ELSE WHEN this.state == 'error': this.reason
+LegacyCutover.history getter:
+  WHEN this.state == 'importing': 'Importing: ' + str(this.done) + ' of ' + str(this.total) + ' earlier conversations'
+  ELSE WHEN this.state == 'done': str(this.total) + ' earlier conversations imported'
+  ELSE WHEN this.state == 'error': this.reason

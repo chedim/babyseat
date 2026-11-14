@@ -12,6 +12,13 @@ The chat history (every session and every message) was imported into the field: 
 (`Legacy:seat.import = {id, sessions: 'all', page: <n>}`; progress on the seat and a ledger entity `Legacy:session:<id>` per old session, with `state`, `rows` and a note of the rows that had no place). Read the ledger
 before you read the source: a session that says `done` is already whole in the field.
 
+## The history cutover: what was imported and what was not
+
+At the first start the seat finds the old store by itself (`Legacy:cutover`: `state` importing, done, absent or error, and the `path`) and imports the chat history in the background, newest first. Only PERSON chats go into the one chat:
+an old session has a kind, on its ledger `Legacy:session:<id>.session_kind`: `chat` (the old `agent` is `build` or `speaker`) is imported; `absorbed` (its title is "absorbed claude session": a Claude Code session the old seat took in)
+and `background` (any other agent: worker, watch, planner, worker-loops, field-call) are NOT imported: their ledger says `state: skipped`, they have no messages and no time rows in the chat. They are still in the old store:
+read them with SQL (`json_extract(body, '$.s.agent')` and `'$.s.title'` in `c_sessions`, their rows in `c_messages` under the key prefix `<session id>|`) and bring a piece into the field when it is useful.
+
 ## What the file holds
 
 Every table is `c_<name>(k TEXT PRIMARY KEY, body TEXT)`: `k` is the row's key, `body` is JSON text. Read inside the body with SQLite's `json_extract(body, '$.path')`.

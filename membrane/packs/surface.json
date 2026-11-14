@@ -735,6 +735,31 @@
       "Intent"
     ]
   },
+  "legacy_cutover": {
+    "imports": [
+      "boot",
+      "sql",
+      "legacy_import"
+    ],
+    "classes": [
+      "LegacyCutover",
+      "LegacySeat"
+    ],
+    "members": 33,
+    "writes": [
+      "SqlSource:legacy.mode",
+      "SqlSource:legacy.path",
+      "membrane::Legacy:cutover.checked",
+      "membrane::Legacy:cutover.ended",
+      "membrane::Legacy:cutover.path",
+      "membrane::Legacy:cutover.reason",
+      "membrane::Legacy:cutover.started",
+      "membrane::Legacy:cutover.state",
+      "membrane::Legacy:cutover=LegacyCutover()"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
   "legacy_import": {
     "imports": [
       "boot",
@@ -759,6 +784,7 @@
       "*.reason",
       "*.rows",
       "*.state",
+      "*.unload",
       "SqlQuery:legacy:msgs.run",
       "SqlQuery:legacy:msgs.source",
       "SqlQuery:legacy:msgs.sql",
@@ -774,6 +800,8 @@
       "membrane:*=ChatTurn()",
       "membrane:*=LegacySession()",
       "membrane:*=SemText()",
+      "membrane::Legacy:seat.cur",
+      "membrane::Legacy:seat.queue",
       "membrane::Legacy:seat.running",
       "membrane::Legacy:seat=LegacySeat()"
     ],

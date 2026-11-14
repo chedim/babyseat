@@ -278,6 +278,37 @@ scenario('tool rows are keyed by the call id', () => {
   assert.equal(new Set(w.log.filter((e) => e.prop === 'parent' && e.new === 'DomNode:chat:row:1000-1:tools:list').map((e) => e.eid)).size, 2, 'two calls, two lines');
 });
 
+// 7b. the history cutover (packs/legacy_cutover.c1f): while the earlier seat's history is imported the answer carries `import`, a plain line; the view shows it, keeps the
+// older button (older turns arrive as the import goes on) and drops the line when an answer has none
+scenario('the import line is shown while the history is imported and goes away when it is done', () => {
+  const LINE = 'Importing your earlier conversations: 340 of 1605. Older turns appear as this proceeds.';
+  const w = world(); w.open();
+  assert.equal(w.n('import').hidden, true, 'a fresh user sees no line');
+  w.reply('history', 200, { ...page([MSGS[2], MSGS[3]], false, null), import: LINE });
+  assert.equal(w.n('import').hidden, false); assert.equal(w.n('import').text, LINE); assert.equal(w.n('import').role, 'status');
+  // the button stays although the seat has nothing older yet: it asks for what is older than the oldest turn shown
+  assert.equal(w.n('older').hidden, false);
+  w.write('DomNode:chat:older:btn', 'clicked', 1);
+  assert.equal(w.asked('older').url, '/membrane/chat/messages?limit=20&before=1002-3');
+  w.reply('older', 200, { ...page([], false, null), import: LINE });
+  assert.equal(w.n('older').hidden, false, 'nothing older yet, the import goes on: ask again later');
+  w.write('DomNode:chat:older:btn', 'clicked', 2);
+  assert.equal(w.asked('older').url, '/membrane/chat/messages?limit=20&before=1002-3', 'the same cursor');
+  w.reply('older', 200, { ...page([MSGS[0], MSGS[1]], false, null), import: LINE });
+  assert.equal(row(w, '1000-1', ':me').text, 'hello', 'the older turns that arrived are drawn');
+  // a poll after the end of the import: no line
+  w.tick(3.5);
+  w.reply('history', 200, { ...page([MSGS[2], MSGS[3]], false, null), import: null });
+  assert.equal(w.n('import').hidden, true, 'the line is gone when the import is done');
+  w.write('DomNode:chat:older:btn', 'clicked', 3);
+  w.reply('older', 200, page([], false, null));
+  assert.equal(w.n('older').hidden, true, 'the import is over and nothing is older: the button goes');
+  // an error line (the reason) is shown the same way
+  const v = world(); v.open();
+  v.reply('history', 200, { ...page([], false, null), import: 'The earlier seat store was not found at /x. Pass the path.' });
+  assert.equal(v.n('import').text, 'The earlier seat store was not found at /x. Pass the path.');
+});
+
 // 8. the pack on the seat does nothing: no View entity, no request
 scenario('no View entity, nothing happens', () => {
   const w = world(); w.tick(100);

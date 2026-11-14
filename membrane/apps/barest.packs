@@ -18,6 +18,7 @@ chat
 chat_turn
 door_session
 legacy_import
+legacy_cutover
 door_fieldvm
 door_state
 door_models

@@ -26,6 +26,8 @@ pub const WRITER: &str = "trigger:field:";
 pub const ROWS: &str = "c_field";
 /// the journal's collection (table `c_journal`): k = sequence number, body = a line
 pub const JOURNAL: &str = "c_journal";
+/// a journalled line longer than this (bytes of its JSON) is kept in RAM without its value (see `journal_push`); a threshold flagged for the operator
+pub const JOURNAL_RAM_MAX_BYTES: usize = 262_144;
 /// the writer of what the door pushes in (a request) and of what the boot tells (facts, started)
 pub const DOOR_WRITER: &str = "host:door";
 pub const BOOT_WRITER: &str = "host:boot";
@@ -548,15 +550,18 @@ impl Host {
     fn unload_entities(&self, asked: &[String], ts: f64) {
         { let db = self.db.lock().unwrap_or_else(|e| e.into_inner()); self.flush(&db); }
         let held: std::collections::HashSet<String> = { let g = self.eng(); let (core, f, _) = &*g; held_by_virtual(core, f) };
+        let mut go: Vec<String> = vec![];
         for eid in asked {
             let reason = { let g = self.eng(); let (core, _, _) = &*g;
                 if !core.docs.contains_key(eid) { continue; }
                 core.pinned_reason(eid).or_else(|| held.contains(eid).then(|| "pinned: held by a live virtual entity's $ref".to_string())) };
             match reason {
-                None => { let mut g = self.eng(); let (core, f, _) = &mut *g; f.unload(core, eid); }
+                None => go.push(eid.clone()),
                 Some(r) => self.inject_write(ts, eid, "unload_result", json!({"status": "refused", "reason": r}), "unload", &stamp_writer("unload")),
             }
         }
+        // one pass over the field's bookkeeping for the whole batch (Fields::unload_many)
+        if !go.is_empty() { let mut g = self.eng(); let (core, f, _) = &mut *g; f.unload_many(core, &go); }
     }
 
     /// For every `mc_done` the door's `mcp-write` setter wrote in this batch: (the Request, the list of what else the engine wrote in the batch: setters' and
@@ -985,7 +990,13 @@ impl Host {
         let _t = self.txn();
         let mut j = self.journal.lock().unwrap_or_else(|e| e.into_inner());
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-        self.exec(&db, &format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", j.len()), l.to_json().to_string()]);
+        let body = l.to_json().to_string();
+        self.exec(&db, &format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", j.len()), body]);
+        // THE IN-MEMORY COPY keeps no huge value: the stored line (c_journal, what a replay reads) is whole, the copy in RAM names its size instead. A query receipt of the history import
+        // carries a page of rows (megabytes) and every page was kept here for the life of the process (measured 2026-11-14: ~100 MB of RSS a page). A flagged threshold (JOURNAL_RAM_MAX_BYTES).
+        if body.len() > JOURNAL_RAM_MAX_BYTES {
+            if let Line::Write { ts, writer, eid, prop, .. } = &l { j.push(Line::Write { ts: *ts, writer: writer.clone(), eid: eid.clone(), prop: prop.clone(), new: json!({"elided_bytes": body.len()}) }); return; }
+        }
         j.push(l);
     }
 

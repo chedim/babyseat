@@ -110,7 +110,7 @@ const ROWS: [(&str, &str, &str); 32] = [
     ("map.hidden", "list", "live"), ("map.hidden_prefix", "list", "live"), ("map.window", "number", "live"), ("map.poll_ms", "number", "live"),
     ("map.tile", "readonly", "restart"), ("map.fade_s", "readonly", "restart"),
     ("home.allow", "allowlist", "live"),
-    ("import.sources", "readonly", "restart"), ("import.page", "readonly", "restart"),
+    ("import.sources", "readonly", "restart"), ("import.history", "readonly", "restart"), ("import.page", "readonly", "restart"),
     ("access.owner", "readonly", "restart"), ("access.token_life", "readonly", "restart"), ("access.token_file", "readonly", "restart"), ("access.mode", "readonly", "restart"),
     ("access.people", "readonly", "restart"), ("access.port", "readonly", "restart"),
     ("limits.command_timeout_s", "readonly", "restart"), ("limits.effect_workers", "readonly", "restart"), ("limits.warm_rows", "readonly", "restart"),
