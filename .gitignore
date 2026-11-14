@@ -83,3 +83,5 @@ dist/
 # the native VM, built by native/build.sh (#971)
 membrane/membrane_vm.so
 membrane/membrane_vm*.so
+# the release dist folder (scripts/dist/build.sh) is build output; the scripts that make it are source
+!scripts/dist/

@@ -434,6 +434,7 @@
   },
   "door": {
     "getters": {
+      "Boot.door_listen_port": "Any",
       "Http.up": "Bool?",
       "Request.ag_allow": "List(Dict)",
       "Request.ag_body": "List(Dict)",
@@ -1358,6 +1359,18 @@
     "resident": [
       "Intent"
     ]
+  },
+  "launcher": {
+    "getters": {
+      "Boot.default_port": "Int"
+    },
+    "writes": {
+      "Boot.cloud_models": "List(Dict)",
+      "Boot.minds": "Dict",
+      "Boot.router_on": "Bool",
+      "Boot.seat_backend": "Text"
+    },
+    "findings": []
   },
   "legacy_import": {
     "getters": {

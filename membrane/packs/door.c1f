@@ -150,7 +150,7 @@ Request.ag_body getter: [{'name': 'build', 'native': True, 'mode': 'primary', 'd
 -- THE CONFIG (opencode.py writes the released one at launch; the page reads `model` of it, the TUI the provider): the one provider is membrane's own /v1
 -- on this door, serving the seat's default model (Boot fact `minds.seat_default`, the model the launcher picked: claude is the only one in the first swap).
 -- No model picked: no `model` keys and no models, the released config's shape without a model.
-Request.cf_model getter: str(prop(prop(this.facts, 'minds'), 'seat_default') or '')
+Request.cf_model getter: str(prop(([b.minds for b in instances('Boot') if b.minds != None] or [None])[0], 'seat_default') or '')   -- the fact `minds`, or the launcher pack's default (a default is a write at `started`, so it is not in the `facts` dict)
 Request.cf_port getter: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [0])[0]
 -- (a dict with a DATA key has no c1f form -- `dict(rows)` is a proposed builtin, docs/c1f-stdlib.md --: the one models row is read from JSON text, only for a name
 -- that needs no escaping; any other name leaves the list empty)
@@ -252,6 +252,8 @@ Request.reply on-setter answer-stream:
 -- door_port the boot writes the listen. The verified token's secret is read by the door from that file (never a property).
 Http.up getter: this.listen_rc == 0 if this.listen_rc != None else None
 
+-- the port: the fact `door_port` (the launcher's `--port`), else `Boot.default_port` (a getter a pack may declare: packs/launcher.c1f says 4096); neither = no door
+Boot.door_listen_port getter: this.door_port if this.door_port != None else this.default_port
 Boot.started on-setter door-listen:
-  WHEN this.door_port != None:
-    ('Http:door').listen = {'id': 'boot', 'port': this.door_port, 'secret_file': this.door_secret_file}
+  WHEN this.door_listen_port != None:
+    ('Http:door').listen = {'id': 'boot', 'port': this.door_listen_port, 'secret_file': this.door_secret_file}

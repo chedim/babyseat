@@ -519,13 +519,12 @@ fn the_seat_script_forwards_each_fact_to_cliffvm_run() {
     assert!(st.success());
     let args: Vec<String> = std::fs::read_to_string(&out).unwrap().lines().map(String::from).collect();
     let facts: Vec<&str> = args.windows(2).filter(|w| w[0] == "--fact").map(|w| w[1].as_str()).collect();
-    // the launcher's own facts (the strict door's secret and data folder, claude the only model) come first; the operator's after them (so they win), then the claude CLI's
-    let own = facts.iter().position(|f| *f == "request_keep_s=0").expect("the operator's fact is passed on");
-    assert_eq!(&facts[own..], ["request_keep_s=0", "chat_max_turns=5", "chat_claude_bin=/bin/echo"], "{args:?}");
-    let data = dir.clone();
-    assert!(facts[..own].iter().any(|f| *f == format!("door_secret_file={}/door.secret", data.display())), "the strict door's secret is in the data folder (the store's folder): {facts:?}");
-    assert!(facts[..own].iter().any(|f| *f == format!("seat_data_dir={}", data.display())), "{facts:?}");
-    assert_eq!(args[0], "run");
+    // the wrapper is `cliffvm serve` on this checkout's membrane/ folder (the finding of packs, the strict door and the defaults are serve's and launcher.c1f's: native/tests/serve_1143.rs); the operator's facts go on as given, in order
+    assert_eq!(args[0], "serve");
+    assert!(args.windows(2).any(|w| w[0] == "--root" && w[1].ends_with("/membrane")), "{args:?}");
+    assert!(args.windows(2).any(|w| w[0] == "--store" && w[1] == dir.join("s.sqlite").to_str().unwrap()), "{args:?}");
+    assert_eq!(facts, ["request_keep_s=0", "chat_max_turns=5"], "{args:?}");
+    assert!(!args.iter().any(|a| a == "--data-dir"), "a store names the data folder: no dev default is added {args:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
