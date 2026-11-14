@@ -944,6 +944,7 @@
     },
     "writes": {
       "*.eo": "Bool",
+      "*.out": "List(Dict)",
       "*.retire": "Bool",
       "*.tids": "Text",
       "*.tnames": "Text",

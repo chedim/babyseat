@@ -240,10 +240,11 @@ Request.m1_reply getter:
 
 -- ---- the event streams --------------------------------------------------------------------------------------------------------------------------
 -- GET /event is the bare stream, GET /global/event wraps each event as {directory, project, payload}. An open stream is its Request (held by its connection, see "The event stream"
--- in docs/cliffvm.md); `ev_on` is true once the head is out. THE FAN-OUT is one write: a producer (the three below) writes the frames it has to say, in order, to `SesBus:main.out`
--- (a list of {type, id, properties}), and the bus's setter writes them, in ONE `send`, to every open stream. Nothing is queued or kept: a stream that opens later sees only what comes
--- after (the page loads the rows once it is connected, then follows). A producer writes the bus once per round; the three producers are never in one round (the message's start, the turn's
--- state change and a chunk of the CLI's output are three different events). No keep-alive comment is sent (`send` writes events only).
+-- in docs/cliffvm.md); `ev_on` is true once the head is out. THE FAN-OUT: a producer (the three below) writes the frames it has to say, in order, to ITS OWN bus entity `SesBus:<kind>-<id>.out`
+-- (a list of {type, id, properties}; the id is the message's, a chunk's also its number), and the bus's setter writes them, in ONE `send`, to every open stream. Nothing is queued or kept: a
+-- stream that opens later sees only what comes after (the page loads the rows once it is connected, then follows). A chunk of the CLI's output and the turn's end receipt CAN land in one round
+-- (the host takes every receipt that is ready at the start of any round), and two turns can end in one: so no two producers share a write that the engine refuses, and a stream's `send` (a
+-- driver verb: a command, one effect per write, run in write order) is not refused for a second write in the cascade. No keep-alive comment is sent (`send` writes events only).
 Request.ev_kind getter: 'global' if this.route == '/global/event' else 'bare'
 Request.ev_on getter: this.ss_route == 'event' and this.method == 'GET' and this.stream_rc == 0
 Request.ev_cwd getter: ([b.seat_cwd for b in instances('Boot') if b.seat_cwd != None] or [''])[0]
@@ -258,15 +259,17 @@ SesBus.out on-setter fan-out:
       s.send = {'id': 'fan', 'frames': [{'event': f['type'], 'data': ({'id': f['id'], 'type': f['type'], 'properties': f['properties']} if s.ev_kind == 'bare' else {'directory': this.cwd, 'project': 'global', 'payload': {'id': f['id'], 'type': f['type'], 'properties': f['properties']}})} for f in this.out]}
 
 -- THE ONE RULE OF THE ENGINE THAT SHAPES THIS: inside one cascade (one outside write and everything it sets off) a (entity, property) is written ONCE; a second write is refused
--- ("loop: ... already written this round"). So a stream's `send` and the bus's `out` take one write per cascade. The send of a turn's start is ONE cascade (the message is born, `queued` is
--- written, the turn starts: all in it), so the start's producer says everything the start says, the assistant's message too; and the end of a turn (its own cascade, when the CLI's receipt
--- lands) says everything the end says. Not covered: a turn REFUSED at its start (no `chat_claude_bin`) ends in the start's own cascade; its end is not on the stream (the rows have it, and
+-- ("loop: ... already written this round"). That is why each producer instance has its own bus entity (one shared `SesBus:main.out` lost the end of a turn when a chunk's write came first in
+-- the round), and why a driver verb (`send`) is exempt in the engine. The send of a turn's start is ONE cascade (the message is born, `queued` is written, the turn starts: all in it), so the
+-- start's producer says everything the start says, the assistant's message too; and the end of a turn says everything the end says. Order inside a round: the chunk, then the end (the
+-- chunk's getter is computed first). A chunk that is taken AFTER its turn is over (the receipt came with an earlier chunk's round) says nothing: the end's final parts carry every word, and a
+-- late delta would reopen the text part empty. Not covered: a turn REFUSED at its start (no `chat_claude_bin`) ends in the start's own cascade; its end is not on the stream (the rows have it, and
 -- /session/status says idle: the page reconciles).
 
 -- PRODUCER 1, the message is sent (`queued` is written when the message and its turn are born): the user's message and part, the session, busy, the assistant's message (not completed), the session
 Chat.queued on-setter oc-start:
   WHEN this.queued == True and this.sid != None:
-    SesBus:main.out = [{'type': 'message.updated', 'id': 'evt_' + this.oc_b + '000', 'properties': {'sessionID': this.sid, 'info': this.oc_user_info}}, {'type': 'message.part.updated', 'id': 'evt_' + this.oc_b + '001', 'properties': {'part': this.oc_user_part, 'time': this.oc_created, 'sessionID': this.sid}}, {'type': 'session.updated', 'id': 'evt_' + this.oc_b + '002', 'properties': {'sessionID': this.sid, 'info': prop('membrane::Chat:session:' + this.sid, 'view')}}, {'type': 'session.status', 'id': 'evt_' + this.oc_b + '003', 'properties': {'status': {'type': 'busy'}, 'sessionID': this.sid}}, {'type': 'message.updated', 'id': 'evt_' + this.oc_b + '004', 'properties': {'sessionID': this.sid, 'info': this.oc_assist_info}}, {'type': 'session.updated', 'id': 'evt_' + this.oc_b + '005', 'properties': {'sessionID': this.sid, 'info': prop('membrane::Chat:session:' + this.sid, 'view')}}]
+    ('SesBus:start-' + this.oc_b).out = [{'type': 'message.updated', 'id': 'evt_' + this.oc_b + '000', 'properties': {'sessionID': this.sid, 'info': this.oc_user_info}}, {'type': 'message.part.updated', 'id': 'evt_' + this.oc_b + '001', 'properties': {'part': this.oc_user_part, 'time': this.oc_created, 'sessionID': this.sid}}, {'type': 'session.updated', 'id': 'evt_' + this.oc_b + '002', 'properties': {'sessionID': this.sid, 'info': prop('membrane::Chat:session:' + this.sid, 'view')}}, {'type': 'session.status', 'id': 'evt_' + this.oc_b + '003', 'properties': {'status': {'type': 'busy'}, 'sessionID': this.sid}}, {'type': 'message.updated', 'id': 'evt_' + this.oc_b + '004', 'properties': {'sessionID': this.sid, 'info': this.oc_assist_info}}, {'type': 'session.updated', 'id': 'evt_' + this.oc_b + '005', 'properties': {'sessionID': this.sid, 'info': prop('membrane::Chat:session:' + this.sid, 'view')}}]
 
 -- PRODUCER 2, the turn ends (done or error: the answer, an interruption, an abort): the final parts (the same ids the live ones had, so the page's rows are replaced, not
 -- doubled), the message completed, idle (the status and the idle event), the session. `oc_fin` is a getter, so the setter on it sees the message as it is NOW (a setter on the turn's
@@ -277,7 +280,7 @@ ChatMessage.oc_fin getter:
   WHEN this.sid != None and this.over and this.said != None and prop(this.turn_eid, 'started') != None: concat(this.oc_fin_parts, this.oc_fin_ends)
 ChatMessage.oc_fin on-setter oc-turn:
   WHEN this.oc_fin != None:
-    SesBus:main.out = this.oc_fin
+    ('SesBus:end-' + this.oc_b).out = this.oc_fin
     membrane::Chat:session[this.sid].upd = this.oc_t1
 
 -- PRODUCER 3, a chunk of the CLI's output (chat_turn.c1f: `Chunk`, one read of its stdout). What it says: the words (a delta; the text part opens, EMPTY, with the first), the tools it starts
@@ -292,7 +295,7 @@ Chunk.oc_me getter: 'membrane::Chat:message:' + replace(str(this.cmd), 'membrane
 Chunk.oc_sid getter: prop(this.oc_me, 'sid') if this.cmd != None else None
 Chunk.oc_go getter: this.part != None and this.n != None and this.oc_sid != None
 Chunk.oc_go on-setter oc-chunk:
-  WHEN this.oc_go:
+  WHEN this.oc_go and prop(this.oc_me, 'over') != True:
     acc = 'Chunk:' + this.cmd + ':acc'
     b = prop(this.oc_me, 'oc_b')
     aid = prop(this.oc_me, 'oc_aid')
@@ -306,7 +309,7 @@ Chunk.oc_go on-setter oc-chunk:
     deltas = [{'type': 'message.part.delta', 'id': 'evt_' + b + tail('000' + str(this.n), 3), 'properties': {'sessionID': this.oc_sid, 'messageID': aid, 'partID': 'prt_' + b + '100', 'field': 'text', 'delta': this.said}} for x in [1] if this.said != '']
     begun = [{'type': 'message.part.updated', 'id': 'evt_' + b + '2' + tail('0' + str(len(old_ids) + i), 2), 'properties': {'part': {'id': 'prt_' + b + '2' + tail('0' + str(len(old_ids) + i), 2), 'sessionID': this.oc_sid, 'messageID': aid, 'type': 'tool', 'callID': this.starts[i]['id'], 'tool': this.starts[i]['name'], 'madeBy': 'claude-agent', 'state': {'status': 'running', 'input': {}, 'title': this.starts[i]['name'], 'time': {'start': now}}, 'time': {'start': now}}, 'time': now, 'sessionID': this.oc_sid}} for i in [0, 1, 2, 3, 4, 5, 6, 7] if i < len(this.starts)]
     ended = [{'type': 'message.part.updated', 'id': 'evt_' + b + '3' + tail('0' + str(x['j']), 2), 'properties': {'part': {'id': 'prt_' + b + '2' + tail('0' + str(x['j']), 2), 'sessionID': this.oc_sid, 'messageID': aid, 'type': 'tool', 'callID': x['r']['id'], 'tool': (all_names[x['j']] if x['j'] < len(all_names) else ''), 'madeBy': 'claude-agent', 'state': {'status': 'completed', 'input': {}, 'title': (all_names[x['j']] if x['j'] < len(all_names) else ''), 'time': {'start': now, 'end': now}, 'output': x['r']['output']}, 'time': {'start': now, 'end': now}}, 'time': now, 'sessionID': this.oc_sid}} for x in rj if x['j'] != None]
-    SesBus:main.out = concat(texts, deltas, begun, ended)
+    ('SesBus:chunk-' + b + '-' + str(this.n)).out = concat(texts, deltas, begun, ended)
     (acc).tids = join(all_ids, ' ')
     (acc).tnames = join(all_names, ' ')
     (acc).eo = (prop(acc, 'eo') == True or this.said != '')

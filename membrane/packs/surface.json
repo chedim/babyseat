@@ -525,7 +525,7 @@
       "*.retire",
       "*.tids",
       "*.tnames",
-      "SesBus:main.out",
+      "SesBus:*.out",
       "membrane:*.aborted",
       "membrane:*.mention",
       "membrane:*.queued",

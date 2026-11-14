@@ -1207,8 +1207,19 @@ impl Fields {
         core.hear(r, None, now);
     }
 
+    /// Is `prop` one of the verbs the drivers run (drivers::VERBS) on this entity's class?
+    fn is_driver_verb(core: &Core, eid: &str, prop: &str) -> bool {
+        #[cfg(feature = "store")]
+        { return core.docs.get(eid).map_or(false, |e| crate::drivers::VERBS.iter().any(|(c, v)| *c == e.cls && *v == prop)); }
+        #[cfg(not(feature = "store"))]
+        { let _ = (core, eid, prop); false }
+    }
+
     fn emit_as(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64, check: bool) {
         if core.docs.get(eid).map(|e| e.props.get(prop) == Some(&new)).unwrap_or(false) { return; }   // idempotent
+        // a driver verb (`Request.send`, `Command.run`, ...) is a COMMAND, not a state: each write of it is one effect, run in write order, and the slot is consumed
+        // at once. The loop check guards state that could cycle inside a cascade; two commands in one cascade (two producers sending to one stream) are both run.
+        let check = check && !Self::is_driver_verb(core, eid, prop);
         if check && !self.visited.insert((eid.to_string(), prop.to_string())) {
             // revisit in this round: refuse BEFORE applying
             let reason = format!("loop: ({}, {}) already written this round by the field; refused {} by {}", eid, prop, new, writer);
