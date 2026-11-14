@@ -166,3 +166,28 @@ html, body { height: 100%; }
   .shell-body { flex-direction: column; padding: 8px 16px 12px; }
   .conn { margin-left: 0; }
 }
+
+/* the stop button: amber, next to Send, only while a turn runs */
+.composer button.stop { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+/* markdown in the bubbles (markdown.c1f): text nodes only; the bubble's pre-wrap is for the pending line, not for blocks */
+.bubble .md { white-space: normal; }
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md-p { margin: 0 0 .6em; } .md-ln { display: block; }
+.md-h { margin: .8em 0 .3em; line-height: 1.25; } h3.md-h { font-size: 1.15em; } h4.md-h { font-size: 1.05em; } h5.md-h, h6.md-h { font-size: 1em; color: var(--mute); }
+.md-hr { border: 0; border-top: 1px solid var(--line); margin: .8em 0; }
+.md-q { margin: .4em 0; padding: .1em 0 .1em .8em; border-left: 3px solid var(--edge); color: var(--mute); }
+.md-list { margin: .3em 0; padding-left: 1.4em; } .md-list .md-list { margin: .1em 0; } .md-li { margin: .1em 0; } .md-it { display: inline; }
+.md-b { font-weight: 650; } .md-i { font-style: italic; } .md-s { text-decoration: line-through; }
+.md a { color: var(--accent); word-break: break-all; }
+code.md-code { font: .92em var(--mono); background: rgb(127 127 127 / .18); padding: .1em .35em; border-radius: 4px; }
+.md-pre { margin: .5em 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); white-space: normal; }
+.md-codebar { display: flex; align-items: center; justify-content: space-between; padding: 3px 8px; border-bottom: 1px solid var(--line); font: 12px var(--mono); color: var(--mute); }
+.md-copy { align-self: auto; padding: 1px 8px; font-size: 12px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
+.composer .md-copy { background: var(--panel); color: var(--ink); }
+.md-codebody { display: block; padding: 8px 10px; font: 12.5px/1.45 var(--mono); white-space: pre; overflow-x: auto; }
+.md-tablewrap { overflow-x: auto; margin: .5em 0; }
+.md-table { border-collapse: collapse; font-size: .95em; } .md-table th, .md-table td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; } .md-table th { background: rgb(127 127 127 / .12); }
+.md-more { margin-top: .4em; color: var(--mute); } .md-plain { white-space: pre-wrap; word-break: break-word; display: block; }
+.md-showall { padding: 2px 8px; font-size: 12px; margin-top: 4px; }
+@media (max-width: 520px) { .bubble { max-width: 100%; } .md-codebody { font-size: 12px; } }

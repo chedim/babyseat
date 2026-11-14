@@ -2,6 +2,7 @@ PACK chat_view 1
 IMPORT dom 1
 IMPORT fetch 1
 IMPORT shell_view 1
+IMPORT markdown 1
 -- THE BARE CHAT AS A VIEW PACK (#1143, the first vertical slice of the UI rebuild: docs/ui-rebuild-plan.md section (c)).
 -- It runs in the PAGE's field engine (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f, and does not run it) and draws the
 -- chat the way membrane/apps/barest.c1f/ui/chat.js does: the turns (who, the message, the answer or its pending line, the tools folded under it), a
@@ -86,6 +87,13 @@ View.open on-setter chat-draw:
     ('DomNode:chat:send').tag = 'button'
     ('DomNode:chat:send').type = 'submit'
     ('DomNode:chat:send').text = 'Send'
+    ('DomNode:chat:stop').parent = 'DomNode:chat:form'
+    ('DomNode:chat:stop').tag = 'button'
+    ('DomNode:chat:stop').type = 'button'
+    ('DomNode:chat:stop').class = 'stop'
+    ('DomNode:chat:stop').text = 'Stop'
+    ('DomNode:chat:stop').title = 'Stop the running turn: the answer so far is kept'
+    ('DomNode:chat:stop').hidden = True
     ('Composer:chat').draft = ''
     this.page_size = ([b.chat_page_size for b in instances('Boot') if b.chat_page_size != None] or [20])[0]
     this.poll_size = ([b.chat_poll_size for b in instances('Boot') if b.chat_poll_size != None] or [10])[0]
@@ -120,7 +128,10 @@ ChatRow.ans_class getter: ('bubble note' if this.state == 'error' else 'bubble s
 ChatRow.tool_list getter: prop(this.raw, 'tool_calls') if prop(this.raw, 'tool_calls') != None else [{'name': x} for x in (prop(this.raw, 'tools') or [])]
 -- a tool's input is shortened to `tool_chars` with an ellipsis; a tool is keyed by its call id (the history route's `id`; a name-only list has none, so its key is the name)
 ChatRow.tool_rows getter: [{'k': str(prop(x, 'id') or ((prop(x, 'name') or prop(x, 'eid') or '') + '|' + ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else ''))), 'name': str(prop(x, 'name') or prop(x, 'eid') or ''), 'in': ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else '')} for x in this.tool_list]
-ChatRow.view getter: {'id': this.rid, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows} if this.raw != None else None
+-- what the answer bubble holds: the answer is MARKDOWN (markdown.c1f draws it into `ans:md`); the pending line is plain text (`ans:ph`) and is there only while there is no answer
+ChatRow.ans_src getter: str(prop(this.raw, 'response') or '')
+ChatRow.ph getter: '' if this.ans_src != '' else this.ans_text
+ChatRow.view getter: {'id': this.rid, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_src': this.ans_src, 'ph': this.ph, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows} if this.raw != None else None
 
 ChatRow.view on-setter chat-draw-row:
   WHEN this.view != None:
@@ -132,7 +143,11 @@ ChatRow.view on-setter chat-draw-row:
     (base + ':me').parent = base
     (base + ':me').tag = 'div'
     (base + ':me').class = 'bubble me'
-    (base + ':me').text = prop(this.view, 'text')
+    (base + ':me:md').parent = base + ':me'
+    (base + ':me:md').tag = 'div'
+    (base + ':me:md').class = 'md'
+    ('Md:' + prop(this.view, 'id') + ':me').into = base + ':me:md'
+    ('Md:' + prop(this.view, 'id') + ':me').src = prop(this.view, 'text')
     (base + ':who').parent = base
     (base + ':who').tag = 'div'
     (base + ':who').class = 'who'
@@ -141,7 +156,16 @@ ChatRow.view on-setter chat-draw-row:
     (base + ':ans').tag = 'div'
     (base + ':ans').class = prop(this.view, 'ans_class')
     (base + ':ans').hidden = prop(this.view, 'ans_hidden')
-    (base + ':ans').text = prop(this.view, 'ans_text')
+    (base + ':ans:ph').parent = base + ':ans'
+    (base + ':ans:ph').tag = 'span'
+    (base + ':ans:ph').class = 'ph'
+    (base + ':ans:ph').hidden = prop(this.view, 'ph') == ''
+    (base + ':ans:ph').text = prop(this.view, 'ph')
+    (base + ':ans:md').parent = base + ':ans'
+    (base + ':ans:md').tag = 'div'
+    (base + ':ans:md').class = 'md'
+    ('Md:' + prop(this.view, 'id') + ':ans').into = base + ':ans:md'
+    ('Md:' + prop(this.view, 'id') + ':ans').src = prop(this.view, 'ans_src')
     (base + ':tools').parent = base
     (base + ':tools').tag = 'details'
     (base + ':tools').class = 'tools-run'
@@ -201,6 +225,22 @@ Composer.error on-setter chat-note:
     ('DomNode:chat:note').hidden = not this.error
     ('DomNode:chat:note:bubble').text = this.error or ''
 
+-- ---- STOP: while a turn runs the composer shows Stop (it goes when none runs); a click asks the seat to end the running turn of each running message
+-- (`POST /membrane/chat/message/<id>/abort`, packs/chat.c1f): the turn ends on the seat as an error that keeps the answer so far and says it was stopped, and the next read of the turns shows it. A
+-- stop the seat did not take is said as text in the note line; one click is one stop until the seat has answered it (`stopping`).
+ChatRow.state on-setter chat-stop-show:
+  ALWAYS:
+    ('DomNode:chat:stop').hidden = len([r for r in instances('ChatRow') if r.state == 'running']) == 0
+DomNode.clicked on-setter chat-stop-click:
+  WHEN this.eid == 'DomNode:chat:stop' and not prop('View:chat', 'stopping'):
+    ('View:chat').stopping = True
+    FOR rid IN [r.rid for r in instances('ChatRow') if r.state == 'running']:
+      ('Fetch:stop:' + rid).request = {'timeout_s': prop('View:chat', 'timeout_s'), 'id': 'stop-' + rid, 'url': '/membrane/chat/message/' + rid + '/abort', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': '{}'}
+View.stopping on-setter chat-stop-label:
+  ALWAYS:
+    ('DomNode:chat:stop').disabled = this.stopping == True
+    ('DomNode:chat:stop').text = 'Stopping…' if this.stopping == True else 'Stop'
+
 -- ---- the receipts: what a call answered, read once, as the legacy chat read it ----
 -- ok = the call went and the seat said 2xx; `why` is what the note says (the seat's own `error`, else the status, else the network's reason)
 Fetch.cv getter:
@@ -210,6 +250,13 @@ Fetch.cv getter:
   hs = prop(rq, 'http_status')
   good = prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300
   {'rid': prop(rq, 'id'), 'ok': good, 'id': str(prop(jb, 'id') or ''), 'why': (str(prop(jb, 'error')) if prop(jb, 'error') else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed'), 'messages': prop(jb, 'messages'), 'more': prop(jb, 'more') == True, 'next': prop(jb, 'next'), 'import': prop(jb, 'import')} if rq != None else None
+
+-- a stop the seat did not take is said in text (the turn goes on: the button stays while it runs); either way the stop is over and the turns are read again at once
+Fetch.cv on-setter chat-stop-done:
+  WHEN startswith(this.eid, 'Fetch:stop:') and this.cv != None:
+    ('View:chat').stopping = False
+    ('View:chat').last_poll = 0
+    ('Composer:chat').error = '' if prop(this.cv, 'ok') else 'Stop did not reach the seat: ' + str(prop(this.cv, 'why')) + '. The turn is still running; try again.'
 
 -- a read of the turns that fails (or times out) is said in text, and the line goes with the next good answer
 Fetch.cv on-setter chat-history-note:

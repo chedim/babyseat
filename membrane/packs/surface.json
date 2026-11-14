@@ -116,7 +116,7 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 58,
+    "members": 65,
     "writes": [
       "membrane:*.mention",
       "membrane:*.queued",
@@ -180,29 +180,34 @@
       "chat",
       "semtext",
       "proc",
-      "boot"
+      "boot",
+      "door"
     ],
     "classes": [
       "Boot",
       "Chat",
       "ChatMessage",
-      "Chunk"
+      "Chunk",
+      "Request"
     ],
-    "members": 57,
+    "members": 58,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
+      "membrane:*.aborted",
       "membrane:*.calls",
       "membrane:*.cost",
       "membrane:*.duration",
       "membrane:*.ended",
       "membrane:*.error",
+      "membrane:*.kept",
       "membrane:*.mention",
       "membrane:*.result",
       "membrane:*.run",
       "membrane:*.run_result",
       "membrane:*.started",
       "membrane:*.state",
+      "membrane:*.stop",
       "membrane:*.usage",
       "membrane:*=ChatResponse()",
       "membrane:*=ChatTool()",

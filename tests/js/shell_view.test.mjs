@@ -13,7 +13,7 @@ initSync({ module: readFileSync(fileURLToPath(new URL('fieldvm_core_bg.wasm', ui
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
 const DOM = "PACK dom 1\nDomNode.tag getter: this.tag or 'div'\n";
 const FETCH = read('../../membrane/packs/fetch.c1f');
-const PACKS = { shell_view: read('../../membrane/apps/barest.c1f/shell_view.c1f'), chat_view: read('../../membrane/apps/barest.c1f/chat_view.c1f'), field_view: read('../../membrane/apps/field.c1f/field_view.c1f') };
+const PACKS = { markdown: read('../../membrane/apps/barest.c1f/markdown.c1f'), shell_view: read('../../membrane/apps/barest.c1f/shell_view.c1f'), chat_view: read('../../membrane/apps/barest.c1f/chat_view.c1f'), field_view: read('../../membrane/apps/field.c1f/field_view.c1f') };
 
 const T0 = 1_000_000;
 function world(extra = {}) {
@@ -119,7 +119,7 @@ scenario('ONE chat: no session list, no New session; the history is read with no
   assert.equal(w.get('DomNode:shell:sessions'), null, 'no sessions column'); assert.equal(w.get('DomNode:shell:newsession'), null); assert.equal(w.get('Fetch:sessions'), null, 'no sessions fetch');
   assert.equal(w.asked('history').url, '/membrane/chat/messages?limit=20', 'every turn of the seat, newest page first');
   w.reply('history', 200, { messages: [MSG('1000-1', 'in main')], more: true, next: '1000-1' });
-  assert.equal(w.get('DomNode:chat:row:1000-1:me').text, 'in main'); assert.equal(w.get('DomNode:chat:older').hidden, false);
+  assert.ok(w.log.some((e) => e.prop === 'text' && e.new === 'in main' && e.eid.startsWith('DomNode:md:1000-1:me:')), 'the message is drawn as markdown under the me bubble'); assert.equal(w.get('DomNode:chat:older').hidden, false);
   w.click('DomNode:chat:older:btn');
   assert.equal(w.asked('older').url, '/membrane/chat/messages?limit=20&before=1000-1', 'Load older pages with before, no sid');
   w.reply('older', 200, { messages: [MSG('900-0', 'an imported turn')], more: false, next: null });
