@@ -21,7 +21,7 @@ and never in a row. A turn whose CLI sends a wrong token fails visibly: the `401
 
 **The claude turn's credential (the release gate).** The turn's CLI answers with the Anthropic API key of the seat's environment variable `ANTHROPIC_API_KEY` by default; `--fact chat_auth=login` opts into the CLI's own login.
 The key travels like the owner token: the run's `env_from` hands the launcher's value to the child's environment, so it is never in `argv`, a property, a row, the journal, a log or a reply, and the Command driver masks it
-(`***`) in anything the child prints. With no key and no opt-in the turn is refused with the way to set it (docs/cliffvm.md, "The claude turn's auth").
+(`***`) in anything the child prints (only values of 16+ characters: a shorter one is no credential; 16 is the operator-approved minimum). With no key and no opt-in the turn is refused with the way to set it (docs/cliffvm.md, "The claude turn's auth").
 
 **Other people, and who is the owner (w34).** `cliffvm token mint --sub alice --name Alice --ttl 30d --secret-file <seat>/door.secret` prints a token (ttl required, no default; `12h`, `15m`, `45s` or seconds work too). The first verified request of a token makes `Person:<sub>` (sub, name, first_seen, last_seen). The owner is the person whose sub is the fact `operator` (default `owner`), the sub of the boot's owner token; only the owner's calls to `/mcp` `entity_write` (packs included) and `run_cliff` run, any other person gets `403` (`for the owner`); reads are open to every verified person.
 
