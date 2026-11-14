@@ -9,7 +9,9 @@ import hashlib
 import json
 import logging
 
-from homeassistant.core import HomeAssistant, SupportsResponse
+from homeassistant.auth.const import GROUP_ID_USER
+from homeassistant.core import Context, HomeAssistant, SupportsResponse
+from homeassistant.exceptions import Unauthorized
 
 from . import const
 from .seat_client import SeatAuthError, SeatClient, SeatError, SeatForbidden
@@ -22,6 +24,26 @@ def jsonable(x):
     return json.loads(json.dumps(x, default=str))
 
 
+async def find_user(hass: HomeAssistant, user_id: str | None = None):
+    """The hidden Home Assistant user: by the id the entry keeps, else by its name among the system users. None when there is none."""
+    if user_id:
+        user = await hass.auth.async_get_user(user_id)
+        if user is not None:
+            return user
+    for u in await hass.auth.async_get_users():
+        if getattr(u, "system_generated", False) and u.name == const.HA_USER_NAME:
+            return u
+    return None
+
+
+def refusal(e: Exception, domain: str, service: str) -> str:
+    """Home Assistant's Unauthorized carries no message, only what it was about: say it, so the model reads who was refused what."""
+    what = ", ".join(str(x) for x in (getattr(e, "entity_id", None),) if x)
+    perm = " ".join(str(x) for x in (getattr(e, "perm_category", None), getattr(e, "permission", None)) if x)
+    return (f"Home Assistant refused {domain}.{service} for its {const.HA_USER_NAME} user (unauthorized"
+            f"{': ' + perm if perm else ''}{' on ' + what if what else ''}): the person grants the user more in Home Assistant, or not")
+
+
 def entity_ids(request: dict) -> list:
     """The entities a service call names: target.entity_id and data.entity_id (a text or a list)."""
     out = []
@@ -32,12 +54,26 @@ def entity_ids(request: dict) -> list:
 
 
 class House:
-    def __init__(self, hass: HomeAssistant, client: SeatClient) -> None:
+    def __init__(self, hass: HomeAssistant, client: SeatClient, entry=None) -> None:
         self.hass = hass
         self.client = client
+        self.entry = entry                      # keeps the hidden user's id (data `ha_user_id`); None: found by name only
         self.forbidden = False                  # the seat said the token is not the owner's: nothing to pull
         self._digest: str | None = None         # of the catalog the seat has
         self.last_catalog: dict = {"entities": [], "services": []}
+
+    # ---- the user every call runs as ---------------------------------------------------------------------------------------------------------
+
+    async def ensure_user(self):
+        """The hidden Home Assistant system user "Membrane" (non-admin, local only, group USER): found by the entry's id, else by name, else created; its id is kept in the entry.
+        Home Assistant's own permission model decides what a call run as it may touch."""
+        user = await find_user(self.hass, (self.entry.data.get(const.CONF_HA_USER_ID) if self.entry is not None else None))
+        if user is None:
+            user = await self.hass.auth.async_create_system_user(const.HA_USER_NAME, group_ids=[GROUP_ID_USER], local_only=True)
+            _LOGGER.info("membrane: created the Home Assistant user %s (hidden, non-admin, local only)", const.HA_USER_NAME)
+        if self.entry is not None and self.entry.data.get(const.CONF_HA_USER_ID) != user.id:
+            self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, const.CONF_HA_USER_ID: user.id})
+        return user
 
     # ---- the catalog ---------------------------------------------------------------------------------------------------------------------------
 
@@ -99,8 +135,12 @@ class House:
         if not self.hass.services.has_service(domain, service):
             return {"ok": False, "error": f"Service {domain}.{service} not found"}
         wants = self.hass.services.supports_response(domain, service) != SupportsResponse.NONE
-        out = await self.hass.services.async_call(domain, service, request.get("data") or {}, blocking=True, target=request.get("target") or None,
-                                                  return_response=wants)
+        user = await self.ensure_user()
+        try:
+            out = await self.hass.services.async_call(domain, service, request.get("data") or {}, blocking=True, target=request.get("target") or None,
+                                                      return_response=wants, context=Context(user_id=user.id))
+        except Unauthorized as e:
+            return {"ok": False, "error": refusal(e, domain, service)}
         return {"ok": True, "response": jsonable(out) if wants else {"called": f"{domain}.{service}"}}
 
     # ---- the pull ------------------------------------------------------------------------------------------------------------------------------
