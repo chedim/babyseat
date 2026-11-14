@@ -23,7 +23,7 @@ Everything under "dry run" was observed on `cliffvm` built from this tree, a fre
 | Rounds: server swap | 73-110 (map through a Python bridge, model backends included 14-22); 62-91 for a first swap with the claude CLI as the only model |
 | Rounds: no-history backend behind the same routes | 8-12 |
 | Rounds: UI rebuild (VM growth + 9 views + test rewrite) | 112-169 |
-| Rounds: data migration and cutover | 14-22 |
+| Rounds: data migration and cutover | phase 1 (the chat history) BUILT in 2026-11-14 (`docs/migration-design.md` "Phase 1"); the rest of the old field is not converted (kept as a read-only source, `Help:legacy`); cutover script and the lazy hook still to do |
 | The finding that changes the plan | (w30: the `/ui/serve/` prefix, the owner cookie and a full-set launch line now exist; the page boots on `cliffvm`, section 6 lists what still 404s) the current page cannot be served by `cliffvm` with ANY pack set today: every page call goes through `/ui/serve/<path>` (`panel.js:34`, `home.js:20`, `field.js:20`) and the door has no such prefix (dry run: `/ui/serve/global/health` 404); the whole session/event API the chat speaks (`/session*`, `/event`) does not exist (barest chat is `/membrane/chat/*`, `P/chat.c1f:58`) |
 
 ## 1. Route inventory (used routes)
@@ -271,7 +271,7 @@ Rounds: pack + native subcommand + owner/guest gating + contract fixtures **5-7*
 Packs that already read legacy rows: voice (`c_entities`, `P/door_voice.c1f:37-55`), decisions (`c_entities`, `c_relations`, `c_entity_deltas`, `c_raw`, `P/door_decisions.c1f`, `N/tests/door_decisions_sql.rs`), the chat (`c_events`).
 **Failure seen in the dry run:** those reads never answer when the table does not exist (fresh cliffvm store): rows 55, 56, 69 hang instead of returning an empty answer or 500.
 
-The full data-migration design (convert on touch, reverse path, version stamp, cutover runbook, tests, build plan, decisions) is `docs/migration-design.md`.
+The data migration is `docs/migration-design.md`. **Scope decision 2026-11-14: ONLY the chat history is migrated** (BUILT, "Phase 1" there: `P/legacy_import.c1f`, `N/tests/legacy_import_1143.rs`, `N/tests/legacy_routes_1143.rs`: sessions and messages become ChatSession / ChatMessage / ChatTurn / ChatResponse / ChatTool, an idempotent batch with a ledger per session, headers first); nothing else is converted (no entities, recall data, vectors, goals, decisions, options). The old store is kept as the read-only `SqlSource:legacy` and the model reads it on demand (`Help:legacy`). The convert-on-touch, reverse and version-stamp sections of the design are the earlier whole-field plan, not built.
 
 **What a read-only legacy source adapter needs:** (a) a `Legacy` pack: `Legacy:<coll>.get(k)` over `sql()` returning the parsed `d`; (b) convert-on-touch: a getter-miss on `<Class>:<key>` reads
 `c_entities`/`c_sessions`/`c_messages` and writes the c1f entity (idempotent, constructor by identity: `P/door_voice.c1f` already does this for voice, same recipe); (c) a one-shot reader of `settings.json` (needs the `fs` driver, exists) into a `Settings:seat` entity;
@@ -450,7 +450,7 @@ Rounds per phase (1 round = 20-45 min; ranges are low = known mechanism reused, 
 | **swap total** (1f as the bridge) | sum of 1a-1k | **73-110** (1g is 14-22 of it; a first swap with the claude CLI as the only model, 1g reduced to the API-key default 3: **62-91**; a native map in 1f instead of the bridge adds 11-19) |
 | 2 no-history chat behind the same routes (the map banner `banner.c1f` + `recall.rs`, momentum map, `Banner:<owner>:<chat>` per person per chat, per-person turn, Continue/cap flow, the `previous_value` re-answer door) | | 8-12 |
 | 3 UI rebuild | VM growth 20-30, views 61-90, harness 3-5, switch 2-3, tests 26-41 | 112-169 |
-| 4 data migration and cutover | adapter 8-12, recall data 4-6, cutover (flag, rollback by journal replay, dual-run soak) 2-4 | 14-22 |
+| 4 data migration and cutover | history import BUILT (2026-11-14, section above); no entity, recall or vector conversion (scope decision); left: the lazy per-session hook (a decision), the cutover script, the JWT secret reuse test | the adapter and recall rounds are dropped from the budget |
 
 Dependencies: 1a -> 1c -> 1d -> 1k first slice; 1b before 1c's visibility; 1g before any non-claude user can swap; 2 needs 1c; 3 needs 1d (event stream) and the VM growth, and can proceed per view once 1a-1d exist; 4 can start after 1c (sessions/messages are what a user sees first) and must finish before cutover, not before the swap (the swap can run on a fresh store only for new users; users with a store need 4).
 

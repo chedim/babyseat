@@ -1268,6 +1268,55 @@
       "Intent"
     ]
   },
+  "legacy_import": {
+    "getters": {
+      "LegacySeat.converter": "Int",
+      "LegacySeat.hbad": "Text?",
+      "LegacySeat.hl": "Dict?",
+      "LegacySeat.hq": "Any",
+      "LegacySeat.kind": "Text",
+      "LegacySeat.opsub": "Text",
+      "LegacySeat.owners": "List(List(Text))?",
+      "LegacySeat.pg": "Any",
+      "LegacySeat.pgq": "Any",
+      "LegacySeat.run_left": "Any",
+      "LegacySeat.want": "Text",
+      "LegacySession.kind": "Text"
+    },
+    "writes": {
+      "*.cursor": "Any",
+      "*.dropped_parts": "Any",
+      "*.imported_at": "Any",
+      "*.reason": "Text?",
+      "*.rows": "Any",
+      "*.state": "Text",
+      "Legacy.running": "Bool",
+      "LegacySeat.after": "Any",
+      "LegacySeat.cur": "Any",
+      "LegacySeat.iid": "Text",
+      "LegacySeat.psize": "Any",
+      "LegacySeat.queue": "Any",
+      "LegacySeat.refused": "Text?",
+      "LegacySeat.run_done": "Num?",
+      "LegacySeat.run_error": "Num?",
+      "LegacySeat.run_total": "Int",
+      "LegacySeat.running": "Bool",
+      "LegacySeat.tick": "Num",
+      "SqlQuery.run": "Dict",
+      "SqlQuery.source": "Text",
+      "SqlQuery.sql": "Text"
+    },
+    "findings": []
+  },
+  "legacy_persons": {
+    "getters": {},
+    "writes": {
+      "Person.imported": "Bool",
+      "Person.name": "Text?",
+      "Person.sub": "Text?"
+    },
+    "findings": []
+  },
   "mcp": {
     "getters": {
       "McpPrompt.kind": "Text",
