@@ -54,9 +54,14 @@ impl Field {
         Ok(())
     }
 
-    /// An entity leaves (a page element taken out): what read or referenced it recalculates.
+    /// An entity leaves (a page element taken out): what read or referenced it recalculates. A `Vm:<ns>` takes every `<ns>::` entity with it.
     pub fn remove(&mut self, eid: &str, now: f64) {
         let mut s = self.seq;
+        if let Some(ns) = vm::Core::namespace_of_vm(eid) {
+            let below: Vec<String> = self.core.docs.keys().filter(|k| k.starts_with(&ns)).cloned().collect();
+            self.f.link_forget(&mut self.core, &ns);
+            for e in below { self.f.remove(&mut self.core, &PageHost, &e, now, &mut s); }
+        }
         self.f.remove(&mut self.core, &PageHost, eid, now, &mut s);
         self.seq = s;
     }
@@ -66,10 +71,34 @@ impl Field {
         self.core.docs.get(eid).map(|e| J::Object(e.props.clone()).to_string()).unwrap_or_else(|| "null".into())
     }
 
-    /// What the field did since the last drain: {"writes": [{eid, prop, new, writer} | {eid, born}], "calls": [...]}.
+    /// What the field did since the last drain: {"writes": [{eid, prop, new, writer} | {eid, born}], "calls": [...], "subs": [{eid, props}], "unsubs": [{eid, props}], "due": number | null}.
+    /// The notices are the graph link's (docs/graph-link.md, 15b): deltas since the last drain.
     pub fn drain(&mut self) -> String {
-        serde_json::json!({"writes": std::mem::take(&mut self.f.out), "calls": std::mem::take(&mut self.f.calls)}).to_string()
+        let (subs, unsubs, due) = self.f.link_drain();
+        serde_json::json!({"writes": std::mem::take(&mut self.f.out), "calls": std::mem::take(&mut self.f.calls), "subs": subs, "unsubs": unsubs, "due": due}).to_string()
     }
+
+    /// The graph link: this VM's own namespace (`Link:page.ns`). Ids with another `ns::` prefix are foreign.
+    pub fn set_ns(&mut self, ns: &str) { self.core.set_ns(ns); }
+
+    /// A foreign entity's value from its owner: one prop, with the owner's opaque revision.
+    pub fn feed_val(&mut self, eid: &str, prop: String, value_json: &str, rev: f64, now: f64) -> Result<(), JsValue> {
+        let v: J = serde_json::from_str(value_json).map_err(err)?;
+        let mut m = Map::new(); m.insert(prop, v);
+        self.apply(eid, fields::LinkVal::Props(m), rev, now); Ok(())
+    }
+    /// Several props of one foreign entity in one round (a JSON object; a delta).
+    pub fn feed_vals(&mut self, eid: &str, props_json: &str, rev: f64, now: f64) -> Result<(), JsValue> {
+        let m = obj(props_json)?; self.apply(eid, fields::LinkVal::Props(m), rev, now); Ok(())
+    }
+    /// The owner says the entity is gone: its readers read `absent`.
+    pub fn feed_gone(&mut self, eid: &str, rev: f64, now: f64) { self.apply(eid, fields::LinkVal::Gone, rev, now); }
+    /// The owner refuses to send it: its readers read `refused: <reason>`.
+    pub fn feed_refused(&mut self, eid: &str, reason: &str, rev: f64, now: f64) { self.apply(eid, fields::LinkVal::Refused(reason.to_string()), rev, now); }
+    /// A reconnect: the next drain announces every subscription again.
+    pub fn link_reset(&mut self) { self.f.link_reset(); }
+    /// The revisions held per replica: [{eid, rev}].
+    pub fn replicas(&self) -> String { serde_json::Value::Array(self.core.replica_revs().into_iter().map(|(e, r)| serde_json::json!({"eid": e, "rev": r})).collect()).to_string() }
 
     /// Load or replace a named `.c1f` pack. A parse error or a missing import is returned as the error text.
     pub fn set_pack(&mut self, name: &str, src: &str) -> Result<(), JsValue> { self.f.set_pack(name, src).map_err(err) }
@@ -98,6 +127,14 @@ impl Field {
     pub fn tick(&mut self, now: f64) {
         let mut s = self.seq;
         self.f.tick(&mut self.core, &PageHost, now, &mut s);
+        self.seq = s;
+    }
+}
+
+impl Field {
+    fn apply(&mut self, eid: &str, v: fields::LinkVal, rev: f64, now: f64) {
+        let mut s = self.seq;
+        self.f.apply_val(&mut self.core, &PageHost, eid, rev, v, now, &mut s);
         self.seq = s;
     }
 }
