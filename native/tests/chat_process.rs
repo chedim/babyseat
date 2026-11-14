@@ -1431,11 +1431,6 @@ fn a_timed_out_commands_result_props_are_errors_that_tell_the_remedy_and_the_par
     // entity_read shows the kind too, and says it is an error
     let (t, e) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "output"}));
     assert!(e && t == format!("Error: {want}"), "entity_read: {t}");
-    // the WHOLE-entity read shows each failed result prop as `Error: <reason>` too (it left them out)
-    let (t, _) = call(port, "entity_read", json!({"spec": "Command:t2"}));
-    for p in ["output", "ok", "rc", "errors"] {
-        assert!(t.lines().any(|l| l == format!("{p}: Error: {want}")), "the whole read shows {p} as an Error: {t}");
-    }
     // a model-style getter over it keeps the Error and the reason
     let pack = "PACK shx 1\nSh.out getter: prop('Command:t2', 'output')\nSh.len getter: this.out + '!'\n";
     put(port, "Pack:shx", "text", json!(pack));

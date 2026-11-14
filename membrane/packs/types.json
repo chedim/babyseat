@@ -966,7 +966,6 @@
       "Request.mc_q_terms": "List(Text)",
       "Request.mc_q_text": "Text?",
       "Request.mc_r_bad": "Text?",
-      "Request.mc_r_failed": "List(Any)",
       "Request.mc_r_id": "Text",
       "Request.mc_r_prop": "Any",
       "Request.mc_r_rows": "Any",
@@ -1375,7 +1374,6 @@
   "proc": {
     "getters": {
       "Command.errors": "Any",
-      "Command.failed_props": "List(Text)",
       "Command.ok": "(Bool|Error)?",
       "Command.output": "Any",
       "Command.partial_errors": "Any",

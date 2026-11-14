@@ -360,7 +360,7 @@ shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus t
   errors; a GET is a 405 (`allow: POST`: there is no SSE stream). The tools are the FIELD ops only, nothing else:
   - `entity_query {q, k, count}`: `kind:<Class>` and `name~:<eid prefix>` joined by `&` (anything else is a tool error), rows `eid (Class)`,
     k default 20 at most 100; reads the store's rows (`c_field`).
-  - `entity_read {spec, prop}`: the stored properties of an entity, or one property in full (a getter's value too). The whole-entity read adds a line `<prop>: Error: <reason>` for each property of a class's `failed_props` that is an Error now (a timed-out Command's `output`, `errors`, `ok`, `rc`): a failure has no stored value, so the row alone left it out.
+  - `entity_read {spec, prop}`: the stored properties of an entity, or one property in full (a getter's value too).
   - A Fetch receipt carries `started`, `finished` (epoch seconds) and `ms` like a Command's, on a refusal too (`drivers.rs`).
   - A chat turn whose CLI ended badly keeps its cause: `ChatTurn.error` and the response say the stage (`claude failed (rc N): <stderr>`, `ended without an exit code (killed by a signal ...)`, `ended with no answer at all`, the output unreadable); a turn whose stream gave a result line is never marked error for an unreadable stream (`chat_turn.c1f`: `rlines`, `finals`, `evl`).
   - `entity_write {spec, prop, value}`: one property, by a computed-name write; what reacts runs (a setter, a driver verb such as

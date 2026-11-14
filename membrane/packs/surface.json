@@ -547,7 +547,7 @@
       "Request",
       "Return"
     ],
-    "members": 86,
+    "members": 85,
     "writes": [
       "*.[]",
       "*.go",
@@ -814,7 +814,7 @@
     "classes": [
       "Command"
     ],
-    "members": 11,
+    "members": 10,
     "writes": [],
     "claims": [],
     "boot_facts": [

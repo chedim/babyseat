@@ -195,9 +195,6 @@ Request.mc_r_id getter: ('membrane::' + this.mc_r_spec) if prop('membrane::' + t
 Request.mc_r_bad getter: 'entity_read needs spec (the entity\'s id)' if this.mc_r_spec == '' else None
 Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json_extract(body, \'$.props\') AS props FROM c_field WHERE k = ?', this.mc_r_id) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else None
 Request.mc_r_val getter: prop(this.mc_r_id, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None else None
--- A whole-entity read shows a failed (Error) property as `Error: <reason>`, as the per-property read does. A failed property has no stored value, so the row cannot list it: a class names the
--- properties that can fail in a getter `failed_props` (a Command's result props, packs/proc.c1f), and the ones that are Errors now follow the row, one line each (`output: Error: <reason>`: a pack cannot build a dict from keys yet).
-Request.mc_r_failed getter: [k for k in (prop(this.mc_r_id, 'failed_props') or []) if prop(this.mc_r_id, k) is Error] if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else []
 Request.mc_r_text getter:
   WHEN this.mc_tool != 'entity_read' or this.mc_r_bad != None: None
   ELSE WHEN this.mc_r_prop != None and this.mc_r_val is Error: 'Error: ' + str(why(this.mc_r_val))
@@ -205,7 +202,6 @@ Request.mc_r_text getter:
   ELSE WHEN this.mc_r_prop != None: str(this.mc_r_val)
   ELSE WHEN this.mc_r_rows == None: None
   ELSE WHEN len(this.mc_r_rows) == 0: 'no such entity: ' + this.mc_r_spec
-  ELSE WHEN len(this.mc_r_failed) > 0: this.mc_r_id + ' (' + str(prop(this.mc_r_rows[0], 'cls')) + ') ' + str(prop(this.mc_r_rows[0], 'props')) + '\n' + join([k + ': Error: ' + str(why(prop(this.mc_r_id, k))) for k in this.mc_r_failed], '\n')
   ELSE: this.mc_r_id + ' (' + str(prop(this.mc_r_rows[0], 'cls')) + ') ' + str(prop(this.mc_r_rows[0], 'props'))
 
 -- ---- entity_query: the store's rows by kind and eid prefix (a kind is the entity's own class or one of its `parents`, `cls:<kind>`) -----------------------------------------------------------------------------------
