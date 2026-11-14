@@ -41,7 +41,7 @@ Request.file getter: this.cand if this.hit == True else None
 Request.parts getter: concat([''], words(replace(this.rel or '', '.', ' ')))
 Request.ext getter: this.parts[len(this.parts) - 1]
 Request.ctype getter: {'html': 'text/html; charset=utf-8', 'js': 'application/javascript; charset=utf-8', 'mjs': 'application/javascript; charset=utf-8', 'wasm': 'application/wasm', 'gz': 'application/gzip', 'json': 'application/json', 'css': 'text/css; charset=utf-8', 'png': 'image/png', 'svg': 'image/svg+xml', 'ico': 'image/x-icon', 'woff2': 'font/woff2'}[this.ext] or 'application/octet-stream'
--- (`page_hold` and `page_cookie` are door_auth.c1f's: the page fetched from this machine is given its owner cookie; none = no cookie)
+-- (`page_hold` and `page_cookie` are door_auth.c1f's: the page fetched from this machine is given its admin cookie; none = no cookie)
 -- none until the file's stat has come back (an asynchronous read): the reply waits for it
 Request.static getter:
   WHEN this.rel == None: 'no'
@@ -61,19 +61,16 @@ Request.static_reply getter:
 
 -- ---- /ui/conf: the page's config -------------------------------------------------------------------------------------------
 -- The launcher tells the facts (Boot:seat.seat_name, .seat_named, .seat_aliases, .seat_stt, .seat_voice_out, .seat_language,
--- .seat_blurp, .build_id). WHO comes from the door's verified token (`authed`, `sub`, `claims`). A localhost peer is NOT the owner (operator, #842):
--- once the door has a secret, a request with no token, from loopback or anywhere, is refused; the owner's token is the file the seat writes at boot
+-- .seat_blurp, .build_id). WHO comes from the door's verified token (`authed`, `sub`, `claims`). A localhost peer is NOT the admin (operator, #842):
+-- once the door has a secret, a request with no token, from loopback or anywhere, is refused; the admin's token is the file the seat writes at boot
 -- (docs/auth.md). A token that is sent and bad is refused the same way. A door with no secret at all (the barest seat) is open by decision.
 Request.loop getter: startswith(this.peer or '', '127.0.0.1:') or startswith(this.peer or '', '[::1]:')
 Request.fwd getter: prop(this.headers, 'x-forwarded-for') != None or prop(this.headers, 'forwarded') != None or prop(this.headers, 'x-real-ip') != None
 Request.entrant getter: this.authed == True
--- THE OWNER (#1143, persons): the person whose sub is the fact `operator` (the released MEMBRANE_OPERATOR), else `owner`: the sub of the token `cliffvm run` writes at boot.
--- The barest seat (no secret, `open`) has no one to tell apart: its caller is the owner.
-Request.owner_sub getter: str(prop(this.facts, 'operator') or 'owner')
-Request.owner getter: this.authed == True and (this.open == True or this.sub == this.owner_sub)
--- the 403 of a verified person who is not the owner: the released error shape (server.py `_json_err`, the one 403 of the JWT seat)
-Request.forbidden getter: {'status': 403, 'body': {'type': 'error', 'error': {'message': 'for the owner'}}}
-Request.who getter: {'sub': this.sub, 'name': prop(this.claims, 'name') or this.sub} if this.authed == True else None
+-- NO USERS (#1143, operator 2026-11-14): every request that carries a VALID token (or the page cookie) is THE ADMIN, whatever the token's `sub` says: the host's door
+-- replaces `sub` and `name` by `admin` after it has verified the token, so no pack reads a sub as an identity. There is no second person, no non-admin tier and nothing
+-- to refuse a verified caller: the gate of every route is `authed` (the 401 below). The barest seat (no secret, `open`) has no one to tell apart: its caller is the admin.
+Request.who getter: {'sub': 'admin', 'name': 'admin'} if this.authed == True else None
 Request.boots getter: [b for b in instances('Boot')]
 Request.c_stt getter: 'server' if startswith(str(([b.seat_stt for b in this.boots] or [''])[0] or ''), 'http') else 'browser'
 Request.c_name getter: ([b.seat_name for b in this.boots] or [None])[0]
@@ -121,7 +118,7 @@ Request.login_reply getter:
   ELSE WHEN this.login_ask == None: this.unauthorized
   ELSE WHEN this.verify_result == None: None
   ELSE WHEN not this.login_ok: this.unauthorized
-  ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.login_cookie}, 'body': {'ok': True, 'who': {'sub': prop(prop(this.verify_result, 'claims'), 'sub'), 'name': prop(prop(this.verify_result, 'claims'), 'name') or prop(prop(this.verify_result, 'claims'), 'sub')}}}
+  ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.login_cookie}, 'body': {'ok': True, 'who': {'sub': 'admin', 'name': 'admin'}}}
 Request.logout_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.cookie_name + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict' + this.secure}, 'body': {'ok': True}}

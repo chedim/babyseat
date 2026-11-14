@@ -1,4 +1,4 @@
-"""Slice 2 (#1143), the seat's use of Home Assistant, from the component's side: the model writes a `HaCall` on a REAL cliffvm seat (the tool `entity_write`, the owner's token, as
+"""Slice 2 (#1143), the seat's use of Home Assistant, from the component's side: the model writes a `HaCall` on a REAL cliffvm seat (the tool `entity_write`, the admin's token, as
 the turn's CLI carries it), the component pulls it over its own session, runs it against the FAKE Home Assistant (fakeha.py: no real HA is ever contacted), and the receipt is read
 back on the seat. Home Assistant's own side of the line (what is exposed to Assist) is the one the component enforces."""
 import asyncio
@@ -31,10 +31,10 @@ def _response(seat, cid):
 
 
 async def _house(pkg, hass, seat, token=None):
-    """-> (session, entry, the House of the component) against the real seat, the token the owner's unless one is given."""
+    """-> (session, entry, the House of the component) against the real seat, the token the admin's unless one is given."""
     s = aiohttp.ClientSession()
     hass.session = s
-    entry = fakeha.FakeConfigEntry(data={"serve_url": seat.url, "serve_user": "opencode", "serve_pass": token or seat.owner_token()})
+    entry = fakeha.FakeConfigEntry(data={"serve_url": seat.url, "serve_user": "opencode", "serve_pass": token or seat.admin_token()})
     hass.config_entries.entries.append(entry)
     hass.states.set("light.kitchen", "off", {"friendly_name": "Kitchen"})
     hass.states.set("sensor.temp", "21.5", {"unit_of_measurement": "C", "friendly_name": "Temperature"})
@@ -187,22 +187,22 @@ def test_a_read_of_the_catalog_refreshes_it_and_answers_how_much(ha, real_seat):
     assert json.loads(real_seat.tool("entity_read", spec="HaCatalog:ha", prop="entity_ids")) == ["light.kitchen", "sensor.temp"]
 
 
-def test_a_token_that_is_not_the_owners_pulls_nothing_and_says_so_while_assist_keeps_working(ha, real_seat):
+def test_a_token_with_sub_ha_is_the_admin_and_pulls_the_calls_and_assist_keeps_working(ha, real_seat):
     pkg, hass = ha
     _allow(real_seat)
     _ask(real_seat, "n1", LIGHT)
 
     async def go():
-        s, entry, house = await _house(pkg, hass, real_seat, token=real_seat.mint())          # sub `ha`: a person, not the owner
+        s, entry, house = await _house(pkg, hass, real_seat, token=real_seat.mint())          # sub `ha`: no users, so the admin
         try:
             n = await house.pump_once()
-            return n, house.forbidden, await entry.runtime_data.client.health()
+            return n, await entry.runtime_data.client.health()
         finally:
             await s.close()
-    n, forbidden, health = asyncio.run(go())
-    assert n == 0 and forbidden is True and health["healthy"] is True
-    assert _state(real_seat, "n1") == "pending", "nothing was claimed"
-    assert hass.services.calls == []
+    n, health = asyncio.run(go())
+    assert n == 1 and health["healthy"] is True
+    assert _state(real_seat, "n1") == "done", "the call was claimed and run"
+    assert [c["service"] for c in hass.services.calls] == ["turn_on"]
 
 
 def test_a_down_seat_is_a_quiet_empty_pull_and_the_loop_survives_it(ha):
@@ -229,7 +229,7 @@ def test_the_background_loop_pulls_by_itself_and_stops_with_its_task(ha, real_se
     async def go():
         s = aiohttp.ClientSession()
         hass.session = s
-        entry = fakeha.FakeConfigEntry(data={"serve_url": real_seat.url, "serve_user": "opencode", "serve_pass": real_seat.owner_token()})
+        entry = fakeha.FakeConfigEntry(data={"serve_url": real_seat.url, "serve_user": "opencode", "serve_pass": real_seat.admin_token()})
         hass.states.set("light.kitchen", "off")
         hass.exposed.add("light.kitchen")
         hass.services.register("light", "turn_on", lambda call: None)

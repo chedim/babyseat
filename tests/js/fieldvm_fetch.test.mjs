@@ -1,5 +1,5 @@
 // W2 (#1143): the page's `Fetch` entity. A pack writes `Fetch:<id>.request = {id, url, method, headers, body}`, the JS shell makes ONE fetch()
-// (same origin only, the owner cookie goes with it) and writes the receipt back in the seat's shape (native/src/drivers.rs, fetch.rs). A fake fetch, node, no browser.
+// (same origin only, the admin cookie goes with it) and writes the receipt back in the seat's shape (native/src/drivers.rs, fetch.rs). A fake fetch, node, no browser.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
@@ -50,7 +50,7 @@ assert.equal(FETCH_PACK, readFileSync(fileURLToPath(new URL('../../membrane/pack
   assert.equal(calls[0].url, `${ORIGIN}/membrane/chat/message`);
   assert.equal(calls[0].init.method, 'POST');
   assert.equal(calls[0].init.body, '{"text":"hi"}');
-  assert.equal(calls[0].init.credentials, 'same-origin', 'the owner cookie goes with it');
+  assert.equal(calls[0].init.credentials, 'same-origin', 'the admin cookie goes with it');
   assert.deepEqual(calls[0].init.headers, { 'content-type': 'application/json' });
   assert.equal(rec(host), undefined, 'no receipt before the answer');
   calls[0].resolve(reply(201, '{"id":"1-1"}', 'Created', { 'Content-Type': 'application/json' }));

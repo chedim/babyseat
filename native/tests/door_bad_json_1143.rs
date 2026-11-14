@@ -42,7 +42,7 @@ fn ask(path: &str, body: &str) -> (serde_json::Map<String, J>, std::path::PathBu
       c.execute_batch("CREATE TABLE IF NOT EXISTS c_field (k TEXT PRIMARY KEY, body TEXT NOT NULL, cls TEXT, updated REAL NOT NULL DEFAULT 0);").unwrap(); }
     c.store = Some(Store::with_exec(&p, std::sync::Arc::new(membrane_vm::sqlexec::NativeSqlExec::new(&p).unwrap())));
     c.load("Boot:seat".into(), "Boot".into(), json!({"ui_dir": "/x", "facts": {"seat_data_dir": d.to_str().unwrap()}}).as_object().unwrap().clone(), None, 0.0);
-    let req = json!({"method": "POST", "query": "", "headers": {}, "peer": "127.0.0.1:5", "path": path, "conn": 7, "body": body, "authed": true, "sub": "owner", "claims": {"sub": "owner"}});
+    let req = json!({"method": "POST", "query": "", "headers": {}, "peer": "127.0.0.1:5", "path": path, "conn": 7, "body": body, "authed": true, "sub": "admin", "claims": {"sub": "admin"}});
     let mut seq = 1;
     f.rebuild(&mut c, 1.0, &mut seq);
     c.store.as_ref().unwrap().push_inbound("Request:1".into(), "Request".into(), req.as_object().unwrap().clone());

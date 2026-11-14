@@ -10,7 +10,7 @@ IMPORT shell_view 1
 --   SetRow:<id>         one setting (`<group>.<key>`): `raw` is the seat's row (GET /ui/settings: descriptor + `current` + `refused` + `applied`), `draft` what the person is typing (text for a text or a number,
 --                       a list of {u, a, b, c} for a list or an allow-list), `busy`, `asked`, `note` / `note_kind` (the result of the last Save, shown next to the row)
 --   Fetch:settings      the read of the rows (GET /ui/settings, settings.c1f)        Fetch:setw:<id>   the write of one row (ONE POST /mcp, entity_write of `Setting:<id>.set`)
--- EVERYONE WHO REACHES THE PAGE IS THE OWNER: no person or permission is known here. The seat's own owner check stays (a write it refuses comes back as text, 403 `for the owner`) and a refusal of a
+-- EVERYONE WHO REACHES THE PAGE IS THE ADMIN: no person or permission is known here, and the seat turns no caller down for who it is. A refusal of a
 -- value (a number out of range, a name that is not a model name) is the seat's own reason, shown in place next to the row; nothing is hidden, nothing is clamped.
 -- Rows the seat marks `hidden` (the Map group, while the field view is disabled in this release) are left out. A restart row is shown with its value and the launch line that changes it: no control.
 -- SECRETS never reach this page: the feed carries the NAME of an environment variable and never its value; this pack only shows what the feed holds.
@@ -30,7 +30,7 @@ Nav.active on-setter settings-activate:
 
 -- the group titles, as the operator named them; a group the seat adds shows under its own id
 SettingsView.titles getter: {'model': 'Model', 'chat': 'Chat', 'home': 'Home', 'import': 'Import', 'access': 'Access', 'limits': 'Limits'}
-SettingsView.subs getter: {'model': 'Which model answers your messages.', 'chat': 'How far and how long one answer may go.', 'home': 'What the model may do in the house.', 'import': 'Other data the seat can read.', 'access': 'Read-only. Everyone with access is the owner.', 'limits': 'Read-only. These are set when the seat starts; a change needs a restart.'}
+SettingsView.subs getter: {'model': 'Which model answers your messages.', 'chat': 'How far and how long one answer may go.', 'home': 'What the model may do in the house.', 'import': 'Other data the seat can read.', 'access': 'Read-only. Everyone with access is the admin.', 'limits': 'Read-only. These are set when the seat starts; a change needs a restart.'}
 -- what the line at the top says: a failed read (text, with the seat's reason), or that the first read is on its way
 SettingsView.msg getter: this.note if this.note else ('' if this.loaded == True else 'Loading the settings…')
 
@@ -49,7 +49,7 @@ SettingsView.open on-setter settings-draw:
     ('DomNode:setv:lead').parent = 'DomNode:setv:head'
     ('DomNode:setv:lead').tag = 'p'
     ('DomNode:setv:lead').class = 'setlead'
-    ('DomNode:setv:lead').text = 'Everyone with access is the owner. Each setting says whether a change applies now or needs a restart; a change the seat refuses is shown next to it with its reason.'
+    ('DomNode:setv:lead').text = 'Everyone with access is the admin. Each setting says whether a change applies now or needs a restart; a change the seat refuses is shown next to it with its reason.'
     ('DomNode:setv:note').parent = 'DomNode:setv:root'
     ('DomNode:setv:note').tag = 'div'
     ('DomNode:setv:note').class = 'setnote'
@@ -403,7 +403,7 @@ DomNode.clicked on-setter set-clicked:
     u = head(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e'), len(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e')) - 2)
     (r).draft = [e for e in prop(r, 'draft') if prop(e, 'u') != u]
 
--- ---- Save: ONE write through the owner-checked door (POST /mcp, entity_write of `Setting:<id>.set`); Enter in a box and the Save button are the form's submit ----
+-- ---- Save: ONE write through the one write door (POST /mcp, entity_write of `Setting:<id>.set`); Enter in a box and the Save button are the form's submit ----
 DomNode.submitted on-setter set-submit:
   WHEN startswith(this.eid, 'DomNode:set:') and tail(this.eid, 5) == ':form':
     ('SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')).go = (prop('SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':'), 'go') or 0) + 1
@@ -425,7 +425,7 @@ SetRow.go on-setter set-save:
     this.note = 'Saving…'
     this.note_kind = 'wait'
     ('Fetch:setw:' + this.rid).request = {'timeout_s': 10, 'id': 'write-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': 'Setting:' + this.rid, 'prop': 'set', 'value': this.out}}})}
--- the call is answered: a 2xx (the seat took the write; whether it applied or refused the VALUE is read back with the rows) or a refusal of the call itself (403 `for the owner`, a failure): the reason is text
+-- the call is answered: a 2xx (the seat took the write; whether it applied or refused the VALUE is read back with the rows) or a refusal of the call itself (a failure): the reason is text
 Fetch.gv on-setter set-write-done:
   WHEN startswith(this.eid, 'Fetch:setw:') and this.gv != None and prop(this.gv, 'ok'):
     ('SetRow:' + replace(this.eid, 'Fetch:setw:', '')).busy = False

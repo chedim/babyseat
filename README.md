@@ -201,7 +201,7 @@ only on a network you trust. [JWT mode](docs/auth.md) is on by default (a token 
 1. HACS → ⋮ → Custom repositories → `https://github.com/chedim/membrane`,
    category *Integration*.
 2. Install **babyseat (membrane)**, restart Home Assistant.
-3. Run a seat, mint a token for Home Assistant (`cliffvm token mint --sub owner`), then
+3. Run a seat, mint a token for Home Assistant (`cliffvm token mint --sub ha`), then
    Settings → Devices & services → Add integration → the seat's URL and the token.
 
 Since 0.7.60 the integration is a thin client of a seat you run: it adds the seat
@@ -210,7 +210,7 @@ model read states and call services through Home Assistant (an allow-list you wr
 default deny; only what you exposed to Assist), shows a few entities for the seat
 (reachable, busy, model, turns today, last answer, last error; a select for its
 model) and adds the services `membrane.send_message` and `membrane.ask`. The seat's
-use of the house, the entities and the select need the owner's token. It does
+use of the house, the entities and the select need the admin's token. It does
 not start a seat; the panels, the per-user relay, speech input and the several-seats
 list are a later slice (see
 [docs/home-assistant.md](docs/home-assistant.md), [docs/hass-plan.md](docs/hass-plan.md)).
@@ -222,7 +222,7 @@ the things it names. On later turns it sees only what changed since the last
 message: which entities moved, and whether the change came from the
 conversation, the code, another seat or a script.
 
-**The conversation block** (the default since #429's measurement; since 0.7.5 made by the `banner` pack, `Banner:<owner>:<chat>`, which each model can tune or replace for its own chats (on a map-mode seat the banner is the whole state message: a class of the model's own with a `text` getter replaces it completely, 3 s for its reads, the default shows headed by the error if it fails: help('map'));
+**The conversation block** (the default since #429's measurement; since 0.7.5 made by the `banner` pack, `Banner:<admin>:<chat>`, which each model can tune or replace for its own chats (on a map-mode seat the banner is the whole state message: a class of the model's own with a `text` getter replaces it completely, 3 s for its reads, the default shows headed by the error if it fails: help('map'));
 `MEMBRANE_INJECTION=banner` restores the WHERE WE ARE banner) replaces that state with one small block about *this*
 chat, built from records only (no model call), at most 900 chars, sent every
 turn while it has content: `NOW`, `WORKING ON` (the person's latest earlier

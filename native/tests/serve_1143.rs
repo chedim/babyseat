@@ -80,7 +80,7 @@ fn get(port: u16, path: &str, extra: &str) -> (String, String) {
     let i = out.windows(4).position(|w| w == b"\r\n\r\n").expect("an HTTP answer");
     (String::from_utf8_lossy(&out[..i]).to_string(), String::from_utf8_lossy(&out[i + 4..]).to_string())
 }
-fn bearer(data: &Path) -> String { format!("Authorization: Bearer {}\r\n", std::fs::read_to_string(data.join("owner.token")).unwrap().trim()) }
+fn bearer(data: &Path) -> String { format!("Authorization: Bearer {}\r\n", std::fs::read_to_string(data.join("admin.token")).unwrap().trim()) }
 
 #[test]
 fn help_names_every_option_and_where_the_defaults_live() {
@@ -93,7 +93,7 @@ fn help_names_every_option_and_where_the_defaults_live() {
 }
 
 #[test]
-fn it_finds_packs_apps_and_ui_next_to_its_own_binary_and_serves_the_page_and_the_door_with_the_owner_token() {
+fn it_finds_packs_apps_and_ui_next_to_its_own_binary_and_serves_the_page_and_the_door_with_the_admin_token() {
     let d = dist("a");
     let data = d.parent().unwrap().join("data");
     let claude = fake_claude(d.parent().unwrap());
@@ -102,11 +102,11 @@ fn it_finds_packs_apps_and_ui_next_to_its_own_binary_and_serves_the_page_and_the
     let secret = data.join("door.secret");
     assert_eq!(std::fs::metadata(&secret).unwrap().permissions().mode() & 0o777, 0o600);
     let said = run.said.join("\n");
-    assert!(said.contains(&data.join("owner.token").display().to_string()), "the token file's path is told: {said}");
+    assert!(said.contains(&data.join("admin.token").display().to_string()), "the token file's path is told: {said}");
     assert!(said.contains(&format!("http://127.0.0.1:{}/", run.port)), "the URL is told: {said}");
     assert!(said.contains("Authorization: Bearer $(cat ") && said.contains("/global/health"), "a ready curl example: {said}");
     assert!(said.contains(&claude.display().to_string()), "the claude CLI that was found is told: {said}");
-    // the page, with the owner cookie for a browser on this machine; the door refuses a bare caller and serves the token's
+    // the page, with the admin cookie for a browser on this machine; the door refuses a bare caller and serves the token's
     let (head, body) = get(run.port, "/", "");
     assert!(head.starts_with("HTTP/1.1 200"), "{head}");
     assert!(body.to_lowercase().contains("<html") || body.to_lowercase().contains("<!doctype"), "the barest page");
@@ -181,7 +181,7 @@ fn with_no_data_dir_the_seat_lives_under_the_users_data_location() {
     std::fs::create_dir_all(&home).unwrap();
     let want = if cfg!(target_os = "macos") { home.join("Library/Application Support/membrane") } else { home.join(".local/share/membrane") };
     let run = start(&d.join("bin/cliffvm"), &["--port", "0"], &[("HOME", home.to_str().unwrap()), ("CLAUDE_BIN", "/usr/bin/true")], &["XDG_DATA_HOME", "ANTHROPIC_API_KEY"]);
-    assert!(want.join("door.secret").exists() && want.join("owner.token").exists() && want.join("seat.sqlite").exists(), "{:?}", want);
+    assert!(want.join("door.secret").exists() && want.join("admin.token").exists() && want.join("seat.sqlite").exists(), "{:?}", want);
     assert!(get(run.port, "/global/health", &bearer(&want)).0.starts_with("HTTP/1.1 200"));
     drop(run);
     // XDG_DATA_HOME moves it on Linux and macOS alike (the freedesktop name is honored where it is set)

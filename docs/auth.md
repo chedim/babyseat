@@ -1,33 +1,37 @@
-# Auth on the cliffvm seat: a localhost peer is not the owner
+# Auth on the cliffvm seat: a localhost peer is not the admin, and there are no users
 
 *This section is the standalone `cliffvm` seat (`scripts/seat-full`, docs/cliffvm.md). The rest of this page describes the Python 0.7 seat (seat token, `MEMBRANE_JWT`), kept until the swap.*
+
+**NO USERS in this release** (operator, 2026-11-14). Every request that carries a VALID token (signature, `exp`, `nbf` and the rest checked exactly as before) or the page cookie is THE ADMIN, whatever the token's `sub` says:
+the door replaces `sub` and `name` by `admin` after it has verified the token, so no pack reads a `sub` as an identity. There is no `Person` entity, no `operator` fact, no non-admin tier and nothing that answers a verified caller
+`403`: the only refusal is the `401` of a request with no valid token. There is NO way left to be a second person. Future: a non-human credential that must be limited (an ESP32, an integration) is a separate design (the `ns` claim of docs/graph-link.md); nothing is built for it.
 
 **The rule** (the operator's, #842): an address is not a credential. When the door has a secret (the fact `door_secret_file`, set by `scripts/seat-full`), every request needs a verified JWT, a request
 from this machine included. Public: the page's shell (`/`, `/index.html`, `/membrane`, `/favicon.ico`), `/ui/www/*`, `/ui/login`, `/ui/logout` (the released seat's set; `/global/health` and the opencode probes are NOT public).
 No token, a bad one, one signed by another key or one past its life: `401`, `WWW-Authenticate: Bearer realm="membrane"`, `{"error":{"message":"missing or invalid token","type":"unauthorized"}}`, the same for each.
 The only mode without a secret is the BAREST seat (`scripts/seat`, no `door_secret_file`): no security at all, by decision (docs/cliffvm.md).
 
-**The owner token file.** `cliffvm run` with `door_secret_file`:
+**The admin token file.** `cliffvm run` with `door_secret_file`:
 1. makes the secret if it is missing (64 hex characters of `/dev/urandom`, mode 0600) and keeps it afterwards;
-2. mints an owner JWT at EVERY boot (`sub` = the fact `operator`, default `owner`; life = the fact `owner_token_ttl_s`, default 2592000 s = 30 days, a threshold flagged for the operator) and writes it to `<seat_data_dir>/owner.token`
-   (mode 0600, a temp file renamed over the old one); the path is the Boot fact `owner_token_file`. Rotation is the restart: the old token stays valid until its own `exp` (only a new secret revokes it).
-3. holds the token's value nowhere else but the process's environment (`MEMBRANE_OWNER_TOKEN`): it is no property of the field, no journal row, no log line and no reply.
+2. mints an admin JWT at EVERY boot (`sub` = `admin`; life = the fact `admin_token_ttl_s`, default 2592000 s = 30 days, a threshold flagged for the operator) and writes it to `<seat_data_dir>/admin.token`
+   (mode 0600, a temp file renamed over the old one); the path is the Boot fact `admin_token_file`. Rotation is the restart: the old token stays valid until its own `exp` (only a new secret revokes it).
+3. holds the token's value nowhere else but the process's environment (`MEMBRANE_ADMIN_TOKEN`): it is no property of the field, no journal row, no log line and no reply.
 
-**The secret file's rules** (release verification, docs/release-verification.md): a missing or empty file is made; one shorter than 32 bytes, unreadable, or a folder REFUSES the start (the seat never replaces a secret it cannot read: that would log everyone out). A second seat started on a copy of the file accepts the first's tokens. The door refuses `crit`, an `aud` and a non-numeric `nbf`/`iat`; a request carrying `X-Forwarded-For`, `Forwarded` or `X-Real-IP` is not this machine (no owner cookie); the door removes `authorization` and `cookie` from the Request entity after verifying them; a HEAD to a family route is a 405 with `allow`. Every pack setter that writes on a request reads `Request.entrant` (the 401 is only a reply).
+**The secret file's rules** (release verification, docs/release-verification.md): a missing or empty file is made; one shorter than 32 bytes, unreadable, or a folder REFUSES the start (the seat never replaces a secret it cannot read: that would log everyone out). A second seat started on a copy of the file accepts the first's tokens. The door refuses `crit`, an `aud` and a non-numeric `nbf`/`iat`; a request carrying `X-Forwarded-For`, `Forwarded` or `X-Real-IP` is not this machine (no admin cookie); the door removes `authorization` and `cookie` from the Request entity after verifying them; a HEAD to a family route is a 405 with `allow`. Every pack setter that writes on a request reads `Request.entrant` (the 401 is only a reply).
 
-**Local tools** read the file: `curl -H "Authorization: Bearer $(cat <seat_data_dir>/owner.token)" http://127.0.0.1:<port>/global/health` (`scripts/seat-full` prints this line with the real paths).
-**The page** needs nothing: a page fetched from this machine (a loopback peer, no `X-Forwarded-For`/`Forwarded`) is given the owner cookie `membrane_jwt_<8 hex>` (HttpOnly, SameSite=Strict, 7 days); `POST /ui/login {"token": "<jwt>"}` turns any token into the same cookie.
-**The opencode TUI** takes its token from the environment, as on the Python seat: `OPENCODE_SERVER_PASSWORD="$(cat <seat_data_dir>/owner.token)" opencode attach http://127.0.0.1:<port>` (Basic password = the token), and the generated config's `apiKey` reads `{env:MEMBRANE_JWT_TOKEN}`.
-**The chat turn**: the `claude` CLI the turn starts calls the seat's `/mcp`. Its MCP config (`chat_turn.c1f`, `mcp_json`) carries `"headers": {"Authorization": "Bearer ${MEMBRANE_OWNER_TOKEN}"}` and the run's `env_from` hands the launcher's value to the child's environment: the token is never in `argv` (a process listing shows `argv`)
+**Local tools** read the file: `curl -H "Authorization: Bearer $(cat <seat_data_dir>/admin.token)" http://127.0.0.1:<port>/global/health` (`scripts/seat-full` prints this line with the real paths).
+**The page** needs nothing: a page fetched from this machine (a loopback peer, no `X-Forwarded-For`/`Forwarded`/`X-Real-IP`, AND a `Host` that is `localhost`, `127.0.0.1`, `[::1]` or a name of the launch fact `host_names`: port ignored, case-insensitive; this stops a DNS-rebinding site from being given the cookie) is given the admin cookie `membrane_jwt_<8 hex>` (HttpOnly, SameSite=Strict, 7 days); `POST /ui/login {"token": "<jwt>"}` turns any token into the same cookie.
+**The opencode TUI** takes its token from the environment, as on the Python seat: `OPENCODE_SERVER_PASSWORD="$(cat <seat_data_dir>/admin.token)" opencode attach http://127.0.0.1:<port>` (Basic password = the token), and the generated config's `apiKey` reads `{env:MEMBRANE_JWT_TOKEN}`.
+**The chat turn**: the `claude` CLI the turn starts calls the seat's `/mcp`. Its MCP config (`chat_turn.c1f`, `mcp_json`) carries `"headers": {"Authorization": "Bearer ${MEMBRANE_ADMIN_TOKEN}"}` and the run's `env_from` hands the launcher's value to the child's environment: the token is never in `argv` (a process listing shows `argv`)
 and never in a row. A turn whose CLI sends a wrong token fails visibly: the `401` is in the answer.
 
 **The sign-in screen** (c1f, not JS). A page opened from another machine (a LAN address, a remote name, a loopback `Host` the door does not allow) gets no cookie, so `GET /ui/fieldvm` answers 401; `boot.js` then fetches `/ui/www/login_view.c1f` and runs ONLY that pack (`apps/barest.c1f/login_view.c1f`, imports `dom` and `fetch`). It is the one pack of the app folder the door serves without a token (door.c1f `Request.login_pack`; every other pack is 404 there) and `/ui/fieldvm` never lists it for a signed-in page. The card takes the token in a password box, `POST /ui/login`s it as JSON, and on a 2xx reloads: the cookie is the seat's (HttpOnly, SameSite=Strict as above). A wrong token shows the seat's own reason beside the form; no answer shows "The seat did not answer". The page keeps nothing: no localStorage, the box and the pack's entity are cleared at submit, the token is in no URL. The shell's bar shows **Sign out** (`POST /ui/logout`, then a reload) only when `/ui/conf` says who the page is.
 
 **The claude turn's credential (the release gate).** The turn's CLI answers with the Anthropic API key of the seat's environment variable `ANTHROPIC_API_KEY` by default; `--fact chat_auth=login` opts into the CLI's own login.
-The key travels like the owner token: the run's `env_from` hands the launcher's value to the child's environment, so it is never in `argv`, a property, a row, the journal, a log or a reply, and the Command driver masks it
+The key travels like the admin token: the run's `env_from` hands the launcher's value to the child's environment, so it is never in `argv`, a property, a row, the journal, a log or a reply, and the Command driver masks it
 (`***`) in anything the child prints (only values of 16+ characters: a shorter one is no credential; 16 is the operator-approved minimum). With no key and no opt-in the turn is refused with the way to set it (docs/cliffvm.md, "The claude turn's auth").
 
-**Other people, and who is the owner (w34).** `cliffvm token mint --sub alice --name Alice --ttl 30d --secret-file <seat>/door.secret` prints a token (ttl required, no default; `12h`, `15m`, `45s` or seconds work too). The first verified request of a token makes `Person:<sub>` (sub, name, first_seen, last_seen). The owner is the person whose sub is the fact `operator` (default `owner`), the sub of the boot's owner token; only the owner's calls to `/mcp` `entity_write` (packs included) and `run_cliff` run, any other person gets `403` (`for the owner`); reads are open to every verified person.
+**More tokens.** `cliffvm token mint --sub ha --name "Home Assistant" --ttl 30d --secret-file <seat>/door.secret` prints a token (ttl required, no default; `12h`, `15m`, `45s` or seconds work too). `--sub` and `--name` are labels: the token is the admin, like every valid token. A request with a token whose `sub` is `bob`, `ha` or anything else is the admin; a request with no token is `401`.
 
 ## The Python seat: the seat token, and JWT mode
 
@@ -38,10 +42,10 @@ over Wi-Fi. Two levels protect them:
 - **The seat token (only when JWT mode is off: `MEMBRANE_JWT=0`).** Every request,
   reads included, needs it, localhost too: an address is not a credential. The one
   open read on the Ollama port is `GET /api/tags`. The page's cookie is minted only
-  on this machine (in JWT mode it carries an owner JWT).
+  on this machine (in JWT mode it carries an admin JWT).
 - **JWT mode (on by default).** Every request on both ports, reads included, needs
   a signed token, and the token says who is talking. A caller on this machine
-  needs a token too; the page served to this machine gets an owner cookie. Use it to
+  needs a token too; the page served to this machine gets an admin cookie. Use it to
   put a seat behind an ingress or on a network other people share.
 
 ## The seat token

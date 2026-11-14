@@ -30,7 +30,7 @@ The store is `c_field(k, body)` with `body = {cls, props}` and indexes on `(cls,
 | shape field | feed | where |
 |---|---|---|
 | node `id`, `kind` | the eid; `cls` (first of `parents`) | `c_field.k`, `entity.c1f:10` |
-| node `label` | `Help:<t>` its topic; `Goal.display` (`banner.c1f` Goal block); `Banner:<owner>:<chat>` its chat; a Message/SemText its first sentence (`SemText.sentences`, `semtext.c1f:19`); otherwise the eid | getters |
+| node `label` | `Help:<t>` its topic; `Goal.display` (`banner.c1f` Goal block); `Banner:<admin>:<chat>` its chat; a Message/SemText its first sentence (`SemText.sentences`, `semtext.c1f:19`); otherwise the eid | getters |
 | node `mass` | no old accretion exists. Honest stand-ins: property count, number of inbound edges, or length of `text`. Not decided (decision 3) | getter |
 | `contest` | none; send 0 | |
 | `v` readings axes | `updated` (VM-provided, `entity.c1f:7-9`), `degree` (edge count), `depth` (colons in the eid), `age`; NO principal components and no `kind:<k>` directions: they need the 1024-float states, which are NOT converted (`docs/migration-design.md:187`, "recall tables, vectors: read in place") | getters |
@@ -39,7 +39,7 @@ The store is `c_field(k, body)` with `body = {cls, props}` and indexes on `(cls,
 | edges `rel` | the old relations, read in place: `c_relations` (`door_decisions.c1f:142`: `json_extract(body,'$.d.subj'/'obj'/'rel')`) | `sql()` |
 | `near` / `evidence` on a card | evidence: the Messages and SemText sentences that mention the entity (`mentions.c1f`, `item-chat` already does the lookup, `door_decisions.c1f:14`); near: other entities sharing mention edges. Cosine `sim` has no source until a native recall (decision 6) | getters + `sql()` |
 | Help | one node per `Help:<topic>` (`help.c1f`, nine topics), edges to the classes a page names; cheap, tiny, a good first slice | `help.c1f` |
-| Banner | `Banner:<owner>:<chat>` (`banner.c1f:3-12`): one node per person per chat, edge to its chat and to the entities its `ask_eids` (`banner.c1f:75`) recalled | getters |
+| Banner | `Banner:<admin>:<chat>` (`banner.c1f:3-12`): one node per person per chat, edge to its chat and to the entities its `ask_eids` (`banner.c1f:75`) recalled | getters |
 | Notes | there is no `Note` class in any pack: `Memory:seat.learn` writes a note EVENT through a driver (`memory.c1f:8-24`), so notes live in the old/driver store, not as entities. Leave out until they are entities (decision 5) | |
 | SemText / Span | the text is a child of its owner; `Span` is virtual, never stored (`semtext.c1f:28-34`): never draw spans | |
 

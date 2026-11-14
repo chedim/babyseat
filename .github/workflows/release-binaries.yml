@@ -88,7 +88,7 @@ jobs:
             otool -l "dist/$VER/bin/cliffvm" | grep -A3 LC_BUILD_VERSION || true
           fi
 
-      - name: "smoke test (the folder alone, --version, serve --port 0, /global/health with the owner token)"
+      - name: "smoke test (the folder alone, --version, serve --port 0, /global/health with the admin token)"
         run: ${{ matrix.smoke }} sh scripts/dist/smoke.sh "dist/$VER"
 
       - name: the wheel payload (the dist folder the wrapper packages as membrane/dist/)

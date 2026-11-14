@@ -7,8 +7,8 @@ IMPORT door 1
 -- PORTED: POST /membrane/feedback. A reply's thumbs press is a WRITE on the entity `Feedback:<message id>` ({kind, why, message,
 --   session, by, at, name, summary}); a second press replaces the first (same entity). The eid is the c1f convention
 --   (`<Class>:<key>`, like `Goal:<slug>`); the Python `membrane::Feedback:feedback:<id>` namespace is gone and nothing read it.
---   Not carried over: the pause refusal of writes (reads the presence entity: the state family's) and the owner-only check
---   (the door has no owner check yet, see door_models).
+--   Not carried over: the pause refusal of writes (reads the presence entity: the state family's) and an admin-only check
+--   (there is none: every verified token is the admin).
 -- DEGRADED (w46): GET /membrane/self/recent answers `{lines: []}`, the released answer of a seat with no self record (server.py:4577); nothing here keeps one.
 -- NOT PORTED (each answers 501 and names why; the boundary is in docs/python-to-c1f.md): the character sheet and the record's
 --   feed (self_loop's file, energy.report and the supervisor: live Python state), the toybox (toys are files with locks, clocks

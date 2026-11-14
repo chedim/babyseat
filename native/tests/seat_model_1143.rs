@@ -1,7 +1,7 @@
 //! The SEAT-WIDE model (#1143): the page's own writes that set the model the seat talks with (the first-run "Which model?" form and the gear window
 //! POST `{"loops": <model>}` to `/membrane/options`; v0.7.53 `ui/index.html:100`, `ui/home.js:892`; the minds' route `/membrane/models` takes the same
-//! keys, `server.py:4923`), through a strict-door seat as the owner, with a fake `claude` that records its argv. The model that answers a message with
-//! no pick of its own is that setting; a session's own pick wins; only the owner writes it; a model the seat cannot run is refused and the old one
+//! keys, `server.py:4923`), through a strict-door seat as the admin, with a fake `claude` that records its argv. The model that answers a message with
+//! no pick of its own is that setting; a session's own pick wins; any valid token (the admin) writes it; a model the seat cannot run is refused and the old one
 //! stays; it survives a restart on the same store. There is NEVER a real `claude` here. Every wait has a timeout and the child is always reaped.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
@@ -76,7 +76,7 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
         std::thread::sleep(Duration::from_millis(100));
     }
 }
-fn owner_token(dir: &Dir) -> String { wait("the owner token", || std::fs::read_to_string(dir.0.join("owner.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())) }
+fn admin_token(dir: &Dir) -> String { wait("the admin token", || std::fs::read_to_string(dir.0.join("admin.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())) }
 fn person_token(dir: &Dir, sub: &str) -> String {
     let secret = wait("the secret", || std::fs::read_to_string(dir.0.join("door.secret")).ok().filter(|t| !t.trim().is_empty()));
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
@@ -124,7 +124,7 @@ fn minds(port: u16, tok: &str) -> J { let (st, b) = http(port, "GET", "/membrane
 fn the_pages_post_of_the_seat_model_changes_both_readbacks_and_the_next_turn_with_no_pick() {
     let dir = setup("seatmodel-set");
     let (_run, port) = launch(&dir, &FACTS);
-    let tok = owner_token(&dir);
+    let tok = admin_token(&dir);
     assert_eq!(options(port, &tok)["background"]["loops"], "claude");
     let sid = new_session(port, &tok);
     assert_eq!(say(port, &tok, &sid, "turn one", None), 204);
@@ -156,7 +156,7 @@ fn the_pages_post_of_the_seat_model_changes_both_readbacks_and_the_next_turn_wit
 fn a_sessions_own_pick_still_wins_over_the_seat_setting() {
     let dir = setup("seatmodel-pick");
     let (_run, port) = launch(&dir, &FACTS);
-    let tok = owner_token(&dir);
+    let tok = admin_token(&dir);
     assert_eq!(http(port, "POST", "/membrane/options", &tok, &json!({"loops": "claude-agent:sonnet"}).to_string()).0, 200);
     let sid = new_session(port, &tok);
     // a message that names opus: opus, not the seat's sonnet
@@ -175,18 +175,22 @@ fn a_sessions_own_pick_still_wins_over_the_seat_setting() {
 }
 
 #[test]
-fn only_the_owner_sets_the_seat_model_a_person_is_refused_with_a_403_and_nothing_changes() {
-    let dir = setup("seatmodel-owner");
+fn any_valid_token_sets_the_seat_model_it_is_the_admin_and_no_token_is_refused_and_changes_nothing() {
+    let dir = setup("seatmodel-admin");
     let (_run, port) = launch(&dir, &FACTS);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     let ann = person_token(&dir, "ann");
-    assert_eq!(http(port, "GET", "/membrane/options", &ann, "").0, 200, "a person reads it");
+    assert_eq!(http(port, "GET", "/membrane/options", &ann, "").0, 200, "a token with sub ann reads it");
     for path in ["/membrane/options", "/membrane/models"] {
-        let (st, b) = http(port, "POST", path, &ann, &json!({"loops": "claude-agent:sonnet"}).to_string());
-        assert_eq!((st, &b), (403, &json!({"type": "error", "error": {"message": "for the owner"}})), "{path}: {b}");
+        let (st, b) = http(port, "POST", path, "", &json!({"loops": "claude-agent:sonnet"}).to_string());
+        assert_eq!(st, 401, "{path}: no token: {b}");
     }
     assert_eq!(options(port, &own)["background"]["loops"], "claude", "nothing changed");
     assert_eq!(minds(port, &own)["loops"], "claude");
+    let (st, b) = http(port, "POST", "/membrane/options", &ann, &json!({"loops": "claude-agent:sonnet"}).to_string());
+    assert_eq!(st, 200, "ann is the admin: {b}");
+    assert_eq!(options(port, &own)["background"]["loops"], "claude-agent:sonnet");
+    assert_eq!(http(port, "POST", "/membrane/options", &own, &json!({"loops": "claude"}).to_string()).0, 200);
     let sid = new_session(port, &own);
     assert_eq!(say(port, &own, &sid, "after refusal", None), 204);
     assert_eq!(model_of(&dir, "after refusal"), None);
@@ -196,7 +200,7 @@ fn only_the_owner_sets_the_seat_model_a_person_is_refused_with_a_403_and_nothing
 fn a_model_the_seat_does_not_know_is_refused_with_the_reason_and_the_old_setting_stays() {
     let dir = setup("seatmodel-unknown");
     let (_run, port) = launch(&dir, &FACTS);
-    let tok = owner_token(&dir);
+    let tok = admin_token(&dir);
     assert_eq!(http(port, "POST", "/membrane/options", &tok, &json!({"loops": "claude-agent:sonnet"}).to_string()).0, 200);
     for (path, body, needle) in [("/membrane/options", json!({"loops": "qwen3:8b"}), "qwen3:8b"), ("/membrane/models", json!({"loops": "no-such"}), "no-such"),
                                  ("/membrane/options", json!({"loops": "has a space"}), "not a model name"), ("/membrane/options", json!({"loops": 7}), "not a model name")] {
@@ -214,13 +218,13 @@ fn a_model_the_seat_does_not_know_is_refused_with_the_reason_and_the_old_setting
 fn the_seat_model_survives_a_restart_on_the_same_store() {
     let dir = setup("seatmodel-restart");
     let (run, port) = launch(&dir, &FACTS);
-    let tok = owner_token(&dir);
+    let tok = admin_token(&dir);
     assert_eq!(http(port, "POST", "/membrane/options", &tok, &json!({"loops": "claude-agent:sonnet"}).to_string()).0, 200);
     assert_eq!(options(port, &tok)["background"]["loops"], "claude-agent:sonnet");
     drop(run);   // the child is killed and reaped: the store is what is left
     // the launcher still names `claude` (its minds fact is the FIRST boot's); the saved pick is the later word
     let (_run2, port2) = launch(&dir, &FACTS);
-    let tok = owner_token(&dir);
+    let tok = admin_token(&dir);
     assert_eq!(options(port2, &tok)["background"]["loops"], "claude-agent:sonnet", "the options read it back");
     assert_eq!(minds(port2, &tok)["loops"], "claude-agent:sonnet");
     let sid = new_session(port2, &tok);

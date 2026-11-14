@@ -41,7 +41,7 @@ pub mod cli;
 pub mod http;
 pub mod jwt;
 #[cfg(unix)]
-pub mod owner;
+pub mod admin;
 #[cfg(feature = "store")]
 pub mod fetch;
 #[cfg(feature = "store")]

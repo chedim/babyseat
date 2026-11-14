@@ -21,7 +21,7 @@ VIRTUAL SesBus
 -- (the turn's text and tool parts). The ids follow the Python seat's: `<prefix>_` and 24 digits, derived from the message (its milliseconds, its request number padded to 8 digits,
 -- three digits for what it is): a session `ses_<ms><n>000`; a message's user row `msg_<ms><n>001`, its assistant row `...002`, the user's text part `prt_...010`, text part k of the answer
 -- `prt_...1kk`, tool part j `prt_...2jj` (k, j < 100). The id of a message is its entity's: `membrane::Chat:session:<sid>:message:<ms>-<n>` (n padded to 8 digits; docs/chat-keys.md), so the reverse needs no table.
--- No security (the barest seat): one operator, no `owner`, no per-person chat. What is not here is listed in docs/release-parity.md section 1.2.
+-- No security (the barest seat): one admin, no per-person chat. What is not here is listed in docs/release-parity.md section 1.2.
 
 -- ---- which route ----------------------------------------------------------------------------------------------------------------------------
 Request.ss_on getter: this.route == '/session' or startswith(this.route, '/session/') or this.route == '/event' or this.route == '/global/event'
