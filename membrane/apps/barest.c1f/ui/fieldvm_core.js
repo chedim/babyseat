@@ -28,7 +28,8 @@ export class Field {
         }
     }
     /**
-     * What the field did since the last drain: {"writes": [{eid, prop, new, writer} | {eid, born}], "calls": [...]}.
+     * What the field did since the last drain: {"writes": [{eid, prop, new, writer} | {eid, born}], "calls": [...], "subs": [{eid, props}], "unsubs": [{eid, props}], "due": number | null}.
+     * The notices are the graph link's (docs/graph-link.md, 15b): deltas since the last drain.
      * @returns {string}
      */
     drain() {
@@ -41,6 +42,98 @@ export class Field {
             return getStringFromWasm0(ret[0], ret[1]);
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * The owner says the entity is gone: its readers read `absent`.
+     * @param {string} eid
+     * @param {number} rev
+     * @param {number} now
+     */
+    feed_gone(eid, rev, now) {
+        const val2 = +rev;
+        const val3 = +now;
+        const ptr0 = passStringToWasm0(eid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.field_feed_gone(this.__wbg_ptr, ptr0, len0, val2, val3);
+    }
+    /**
+     * The owner refuses to send it: its readers read `refused: <reason>`.
+     * @param {string} eid
+     * @param {string} reason
+     * @param {number} rev
+     * @param {number} now
+     */
+    feed_refused(eid, reason, rev, now) {
+        const val3 = +rev;
+        const val4 = +now;
+        let ptr0, len0, ptr1, len1;
+        try {
+            ptr0 = passStringToWasm0(eid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passStringToWasm0(reason, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len1 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+            throw e;
+        }
+        wasm.field_feed_refused(this.__wbg_ptr, ptr0, len0, ptr1, len1, val3, val4);
+    }
+    /**
+     * A foreign entity's value from its owner: one prop, with the owner's opaque revision.
+     * @param {string} eid
+     * @param {string} prop
+     * @param {string} value_json
+     * @param {number} rev
+     * @param {number} now
+     */
+    feed_val(eid, prop, value_json, rev, now) {
+        const val4 = +rev;
+        const val5 = +now;
+        let ptr0, len0, ptr1, len1, ptr2, len2;
+        try {
+            ptr0 = passStringToWasm0(eid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passStringToWasm0(prop, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len1 = WASM_VECTOR_LEN;
+            ptr2 = passStringToWasm0(value_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len2 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+            throw e;
+        }
+        const ret = wasm.field_feed_val(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, val4, val5);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Several props of one foreign entity in one round (a JSON object; a delta).
+     * @param {string} eid
+     * @param {string} props_json
+     * @param {number} rev
+     * @param {number} now
+     */
+    feed_vals(eid, props_json, rev, now) {
+        const val3 = +rev;
+        const val4 = +now;
+        let ptr0, len0, ptr1, len1;
+        try {
+            ptr0 = passStringToWasm0(eid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passStringToWasm0(props_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len1 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+            throw e;
+        }
+        const ret = wasm.field_feed_vals(this.__wbg_ptr, ptr0, len0, ptr1, len1, val3, val4);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
         }
     }
     /**
@@ -61,6 +154,12 @@ export class Field {
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
+    }
+    /**
+     * A reconnect: the next drain announces every subscription again.
+     */
+    link_reset() {
+        wasm.field_link_reset(this.__wbg_ptr);
     }
     /**
      * An entity into the mirror (a reload of a known one counts its changed fields as written).
@@ -121,7 +220,7 @@ export class Field {
         wasm.field_rebuild(this.__wbg_ptr, now);
     }
     /**
-     * An entity leaves (a page element taken out): what read or referenced it recalculates.
+     * An entity leaves (a page element taken out): what read or referenced it recalculates. A `Vm:<ns>` takes every `<ns>::` entity with it.
      * @param {string} eid
      * @param {number} now
      */
@@ -130,6 +229,31 @@ export class Field {
         const ptr0 = passStringToWasm0(eid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         wasm.field_remove(this.__wbg_ptr, ptr0, len0, val2);
+    }
+    /**
+     * The revisions held per replica: [{eid, rev}].
+     * @returns {string}
+     */
+    replicas() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.field_replicas(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * The graph link: this VM's own namespace (`Link:page.ns`). Ids with another `ns::` prefix are foreign.
+     * @param {string} ns
+     */
+    set_ns(ns) {
+        const ptr0 = passStringToWasm0(ns, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.field_set_ns(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Load or replace a named `.c1f` pack. A parse error or a missing import is returned as the error text.
