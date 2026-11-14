@@ -2,6 +2,7 @@
 //! and the chat (packs/chat.c1f, packs/chat_turn.c1f). Every wait has a timeout and the child is always reaped. There is NEVER a real
 //! `claude` here: the turn's binary is a fake script the test writes (a Boot fact names it), so no model, no login, no network.
 #![cfg(feature = "bin")]
+mod common;
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -41,7 +42,7 @@ fn start_env(tag: &str, names: &[&str], extra: &[&str], env: &[(&str, &str)]) ->
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
     let run = Run { child, _lines: rx, dir };
-    let line = run._lines.recv_timeout(Duration::from_secs(30)).expect("the door came up (a line on stdout)");
+    let line = run._lines.recv_timeout(common::DOOR_UP).expect("the door came up (a line on stdout)");
     let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap_or_else(|_| panic!("a port in {line:?}"));
     (run, port)
 }
@@ -54,7 +55,7 @@ thread_local! {
 /// one HTTP request on its own connection; -> (status, body text)
 fn http(port: u16, method: &str, path: &str, body: &str) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+    s.set_read_timeout(Some(common::IO)).unwrap();
     let auth = BEARER.with(|b| b.borrow().as_ref().map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default());
     let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{auth}\r\n{body}", body.len());
     s.write_all(raw.as_bytes()).unwrap();
@@ -80,14 +81,7 @@ fn call(port: u16, tool: &str, args: J) -> (String, bool) {
 }
 
 /// poll `f` until it gives Some (a hard timeout, then a panic naming what was last seen)
-fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
-    let t = Instant::now();
-    loop {
-        if let Some(v) = f() { return v; }
-        assert!(t.elapsed() < Duration::from_secs(90), "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
+fn wait<T>(what: &str, f: impl FnMut() -> Option<T>) -> T { common::wait_for(what, common::WAIT, f) }
 
 fn terminate(run: &mut Run) -> bool {
     unsafe { libc::kill(run.child.id() as i32, libc::SIGTERM); }
@@ -235,7 +229,7 @@ fn launch_env(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str], env:
     let log = dir.join("seat.out");
     std::thread::spawn(move || { let mut f = std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap(); for l in BufReader::new(out).lines().map_while(Result::ok) { let _ = writeln!(f, "{l}"); if tx.send(l).is_err() { break; } } });
     let run = Run { child, _lines: rx, dir: dir.to_path_buf() };
-    let line = run._lines.recv_timeout(Duration::from_secs(30)).expect("the door came up");
+    let line = run._lines.recv_timeout(common::DOOR_UP).expect("the door came up");
     let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap();
     (run, port)
 }
@@ -1400,21 +1394,34 @@ fn a_chunks_birth_costs_the_running_message_not_every_finished_one() {
 /// a CLI that streams `n` partial lines, 3 ms apart (the chunk-cost test's script)
 fn chatty(n: u32) -> String { CHATTY.replace("range(150)", &format!("range({n})")).replace("time.sleep(0.02)", "time.sleep(0.003)") }
 
-/// The work a chunk's birth causes, by the eval accounting: the steps of every getter and setter of the classes ChatMessage and Chunk, per chunk, over one whole turn.
+/// The work a chunk's birth causes, by the eval accounting: the steps of every getter and setter of the classes ChatMessage and Chunk, per streamed line (`n` lines, one
+/// chunk each), over one whole turn. The divisor is the `n` the script streams, not the count of `Chunk.sevs` getter runs: under load the CLI's lines arrive batched into fewer,
+/// fatter reads and that getter runs a different number of times, so "per getter run" moved by 10% with the machine's load while the work per line stayed within 3%.
 fn steps_per_chunk(tag: &str, n: u32) -> f64 {
     let stats = shipped(&["stats.c1f"]);
     let (mut run, port, _dir) = fake_seat_script(tag, &["--fact", "eval_stats_window_s=1"], &[("stats.c1f", stats[0].1.as_str())], &chatty(n));
     let id = send(port, "count the work");
     wait("the turn", || { let v = view(port, &id); (v["state"] == "done" || v["state"] == "error").then_some(()) });
-    let rows = wait("a published window with the chunk getters", || {
+    // `top_total` is the lifetime table as of the LAST PUBLISHED window (every 1 s), so a read right after the turn may hold only part of it (the end of the turn's work not yet in, and
+    // under load the cut falls anywhere). The turn is over: wait until the table is QUIET, that is two snapshots published at different times (`at`) that hold the same numbers.
+    let snap = |(): ()| -> Option<(f64, u64, u64)> {
         let (t, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "top_total"}));
-        let v: J = serde_json::from_str(&t).ok()?;
-        v.as_array()?.iter().any(|r| r["prop"] == "sevs" && r["class"] == "Chunk" && r["calls"].as_u64().unwrap_or(0) >= (n as u64 * 9 / 10)).then_some(v)
+        let rows: J = serde_json::from_str(&t).ok()?;
+        let (at, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "at"}));
+        let births = rows.as_array()?.iter().filter(|r| r["class"] == "Chunk" && r["prop"] == "sevs").map(|r| r["calls"].as_u64().unwrap_or(0)).sum::<u64>();
+        let steps = rows.as_array()?.iter().filter(|r| (r["class"] == "ChatMessage" || r["class"] == "Chunk") && r["pack"] == "chat_turn").map(|r| r["steps"].as_u64().unwrap_or(0)).sum::<u64>();
+        (births >= n as u64 * 9 / 10).then_some((at.trim().parse::<f64>().ok()?, births, steps))
+    };
+    let mut last = wait("a published window with the chunk getters", || snap(()));
+    let (births, steps) = wait("a quiet table (two windows with the same numbers)", || {
+        std::thread::sleep(Duration::from_millis(300));
+        let now = snap(())?;
+        let quiet = now.0 > last.0 && now.1 == last.1 && now.2 == last.2;
+        if now.0 > last.0 { last = now; }
+        quiet.then_some((now.1, now.2))
     });
-    let births = rows.as_array().unwrap().iter().filter(|r| r["class"] == "Chunk" && r["prop"] == "sevs").map(|r| r["calls"].as_u64().unwrap()).sum::<u64>();
-    let steps: u64 = rows.as_array().unwrap().iter().filter(|r| (r["class"] == "ChatMessage" || r["class"] == "Chunk") && r["pack"] == "chat_turn").map(|r| r["steps"].as_u64().unwrap()).sum();
     assert!(terminate(&mut run));
-    eprintln!("{tag}: {births} chunks, {steps} steps"); steps as f64 / births.max(1) as f64
+    eprintln!("{tag}: {births} chunks, {steps} steps"); steps as f64 / n as f64
 }
 
 /// The work per chunk must not grow with the chunks already there (#1143, w28): the message's `chunks` getter scanned every live chunk (and built a dict and a sort of them)

@@ -3,6 +3,7 @@
 //! the page writes to. The packs and the app are the SHIPPED folders (not copies); the store and the fake `claude` live in a temp folder.
 //! There is NEVER a real `claude` here, only a fake script; every wait has a timeout and the child is always reaped; the port is ephemeral.
 #![cfg(feature = "bin")]
+mod common;
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -66,7 +67,7 @@ fn seat_at(dir: std::path::PathBuf, with_fake: bool, facts: &[&str]) -> (Run, u1
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
     let run = Run { child, _lines: rx, dir };
-    let line = run._lines.recv_timeout(Duration::from_secs(60)).expect("the door came up (a line on stdout)");
+    let line = run._lines.recv_timeout(common::DOOR_UP).expect("the door came up (a line on stdout)");
     let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap_or_else(|_| panic!("a port in {line:?}"));
     (run, port)
 }
@@ -74,7 +75,7 @@ fn seat_at(dir: std::path::PathBuf, with_fake: bool, facts: &[&str]) -> (Run, u1
 /// one HTTP request on its own connection; -> (status, content-type, body text)
 fn http(port: u16, method: &str, path: &str, body: &str) -> (u16, String, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    s.set_read_timeout(Some(common::IO)).unwrap();
     let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
     s.write_all(raw.as_bytes()).unwrap();
     let mut out = vec![];
@@ -96,14 +97,7 @@ fn call(port: u16, tool: &str, args: J) -> (String, bool) {
 /// the LIVE Request entities: a Request is VIRTUAL (RAM only, not a row), so `entity_query` never lists it; a block run by `run_cliff` reads the engine's `instances`
 fn clifflet(port: u16, code: &str) -> String { let (t, e) = call(port, "run_cliff", json!({"code": code})); assert!(!e, "{t}"); t }
 
-fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
-    let t = Instant::now();
-    loop {
-        if let Some(v) = f() { return v; }
-        assert!(t.elapsed() < Duration::from_secs(40), "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
+fn wait<T>(what: &str, f: impl FnMut() -> Option<T>) -> T { common::wait_for(what, common::WAIT, f) }
 
 fn terminate(run: &mut Run) -> bool {
     unsafe { libc::kill(run.child.id() as i32, libc::SIGTERM); }

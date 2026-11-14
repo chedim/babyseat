@@ -3,6 +3,7 @@
 //! evaluator here, so the help cannot lie. A fence ```c1f is a pack that must load; ```c1f-error is a pack the loader must refuse.
 //! Directives in the block's `--` comments: `-- given <eid> <json props>`, `-- write <eid>.<prop> = <json>`, `-- reads <eid>.<prop> = <json>`
 //! (checked in order, after the pack loaded), `-- error: <text the loader's message holds>`.
+mod common;
 use membrane_vm::host::{Host, Options};
 use serde_json::Value as J;
 use std::path::PathBuf;
@@ -160,14 +161,15 @@ fn run_live(b: &Block, at: &str) {
             let val: J = serde_json::from_str(v).unwrap();
             if !h.snapshot().contains_key(&e) { h.born(&e, e.split(':').next().unwrap(), Default::default(), "person"); }   // a write makes the entity, as the door does
             h.write(&e, &p, val.clone(), "person");
-            if p == "run" {
+            if p == "run" || p == "request" {   // a write that starts an effect (a command, a query, an http call): the receipt lands on `<prop>_result` later, so wait for it by its id
+                let res = format!("{p}_result");
                 let id = val.get("id").cloned().unwrap_or(J::Null);
                 let t0 = std::time::Instant::now();
                 loop {
                     h.pump();
-                    let got = h.get(&e, "run_result");
+                    let got = h.get(&e, &res);
                     if got.get("id") == Some(&id) { break; }
-                    assert!(t0.elapsed() < std::time::Duration::from_secs(20), "{at}: no receipt for run id {id} on {e} (the example does not run); run_result is {got}");
+                    assert!(t0.elapsed() < common::WAIT, "{at}: no receipt for run id {id} on {e} (the example does not run); {res} is {got}");
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
             } else { h.pump(); }

@@ -3,6 +3,7 @@
 //! There is NEVER a real `claude` here: the turn's binary is a fake script (a Boot fact names it). The answers are compared in SHAPE with the
 //! recorded answers of the released Python seat (tests/golden/session/*.json, scripts/golden_session.py): `shape_misses`.
 #![cfg(feature = "bin")]
+mod common;
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -55,7 +56,7 @@ fn seat_facts(tag: &str, script: &str, strict: bool, facts: &[&str]) -> (Run, u1
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
     let run = Run { child, _lines: rx, dir: dir.clone() };
-    let line = run._lines.recv_timeout(Duration::from_secs(30)).expect("the door came up (a line on stdout)");
+    let line = run._lines.recv_timeout(common::DOOR_UP).expect("the door came up (a line on stdout)");
     let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap_or_else(|_| panic!("a port in {line:?}"));
     (run, port, dir)
 }
@@ -69,7 +70,7 @@ fn http(port: u16, method: &str, path: &str, body: &str) -> (u16, String) {
 }
 fn http_once(port: u16, method: &str, path: &str, body: &str) -> Option<(u16, String)> {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+    s.set_read_timeout(Some(common::IO)).unwrap();
     let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
     s.write_all(raw.as_bytes()).unwrap();
     let mut out = vec![];
@@ -85,14 +86,7 @@ fn api(port: u16, method: &str, path: &str, body: J) -> (u16, J) {
     (st, if t.trim().is_empty() { J::Null } else { serde_json::from_str(&t).unwrap_or_else(|e| panic!("{e}: {t}")) })
 }
 
-fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
-    let t = Instant::now();
-    loop {
-        if let Some(v) = f() { return v; }
-        assert!(t.elapsed() < Duration::from_secs(90), "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
+fn wait<T>(what: &str, f: impl FnMut() -> Option<T>) -> T { common::wait_for(what, common::WAIT, f) }
 
 // ---- the shape comparer -------------------------------------------------------------------------------------------------------------------------
 /// What the answer lacks against a recorded fixture: every key of the fixture must be in the answer with the same JSON type (a `null` in the fixture
@@ -541,7 +535,7 @@ fn abort_stops_the_running_turn_which_ends_as_an_aborted_error_and_idle_on_the_s
 // ---- a seat WITH a secret (the strict door) ------------------------------------------------------------------------------------------------
 fn http_tok(port: u16, method: &str, path: &str, token: Option<&str>, body: &str) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+    s.set_read_timeout(Some(common::IO)).unwrap();
     let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
     s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{auth}\r\n{body}", body.len()).as_bytes()).unwrap();
     let mut out = vec![];
