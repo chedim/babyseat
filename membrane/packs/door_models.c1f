@@ -23,7 +23,8 @@ Request.m_ask on-setter models-ask:
 -- ---- GET /v1/models: the screened tags, the sentinel lane, the autoselect lanes (only with a router), the cloud rungs
 Request.m_router getter: ([b.router_on for b in instances('Boot')] or [False])[0] == True
 Request.m_tags getter: [m for m in instances('Model') if m.listed == True and m.rung != True and m.chat_ok == True]
-Request.m_rungs getter: [m for m in instances('Model') if m.rung == True and m.listed == True] if this.m_router else []
+-- a claude-agent rung is the model this seat RUNS (the chat's turn is the claude CLI): listed with or without a router (the router's other rungs are the router's)
+Request.m_rungs getter: [m for m in instances('Model') if m.rung == True and m.listed == True and (this.m_router or m.backend == 'claude-agent')]
 Request.m_lanes getter: ['autoselect', 'autoselect-local'] if this.m_router else []
 Request.d_tags getter: FOR m IN this.m_tags: {'id': m.name, 'object': 'model', 'owned_by': 'membrane->ollama'}
 Request.d_lanes getter: FOR l IN this.m_lanes: {'id': l, 'object': 'model', 'owned_by': 'membrane-router'}

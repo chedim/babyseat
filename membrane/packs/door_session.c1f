@@ -65,7 +65,7 @@ ChatSession.sid getter: replace(this.eid, 'membrane::Chat:session:', '')
 ChatSession.fact_cwd getter: ([b.seat_cwd for b in instances('Boot') if b.seat_cwd != None] or [''])[0]
 ChatSession.fact_project getter: ([b.seat_project for b in instances('Boot') if b.seat_project != None] or [''])[0]
 ChatSession.fact_version getter: ([b.seat_version for b in instances('Boot') if b.seat_version != None] or [''])[0]
-ChatSession.view getter: {'id': this.sid, 'projectID': this.fact_project, 'directory': this.fact_cwd, 'path': tail(this.fact_cwd, max(0, len(this.fact_cwd) - 1)), 'slug': 'session', 'title': this.stitle, 'version': this.fact_version, 'agent': 'build', 'model': {'id': 'claude', 'providerID': 'membrane', 'variant': 'default'}, 'cost': 0, 'tokens': {'total': 0, 'input': 0, 'output': 0, 'reasoning': 0, 'cache': {'read': 0, 'write': 0}}, 'summary': {'additions': 0, 'deletions': 0, 'files': 0}, 'time': {'created': this.born, 'updated': this.upd}}
+ChatSession.view getter: {'id': this.sid, 'projectID': this.fact_project, 'directory': this.fact_cwd, 'path': tail(this.fact_cwd, max(0, len(this.fact_cwd) - 1)), 'slug': 'session', 'title': this.stitle, 'version': this.fact_version, 'agent': 'build', 'model': {'id': this.smodel or this.seat_model, 'providerID': 'membrane', 'variant': 'default'}, 'cost': 0, 'tokens': {'total': 0, 'input': 0, 'output': 0, 'reasoning': 0, 'cache': {'read': 0, 'write': 0}}, 'summary': {'additions': 0, 'deletions': 0, 'files': 0}, 'time': {'created': this.born, 'updated': this.upd}}
 
 -- the sessions are lazy (a store row, loaded when read): the list asks the store for the keys, then reads each by eid
 Request.ss_rows getter: sql('SELECT k, json_extract(body, \'$.props.born\') AS born FROM c_field WHERE cls = \'Chat\' AND k LIKE ? AND k NOT LIKE ?', 'membrane::Chat:session:%', 'membrane::Chat:session:%:%') if this.ss_route == 'root' and this.method == 'GET' else []
@@ -100,9 +100,17 @@ Request.ss_rename on-setter session-rename:
   WHEN this.ss_rename:
     membrane::Chat:session[this.ss_sid].stitle = this.ss_new_title
     membrane::Chat:session[this.ss_sid].upd = this.ms
+-- PATCH {model: {modelID, providerID}}: the session's model (the released handler's "THE MODEL'S PATCH"); the provider is always `membrane` here, an empty name changes nothing
+Request.ss_new_model getter: strip(str(prop(prop(this.jbody, 'model'), 'modelID') or prop(prop(this.jbody, 'model'), 'id') or '')) if this.ss_route == 'one' and this.method == 'PATCH' else ''
+Request.ss_remodel getter: this.ss_new_model != '' and this.ss_view != None and prop(prop(this.ss_view, 'model'), 'id') != this.ss_new_model
+Request.ss_remodel on-setter session-remodel:
+  WHEN this.ss_remodel:
+    membrane::Chat:session[this.ss_sid].smodel = this.ss_new_model
+    membrane::Chat:session[this.ss_sid].upd = this.ms
 Request.ss_patch_reply getter:
   WHEN this.ss_view == None: this.ss_missing
   ELSE WHEN this.ss_new_title != '' and prop(this.ss_view, 'title') != this.ss_new_title: None
+  ELSE WHEN this.ss_remodel: None
   ELSE: {'status': 200, 'body': this.ss_view}
 
 -- DELETE /session/<sid>: the session and its messages (with their turns, answers and tools, which their paths own) are retired
@@ -130,17 +138,23 @@ Request.ss_status_reply getter: {'status': 200, 'body': (json(prop(this.ss_stat[
 Request.sm_text getter: strip(join([str(prop(p, 'text') or '') for p in (prop(this.jbody, 'parts') or []) if prop(p, 'type') == 'text'], '\n'))
 Request.sm_post getter: (this.ss_route == 'prompt_async' or this.ss_route == 'message') and this.method == 'POST'
 Request.sm_go getter: this.sm_post and this.ss_view != None and this.sm_text != ''
+-- the body's `model` ({providerID, modelID}, as the page sends it) is the session's from now on (the released handler: "THE MESSAGE'S PICK STICKS"); a message with none runs on the session's
+Request.sm_pick getter: strip(str(prop(prop(this.jbody, 'model'), 'modelID') or prop(prop(this.jbody, 'model'), 'id') or ''))
+Request.sm_pick_now getter: this.sm_pick or str(prop('membrane::Chat:session:' + str(this.ss_sid), 'smodel') or '')
 Request.sm_go on-setter session-message:
   WHEN this.sm_go:
     id = this.ms_txt + '-' + replace(this.eid, 'Request:', '')
     membrane::Chat:main = Chat(name: 'main')
-    membrane::Chat:message[id] = ChatMessage(text: this.sm_text, at: clock, sid: this.ss_sid)
+    membrane::Chat:message[id] = ChatMessage(text: this.sm_text, at: clock, sid: this.ss_sid, pick: this.sm_pick_now)
     membrane::Chat:message[id]:body = SemText(text: this.sm_text)
     membrane::Chat:message[id]:body.mention = True
     membrane::Chat:message[id]:turn = ChatTurn(message: 'membrane::Chat:message:' + id, queued_at: clock, sid: this.ss_sid)
     membrane::Chat:message[id].queued = True
     membrane::Chat:session[this.ss_sid].upd = this.ms
     this.sm_id = id
+Request.sm_go on-setter session-pick:
+  WHEN this.sm_go and this.sm_pick != '':
+    membrane::Chat:session[this.ss_sid].smodel = this.sm_pick
 Request.sm_meid getter: 'membrane::Chat:message:' + this.sm_id if this.sm_id != None else None
 Request.sm_reply getter:
   WHEN this.ss_view == None: this.ss_missing
@@ -163,12 +177,14 @@ ChatMessage.oc_cwd getter: ([b.seat_cwd for b in instances('Boot') if b.seat_cwd
 ChatMessage.oc_created getter: num(words(replace(str(this.at * 1000), '.', ' '))[0])
 ChatMessage.oc_t0 getter: num(words(replace(str(prop(this.turn_eid, 'started') * 1000), '.', ' '))[0]) if prop(this.turn_eid, 'started') != None else this.oc_created
 ChatMessage.oc_t1 getter: num(words(replace(str(prop(this.turn_eid, 'ended') * 1000), '.', ' '))[0]) if prop(this.turn_eid, 'ended') != None else None
-ChatMessage.oc_user_info getter: {'id': this.oc_uid, 'sessionID': this.sid, 'role': 'user', 'agent': 'build', 'model': {'providerID': 'membrane', 'modelID': 'claude'}, 'time': {'created': this.oc_created}, 'summary': {'diffs': []}}
+-- the model that answers (or answered) this message: its own pick, else the seat's
+ChatMessage.model_shown getter: this.pick if (this.pick or '') != '' else this.seat_model
+ChatMessage.oc_user_info getter: {'id': this.oc_uid, 'sessionID': this.sid, 'role': 'user', 'agent': 'build', 'model': {'providerID': 'membrane', 'modelID': this.model_shown}, 'time': {'created': this.oc_created}, 'summary': {'diffs': []}}
 ChatMessage.oc_user_part getter: {'id': 'prt_' + this.oc_b + '010', 'sessionID': this.sid, 'messageID': this.oc_uid, 'type': 'text', 'text': this.text}
 ChatMessage.oc_usage getter: prop(this.turn_eid, 'usage') or {}
 ChatMessage.oc_tokens getter: {'total': (prop(this.oc_usage, 'input_tokens') or 0) + (prop(this.oc_usage, 'output_tokens') or 0) + (prop(this.oc_usage, 'cache_creation_input_tokens') or 0) + (prop(this.oc_usage, 'cache_read_input_tokens') or 0), 'input': prop(this.oc_usage, 'input_tokens') or 0, 'output': prop(this.oc_usage, 'output_tokens') or 0, 'reasoning': 0, 'cache': {'read': prop(this.oc_usage, 'cache_read_input_tokens') or 0, 'write': prop(this.oc_usage, 'cache_creation_input_tokens') or 0}}
 ChatMessage.oc_error getter: str(this.said or 'the turn failed') if this.tstate == 'error' else None
-ChatMessage.oc_assist_info getter: {'id': this.oc_aid, 'sessionID': this.sid, 'role': 'assistant', 'parentID': this.oc_uid, 'modelID': 'claude', 'providerID': 'membrane', 'mode': 'build', 'agent': 'build', 'path': {'cwd': this.oc_cwd, 'root': this.oc_cwd}, 'cost': prop(this.turn_eid, 'cost') or 0.0, 'tokens': this.oc_tokens, 'time': {'created': this.oc_t0, 'completed': this.oc_t1}, 'madeBy': 'claude-agent', 'finish': 'stop' if this.tstate == 'done' else None, 'error': ({'name': ('MessageAbortedError' if this.aborted == True else 'Error'), 'data': {'message': this.oc_error}} if this.oc_error != None else None)}
+ChatMessage.oc_assist_info getter: {'id': this.oc_aid, 'sessionID': this.sid, 'role': 'assistant', 'parentID': this.oc_uid, 'modelID': this.model_shown, 'providerID': 'membrane', 'mode': 'build', 'agent': 'build', 'path': {'cwd': this.oc_cwd, 'root': this.oc_cwd}, 'cost': prop(this.turn_eid, 'cost') or 0.0, 'tokens': this.oc_tokens, 'time': {'created': this.oc_t0, 'completed': this.oc_t1}, 'madeBy': 'claude-agent', 'finish': 'stop' if this.tstate == 'done' else None, 'error': ({'name': ('MessageAbortedError' if this.aborted == True else 'Error'), 'data': {'message': this.oc_error}} if this.oc_error != None else None)}
 ChatMessage.oc_tids getter: [replace(k, this.turn_eid + ':tool:', '') for k in this.tool_keys]
 ChatMessage.oc_tool_parts getter: [{'id': 'prt_' + this.oc_b + '2' + tail('0' + str(i), 2), 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'tool', 'callID': this.oc_tids[i], 'tool': this.tool_rows[i]['name'], 'madeBy': 'claude-agent', 'state': {'status': 'completed', 'input': this.tool_rows[i]['input'] or {}, 'title': this.tool_rows[i]['name'], 'time': {'start': this.oc_t0, 'end': this.oc_t1}, 'output': str(this.tool_rows[i]['result'] or '')}, 'time': {'start': this.oc_t0, 'end': this.oc_t1}} for i in this.oc_idx if i < len(this.tool_rows)]
 ChatMessage.oc_text_part getter: [{'id': 'prt_' + this.oc_b + '100', 'sessionID': this.sid, 'messageID': this.oc_aid, 'type': 'text', 'text': t, 'time': {'start': this.oc_t0, 'end': this.oc_t1}} for t in [this.said] if t != None and t != '']

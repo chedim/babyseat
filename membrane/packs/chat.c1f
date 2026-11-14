@@ -24,6 +24,8 @@ IMPORT semtext 1
 -- `text` stays what it was (the page's API); the body holds the same string once more. The answer is a SemText the same way (chat_turn.c1f, `...:turn:response:body`); a tool's result is not.
 
 Chat.title getter: 'main'
+-- the model of the seat's own pick (the launcher's `minds.seat_default`; `claude` when it names none): a session or a message with no pick of its own runs on it
+Chat.seat_model getter: prop('Minds:seat', 'seat_default') or 'claude'
 ChatMessage.mid getter: replace(this.eid, 'membrane::Chat:message:', '')
 ChatMessage.turn_eid getter: 'membrane::Chat:message:' + this.mid + ':turn'
 ChatMessage.tstate getter: prop(this.turn_eid, 'status')

@@ -28,12 +28,14 @@ fn shipped(names: &[&str]) -> Vec<(String, String)> {
 }
 
 /// the barest chat's packs plus the session door
-const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f"];
+const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f", "router.c1f", "door_models.c1f"];
 
 /// the seat's folder holds the fake claude; the binary is told its path as a fact
 fn seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) { seat_with(tag, script, false) }
 /// `strict`: the seat has a door secret (and so an owner token file, `<dir>/owner.token`): every route but the public set needs the token
-fn seat_with(tag: &str, script: &str, strict: bool) -> (Run, u16, std::path::PathBuf) {
+fn seat_with(tag: &str, script: &str, strict: bool) -> (Run, u16, std::path::PathBuf) { seat_facts(tag, script, strict, &[]) }
+/// `facts`: more `--fact name=value` lines
+fn seat_facts(tag: &str, script: &str, strict: bool, facts: &[&str]) -> (Run, u16, std::path::PathBuf) {
     let dir = tmp(tag);
     let bin = dir.join("fake-claude");
     std::fs::write(&bin, script).unwrap();
@@ -46,6 +48,7 @@ fn seat_with(tag: &str, script: &str, strict: bool) -> (Run, u16, std::path::Pat
     let mut child = Command::new(BIN).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact,
                "--fact", "seat_cwd=/srv/seat", "--fact", "seat_project=membrane", "--fact", "seat_version=1.0"])
+        .args(facts.iter().flat_map(|f| ["--fact".to_string(), f.to_string()]))
         .args(if strict { vec!["--fact".to_string(), format!("door_secret_file={}", dir.join("door.secret").display()), "--fact".to_string(), format!("seat_data_dir={}", dir.display())] } else { vec![] })
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
@@ -118,13 +121,15 @@ fn shape_at(p: &str, fix: &J, got: &J, out: &mut Vec<String>) {
         (f, g) => out.push(format!("{p}: {} expected, {} found", kind(f), kind(g))),
     }
 }
-fn golden(name: &str) -> J {
-    let p = format!("{}/../tests/golden/session/{name}.json", env!("CARGO_MANIFEST_DIR"));
+fn golden(name: &str) -> J { golden_in("session", name) }
+fn golden_in(dir: &str, name: &str) -> J {
+    let p = format!("{}/../tests/golden/{dir}/{name}.json", env!("CARGO_MANIFEST_DIR"));
     serde_json::from_str(&std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{p}: {e}"))).unwrap()
 }
 /// the answer's body against the fixture's body, and the status against the fixture's
-fn same_shape(name: &str, status: u16, body: &J) {
-    let g = golden(name);
+fn same_shape(name: &str, status: u16, body: &J) { same_shape_in("session", name, status, body) }
+fn same_shape_in(dir: &str, name: &str, status: u16, body: &J) {
+    let g = golden_in(dir, name);
     assert_eq!(status as i64, g["status"].as_i64().unwrap(), "{name}: the status; body {body}");
     let m = shape_misses(&g["body"], body);
     assert!(m.is_empty(), "{name}: {m:?}\nanswer: {body}");
@@ -572,4 +577,92 @@ fn on_a_seat_with_a_secret_the_session_routes_and_streams_need_the_owner_token_a
     let f = sse.until("idle", |n, _| n == "session.idle");
     assert_eq!(types(&f).first().map(String::as_str), Some("message.updated"));
     wait("the rows", || { let (st, b) = http_tok(port, "GET", &format!("/session/{sid}/message"), Some(&token), ""); (st == 200 && serde_json::from_str::<J>(&b).map(|v| v.as_array().map(|a| a.len()) == Some(2)).unwrap_or(false)).then_some(()) });
+}
+
+
+// ---- the model: the list the picker reads, the pick a session holds, the pick the turn runs on (#1143, step 2) ---------------------------------
+/// the launcher's facts of a seat that answers through the claude CLI only: two claude rungs (the CLI's own default, and `sonnet` the way the Python seat
+/// names a rung: `claude-agent:<model>`), no router, a backend nobody listens on (a refused connection is an empty tag list), `claude` the seat default
+const CLAUDE_FACTS: [&str; 4] = [
+    r#"cloud_models=[{"name":"claude","backend":"claude-agent"},{"name":"claude-agent:sonnet","backend":"claude-agent"}]"#,
+    "router_on=false", "seat_backend=http://127.0.0.1:1",
+    r#"minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude"}"#];
+fn argv_of(dir: &std::path::Path, prompt: &str) -> Option<Vec<String>> {
+    let t = std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of(prompt)))).ok()?;
+    Some(serde_json::from_str::<J>(&t).ok()?["argv"].as_array()?.iter().map(|x| x.as_str().unwrap().to_string()).collect())
+}
+
+#[test]
+fn the_model_list_names_the_claude_models_the_seat_can_run_even_with_no_router_in_the_shape_the_python_seat_lists() {
+    let (_run, port, _dir) = seat_facts("ses-models", QUICK, false, &CLAUDE_FACTS);
+    let (st, l) = api(port, "GET", "/v1/models", J::Null);
+    same_shape_in("boot", "v1_models", st, &l);
+    let rows = l["data"].as_array().unwrap();
+    for id in ["claude", "claude-agent:sonnet"] {
+        let r = rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} is listed: {l}"));
+        assert_eq!(r["owned_by"], "membrane->claude-agent", "the page's picker reads this owner: {r}");
+    }
+}
+
+#[test]
+fn a_session_keeps_the_model_its_patch_names_and_shows_it_in_the_released_shape() {
+    let (_run, port, _dir) = seat_facts("ses-patch-model", QUICK, false, &CLAUDE_FACTS);
+    let sid = new_session(port, "M");
+    assert_eq!(api(port, "GET", &format!("/session/{sid}"), J::Null).1["model"]["id"], "claude", "the seat default until a pick");
+    let (st, p) = api(port, "PATCH", &format!("/session/{sid}"), json!({"model": {"providerID": "membrane", "modelID": "claude-agent:sonnet"}}));
+    same_shape_in("session", "session_patch_model", st, &p);
+    assert_eq!(p["model"], json!({"id": "claude-agent:sonnet", "providerID": "membrane", "variant": "default"}), "{p}");
+    assert_eq!(p["title"], "M", "a patch with no title leaves it");
+    assert_eq!(api(port, "GET", &format!("/session/{sid}"), J::Null).1["model"]["id"], "claude-agent:sonnet");
+    assert_eq!(api(port, "GET", "/session", J::Null).1[0]["model"]["id"], "claude-agent:sonnet");
+    // an empty model name changes nothing (the Python seat's check: modelID or id must be there)
+    let (_, p) = api(port, "PATCH", &format!("/session/{sid}"), json!({"model": {"providerID": "membrane", "modelID": ""}}));
+    assert_eq!(p["model"]["id"], "claude-agent:sonnet");
+}
+
+#[test]
+fn a_message_that_names_a_model_makes_it_the_sessions_and_the_turn_runs_the_cli_on_it() {
+    let (_run, port, dir) = seat_facts("ses-pick", STEPS, false, &CLAUDE_FACTS);
+    let sid = new_session(port, "P");
+    // no pick: no --model (the CLI's own default), the rows name the seat's default
+    assert_eq!(say(port, &sid, "quick plain"), 204);
+    let r = finished(port, &sid, 2);
+    let a = argv_of(&dir, "quick plain").expect("the CLI ran");
+    assert!(!a.iter().any(|x| x == "--model"), "{a:?}");
+    assert_eq!(r[0]["info"]["model"]["modelID"], "claude");
+    // a pick in the body, the way the page sends it
+    let (st, _) = api(port, "POST", &format!("/session/{sid}/prompt_async"), json!({"agent": "build", "model": {"providerID": "membrane", "modelID": "claude-agent:sonnet"}, "parts": [{"type": "text", "text": "quick sonnet"}]}));
+    assert_eq!(st, 204);
+    let r = finished(port, &sid, 4);
+    let a = argv_of(&dir, "quick sonnet").expect("the CLI ran");
+    let i = a.iter().position(|x| x == "--model").unwrap_or_else(|| panic!("--model in {a:?}"));
+    assert_eq!(a[i + 1], "sonnet", "the rung's prefix is the Python seat's namespace, the CLI knows the bare alias: {a:?}");
+    assert!(i < a.iter().position(|x| x == "--").unwrap(), "an option, before the `--` that ends the options: {a:?}");
+    assert_eq!(r[2]["info"]["model"]["modelID"], "claude-agent:sonnet");
+    assert_eq!(r[3]["info"]["modelID"], "claude-agent:sonnet", "the assistant row names the model that answered");
+    assert_eq!(api(port, "GET", &format!("/session/{sid}"), J::Null).1["model"]["id"], "claude-agent:sonnet", "the pick sticks to the session");
+    // the next message, no model in the body: the session's pick still holds
+    assert_eq!(say(port, &sid, "quick again"), 204);
+    finished(port, &sid, 6);
+    let a = argv_of(&dir, "quick again").unwrap();
+    assert!(a.iter().any(|x| x == "claude-agent:sonnet" || x == "sonnet") && a.iter().any(|x| x == "--model"), "{a:?}");
+    // the seat's own default picked again: back to the CLI's default
+    let (st, _) = api(port, "PATCH", &format!("/session/{sid}"), json!({"model": {"providerID": "membrane", "modelID": "claude"}}));
+    assert_eq!(st, 200);
+    assert_eq!(say(port, &sid, "quick back"), 204);
+    finished(port, &sid, 8);
+    assert!(!argv_of(&dir, "quick back").unwrap().iter().any(|x| x == "--model"));
+}
+
+#[test]
+fn a_model_the_seat_cannot_run_is_refused_in_the_turn_with_the_reason_and_the_cli_never_starts() {
+    let (_run, port, dir) = seat_facts("ses-refuse", STEPS, false, &CLAUDE_FACTS);
+    let sid = new_session(port, "R");
+    let (st, _) = api(port, "POST", &format!("/session/{sid}/prompt_async"), json!({"model": {"providerID": "membrane", "modelID": "qwen3:8b"}, "parts": [{"type": "text", "text": "quick refused"}]}));
+    assert_eq!(st, 204);
+    let r = finished(port, &sid, 2);
+    let err = r[1]["info"]["error"]["data"]["message"].as_str().unwrap_or_else(|| panic!("an error on the row: {}", r[1]["info"]));
+    assert!(err.contains("qwen3:8b") && err.contains("claude"), "the reason names the model and what runs here: {err}");
+    assert!(argv_of(&dir, "quick refused").is_none(), "nothing was run");
+    assert_eq!(api(port, "GET", "/session/status", J::Null).1[&sid], json!({"type": "idle"}));
 }

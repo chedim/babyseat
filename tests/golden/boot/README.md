@@ -12,3 +12,5 @@ every key of the fixture must be in the answer with the same JSON type (a `null`
 an element of an answer's list must match some element of the fixture's list; an empty fixture list accepts anything.
 
 `python3 scripts/golden_boot.py --tree <dir> --check` exits 1 when the Python tree's answers differ in shape from the committed files.
+
+`v1_models.json` is written from the released handler, not recorded: see the note at the end of `tests/golden/session/README.md`.

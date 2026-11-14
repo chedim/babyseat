@@ -69,15 +69,23 @@ ChatMessage.banner_slot getter:
 ChatMessage.sys getter:
   WHEN this.over: None
   ELSE: join([this.note, this.banner_slot], '\n\n')
+-- THE MODEL (#1143): the message's `pick` (the session's pick, packs/door_session.c1f; none on the bare chat) names a model of the seat's list. The seat's own default (or no pick,
+-- or the Python seat's `membrane`) runs the CLI on ITS default, no flag; a claude-agent rung runs with `--model <the rung's name without the `claude-agent:` namespace the Python seat
+-- gave its rungs: the CLI knows the bare alias>`; any other pick (a local model, an unknown name) is refused in the turn with the reason, the CLI never starts.
+ChatMessage.pick_default getter: (this.pick or '') in ['', 'membrane', this.seat_model]
+ChatMessage.pick_ok getter: this.pick_default or prop('Model:' + this.pick, 'backend') == 'claude-agent'
+ChatMessage.sdk_model getter: '' if this.pick_default else (tail(this.pick, len(this.pick) - len('claude-agent:')) if startswith(this.pick, 'claude-agent:') else this.pick)
+ChatMessage.model_args getter: ['--model', this.sdk_model] if this.sdk_model != '' else []
 ChatMessage.argv getter:
   WHEN this.over: None
   ELSE WHEN this.bin == '' or this.mcp_json == None or this.sys == None or this.text == None: None
-  ELSE: ['env', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence', '--max-turns', str(this.max_turns), '--system-prompt', this.sys, '--', this.text]
+  ELSE: concat(concat(['env', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence'], this.model_args), ['--max-turns', str(this.max_turns), '--system-prompt', this.sys, '--', this.text])
 
 -- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------
 ChatMessage.plan getter:
   WHEN this.queued != True or this.tstate != 'queued' or this.text == None: None
   ELSE WHEN this.bin == '': {'refuse': 'The chat answers through the claude CLI, and its path is not named yet (chat_claude_bin). Name it with CLAUDE_BIN=<path to claude> when you start scripts/seat, or start cliffvm with --fact chat_claude_bin=<path>, then send the message again.'}
+  ELSE WHEN not this.pick_ok: {'refuse': 'This seat answers through the claude CLI only: ' + str(this.pick) + ' is not one of its claude models (GET /v1/models lists them). Pick one of those, or the seat default.'}
   ELSE WHEN this.argv != None: {'argv': this.argv}
   ELSE: None
 Chat.plan on-setter turn-start:
