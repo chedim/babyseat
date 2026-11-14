@@ -246,12 +246,13 @@ fn a_tool_call_runs_through_the_doors_own_tool_logic_and_its_result_goes_back_to
     assert_eq!(m[2]["tool_calls"][0], json!({"id": "call_a1", "type": "function", "function": {"name": "entity_write", "arguments": r#"{"spec":"Thing:probe","prop":"x","value":5}"#}}));
     assert_eq!(m[3]["role"], "tool");
     assert_eq!(m[3]["tool_call_id"], "call_a1");
-    assert_eq!(m[3]["content"], "wrote Thing:probe.x", "the same reply text as /mcp tools/call: {m:?}");
+    assert!(m[3]["content"].as_str().unwrap().starts_with("wrote Thing:probe.x"), "the same reply text as /mcp tools/call gives: {m:?}");
+    let told = m[3]["content"].as_str().unwrap().to_string();
     // the tool is an entity under the turn, like the claude turn's
     let (n, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn:tool:call_a1"), "prop": "name"}));
     assert_eq!(n, "entity_write");
     let (r, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn:tool:call_a1"), "prop": "result"}));
-    assert_eq!(r, "wrote Thing:probe.x");
+    assert_eq!(r, told, "the tool entity holds the very text the model got");
     assert!(terminate(&mut run));
 }
 
@@ -289,7 +290,7 @@ fn a_tool_error_is_the_tool_result_the_model_gets_and_a_call_that_is_not_json_is
     assert_eq!(m.len(), 5, "{m:?}");
     assert_eq!((m[3]["role"].as_str(), m[3]["tool_call_id"].as_str(), m[3]["content"].as_str()), (Some("tool"), Some("c1"), Some(door_text.as_str())), "the door's error text, to the model: {m:?}");
     assert_eq!((m[4]["role"].as_str(), m[4]["tool_call_id"].as_str()), (Some("tool"), Some("c2")));
-    assert!(m[4]["content"].as_str().unwrap().starts_with("Error: ") && m[4]["content"].as_str().unwrap().contains("not JSON"), "{m:?}");
+    assert!(m[4]["content"].as_str().unwrap().starts_with("Error: ") && m[4]["content"].as_str().unwrap().contains("not a JSON object"), "{m:?}");
     assert!(terminate(&mut run));
 }
 

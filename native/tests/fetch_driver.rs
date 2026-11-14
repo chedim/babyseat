@@ -358,3 +358,81 @@ fn a_fetch_receipt_carries_started_finished_and_ms_like_a_commands_and_a_refusal
     let r = &c.docs["Fetch:m"].props["request_result"];
     assert!(r["started"].is_f64() && r["finished"].is_f64() && r["ms"].is_u64(), "{r}");
 }
+
+// ---- THE BEARER FROM THE ENVIRONMENT (#1143, the OpenAI-compatible chat rung): `bearer_env` names a variable; its value is the request's `Authorization: Bearer`
+// header, read by the driver, never stored in the entity, the journal or the receipt, and masked wherever the server prints it back.
+#[test]
+fn bearer_env_sends_the_value_of_the_named_variable_as_a_bearer_and_masks_it_in_whatever_comes_back() {
+    let key = "sk-test-bearer-PLANTED-0123456789";
+    std::env::set_var("FETCH_TEST_BEARER_A", key);
+    let (port, rx) = serve(move |_| { let body = format!("bad key: {key} !"); vec![format!("HTTP/1.1 401 No\r\nContent-Length: {}\r\n\r\n", body.len()).into_bytes(), body.into_bytes()] });
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "b1", "url": format!("http://127.0.0.1:{port}/x"), "method": "POST", "body": "{}", "bearer_env": "FETCH_TEST_BEARER_A"}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let seen = rx.recv().unwrap();
+    assert!(seen.contains(&format!("Authorization: Bearer {key}")), "the server got the bearer: {seen}");
+    let all = serde_json::to_string(&c.docs["Fetch:m"].props).unwrap();
+    assert!(!all.contains(key), "the key is not on the entity: {all}");
+    let r = &c.docs["Fetch:m"].props["request_result"];
+    assert_eq!(r["http_status"], json!(401));
+    assert!(r["body"].as_str().unwrap().contains("bad key: *** !"), "the echo is masked: {r}");
+}
+
+#[test]
+fn a_masked_value_is_masked_in_a_stream_even_when_the_pieces_cut_it() {
+    let key = "sk-test-bearer-STRADDLE-0123456789";
+    std::env::set_var("FETCH_TEST_BEARER_B", key);
+    let (a, b) = key.split_at(11);
+    let (port, _rx) = serve({ let (a, b) = (a.to_string(), b.to_string()); move |_| vec![b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_vec(), format!("data: one {a}").into_bytes(), format!("{b} two\n\n").into_bytes()] });
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "b2", "url": format!("http://127.0.0.1:{port}/event"), "stream": true, "bearer_env": "FETCH_TEST_BEARER_B"}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let mut chunks: Vec<(i64, String)> = c.docs.iter().filter(|(k, _)| k.starts_with("Chunk:Fetch:m:")).map(|(_, e)| (e.props["n"].as_i64().unwrap(), e.props["data"].as_str().unwrap().to_string())).collect();
+    chunks.sort();
+    let text: String = chunks.iter().map(|c| c.1.clone()).collect();
+    assert_eq!(text, "data: one *** two\n\n");
+    assert!(!chunks.iter().any(|c| c.1.contains(&key[..11]) || c.1.contains(&key[11..])), "no piece holds a part of the key: {chunks:?}");
+}
+
+#[test]
+fn a_bearer_variable_that_is_not_set_is_a_refusal_that_names_it_and_nothing_is_sent() {
+    std::env::remove_var("FETCH_TEST_BEARER_C");
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "b3", "url": "http://127.0.0.1:1/x", "bearer_env": "FETCH_TEST_BEARER_C"}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let r = &c.docs["Fetch:m"].props["request_result"];
+    assert_eq!(r["rc"], json!(2), "{r}");
+    assert!(r["head"].as_str().unwrap().contains("environment variable FETCH_TEST_BEARER_C is not set"), "{r}");
+    std::env::set_var("FETCH_TEST_BEARER_C", "");
+    put(&mut c, &mut f, json!({"id": "b4", "url": "http://127.0.0.1:1/x", "bearer_env": "FETCH_TEST_BEARER_C"}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props["request_result"]["id"] == json!("b4"));
+    assert_eq!(c.docs["Fetch:m"].props["request_result"]["rc"], json!(2), "an empty variable is no key");
+}
+
+#[test]
+fn with_lines_a_chunk_holds_whole_lines_only_and_the_end_flushes_the_last_one() {
+    let (port, _rx) = serve(|_| vec![b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_vec(), b"data: a\ndata: b".to_vec(), b"c\n\ndata: d".to_vec(), b"\n\nlast".to_vec()]);
+    let (mut c, mut f) = world();
+    put(&mut c, &mut f, json!({"id": "l1", "url": format!("http://127.0.0.1:{port}/event"), "stream": true, "lines": true}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let mut chunks: Vec<(i64, String, bool)> = c.docs.iter().filter(|(k, _)| k.starts_with("Chunk:Fetch:m:")).map(|(_, e)| (e.props["n"].as_i64().unwrap(), e.props["data"].as_str().unwrap().to_string(), e.props["done"].as_bool().unwrap())).collect();
+    chunks.sort();
+    let text: String = chunks.iter().map(|c| c.1.clone()).collect();
+    assert_eq!(text, "data: a\ndata: bc\n\ndata: d\n\nlast");
+    for (_, d, done) in &chunks[..chunks.len() - 2] { assert!(d.ends_with('\n') && !done, "a chunk ends at a line end: {d:?}"); }
+    assert_eq!(chunks[chunks.len() - 2].1, "last", "the unfinished line comes at the end");
+    assert!(chunks.last().unwrap().2);
+}
+
+#[test]
+fn with_keep_a_streams_receipt_also_carries_the_whole_body_and_without_it_does_not() {
+    for keep in [true, false] {
+        let (port, _rx) = serve(|_| vec![b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_vec(), b"data: one\n\n".to_vec(), b"data: two\n\n".to_vec()]);
+        let (mut c, mut f) = world();
+        put(&mut c, &mut f, json!({"id": "k1", "url": format!("http://127.0.0.1:{port}/event"), "stream": true, "keep": keep}));
+        pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+        let r = &c.docs["Fetch:m"].props["request_result"];
+        assert_eq!(r.get("body").and_then(|b| b.as_str()), if keep { Some("data: one\n\ndata: two\n\n") } else { None }, "{r}");
+        assert!(c.docs.keys().any(|k| k.starts_with("Chunk:Fetch:m:")), "the chunks come either way");
+    }
+}
