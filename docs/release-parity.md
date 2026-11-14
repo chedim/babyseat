@@ -104,7 +104,7 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 | 48 | GET `/membrane/quota`, POST `/membrane/quota/resume` | `panel.js:2592,2625,2640`, `home.js:1307` | `PY:4634`, `PY:4937` (`quota.py`) | PARTIAL | 501 / 404; keep-list question 1 (is quota dropped?) is still open **w33**: `P/door_state.c1f`: GET and POST `/resume` answer the released shape of a seat with nothing paused (`paused: []`, `probe_s: 600`); no model is paused here |
 | 49 | GET `/membrane/minds` | `home.js:4840` | `SEAT_READ_PATHS` (`PY:4163`), relayed to :11500; admin only (`relay.py` `ADMIN_READ_EXACT`) | PARTIAL | **w46, DEGRADED**: 200 `{loops: {}, thinker: [], dreamer: []}`, the released answer with no pulse (`lanes.py:4606-4609`; keys of `fieldpulse.minds()`, golden `minds.json`); the orb chat views read no session, so `home.js:4840` finds no `sid` |
 | 50 | GET and POST `/membrane/models` {loops, cortex, workers, think, ...} | `panel.js:2823,2837,2859` | `PY:4592`, `PY:4971` | PARTIAL | `P/door_models.c1f`; specs `minds.json`, `N/tests/models_door.rs`; works only after the launcher tells `Boot:seat.minds` (dry run 503 without, 200 with `--fact minds=...`); applying a pick (runner.model, `minds_models.py`) stays Python |
-| 51 | GET `/v1/models` | `panel.js:2782,2824` | `PY` seat read (`SEAT_READ_PATHS`) | PARTIAL | spec `models.json`; **w41**: lists the claude-agent rungs of `cloud_models` (`owned_by: membrane->claude-agent`) with or without `router_on` (golden `boot/v1_models.json`, written from `lanes.py` `_v1_models`); local tags are still listed when `seat_backend` answers, but a pick of one is refused in the turn (claude is the only model the seat runs) |
+| 51 | GET `/v1/models` | `panel.js:2782,2824` | `PY` seat read (`SEAT_READ_PATHS`) | PARTIAL | spec `models.json`; **w41**: lists the claude-agent rungs of `cloud_models` (`owned_by: membrane->claude-agent`) with or without `router_on` (golden `boot/v1_models.json`, written from `lanes.py` `_v1_models`); local tags are still listed when `seat_backend` answers; **w56**: a pick of a local tag, or of a `cloud_models` entry with another backend (`base_url`, `api_key_env`), runs the OpenAI-compatible turn (`P/chat_oai.c1f`, `N/tests/chat_openai_1143.rs`; no history, the four field tools, `chat_max_turns`; docs/cliffvm.md "The OpenAI-compatible turn"); an unknown name is refused in the turn |
 
 ### 1.5 Decisions, goals, work graph
 
@@ -318,7 +318,7 @@ Time to first healthy answer 0.84 s on an empty store; RSS 13.9 MB. Failing pack
 |---|---|---|
 | `--ui-dir membrane/ui` | `door.c1f` static files | `/` and every `/ui/www/*` 404 (the full pack set has no `ui/` of its own; `apps/barest.c1f` carries the barest page) |
 | `minds` | `router.c1f:67-95`, `door_models.c1f` | `/membrane/models` 503 (200 with `--fact 'minds={"loops":...}'`) |
-| `seat_backend`, `router_on`, `cloud_models` | `router.c1f:16-60` | `/v1/models` lists only `@explore` |
+| `seat_backend`, `router_on`, `cloud_models` | `router.c1f:16-60`, `chat_oai.c1f` | `/v1/models` lists only `@explore`; a `cloud_models` entry may carry `base_url`, `api_key_env`, `chat_path` (w56) |
 | `door_secret_file` | the door's JWT verifier; `cliffvm run` makes the secret and the owner token file (w32) | no secret: no token check at all, every caller is `{"sub":"owner"}` (the barest seat, open by decision); with it: no token = 401, loopback included |
 | `seat_data_dir` | `door_voice.c1f:23` | `/ui/log` cannot write |
 | `seat_stt`, `seat_project`, `nerve_pause_off`, `ledger`, `agent_writes`, `chat_claude_bin` | conf, probes, pause, decisions, memory, chat | defaults: `stt browser`, project null, ... |
@@ -433,7 +433,7 @@ Rounds per phase (1 round = 20-45 min; ranges are low = known mechanism reused, 
 | 1d `/event` + `/global/event` with opencode frames and per-person filtering | rows 8, 30, 31 | 5-8 |
 | 1e state, controls, options, stats, quota, minds (a presence writer pack, settings via `fs`) | rows 41-50, 54 | 10-16 |
 | 1f field map routes (8) over the Python engine through a bridge, or a native map | rows 61-68 | bridge 4-6; native 15-25 |
-| 1g model backends (Ollama, cloud providers, claude API key default) behind the turn | row 23, 76, D1/D9 | 14-22 |
+| 1g model backends (Ollama, cloud providers, claude API key default) behind the turn | row 23, 76, D1/D9 | 14-22; **w56 built the first slice** of the OpenAI-compatible chat (Ollama tags and `cloud_models` entries: one turn, no history, the field tools, streamed words; `bearer_env` on `Fetch`); not built: history/Continue, the provider registry rows (`auth.PROVIDERS`: the entry names `base_url`/`chat_path` instead), `reasoning_content`, `stream_options`, the proxy routes (row 76) |
 | 1h HA routes and bridge | row 75 | 4-6 |
 | 1i item-chat say, work-graph watch nodes, empty-table safety in the sql packs | rows 55-57, 69, 70 | 3-4 |
 | 1j packaging: wheels or the launcher fetching a `cliffvm` per platform, `membrane standalone` starting it, HA add-on, Termux/aarch64 | | 6-9 |
