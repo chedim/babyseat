@@ -14,7 +14,7 @@ IMPORT dom 1
 --   an index           = a list literal 0..63 (`idx`) cut by `head(idx, n)`
 --   a stream of tokens = one text with NUL (\0) delimiters, split by the trick above: text tokens are at even places and markers at odd places
 
--- ---- the painter: the one place a node dict {k, parent, tag, class, text, href, lang, owner, act, before} becomes a DomNode ----
+-- ---- the painter: the one place a node dict {k, parent, tag, class, text, href, lang, owner, act, before, tabindex, role, label, live} becomes a DomNode ----
 -- a node that was drawn before and is not in the new list is retired (its element leaves the page); `text` is written only where the dict has one (a text write on a node
 -- that has children would wipe them); a value that did not change is no write.
 MdPaint.nodes on-setter md-paint:
@@ -41,6 +41,16 @@ MdPaint.nodes on-setter md-paint:
       (prop(nd, 'k')).act = prop(nd, 'act')
     FOR nd IN [x for x in this.nodes if prop(x, 'before') != None]:
       (prop(nd, 'k')).before = prop(nd, 'before')
+    FOR nd IN [x for x in this.nodes if prop(x, 'tag') == 'button']:
+      (prop(nd, 'k')).type = 'button'
+    FOR nd IN [x for x in this.nodes if prop(x, 'tabindex') != None]:
+      (prop(nd, 'k')).tabindex = prop(nd, 'tabindex')
+    FOR nd IN [x for x in this.nodes if prop(x, 'role') != None]:
+      (prop(nd, 'k')).role = prop(nd, 'role')
+    FOR nd IN [x for x in this.nodes if prop(x, 'label') != None]:
+      (prop(nd, 'k')).aria-label = prop(nd, 'label')
+    FOR nd IN [x for x in this.nodes if prop(x, 'live') != None]:
+      (prop(nd, 'k')).aria-live = prop(nd, 'live')
     FOR nd IN [x for x in this.nodes if prop(x, 'act') != None]:
       (prop(nd, 'k')).act = prop(nd, 'act')
 
@@ -93,6 +103,11 @@ MdLine.nodes getter: [{'k': this.base + ':' + str(prop(t, 'k')), 'parent': this.
 MdLine.nodes on-setter md-line-paint:
   WHEN this.nodes != None:
     ('MdPaint:l:' + after(this.eid, 'MdLine:')).nodes = this.nodes
+-- SHRINKING: a line, block or chunk its parent no longer draws is told `gone` (a counter: every write is a change): its nodes are retired and its text forgotten (so the same text drawn again draws again)
+MdLine.gone on-setter md-line-gone:
+  WHEN this.gone != None:
+    ('MdPaint:l:' + after(this.eid, 'MdLine:')).nodes = []
+    this.src = None
 
 -- ---- the message ----
 -- `cap`: how much of a message is parsed (the rest is a plain preview and a "Show all" button: 12000 characters is the value TRIED, not decided).
@@ -148,17 +163,30 @@ MdChunk.nextslot getter: {'k': this.nd + ':next', 'parent': this.into, 'tag': 'd
 -- the chunk past the 120th is not parsed: everything left is one plain text
 MdChunk.plan getter:
   WHEN this.into == None or this.raw == None or this.n == None: None
+  ELSE WHEN this.n > 0 and this.r == '': {'nodes': [], 'blocks': [], 'rest': ''}
   ELSE WHEN this.n >= 120: {'nodes': [{'k': this.nd, 'parent': this.into, 'tag': 'div', 'class': 'md-plain', 'text': this.r}], 'blocks': [], 'rest': ''}
-  ELSE WHEN this.fence: {'nodes': [{'k': this.nd, 'parent': this.into, 'tag': 'pre', 'class': 'md-pre', 'lang': this.lang, 'before': this.nd + ':next'}, {'k': this.nd + ':bar', 'parent': this.nd, 'tag': 'div', 'class': 'md-codebar'}, {'k': this.nd + ':lang', 'parent': this.nd + ':bar', 'tag': 'span', 'class': 'md-lang', 'text': this.lang or 'code'}, {'k': this.nd + ':copy', 'parent': this.nd + ':bar', 'tag': 'button', 'class': 'md-copy', 'text': 'Copy', 'owner': this.eid, 'act': 'md-copy'}, {'k': this.nd + ':code', 'parent': this.nd, 'tag': 'code', 'class': 'md-codebody', 'text': this.body}, this.nextslot], 'blocks': [], 'rest': this.rest}
+  ELSE WHEN this.fence: {'nodes': [{'k': this.nd, 'parent': this.into, 'tag': 'pre', 'class': 'md-pre', 'lang': this.lang, 'before': this.nd + ':next'}, {'k': this.nd + ':bar', 'parent': this.nd, 'tag': 'div', 'class': 'md-codebar'}, {'k': this.nd + ':lang', 'parent': this.nd + ':bar', 'tag': 'span', 'class': 'md-lang', 'text': this.lang or 'code'}, {'k': this.nd + ':copy', 'parent': this.nd + ':bar', 'tag': 'button', 'class': 'md-copy', 'text': 'Copy', 'label': 'Copy code', 'owner': this.eid, 'act': 'md-copy'}, {'k': this.nd + ':live', 'parent': this.nd + ':bar', 'tag': 'span', 'class': 'md-live', 'role': 'status', 'live': 'polite'}, {'k': this.nd + ':code', 'parent': this.nd, 'tag': 'code', 'class': 'md-codebody', 'text': this.body, 'tabindex': 0, 'role': 'region', 'label': (this.lang + ' code') if this.lang != '' else 'code'}, this.nextslot], 'blocks': [], 'rest': this.rest}
   ELSE: {'nodes': concat([{'k': this.nd + ':s' + str(prop(bk, 'i')), 'parent': this.into, 'tag': 'div', 'class': 'md-slot', 'before': this.nd + ':next'} for bk in this.blocks], [this.nextslot]), 'blocks': this.blocks, 'rest': this.rest}
 MdChunk.plan on-setter md-chunk-draw:
   WHEN this.plan != None:
     ('MdPaint:' + this.key).nodes = prop(this.plan, 'nodes')
+    FOR i IN [x for x in (this.bids or []) if x not in [prop(b, 'i') for b in prop(this.plan, 'blocks')]]:
+      ('MdBlock:' + this.key + ':b' + str(i)).gone = (prop('MdBlock:' + this.key + ':b' + str(i), 'gone') or 0) + 1
+    this.bids = [prop(b, 'i') for b in prop(this.plan, 'blocks')]
     FOR bk IN prop(this.plan, 'blocks'):
       ('MdBlock:' + this.key + ':b' + str(prop(bk, 'i'))).depth = this.depth
       ('MdBlock:' + this.key + ':b' + str(prop(bk, 'i'))).kind = prop(bk, 'kind')
       ('MdBlock:' + this.key + ':b' + str(prop(bk, 'i'))).into = this.nd + ':s' + str(prop(bk, 'i'))
       ('MdBlock:' + this.key + ':b' + str(prop(bk, 'i'))).raw = prop(bk, 'raw')
+MdChunk.gone on-setter md-chunk-gone:
+  WHEN this.gone != None:
+    ('MdPaint:' + this.key).nodes = []
+    this.raw = None
+    FOR i IN (this.bids or []):
+      ('MdBlock:' + this.key + ':b' + str(i)).gone = (prop('MdBlock:' + this.key + ':b' + str(i), 'gone') or 0) + 1
+    this.bids = []
+    FOR nx IN [x for x in ['MdChunk:' + this.pre + 'c' + str(this.n + 1)] if prop(x, 'raw') != None]:
+      (nx).gone = (prop(nx, 'gone') or 0) + 1
 -- the next chunk gets what this one left (an empty rest clears a next chunk that was there: the text got shorter)
 MdChunk.plan on-setter md-chunk-next:
   WHEN this.plan != None and (prop(this.plan, 'rest') != '' or prop('MdChunk:' + this.pre + 'c' + str(this.n + 1), 'raw') != None):
@@ -197,7 +225,7 @@ MdBlock.llines getter: [{'eid': 'MdLine:' + this.key + ':l' + str(i), 'base': 'D
 MdBlock.ilines getter: [{'eid': 'MdLine:' + this.key + ':i' + str(prop(it, 'i')), 'base': 'DomNode:md:' + this.key + ':i' + str(prop(it, 'i')) + ':t', 'into': this.nd + ':i' + str(prop(it, 'i')) + ':t', 'src': (prop(it, 'text') if (this.depth < 4 or strip(prop(it, 'kids')) == '') else prop(it, 'text') + ' ' + replace(strip(prop(it, 'kids')), '\n', ' '))} for it in this.items]
 MdBlock.ikids getter: [{'eid': 'MdBlock:' + this.key + ':i' + str(prop(it, 'i')), 'kind': 'l', 'depth': this.depth + 1, 'into': this.nd + ':i' + str(prop(it, 'i')), 'raw': prop(it, 'kids')} for it in this.items if strip(prop(it, 'kids')) != '' and this.depth < 4]
 MdBlock.inodes getter: concat([{'k': this.nd, 'parent': this.into, 'tag': ('ol' if this.isol[0] else 'ul'), 'class': 'md-list'}], [{'k': this.nd + ':i' + str(prop(it, 'i')), 'parent': this.nd, 'tag': 'li', 'class': 'md-li'} for it in this.items], [{'k': this.nd + ':i' + str(prop(it, 'i')) + ':t', 'parent': this.nd + ':i' + str(prop(it, 'i')), 'tag': 'span', 'class': 'md-it'} for it in this.items])
-MdBlock.tnodes getter: concat([{'k': this.nd, 'parent': this.into, 'tag': 'div', 'class': 'md-tablewrap'}, {'k': this.nd + ':tb', 'parent': this.nd, 'tag': 'table', 'class': 'md-table'}, {'k': this.nd + ':th', 'parent': this.nd + ':tb', 'tag': 'thead'}, {'k': this.nd + ':r0', 'parent': this.nd + ':th', 'tag': 'tr'}, {'k': this.nd + ':tbd', 'parent': this.nd + ':tb', 'tag': 'tbody'}], [{'k': this.nd + ':r' + str(i), 'parent': this.nd + ':tbd', 'tag': 'tr'} for i in head(this.idx, len(this.L)) if i >= 2])
+MdBlock.tnodes getter: concat([{'k': this.nd, 'parent': this.into, 'tag': 'div', 'class': 'md-tablewrap', 'tabindex': 0, 'role': 'region', 'label': 'table'}, {'k': this.nd + ':tb', 'parent': this.nd, 'tag': 'table', 'class': 'md-table'}, {'k': this.nd + ':th', 'parent': this.nd + ':tb', 'tag': 'thead'}, {'k': this.nd + ':r0', 'parent': this.nd + ':th', 'tag': 'tr'}, {'k': this.nd + ':tbd', 'parent': this.nd + ':tb', 'tag': 'tbody'}], [{'k': this.nd + ':r' + str(i), 'parent': this.nd + ':tbd', 'tag': 'tr'} for i in head(this.idx, len(this.L)) if i >= 2])
 MdBlock.trows getter: [{'eid': 'MdBlock:' + this.key + ':r' + str(i), 'kind': ('trh' if i == 0 else 'tr'), 'depth': this.depth + 1, 'into': this.nd + ':r' + str(i), 'raw': this.L[i]} for i in head(this.idx, len(this.L)) if i != 1]
 MdBlock.cnodes getter: [{'k': 'DomNode:md:' + this.key + ':c' + str(j), 'parent': this.into, 'tag': ('th' if this.kind == 'trh' else 'td'), 'class': 'md-cell'} for j in head(this.idx, len(this.cells))]
 MdBlock.clines getter: [{'eid': 'MdLine:' + this.key + ':c' + str(j), 'base': 'DomNode:md:' + this.key + ':c' + str(j), 'into': 'DomNode:md:' + this.key + ':c' + str(j), 'src': this.cells[j]} for j in head(this.idx, len(this.cells))]
@@ -216,6 +244,10 @@ MdBlock.plan getter:
 MdBlock.plan on-setter md-block-draw:
   WHEN this.plan != None:
     ('MdPaint:' + this.key).nodes = prop(this.plan, 'nodes')
+    ks = [prop(x, 'eid') for x in concat(prop(this.plan, 'lines'), prop(this.plan, 'blocks'), prop(this.plan, 'chunks'))]
+    FOR e IN [x for x in (this.kids or []) if x not in ks]:
+      (e).gone = (prop(e, 'gone') or 0) + 1
+    this.kids = ks
     FOR ln IN prop(this.plan, 'lines'):
       (prop(ln, 'eid')).base = prop(ln, 'base')
       (prop(ln, 'eid')).into = prop(ln, 'into')
@@ -232,11 +264,34 @@ MdBlock.plan on-setter md-block-draw:
       (prop(ck, 'eid')).into = prop(ck, 'into')
       (prop(ck, 'eid')).raw = prop(ck, 'raw')
 
+MdBlock.gone on-setter md-block-gone:
+  WHEN this.gone != None:
+    ('MdPaint:' + this.key).nodes = []
+    this.raw = None
+    FOR e IN (this.kids or []):
+      (e).gone = (prop(e, 'gone') or 0) + 1
+    this.kids = []
+
 -- ---- the two buttons: "Show all" (a message over its cap) and "Copy" (a code block) ----
--- Copy is the host's `copy` write on the button: {text, at} (`at` makes a second click a new value); the host puts the text on the clipboard (fieldvm.js)
+-- Copy is the host's `copy` write on the button: {text, at} (`at` makes a second click a new value); the host puts the text on the clipboard (fieldvm.js) and answers with `copy_result` {ok, why}.
+-- The answer is shown as the button's text ("Copied" / "Copy failed") and SAID in the block's live region (polite); `MdClock` puts both back after `hold` seconds of the page's clock (no timer of its own).
 DomNode.clicked on-setter md-click:
   WHEN this.act == 'md-more':
     (this.owner).full = True
   ELSE WHEN this.act == 'md-copy':
     this.copy = {'text': prop(this.owner, 'body'), 'at': this.clicked}
-    this.text = 'Copied'
+DomNode.copy_result on-setter md-copied:
+  WHEN this.act == 'md-copy' and this.copy_result != None:
+    this.text = 'Copied' if prop(this.copy_result, 'ok') == True else 'Copy failed'
+    ('DomNode:md:' + after(this.owner, 'MdChunk:') + ':live').text = 'Copied' if prop(this.copy_result, 'ok') == True else 'Copy failed: ' + str(prop(this.copy_result, 'why') or 'the browser refused')
+    ('MdClock:main').due = concat((prop('MdClock:main', 'due') or []), [{'eid': this.eid, 'live': 'DomNode:md:' + after(this.owner, 'MdChunk:') + ':live', 'at': clock}])
+-- `hold`: how long the answer stays (2 s is the value TRIED, not decided)
+MdClock.hold getter: 2
+MdClock.tick getter: clock
+MdClock.late getter: [d for d in (this.due or []) if this.tick - prop(d, 'at') >= this.hold]
+MdClock.late on-setter md-clock-revert:
+  WHEN len(this.late) > 0:
+    FOR d IN this.late:
+      (prop(d, 'eid')).text = 'Copy'
+      (prop(d, 'live')).text = ''
+    this.due = [d for d in this.due if this.tick - prop(d, 'at') < this.hold]

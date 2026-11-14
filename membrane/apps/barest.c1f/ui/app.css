@@ -1,7 +1,7 @@
 :root {
   --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1f23; --mute: #61666e; --line: #dcdad2; --edge: #9a9a92;
   --accent: #0b6bcb; --accent-ink: #ffffff; --me: #e6eefa; --seat: #eeece6; --note: #fff3d6; --note-ink: #5a4300;
-  --ok: #2a8a4a; --bad: #b4691a;
+  --ok: #2a8a4a; --bad: #b4691a; --link: #095fb5; --stop: #8f5410; --stop-ink: #ffffff;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -9,13 +9,13 @@
   :root:not([data-theme="light"]) {
     --bg: #141517; --panel: #1c1e21; --ink: #e8e8e4; --mute: #9a9ea6; --line: #2f3236; --edge: #6d7178;
     --accent: #5aa2ff; --accent-ink: #0a1420; --me: #1f2c3f; --seat: #25272b; --note: #3a2f12; --note-ink: #f1d88f;
-    --ok: #5ac27a; --bad: #e0a050;
+    --ok: #5ac27a; --bad: #e0a050; --link: #5aa2ff; --stop: #e0a050; --stop-ink: #1a1204;
   }
 }
 :root[data-theme="dark"] {
   --bg: #141517; --panel: #1c1e21; --ink: #e8e8e4; --mute: #9a9ea6; --line: #2f3236; --edge: #6d7178;
   --accent: #5aa2ff; --accent-ink: #0a1420; --me: #1f2c3f; --seat: #25272b; --note: #3a2f12; --note-ink: #f1d88f;
-  --ok: #5ac27a; --bad: #e0a050;
+  --ok: #5ac27a; --bad: #e0a050; --link: #5aa2ff; --stop: #e0a050; --stop-ink: #1a1204;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -75,6 +75,7 @@ html, body { height: 100%; }
 .bubble { padding: 8px 10px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; max-width: 92%; }
 .bubble.me { background: var(--me); align-self: flex-end; }
 .bubble.seat { background: var(--seat); align-self: flex-start; }
+.bubble.stopped { background: var(--seat); align-self: flex-start; border-left: 3px solid var(--edge); }   /* a turn the person stopped: neutral, not an error */
 .bubble.note { background: var(--note); color: var(--note-ink); align-self: flex-start; }
 .bubble.pending { color: var(--mute); font-style: italic; }
 .who { font-size: 11px; color: var(--mute); }
@@ -168,7 +169,7 @@ html, body { height: 100%; }
 }
 
 /* the stop button: amber, next to Send, only while a turn runs */
-.composer button.stop { background: var(--bad); border-color: var(--bad); color: #fff; }
+.composer button.stop { background: var(--stop); border-color: var(--stop); color: var(--stop-ink); }
 
 /* markdown in the bubbles (markdown.c1f): text nodes only; the bubble's pre-wrap is for the pending line, not for blocks */
 .bubble .md { white-space: normal; }
@@ -179,7 +180,7 @@ html, body { height: 100%; }
 .md-q { margin: .4em 0; padding: .1em 0 .1em .8em; border-left: 3px solid var(--edge); color: var(--mute); }
 .md-list { margin: .3em 0; padding-left: 1.4em; } .md-list .md-list { margin: .1em 0; } .md-li { margin: .1em 0; } .md-it { display: inline; }
 .md-b { font-weight: 650; } .md-i { font-style: italic; } .md-s { text-decoration: line-through; }
-.md a { color: var(--accent); word-break: break-all; }
+.md a { color: var(--link); word-break: break-all; text-decoration: underline; text-underline-offset: 2px; }
 code.md-code { font: .92em var(--mono); background: rgb(127 127 127 / .18); padding: .1em .35em; border-radius: 4px; }
 .md-pre { margin: .5em 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); white-space: normal; }
 .md-codebar { display: flex; align-items: center; justify-content: space-between; padding: 3px 8px; border-bottom: 1px solid var(--line); font: 12px var(--mono); color: var(--mute); }
@@ -191,3 +192,11 @@ code.md-code { font: .92em var(--mono); background: rgb(127 127 127 / .18); padd
 .md-more { margin-top: .4em; color: var(--mute); } .md-plain { white-space: pre-wrap; word-break: break-word; display: block; }
 .md-showall { padding: 2px 8px; font-size: 12px; margin-top: 4px; }
 @media (max-width: 520px) { .bubble { max-width: 100%; } .md-codebody { font-size: 12px; } }
+
+/* accessibility: the scrolling regions (a code block, a table) are focusable and their ring is inside the box (an overflow box would clip it); a visually hidden live region; reduced motion */
+.md-codebody:focus-visible, .md-tablewrap:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.md-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.md-codebar { position: relative; }
+.md-tablewrap { max-width: 100%; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+.md-table th, .md-table td { white-space: nowrap; word-break: normal; overflow-wrap: normal; }   /* a table scrolls sideways inside its wrapper instead of breaking words letter by letter */
