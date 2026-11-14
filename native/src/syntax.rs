@@ -108,6 +108,8 @@ pub const LET: &str = "LET";
 /// A constructor in a setter's writes: `(<entity>, CTOR, "Class(name: value, ...)")`, written `<entity> = Class(name: value, ...)`.
 /// The entity is the identity of what is made; its text has no `.field`.
 pub const CTOR: &str = "(new)";
+/// A death in a setter's writes: `(<entity>, KILL, "<expr>")`, written `<entity> = None`: the mirror of a birth. Only a plain `None` destroys (fields.rs `kill`).
+pub const KILL: &str = "(gone)";
 
 fn is_name(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_') && !s.chars().next().unwrap().is_ascii_digit()
@@ -176,9 +178,15 @@ fn statement(s: &str, at: usize) -> Result<W, String> {
     if is_name(lhs) { return Ok((LET.into(), lhs.into(), rhs.into())); }    // a local
     let Some(d) = last_top_dot(lhs) else {
         // `<entity> = Class(name: value, ...)`: a constructor, the entity written is its identity
-        if top_level(lhs, name_colon).is_some() {
-            crate::expr::parse_ctor(rhs).map_err(|e| format!("line {}: `{}`: {}", at, lhs, e))?;
-            return Ok((lhs.into(), CTOR.into(), rhs.into()));
+        if top_level(lhs, name_colon).is_some() || (lhs.starts_with('(') && lhs.ends_with(')')) {   // a computed identity is a parenthesised expression
+            match crate::expr::parse_ctor(rhs) {
+                Ok(_) => return Ok((lhs.into(), CTOR.into(), rhs.into())),
+                // not a constructor: a value, which must be a plain None at run time (a death); a call with unnamed arguments is still the constructor's error
+                Err(e) => match crate::expr::parse(rhs) {
+                    Ok(n) if !matches!(&n, crate::expr::Node::Call(f, _) if f.chars().next().map_or(false, |c| c.is_uppercase())) => return Ok((lhs.into(), KILL.into(), rhs.into())),
+                    _ => return Err(format!("line {}: `{}`: {}", at, lhs, e)),
+                },
+            }
         }
         return Err(format!("line {}: `{}` needs a target: write `this.{}`", at, lhs, lhs));
     };
@@ -486,7 +494,7 @@ fn print_writes(out: &mut String, ws: &[W], indent: &str) {
         else if t == END { ind.truncate(ind.len().saturating_sub(2)); }
         else if t == LET { out.push_str(&format!("{}{} = {}\n", ind, p, v)); }
         else if t == LLM_CALL { out.push_str(&format!("{}{} = {}\n", ind, LLM_CALL, v)); }
-        else if p == CTOR { out.push_str(&format!("{}{} = {}\n", ind, t, v)); }
+        else if p == CTOR || p == KILL { out.push_str(&format!("{}{} = {}\n", ind, t, v)); }
         else { out.push_str(&format!("{}{}.{} = {}\n", ind, t, p, v)); }
     }
 }

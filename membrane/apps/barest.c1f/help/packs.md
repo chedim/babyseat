@@ -16,7 +16,7 @@ The host loads the text at once: its classes, getters and setters are live for t
 The reply of the write says it too, on its first lines: `pack <name> loaded`, or `pack <name> did not load: <the loader's message>`. Read that line (or `Pack:<name>.state`, `.error`)
 after every pack you write: a pack that did not load does nothing, whatever you meant it to do.
 
-Write the whole text again to change the pack (it reloads in place). Write an empty text to remove it. An optional first line
+Write the whole text again to change the pack (it reloads in place). To remove it write a plain null to the entity (`entity_write {spec: "Pack:lamps", value: null}`, no prop; or `Pack:lamps.retire = true`, or an empty `text`): its getters and setters go, what its getters left is cleared, a pack below it shows again, and the reply says `pack lamps unloaded`. An optional first line
 `PACK lamps 1` names the pack (the name must be the id) and `IMPORT <pack> <major>` lines name the packs whose classes you use.
 Comments start with `--`.
 

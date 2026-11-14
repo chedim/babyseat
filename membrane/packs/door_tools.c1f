@@ -54,10 +54,16 @@ Request.mc_w_prop getter: strip(str(prop(this.mc_args, 'prop') or ''))
 -- namespace in their packs, and a bare spelling of one of them reaches it instead of creating a second entity. An id that already has a row,
 -- or has no `membrane::` twin, is used as written.
 Request.mc_w_id getter: ('membrane::' + this.mc_w_spec) if prop('membrane::' + this.mc_w_spec, 'eid') != None and prop(this.mc_w_spec, 'eid') == None else this.mc_w_spec
-Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop' if this.mc_w_spec == '' or this.mc_w_prop == '' else None
+-- DEATH BY NULL (operator, 2026-11-14): `entity_write {spec: 'Stop:3', value: null}` with NO prop destroys the entity, the mirror of a birth (`Stop:3 = None`); a Pack unloads. The key
+-- `value` must be there and null: a call that merely forgets the prop is still refused.
+Request.mc_w_kill getter: this.mc_w_prop == '' and 'value' in this.mc_args and prop(this.mc_args, 'value') == None
+Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop (or value: null with no prop, to remove the entity)' if this.mc_w_spec == '' or (this.mc_w_prop == '' and not this.mc_w_kill) else None
 Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None and not this.mc_anon else None
 Request.mc_write on-setter mcp-write:
-  WHEN this.mc_write != None:
+  WHEN this.mc_write != None and this.mc_w_kill:
+    (prop(this.mc_write, 'spec')) = None
+    this.mc_done = True
+  ELSE WHEN this.mc_write != None:
     this.mc_w_t0 = clock
     this.mc_w_old = prop(prop(this.mc_write, 'spec'), prop(this.mc_write, 'prop') + '_result')
     (prop(this.mc_write, 'spec')).[prop(this.mc_write, 'prop')] = prop(this.mc_write, 'value')
@@ -92,7 +98,7 @@ Return.state getter: 'pending' if this.result_prop != None and this.receipt == N
 -- THE RETURN ENTITY IS TRANSIENT (operator, 2026-11-13): it carries the reply and is never retired by a write: the Request HOLDS it (`mc_w_returned` is a reference to it, a
 -- `$ref` value), and a Request is held by its open connection until the reply is delivered, so both are collected together (docs/cliffvm.md, "Garbage collection"). The
 -- receipt stays where it always lived, `<prop>_result` on the target.
-Request.mc_w_head getter: 'wrote ' + this.mc_w_id + '.' + this.mc_w_prop
+Request.mc_w_head getter: ('removed ' + this.mc_w_id) if this.mc_w_kill else ('wrote ' + this.mc_w_id + '.' + this.mc_w_prop)
 -- THE REPLY'S SIZE (operator, 2026-11-13: the Claude CLI refuses a tool result over its MCP limit and the model then gets nothing): the reply carries the first
 -- and the last `mc_w_cap` characters (8192, about 8 KB) of each stream, with its total size in bytes (`stdout_bytes`); a stream of at most twice the cap comes whole
 -- (`stdout`). The FULL text stays on the Command: `Command:x.output` (stdout), `Command:x.errors` (stderr): read it with entity_read or cut it with run_cliff.
@@ -120,7 +126,8 @@ Request.mc_w_rcpt getter:
 -- A PACK THE MODEL WROTE SAYS WHETHER IT LOADED (the delivery-route incident, 2026-11-14): the host adds the reaction `Pack:<name>.loaded` (new: loaded or not, why: the engine's error text,
 -- verbatim) for each pack text written in the round; the reply words it on its first lines, after the head, and it is not repeated in the `reactions:` list.
 Request.rx_pack getter: [r for r in (this.reactions or []) if prop(r, 'prop') == 'loaded' and startswith(str(prop(r, 'eid')), 'Pack:')]
-Request.rx_pack_lines getter: concat([('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' loaded') for r in this.rx_pack if prop(r, 'new') == True], concat([('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' did not load: ' + str(prop(r, 'why') or 'it waits for something it imports') + '\n' + ('to fix: a layer overrides only what it imports, so IMPORT the pack the error names (the text above says how); ' if 'IMPORT' in str(prop(r, 'why')) else '') + 'read ' + str(prop(r, 'eid')) + '.loaded and ' + str(prop(r, 'eid')) + '.error to check; the old text of this pack, if it had loaded before, still runs') for r in this.rx_pack if prop(r, 'new') != True], []))
+Request.rx_unloaded getter: [('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' unloaded') for r in (this.reactions or []) if prop(r, 'prop') == 'unloaded' and startswith(str(prop(r, 'eid')), 'Pack:')]
+Request.rx_pack_lines getter: concat(this.rx_unloaded, concat([('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' loaded') for r in this.rx_pack if prop(r, 'new') == True], concat([('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' did not load: ' + str(prop(r, 'why') or 'it waits for something it imports') + '\n' + ('to fix: a layer overrides only what it imports, so IMPORT the pack the error names (the text above says how); ' if 'IMPORT' in str(prop(r, 'why')) else '') + 'read ' + str(prop(r, 'eid')) + '.loaded and ' + str(prop(r, 'eid')) + '.error to check; the old text of this pack, if it had loaded before, still runs') for r in this.rx_pack if prop(r, 'new') != True], [])))
 Request.rx_marked getter: [{'r': r, 'full': (this.mc_tool == 'entity_write' and (prop(r, 'eid') == this.mc_w_id or startswith(str(prop(r, 'eid')), this.mc_w_id + ':'))) or (this.mc_tool == 'run_cliff' and prop(r, 'by') == 'run') or prop(r, 'why') != None or prop(r, 'prop') == 'failed'} for r in (this.reactions or []) if not (prop(r, 'prop') == 'loaded' and startswith(str(prop(r, 'eid')), 'Pack:'))]
 Request.rx_full getter: [m['r'] for m in this.rx_marked if m['full']]
 Request.rx_rest getter: [{'k': str(prop(m['r'], 'cls')) + '.' + str(prop(m['r'], 'prop'))} for m in this.rx_marked if not m['full']]

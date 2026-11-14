@@ -1108,6 +1108,7 @@
       "Request.mc_w_effect": "Bool",
       "Request.mc_w_head": "Text",
       "Request.mc_w_id": "Text",
+      "Request.mc_w_kill": "Bool",
       "Request.mc_w_n": "Text",
       "Request.mc_w_new": "Any",
       "Request.mc_w_perr": "Dict?",
@@ -1131,7 +1132,10 @@
       "Request.rx_groups": "List(Text)",
       "Request.rx_lines": "List(Text)",
       "Request.rx_marked": "List(Dict)",
+      "Request.rx_pack": "List(Any)",
+      "Request.rx_pack_lines": "List(Text)",
       "Request.rx_rest": "List(Dict)",
+      "Request.rx_unloaded": "List(Text)",
       "Return.kind": "Text",
       "Return.receipt": "Any",
       "Return.state": "Text"
