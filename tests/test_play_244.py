@@ -365,14 +365,6 @@ def test_the_route_is_behind_the_jwt_gate_and_tags_the_token(route):
         assert _log("toy:die")[-1]["by"] == "alice"
 
 
-def test_the_ha_relay_lets_the_poke_through_with_the_ha_user():
-    relay = (ROOT / "custom_components" / "membrane" / "relay.py").read_text()
-    allowed = relay.split("ALLOWED_EXACT = (", 1)[1].split(")", 1)[0]
-    assert '"membrane/toybox/poke"' in allowed
-    person = relay.split("PERSON_PATHS = (", 1)[1].split(")", 1)[0]
-    assert '"membrane/toybox/poke"' in person
-
-
 # ---- a spot in the field ---------------------------------------------------------------
 
 def _live(fld, eid):

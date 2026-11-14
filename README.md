@@ -196,36 +196,24 @@ open; writes need the seat token, which the container prints at boot
 only on a network you trust. [JWT mode](docs/auth.md) is on by default (a token on every request); turn it off with `MEMBRANE_JWT=0`. Details:
 [docs/docker.md](docs/docker.md).
 
-### Inside Home Assistant (HACS)
+### Home Assistant (HACS)
 
 1. HACS → ⋮ → Custom repositories → `https://github.com/chedim/membrane`,
    category *Integration*.
-2. Install **Membrane**, restart Home Assistant.
-3. Settings → Devices & services → Add integration → **Membrane** →
-   *Inside Home Assistant*. If Home Assistant already has the Ollama
-   integration, it is used; otherwise give Ollama's address. Pick the models.
+2. Install **babyseat (membrane)**, restart Home Assistant.
+3. Run a seat, mint a token for Home Assistant (`cliffvm token mint --sub owner`), then
+   Settings → Devices & services → Add integration → the seat's URL and the token.
 
-Home Assistant then runs the seat as its own child process (started and
-stopped with HA, restarted if it dies; its data in `<config>/membrane/`),
-opens on membrane home for everyone (HA's sidebar folds away; ☰ leads to HA's
-own pages — switch it off in the integration's options), adds the seat as an
-Assist conversation agent, and its field's readings as sensors.
-
-**What it can do in your house:** by default the seat may use Home Assistant
-through a hidden, non-admin, local-only user ("Membrane") — read any state,
-call any service, and mirror the entities it chooses (they update live). It
-acts on what people ask, but its commands are written by a model: turn *Let
-the seat use Home Assistant* off in the integration's options if you'd rather
-it only talks. It can't change Home Assistant's configuration or users.
-
-*Connect to a seat running elsewhere* is for a seat on another machine (the
-integration is then only its UI and agent).
-
-**Several seats, one house (the 🦠 zoo):** *Configure* → **Add a seat** (host,
-ports 4096 / 11500, its `membrane token seat`) adds a laptop or a phone; the
-house talks to one at a time — switch it from membrane home's 🦠 button (a
-card per seat; its Blurp's level and rung only when Blurp is on) or the `select.membrane_seat`
-entity ([docs/home-assistant.md](docs/home-assistant.md#the-zoo-several-seats)).
+Since 0.7.60 the integration is a thin client of a seat you run: it adds the seat
+as an Assist conversation agent, asks for a new token when one runs out, lets the
+model read states and call services through Home Assistant (an allow-list you write,
+default deny; only what you exposed to Assist), shows a few entities for the seat
+(reachable, busy, model, turns today, last answer, last error; a select for its
+model) and adds the services `membrane.send_message` and `membrane.ask`. The seat's
+use of the house, the entities and the select need the owner's token. It does
+not start a seat; the panels, the per-user relay, speech input and the several-seats
+list are a later slice (see
+[docs/home-assistant.md](docs/home-assistant.md), [docs/hass-plan.md](docs/hass-plan.md)).
 
 ### The daily work: typed tools, guarded writes
 
@@ -662,7 +650,7 @@ of the top 8.
 - **Update check at boot** (opt out `MEMBRANE_NO_UPDATE_CHECK=1`): the CLI
   compares against its install source (git or PyPI), prints the CHANGELOG
   delta, and asks before pulling (`--ff-only`; a dirty tree is refused).
-  Inside Home Assistant, updates come through HACS.
+  In Home Assistant, the integration updates through HACS (the seat is yours to update).
 - **Restart only from the shell** (`membrane reset` / `./run.sh restart`).
   Membrane never restarts itself while running, and a restart loses nothing:
   the field re-hydrates from its backend. The one way a restart CAN change
@@ -682,7 +670,7 @@ of the top 8.
 | [docs/claude-agent.md](docs/claude-agent.md) | **The claude-agent rung**: Claude through the Agent SDK on your Anthropic API key; enabling it, opt-in routing, membrane's tools in Claude's loop (built-ins off, no check-ins, a 2048-call ceiling per answer with a person's Continue, an idle guard instead of the wall clock), learned like any model with a `madeBy` provenance mark |
 | [docs/docker.md](docs/docker.md) | **babyseat in Docker**: the public image `chedim/babyseat`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
 | [docs/auth.md](docs/auth.md) | **JWT mode (on by default; `MEMBRANE_JWT=0` turns it off).** Turning it off, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
-| [docs/home-assistant.md](docs/home-assistant.md) | **babyseat in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
+| [docs/home-assistant.md](docs/home-assistant.md) | **babyseat in Home Assistant** (HACS): connect to a seat with a token, the Assist agent, the seat's use of the house (calls, allow-list), entities and services, reauth, what works and what is a later slice |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
 | [doctrine.md](doctrine.md) + [membrane/help/](membrane/help/) | **What the model is told.** The doctrine is the short core every turn carries; the long forms (packs, exec, cliffhanger, goals, watches, browser, the in-page field engine, clock, voice, restarts, consequences) are help topics shipped as field entities `membrane::help:<topic>` (the `help` seed pack: a release updates them, a seat's edits are kept as overlays), read by `help(topic)` |
 | [docs/cliffvm.md](docs/cliffvm.md) | **`cliffvm`: the field VM as a standalone app, no Python.** The binary, how to run a packs folder, the host loop and its journal, and what it does not do yet (the list of what `fields_live.py` still does). |

@@ -31,11 +31,8 @@ class TestNoHardcodedName(unittest.TestCase):
 
 
     def test_home_assistant_names_no_seat_itself(self):
-        # one fallback, the seat's own default (const.DEFAULT_NAME mirrors
-        # naming.DEFAULT: the integration runs without the membrane package)
-        src = (TREES[1] / "const.py").read_text()
-        self.assertRegex(src, r'(?m)^DEFAULT_NAME = "' + N.DEFAULT + '"')
-        hits = [f"{p.name}:{i}: {line.strip()}" for p in sorted(TREES[1].glob("*.py")) if p.name != "const.py"
+        # #1143: the component is a client of a seat and shows no seat name of its own (it no longer mirrors naming.DEFAULT)
+        hits = [f"{p.name}:{i}: {line.strip()}" for p in sorted(TREES[1].glob("*.py"))
                 for i, line in enumerate(p.read_text().splitlines(), 1) if '"' + N.DEFAULT + '"' in line]
         self.assertEqual(hits, [], "\n" + "\n".join(hits))
 

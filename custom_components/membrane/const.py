@@ -2,27 +2,20 @@
 
 DOMAIN = "membrane"
 
-# the setup form (config_flow.py)
-CONF_MODE = "mode"
-MODE_INSIDE = "inside"          # HA runs the seat itself (supervisor.py)
-MODE_CONNECT = "connect"        # a seat elsewhere (the boat's ThinkPhone, a server)
-CONF_BACKEND = "backend"        # Ollama URL the seat thinks with
-CONF_MODEL = "model"
-CONF_EMBED_MODEL = "embed_model"
-CONF_SERVE_URL = "serve_url"    # connect mode: the seat's serve surface
+# the config entry: where the seat is and the token that opens its door. The password field of the old component's Basic pair carries
+# the token (cliffvm reads a Basic password as the JWT: docs/auth.md), so the entry keeps the shape the old connect form made.
+CONF_SERVE_URL = "serve_url"
 CONF_SERVE_USER = "serve_user"
 CONF_SERVE_PASS = "serve_pass"
-# options
-OPT_LANDING = "landing"         # membrane home is the landing page (Agatha's way)
-OPT_STT_URL = "stt_url"         # a whisper-server for speech; "" = the browser listens itself
-OPT_LOOPS = "loops"             # the seat's watch-loop pool
-OPT_HA_ACCESS = "ha_access"     # the seat may use Home Assistant (ha_access.py)
-OPT_HA_BASE_URL = "ha_base_url" # connect mode: HA's address as THE SEAT sees it ("" = HA's own)
-
-DEFAULT_BACKEND = "http://localhost:11434"
 DEFAULT_SERVE_USER = "opencode"
-DEFAULT_NAME = "Bob"            # until the seat says its own: naming.DEFAULT, the seat's default
-DEFAULT_LOOPS = 1               # an HA box is smaller than the boat's brain phone
 
-PROXY_TIMEOUT_S = 1800.0        # a model turn may run minutes
-SEAT_DIR = "membrane"           # <config>/membrane: the seat's data, home, log
+POLL_S = 60                      # the seat's health, as often as the old component polled the seat (decision 11 of docs/hass-plan.md)
+HEALTH_TIMEOUT_S = 10            # the config flow's check (the old form's)
+SESSION_TIMEOUT_S = 15           # creating a session (the old conversation's)
+TURN_TIMEOUT_S = 600.0           # a model turn may run minutes (the old conversation's REQUEST_TIMEOUT_S)
+SESSION_TITLE_PREFIX = "hass-"   # a seat session per Home Assistant conversation: "hass-<conversation id>"
+
+# THE SEAT'S USE OF HOME ASSISTANT (slice 2): the component pulls the calls the model wrote (docs/home-assistant.md, "The seat uses Home Assistant")
+CALL_PULL_S = 2.0                # how often the pending calls are asked for: the old component's batch flush (FLUSH_S, decision 11 of docs/hass-plan.md), kept as it was
+CATALOG_S = POLL_S               # how often the catalog is rebuilt and, when it changed, pushed: the old component's one minute
+STATE_MAX = 255                  # Home Assistant's own limit on a state's length (a longer one is refused by HA), not ours

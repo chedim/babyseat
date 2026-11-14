@@ -29,15 +29,8 @@ class TestTheMicrophoneIsLongEnough(unittest.TestCase):
         self.assertGreaterEqual(U.MAX_STT, WAV_BYTES)
         self.assertGreaterEqual(U.STT_TIMEOUT_S, 120)
 
-    def test_home_assistant_takes_it_and_its_server_does_too(self):
-        src = (ROOT / "custom_components/membrane/stt.py").read_text()
-        self.assertGreaterEqual(_num(src, "MAX_BYTES"), WAV_BYTES)
-        self.assertLess(_num(src, "MAX_BYTES"), HA_BODY_CAP)      # HA refuses bigger bodies itself
-        self.assertGreaterEqual(_num(src, "STT_TIMEOUT_S"), 120)
-
     def test_the_refusal_says_the_real_limit(self):
         self.assertNotIn("60 s", (ROOT / "membrane/ui_serve.py").read_text())
-        self.assertNotIn("60 s", (ROOT / "custom_components/membrane/stt.py").read_text())
 
 
 if __name__ == "__main__":

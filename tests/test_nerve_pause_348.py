@@ -205,13 +205,6 @@ class TestTheRoute(_Env):
         self.assertEqual((code, out["paused"]), (200, True))
         self.assertTrue(self.srv.paused)
 
-    def test_the_ha_relay_lets_an_admins_toggle_through(self):
-        relay = (ROOT / "custom_components" / "membrane" / "relay.py").read_text()
-        for name in ("ALLOWED_EXACT", "ADMIN_WRITE_EXACT", "PERSON_PATHS"):
-            block = relay.split(name + " = (", 1)[1].split(")", 1)[0]
-            self.assertIn('"membrane/seat/pause"', block, name)
-
-
 # ---- auto-chat is gone ------------------------------------------------------------------
 
 class TestAutoChatIsGone(_Env):
