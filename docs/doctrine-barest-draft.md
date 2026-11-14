@@ -74,7 +74,7 @@ Good luck.
 
 What the draft deliberately dropped from `doctrine.md`: persons, the editor and remote clients, phone calls, Blurp, voice,
 Home Assistant, the lanes and the triage loop, goals, planner and workers (loops come later), watches and wakes, decisions
-cards, the owner and security section (the barest seat has none), the improve-babyseat pull-request paragraph, the
+cards, the admin and security section (the barest seat has none), the improve-babyseat pull-request paragraph, the
 development-workflow paragraph, and every help-topic list.
 
 What the text promises, and where the barest seat stands today:

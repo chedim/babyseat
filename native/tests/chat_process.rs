@@ -48,7 +48,7 @@ fn start_env(tag: &str, names: &[&str], extra: &[&str], env: &[(&str, &str)]) ->
 }
 
 thread_local! {
-    /// the bearer this test thread's requests carry (a seat with a door secret: the owner token file's); none = a bare caller
+    /// the bearer this test thread's requests carry (a seat with a door secret: the admin token file's); none = a bare caller
     static BEARER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -1557,7 +1557,7 @@ fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_
     assert!(terminate(&mut run));
 }
 
-// ---- the chat turn on a seat with a door secret (#1143): the CLI reaches /mcp with the owner's token, never through argv ----------------------------
+// ---- the chat turn on a seat with a door secret (#1143): the CLI reaches /mcp with the admin's token, never through argv ----------------------------
 /// the fake as the real CLI behaves with an MCP server's `headers`: `${VAR}` in a value is the environment's; it records the config's header text, what it sent, and its argv
 fn fake_with_headers(sent: &str) -> String {
     FAKE.replace("url = cfg[\"mcpServers\"][\"membrane\"][\"url\"]", &format!(r#"url = cfg["mcpServers"]["membrane"]["url"]
@@ -1568,25 +1568,25 @@ json.dump({{"raw": raw_headers, "sent": hdrs, "argv": argv}}, open(os.path.join(
         .replace("headers={\"Content-Type\": \"application/json\"}", "headers=dict({\"Content-Type\": \"application/json\"}, **hdrs)")
 }
 
-/// a seat with a door secret in its own folder (made at boot), the fake as its CLI; the test thread carries the owner's token afterwards
-fn owner_seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
+/// a seat with a door secret in its own folder (made at boot), the fake as its CLI; the test thread carries the admin's token afterwards
+fn admin_seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
     let (run, port, dir) = fake_seat_script(tag, &["--fact", "door_secret_file=door.secret", "--fact", "seat_data_dir=."], &[], script);
-    let tok = std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string();
+    let tok = std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string();
     BEARER.with(|b| *b.borrow_mut() = Some(tok));
     (run, port, dir)
 }
 
 #[test]
 fn the_turns_cli_reaches_the_mcp_door_with_the_owner_token_from_its_environment_and_never_through_argv() {
-    let (mut run, port, dir) = owner_seat("chatowner", &fake_with_headers(""));
-    let tok = std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string();
+    let (mut run, port, dir) = admin_seat("chatadmin", &fake_with_headers(""));
+    let tok = std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string();
     let id = send(port, "with a token");
     let v = finish(port, &dir, &id, "with a token");
     assert_eq!(v["state"], "done", "the seat accepted the token the CLI sent: {v}");
     assert_eq!(v["tools"], json!(["entity_write", "entity_read"]));
     let h: J = serde_json::from_str(&std::fs::read_to_string(dir.join("mcp_headers.json")).unwrap()).unwrap();
-    assert_eq!(h["raw"], json!({"Authorization": "Bearer ${MEMBRANE_OWNER_TOKEN}"}), "the config names the variable, not the token");
-    assert_eq!(h["sent"]["Authorization"], format!("Bearer {tok}"), "what the CLI sent is the owner's token");
+    assert_eq!(h["raw"], json!({"Authorization": "Bearer ${MEMBRANE_ADMIN_TOKEN}"}), "the config names the variable, not the token");
+    assert_eq!(h["sent"]["Authorization"], format!("Bearer {tok}"), "what the CLI sent is the admin's token");
     assert!(!h["argv"].to_string().contains(&tok), "the token is not in argv (a process listing shows argv)");
     assert!(!std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("with a token")))).unwrap().contains(&tok));
     // the token is in no row of the field either: not in the message's view, not in the command entity
@@ -1598,7 +1598,7 @@ fn the_turns_cli_reaches_the_mcp_door_with_the_owner_token_from_its_environment_
 
 #[test]
 fn a_turn_whose_cli_sends_a_wrong_token_fails_visibly() {
-    let (mut run, port, dir) = owner_seat("chatwrongtoken", &fake_with_headers("hdrs = {'Authorization': 'Bearer not-the-owners-token'}"));
+    let (mut run, port, dir) = admin_seat("chatwrongtoken", &fake_with_headers("hdrs = {'Authorization': 'Bearer not-the-admins-token'}"));
     let id = send(port, "wrong token");
     let v = finish(port, &dir, &id, "wrong token");
     assert_eq!(v["state"], "error", "{v}");

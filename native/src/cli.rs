@@ -120,9 +120,9 @@ fn absolute(p: &str) -> String {
 /// `run`: the app is the folder. Load its packs, compute the getters once, tell the facts and `started`, then loop until `stop`.
 /// Prints `cliffvm: door listening on <host>:<port>` once the door is up. -> the process's exit code.
 pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
-    // the owner's token (owner.rs): with a door secret, the secret is made if missing and a fresh owner token is written at every boot; before any thread starts
+    // the admin's token (admin.rs): with a door secret, the secret is made if missing and a fresh admin token is written at every boot; before any thread starts
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-    let owner_facts = match crate::owner::boot(&r.facts, now) { Ok(m) => m, Err(e) => { eprintln!("cliffvm: owner token: {e}"); return 2; } };
+    let admin_facts = match crate::admin::boot(&r.facts, now) { Ok(m) => m, Err(e) => { eprintln!("cliffvm: admin token: {e}"); return 2; } };
     let mut o = Options::new(Some(r.store.clone()));
     o.plain = true;
     o.bind = r.bind.clone();
@@ -169,7 +169,7 @@ pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 {
         if let Err(e) = plan::run(h.engine(), &host::NullHost, steps, false, &mut |_| Outcome::Skipped) { eprintln!("cliffvm: boot stopped: {e}"); return 2; }
     }
     let mut told = facts(r);
-    told.extend(owner_facts);
+    told.extend(admin_facts);
     host::boot_started(&h, &told, true);
     if let Some(steps) = &steps {
         let _ = plan::run(h.engine(), &host::NullHost, steps, true, &mut |_| Outcome::Skipped);   // the UI is up: the background steps

@@ -183,7 +183,7 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
             let (req2, http) = (req.clone(), props.get("http").and_then(|h| h.as_str()).unwrap_or("").to_string());
             st.effect(eid, verb, Box::new(move |sh, _| crate::http::verify(&Store::from_shared(sh), &http, &req2)));
         }
-        ("Request", "mint") => {                           // a token for a person, signed with the door's own secret (the page's owner cookie)
+        ("Request", "mint") => {                           // a token for a person, signed with the door's own secret (the page's admin cookie)
             let (req2, http) = (req.clone(), props.get("http").and_then(|h| h.as_str()).unwrap_or("").to_string());
             st.effect(eid, verb, Box::new(move |sh, _| crate::http::mint(&Store::from_shared(sh), &http, &req2)));
         }

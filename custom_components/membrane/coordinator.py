@@ -1,6 +1,6 @@
 """The seat, polled (POLL_S): `GET /global/health` (a 401 is the token's end of life: Home Assistant starts its reauth flow; any other failure makes the entry retry /
 unavailable until the seat answers again), and, for the entities of slice 2, the seat's own rows (`GET /membrane/ha/metrics`) and options (`GET /membrane/options`). The two
-extra reads are the owner's: a seat that refuses them (the token is a person's) or has no such route just has no rows and no model list, and Assist is untouched."""
+extra reads need a verified token: a seat that has no such route just has no rows and no model list, and Assist is untouched."""
 from __future__ import annotations
 
 import logging
@@ -34,7 +34,7 @@ class SeatHealth(DataUpdateCoordinator):
                 got = await read()
             except SeatAuthError as e:
                 raise ConfigEntryAuthFailed(str(e)) from e
-            except SeatError as e:                   # not the owner's token (metrics), or a seat without the pack: nothing of it
+            except SeatError as e:                   # not the admin's token (metrics), or a seat without the pack: nothing of it
                 _LOGGER.debug("membrane: no %s from the seat: %s", key, e)
                 continue
             if key == "rows":

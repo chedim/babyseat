@@ -17,7 +17,7 @@ VIRTUAL Chunk
 --   chat_auth         how the CLI authenticates: `api_key` (the DEFAULT: the key of the seat's environment variable ANTHROPIC_API_KEY, handed to the CLI in ITS environment) or `login` (the
 --                     CLI's own login: an explicit opt-in, never chosen silently). Anything else is refused. The key is never read by a pack: the launcher tells only `anthropic_key_set`
 --                     (a yes or no), and the run's `env_from` hands the value to the child (the driver masks it in whatever the child prints), so it is in no property, argv, row or reply.
---   (LIVE since the settings pack: `Setting:chat.max_steps` and `Setting:chat.timeout` (packs/settings.c1f) are the owners of the two values below: their `current` is read first, then the fact, then the default here, which a seat without that pack still uses)
+--   (LIVE since the settings pack: `Setting:chat.max_steps` and `Setting:chat.timeout` (packs/settings.c1f) are the sources of the two values below: their `current` is read first, then the fact, then the default here, which a seat without that pack still uses)
 --   chat_turn_timeout_s the turn's time limit in seconds (a Command's timeout_s); default 21600 here (a threshold: flagged for the operator).
 --   chat_max_turns    the ceiling (the CLI's --max-turns); default 2048 here (a threshold: flagged for the operator).
 -- `env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is the CLI's own switch the Python rung set (no auto-memory keyed to the folder).
@@ -53,13 +53,13 @@ ChatMessage.turn_timeout_s getter:
 ChatMessage.port getter:
   WHEN this.over: None
   ELSE: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
--- THE OWNER'S TOKEN (docs/auth.md): a seat with a door secret refuses a caller with no token, loopback too, so the turn's CLI carries the owner's token
--- (the file `Boot:seat.owner_token_file` names, written by the launcher at every boot). The token is NOT here: the config names the variable
--- `${MEMBRANE_OWNER_TOKEN}` as the CLI's MCP `headers` take it, and the run's `env_from` hands the launcher's own value to the child's environment,
+-- THE ADMIN'S TOKEN (docs/auth.md): a seat with a door secret refuses a caller with no token, loopback too, so the turn's CLI carries the admin's token
+-- (the file `Boot:seat.admin_token_file` names, written by the launcher at every boot). The token is NOT here: the config names the variable
+-- `${MEMBRANE_ADMIN_TOKEN}` as the CLI's MCP `headers` take it, and the run's `env_from` hands the launcher's own value to the child's environment,
 -- so the value is in no property, no argv and no row. The barest seat has no such file: no header, no variable.
-ChatMessage.owner_file getter:
+ChatMessage.admin_file getter:
   WHEN this.over: None
-  ELSE: ([b.owner_token_file for b in instances('Boot') if b.owner_token_file != None] or [None])[0]
+  ELSE: ([b.admin_token_file for b in instances('Boot') if b.admin_token_file != None] or [None])[0]
 -- THE DOOR'S ADDRESS (#1143): the CLI is always a child of the seat on the same machine, so its MCP url names the address the door actually listens on: the host of
 -- `Http:door.listen_result` when it is a specific address (`--bind <lan-ip>` has no listener on loopback), loopback when the bind is the wildcard (0.0.0.0, ::) or unstated.
 -- A specific IPv6 address is written in brackets.
@@ -73,14 +73,14 @@ ChatMessage.mcp_url getter:
   ELSE: 'http://' + this.mcp_host + ':' + str(this.port) + '/mcp'
 ChatMessage.mcp_server getter:
   WHEN this.over or this.port == None: None
-  ELSE WHEN this.owner_file != None: {'type': 'http', 'url': this.mcp_url, 'headers': {'Authorization': 'Bearer ${MEMBRANE_OWNER_TOKEN}'}}
+  ELSE WHEN this.admin_file != None: {'type': 'http', 'url': this.mcp_url, 'headers': {'Authorization': 'Bearer ${MEMBRANE_ADMIN_TOKEN}'}}
   ELSE: {'type': 'http', 'url': this.mcp_url}
--- what the run's `env_from` hands the child: the owner's token (a seat with a secret) and, in key mode, the API key (both named, never valued here). ONE key check: the key is named
+-- what the run's `env_from` hands the child: the admin's token (a seat with a secret) and, in key mode, the API key (both named, never valued here). ONE key check: the key is named
 -- only when `key_set` (the launcher's fact: set AND non-empty) is true, the same test `plan` refuses on, so the driver's "environment variable ... is not set" can never be reached in key mode.
-ChatMessage.owner_env getter:
+ChatMessage.admin_env getter:
   WHEN this.over: None
-  ELSE WHEN this.owner_file != None and this.auth == 'api_key' and this.key_set: {'MEMBRANE_OWNER_TOKEN': 'MEMBRANE_OWNER_TOKEN', 'ANTHROPIC_API_KEY': 'ANTHROPIC_API_KEY'}
-  ELSE WHEN this.owner_file != None: {'MEMBRANE_OWNER_TOKEN': 'MEMBRANE_OWNER_TOKEN'}
+  ELSE WHEN this.admin_file != None and this.auth == 'api_key' and this.key_set: {'MEMBRANE_ADMIN_TOKEN': 'MEMBRANE_ADMIN_TOKEN', 'ANTHROPIC_API_KEY': 'ANTHROPIC_API_KEY'}
+  ELSE WHEN this.admin_file != None: {'MEMBRANE_ADMIN_TOKEN': 'MEMBRANE_ADMIN_TOKEN'}
   ELSE WHEN this.auth == 'api_key' and this.key_set: {'ANTHROPIC_API_KEY': 'ANTHROPIC_API_KEY'}
   ELSE: None
 ChatMessage.mcp_json getter:
@@ -92,7 +92,7 @@ ChatMessage.banner_text getter:
 ChatMessage.note getter:
   WHEN this.over: None
   ELSE: 'Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.'
--- THE PROMPT PROPS END WITH THE TURN (#1143): bin, max_turns, port, owner_file, mcp_server, owner_env, mcp_json, banner_text, banner_slot, sys, argv and note are none once the turn is over (done/error): a finished message
+-- THE PROMPT PROPS END WITH THE TURN (#1143): bin, max_turns, port, admin_file, mcp_server, admin_env, mcp_json, banner_text, banner_slot, sys, argv and note are none once the turn is over (done/error): a finished message
 -- no longer reads the banner, so a banner change recomputes only unfinished messages (not every message ever sent), the reply of a write carries none of them and the
 -- stored rows hold no copy of the system prompt. The view, the text, the response and the tools are not among them.
 -- A banner with no `text` (the model's pack left it null) is SHOWN, not skipped: the turn runs with the banner error in the banner's slot, so the model can repair it (Help:banner).
@@ -136,7 +136,7 @@ Chat.plan on-setter turn-start:
   ELSE WHEN prop(this.plan, 'argv') != None:
     membrane::Chat[this.cp]:turn.state = 'running'
     membrane::Chat[this.cp]:turn.started = clock
-    membrane::Command:chat[this.cp] = Command(cmd: prop(this.plan, 'argv'), env_from: this.owner_env)
+    membrane::Command:chat[this.cp] = Command(cmd: prop(this.plan, 'argv'), env_from: this.admin_env)
     membrane::Command:chat[this.cp].run = {'id': this.cp, 'args': [], 'partial': True, 'timeout_s': this.turn_timeout_s}
 
 -- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------

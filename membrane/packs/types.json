@@ -288,6 +288,8 @@
   "chat_turn": {
     "getters": {
       "Boot.interrupted": "List(Text)",
+      "ChatMessage.admin_env": "Dict?",
+      "ChatMessage.admin_file": "Any",
       "ChatMessage.answer": "Text?",
       "ChatMessage.argv": "List(Any)?",
       "ChatMessage.auth": "Any",
@@ -315,8 +317,6 @@
       "ChatMessage.note": "Text?",
       "ChatMessage.oai_acc": "Text",
       "ChatMessage.over": "Bool",
-      "ChatMessage.owner_env": "Dict?",
-      "ChatMessage.owner_file": "Any",
       "ChatMessage.partial_text": "Text",
       "ChatMessage.partial_tools": "List(Text)",
       "ChatMessage.pick_default": "Bool",
@@ -471,7 +471,6 @@
       "Request.family": "Dict?",
       "Request.family_checked": "Dict?",
       "Request.file": "Text?",
-      "Request.forbidden": "Dict",
       "Request.found": "Any",
       "Request.fwd": "Bool",
       "Request.fwdh": "Text",
@@ -496,8 +495,6 @@
       "Request.ms": "Num?",
       "Request.own_routes": "Dict?",
       "Request.owned": "Bool",
-      "Request.owner": "Bool",
-      "Request.owner_sub": "Text",
       "Request.parts": "List(Text)",
       "Request.path_body": "Dict",
       "Request.person": "Any",
@@ -539,21 +536,18 @@
   },
   "door_auth": {
     "getters": {
-      "Person.owner": "Bool",
-      "Request.owner_ask": "Dict?",
-      "Request.owner_page": "Bool",
-      "Request.owner_ttl": "Int",
+      "Request.admin_ask": "Dict?",
+      "Request.admin_page": "Bool",
+      "Request.admin_ttl": "Int",
+      "Request.host": "Text",
+      "Request.host_allowed": "List(Text)",
+      "Request.host_extra": "Any",
+      "Request.host_ok": "Bool",
       "Request.page": "Bool",
       "Request.page_cookie": "Text?",
-      "Request.page_hold": "Bool?",
-      "Request.person_eid": "Text?",
-      "Request.person_seen": "Dict?"
+      "Request.page_hold": "Bool?"
     },
     "writes": {
-      "*.first_seen": "Any",
-      "*.last_seen": "Any",
-      "*.name": "Any",
-      "*.sub": "Any",
       "Request.mint": "Dict?"
     },
     "findings": [],
@@ -1055,10 +1049,10 @@
       "Request.cl_start": "Text?",
       "Request.cl_stext": "Text",
       "Request.m_tools": "List(Text)",
+      "Request.mc_anon": "Bool",
       "Request.mc_args": "Any",
       "Request.mc_bad": "Text?",
       "Request.mc_call": "Dict?",
-      "Request.mc_deny": "Bool",
       "Request.mc_id": "Any",
       "Request.mc_init": "Dict",
       "Request.mc_is_err": "Bool",
@@ -1713,7 +1707,7 @@
       "Setting.fact_val": "Any"
     },
     "writes": {
-      "*.[this.owner_prop]": "Any",
+      "*.[this.source_prop]": "Any",
       "*.retire": "Bool",
       "HaAllow.entities": "Any",
       "HaAllow.services": "Any",

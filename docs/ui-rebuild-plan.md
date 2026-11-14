@@ -121,7 +121,7 @@ Why the bare app's: its chat (174 lines) and graph (194 lines) read routes that 
 - Memory: the page holds a copy of the followed field. The snapshot cap (b) and virtualization are the guards; a 5,000-row chat history is the test.
 - Accessibility: `DomNode` lacks focus management, `aria-live` on a log, `label`/`for`, `tabindex`. The allow-lists must grow with W1 (`aria-*`, `tabindex`, `for`, `type`), and focus must be a write, or the rebuilt composer is a regression.
 - Mobile: the page uses a `viewport` meta and the old CSS; a pack uses the same class names, so CSS is shared. IME composition and soft-keyboard `input` events need W1 to read `value`, not `keydown`.
-- Security: text only, never HTML; `Fetch` same-origin only; a pack can write to a seat only through an existing route (so owner/guest gating still applies). Untrusted pack = the seat's own packs only; no user-supplied view packs in slice one.
+- Security: text only, never HTML; `Fetch` same-origin only; a pack can write to a seat only through an existing route (so the door's token check still applies). Untrusted pack = the seat's own packs only; no user-supplied view packs in slice one.
 - Scope creep: the released `panel.js` carries Blurp/self/toybox parts; building them in c1f before D10 is answered wastes 6-8 rounds.
 - The seat's snapshot door (`/ui/fieldvm`) shipping every entity of declared classes may be large; paging it is a seat-side change not counted above.
 

@@ -297,7 +297,7 @@ class Host {
   // ---- W2: the page's `Fetch` entity (#1143). A pack writes `Fetch:<x>.request = {id, url, method?, headers?, body?, timeout_s?}`; this
   // makes ONE fetch() and writes `request_result` back in the seat's shape (native/src/drivers.rs + fetch.rs: {id, status, rc, head,
   // http_status, headers, body, started, finished, ms}; a failure is {id, status:'error', rc, head: the reason, started, finished, ms}).
-  // Same origin only, credentials same-origin (the owner cookie), never authorization or cookie. `abort = true` aborts the one in flight.
+  // Same origin only, credentials same-origin (the admin cookie), never authorization or cookie. `abort = true` aborts the one in flight.
   // No timeout unless the request carries `timeout_s`. W3: with `stream: true` the body is read as SSE; each frame's `data` is a page-local
   // entity `Chunk:<fetch eid>:<n>` ({fetch, id, n, data, done}, the seat's Fetch Chunk), n from 1, a last `done: true` Chunk (n+1, `error` on
   // a failure or abort), then the receipt without a body. Chunks are fed as mirrors: never fetched, never sent anywhere.

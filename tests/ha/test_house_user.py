@@ -1,5 +1,5 @@
 """#1143, the seat's use of the house runs AS a Home Assistant user: the hidden system user "Membrane" (non-admin, local-only, group USER -- the old component's own), so Home
-Assistant's permission model, which the model cannot write, decides what a call may touch. The component still signs in to the seat with the owner's token (Home Assistant is NOT
+Assistant's permission model, which the model cannot write, decides what a call may touch. The component still signs in to the seat with the admin's token (Home Assistant is NOT
 a seat person). Against the fake Home Assistant (fakeha.py) and a real seat."""
 import asyncio
 import json

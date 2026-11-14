@@ -38,7 +38,7 @@ fn start(data: &std::path::Path, extra: &[&str]) -> Run {
 fn get(port: u16, path: &str, extra: &str) -> (String, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
-    s.write_all(format!("GET {path} HTTP/1.1\r\nHost: t\r\n{extra}\r\n").as_bytes()).unwrap();
+    s.write_all(format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{extra}\r\n").as_bytes()).unwrap();
     let mut out = vec![];
     let _ = s.read_to_end(&mut out);
     let i = out.windows(4).position(|w| w == b"\r\n\r\n").expect("an HTTP answer");
@@ -81,19 +81,19 @@ fn the_first_run_makes_a_private_secret_and_serves_the_page_with_its_cookie_and_
 #[test]
 fn a_fact_passes_through_and_wins_over_the_defaults() {
     let data = tmp("b");
-    let run = start(&data, &["--fact", "operator=ann"]);
+    let run = start(&data, &["--fact", "admin_token_ttl_s=3600"]);
     let (head, _) = get(run.port, "/", "");
     let ck = cookie_of(&head);
     let (_, b) = get(run.port, "/ui/serve/ui/conf", &format!("Cookie: {ck}\r\n"));
-    assert!(b.contains("\"sub\":\"ann\""), "the owner cookie is for the operator fact: {b}");
+    assert!(b.contains("\"sub\":\"admin\""), "the admin cookie is the admin's: {b}");
     let _ = std::fs::remove_dir_all(&data);
 }
 
 #[test]
-fn the_script_says_where_the_owner_token_is_and_how_a_local_tool_uses_it() {
+fn the_script_says_where_the_admin_token_is_and_how_a_local_tool_uses_it() {
     let data = tmp("c");
     let run = start(&data, &[]);
-    let file = data.join("owner.token");
+    let file = data.join("admin.token");
     let said = run.said.join("\n");
     assert!(said.contains(&file.display().to_string()), "the token file's path is printed: {said}");
     assert!(said.contains("curl -H \"Authorization: Bearer $(cat ") && said.contains("/global/health"), "a ready curl example: {said}");

@@ -32,7 +32,7 @@ const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f
 
 /// the seat's folder holds the fake claude; the binary is told its path as a fact
 fn seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) { seat_with(tag, script, false) }
-/// `strict`: the seat has a door secret (and so an owner token file, `<dir>/owner.token`): every route but the public set needs the token
+/// `strict`: the seat has a door secret (and so an admin token file, `<dir>/admin.token`): every route but the public set needs the token
 fn seat_with(tag: &str, script: &str, strict: bool) -> (Run, u16, std::path::PathBuf) { seat_facts(tag, script, strict, &[]) }
 /// `facts`: more `--fact name=value` lines
 fn seat_facts(tag: &str, script: &str, strict: bool, facts: &[&str]) -> (Run, u16, std::path::PathBuf) {

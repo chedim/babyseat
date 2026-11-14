@@ -25,7 +25,7 @@ Request.reply getter:
 Request.reply on-setter answer:
   ALWAYS:
     this.respond = this.reply
-Request.who getter: ('owner ' + this.sub) if this.authed else ('nobody: ' + str(this.auth_error))
+Request.who getter: ('verified ' + this.sub) if this.authed else ('nobody: ' + str(this.auth_error))
 Http.kind getter: 'http'
 ";
 
@@ -129,7 +129,7 @@ fn the_door_verifies_the_token_and_a_pack_reads_who() {
     let (mut ra, mut rb, mut rc) = (None, None, None);
     pump(&mut c, &mut f, |_| { if ra.is_none() { ra = a.try_recv().ok(); } if rb.is_none() { rb = b.try_recv().ok(); } if rc.is_none() { rc = c2.try_recv().ok(); } ra.is_some() && rb.is_some() && rc.is_some() });
     let who = |path: &str| c.docs.values().find(|e| e.props.get("path") == Some(&json!(path))).map(|e| e.props["who"].clone()).unwrap();
-    assert_eq!(who("/a"), json!("owner owner"));
+    assert_eq!(who("/a"), json!("verified admin"), "the token's own sub (owner) is replaced: a verified token is the admin");
     assert_eq!(who("/b"), json!("nobody: no token"));
     assert_eq!(who("/c"), json!("nobody: no token"), "a query-string token is never read");
 }
@@ -148,7 +148,7 @@ fn the_secret_may_be_a_file_the_launcher_names() {
     let mut ra = None;
     pump(&mut c, &mut f2, |_| { if ra.is_none() { ra = a.try_recv().ok(); } ra.is_some() });
     let who = c.docs.values().find(|e| e.props.get("path") == Some(&json!("/a"))).map(|e| e.props["who"].clone()).unwrap();
-    assert_eq!(who, json!("owner owner"));
+    assert_eq!(who, json!("verified admin"));
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn a_request_can_ask_the_door_to_verify_a_token_it_carries_in_its_body() {
     ask(&mut c, &mut f, "v1", GOOD);
     let r = c.docs["Request:900"].props["verify_result"].clone();
     assert_eq!(r["rc"], json!(0), "{r}");
-    assert_eq!(r["claims"]["sub"], json!("owner"));
+    assert_eq!(r["claims"]["sub"], json!("owner"), "the receipt of a verify is the checked token's own claims (the fixture's sub)");
     ask(&mut c, &mut f, "v2", "not.a.token");
     let r = c.docs["Request:900"].props["verify_result"].clone();
     assert_eq!(r["rc"], json!(1), "{r}");

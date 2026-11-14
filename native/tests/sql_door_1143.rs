@@ -1,6 +1,6 @@
-//! The Sql driver through the DOOR (#1143, the operator 2026-11-14): the MODEL creates a `SqlSource` with `entity_write` (the owner's tool), a query, runs it and
+//! The Sql driver through the DOOR (#1143, the operator 2026-11-14): the MODEL creates a `SqlSource` with `entity_write` (the admin's tool), a query, runs it and
 //! reads the rows back; the pack needs no grant beyond what Command and Fetch need (the tools pack imports `sql`, as it imports `proc` and `fetch`); a
-//! non-owner is refused (403) and nothing is made; the seat's own store path is refused with a visible reason whoever writes it.
+//! caller with no token is refused (401) and nothing is made; the seat's own store path is refused with a visible reason whoever writes it.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -55,7 +55,7 @@ fn http(port: u16, method: &str, path: &str, tok: Option<&str>, body: &str) -> (
 }
 fn now() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() }
 fn secret_of(dir: &std::path::Path) -> Vec<u8> { std::fs::read_to_string(dir.join("door.secret")).unwrap().trim().as_bytes().to_vec() }
-fn owner_token(dir: &std::path::Path) -> String { std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string() }
+fn admin_token(dir: &std::path::Path) -> String { std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string() }
 fn person_token(dir: &std::path::Path, sub: &str, name: &str) -> String { membrane_vm::jwt::mint(&secret_of(dir), sub, name, 3600.0, now()).unwrap() }
 
 /// one tools/call on /mcp; -> (http status, body)
@@ -71,7 +71,6 @@ fn read_prop(port: u16, tok: &str, spec: &str, prop: &str) -> J {
     if t.contains(" has no ") { return J::Null; }   // the read tool's words for a property the entity does not have
     serde_json::from_str(&t).unwrap_or(json!(t))
 }
-const FORBIDDEN: fn() -> J = || json!({"type": "error", "error": {"message": "for the owner"}});
 
 fn write(port: u16, tok: &str, spec: &str, prop: &str, value: J) -> (u16, J) { call(port, tok, "entity_write", json!({"spec": spec, "prop": prop, "value": value})) }
 fn wait_prop(port: u16, tok: &str, spec: &str, prop: &str) -> J {
@@ -80,14 +79,14 @@ fn wait_prop(port: u16, tok: &str, spec: &str, prop: &str) -> J {
 }
 
 #[test]
-fn the_owner_writes_a_source_and_a_query_through_the_door_and_reads_the_rows() {
-    let dir = tmp("sqldoor-owner");
+fn the_admin_writes_a_source_and_a_query_through_the_door_and_reads_the_rows() {
+    let dir = tmp("sqldoor-admin");
     let db = dir.join("wordnet.sqlite");
     let cx = rusqlite::Connection::open(&db).unwrap();
     cx.execute_batch("CREATE TABLE syn (w TEXT, s TEXT); INSERT INTO syn VALUES ('big','large'),('big','huge'),('small','tiny');").unwrap();
     drop(cx);
     let (_run, port) = launch(&dir, true, &[]);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     for (spec, prop, v) in [("SqlSource:lex", "path", json!(db.to_string_lossy())), ("SqlQuery:syn", "source", json!("lex")), ("SqlQuery:syn", "sql", json!("SELECT s FROM syn WHERE w = ? ORDER BY s"))] {
         let (st, b) = write(port, &own, spec, prop, v);
         assert_eq!(st, 200, "{spec}.{prop}: {b}");
@@ -100,13 +99,15 @@ fn the_owner_writes_a_source_and_a_query_through_the_door_and_reads_the_rows() {
 }
 
 #[test]
-fn a_person_who_is_not_the_owner_cannot_make_a_source() {
+fn a_caller_with_no_token_cannot_make_a_source_and_any_valid_token_can() {
     let dir = tmp("sqldoor-bob");
     let (_run, port) = launch(&dir, true, &[]);
-    let (own, bob) = (owner_token(&dir), person_token(&dir, "bob", "Bob"));
-    let (st, b) = write(port, &bob, "SqlSource:lex", "path", json!("/etc/passwd"));
-    assert_eq!((st, &b), (403, &FORBIDDEN()), "{b}");
+    let (own, bob) = (admin_token(&dir), person_token(&dir, "bob", "Bob"));
+    let (st, b) = write(port, "", "SqlSource:lex", "path", json!("/etc/passwd"));
+    assert_eq!(st, 401, "{b}");
     assert_eq!(read_prop(port, &own, "SqlSource:lex", "path"), J::Null, "nothing was made");
+    let (st, b) = write(port, &bob, "SqlSource:bobs", "path", json!("/nonexistent/bobs.sqlite"));
+    assert_eq!(st, 200, "bob is the admin: {b}");
 }
 
 #[test]
@@ -115,7 +116,7 @@ fn the_seats_own_store_path_written_through_the_door_is_refused_with_a_reason_an
     let good = dir.join("good.sqlite");
     rusqlite::Connection::open(&good).unwrap().execute_batch("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (7);").unwrap();
     let (_run, port) = launch(&dir, true, &[]);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     let store = dir.join("field.sqlite3");
     for (spec, prop, v) in [("SqlSource:s", "path", json!(store.to_string_lossy())), ("SqlSource:s", "mode", json!("rw")), ("SqlQuery:q", "source", json!("s")), ("SqlQuery:q", "sql", json!("SELECT x FROM t"))] {
         assert_eq!(write(port, &own, spec, prop, v).0, 200);

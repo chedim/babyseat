@@ -61,17 +61,17 @@ Existing mechanisms only: packs, `Request.override` (a getter that wins before t
 
 ## 3. Auth (never tokenless)
 
-A localhost peer is not the owner (docs/auth.md, #842): every route but the shell needs a verified JWT, HA's own host included.
+A localhost peer is not the admin (docs/auth.md, #842): every route but the shell needs a verified JWT, HA's own host included.
 - **Connect mode**: the operator mints once, on the seat: `cliffvm token mint --sub ha --name "Home Assistant" --ttl <T> --secret-file <seat>/door.secret`, and pastes it into the existing form's password field. The component keeps sending `Authorization: Basic base64("opencode:<token>")` (`config_flow.py:139`, `coordinator.py:34`): cliffvm reads the password as the token (`http.rs:49-55`). The form changes only its label and a hint; the entry shape (`serve_url`, `serve_user`, `serve_pass`) is unchanged. A token has a required life (`--ttl`, no default), so the component adds the standard reauth step (HA `ConfigEntryAuthFailed` on a 401, `async_step_reauth` asking for a new token). The first verified request creates `Person:ha`.
-- **Inside mode**: the component started the seat, so it reads `<data>/owner.token` (0600, rewritten at every boot, `docs/auth.md`) from disk on each request: no expiry to manage, no secret in the entry. The relay holds the token, never the browser, as today.
-- **Who may write the HA routes** (I7-I9, I10 calls): reads are open to every verified person; the `/mcp` `entity_write` is owner-only. A pack route decides for itself: owner only, or the sub named in a fact `ha_sub` [owner or `ha_sub`: decision].
-- **Per-HA-user identity** stays what it is: one transport token, `[HA user: X]` stamped by the relay, ownership in HA's Store. Per-user tokens (`--sub ha:<uid>`) would give the seat real `Person`s but need one mint per user and a rotation story: NICE, not first.
+- **Inside mode**: the component started the seat, so it reads `<data>/admin.token` (0600, rewritten at every boot, `docs/auth.md`) from disk on each request: no expiry to manage, no secret in the entry. The relay holds the token, never the browser, as today.
+- **Who may write the HA routes** (I7-I9, I10 calls): every route needs a verified token and every valid token is the admin (no users, 2026-11-14): the `ha_sub` fact was never built and is dropped.
+- **Per-HA-user identity** stays what it is: one transport token, `[HA user: X]` stamped by the relay, ownership in HA's Store. Per-user tokens (`--sub ha:<uid>`) would need one mint per user and a rotation story: NICE, not first.
 
 ## 4. Platforms: how HA users get a seat
 
 | host | design | status |
 |---|---|---|
-| HA Core / Supervised / OS / Container | **[recommended] keep the pip `requirements: ["babyseat==<v>"]`**: HA installs the platform wheel (musllinux on the Alpine-based HA images, `PP section b/d`), whose `dist/` holds `cliffvm` + packs + ui; the component finds it (`importlib` -> `dist/bin/cliffvm`) and spawns `cliffvm run <dist packs> --store <config>/membrane/cliffvm.sqlite3 --port <p> --bind 127.0.0.1 --fact ...` (PP launcher option 3: `cliffvm serve` does the defaults, the component passes ~5 facts). The `python -m membrane.opencode` line goes; readiness = `/global/health` with the owner token | musl `bin` build never run (PP risk table); `package_found` (`supervisor.py:46`) becomes "binary found" |
+| HA Core / Supervised / OS / Container | **[recommended] keep the pip `requirements: ["babyseat==<v>"]`**: HA installs the platform wheel (musllinux on the Alpine-based HA images, `PP section b/d`), whose `dist/` holds `cliffvm` + packs + ui; the component finds it (`importlib` -> `dist/bin/cliffvm`) and spawns `cliffvm run <dist packs> --store <config>/membrane/cliffvm.sqlite3 --port <p> --bind 127.0.0.1 --fact ...` (PP launcher option 3: `cliffvm serve` does the defaults, the component passes ~5 facts). The `python -m membrane.opencode` line goes; readiness = `/global/health` with the admin token | musl `bin` build never run (PP risk table); `package_found` (`supervisor.py:46`) becomes "binary found" |
 | HA OS add-on | a Supervisor add-on is a separate repo layout and image; it is the Docker image below with a `config.yaml`. NICE, later (est. 3-4 rounds) | not designed |
 | seat on another host / Docker (`chedim/babyseat`, musl or glibc) | connect mode (exists); the image must be the new one (no Python, PP section d) | needs the image |
 | Termux / Android (ThinkPhone, boat) | the boat's HA runs in a proot Debian (`/opt/hass/venv`, aarch64 glibc userland, per memory 2026-10-21), so a **manylinux aarch64 wheel installs there** (UNVERIFIED: proot, RAM; the phone was short on RAM, the in-HA seat was dropped). A native Termux seat is Bionic: the Linux musl-static aarch64 binary may run on the Android kernel without libc (UNVERIFIED), but DNS reads `/etc/resolv.conf` (absent on Android) so a hostname in `seat_backend` may fail; TLS roots are compiled in (`webpki-roots`), sqlite is bundled, no OpenSSL. A separate `aarch64-linux-android` target needs the NDK for `ring` and bundled sqlite: not planned (PP decision 4: Android/Termux none) | UNVERIFIED all; a 1-2 round spike if the operator wants Termux |
@@ -90,7 +90,7 @@ The component still never passes HA's own environment to the child (keep `ENV_KE
 ## 6. The thin component and how it finds the seat
 
 What stays Python (HA runs Python): config and reauth flow, one `SeatClient` (aiohttp, one auth header, timeouts), the conversation entity (text in, text out), the entity builder for `/membrane/ha/metrics` rows, the HA-side collectors (state change listener, `async_get_all_descriptions`, `async_should_expose`, MQTT client: these only read HA and forward raw rows), the relay (HA auth + owner map), the supervisor, `clean_text` for STT. What moves to c1f: the metric list and names, the catalog-to-graph mapping, the mirror/MQTT logic, the call queue, the seat's name and card, any wording.
-Supervisor (I17): keep the loop and its numbers (decisions), change only argv, the env whitelist, one port instead of two (the old second port was the :11500 proxy), the ready probe with the owner token, and the child's data path. The seat's own restart-for-new-code (`restarts.py`) is Python-seat only: a crash or SIGTERM is simply respawned.
+Supervisor (I17): keep the loop and its numbers (decisions), change only argv, the env whitelist, one port instead of two (the old second port was the :11500 proxy), the ready probe with the admin token, and the child's data path. The seat's own restart-for-new-code (`restarts.py`) is Python-seat only: a crash or SIGTERM is simply respawned.
 `membrane_ai` (the boat's second copy, domain `membrane_ai`, basic-auth pair, `/session` + `/membrane/state` only): **delete** it in the slice-1 PR [decision]; HACS ships one domain.
 
 ## 7. What to test
@@ -120,7 +120,7 @@ New: (1) **golden fixtures from the oracle**: with the Python 0.7.53 seat, recor
 4. Musl `bin` build, aarch64 Linux, Android: never built (PP); wheel layout `dist/bin/cliffvm` is a proposal.
 5. Model on HA hosts: without RP D1 (Ollama turn path, first slice w56) an HA Assist user has no answer; the claude CLI is not on HA hosts.
 6. The catalog-to-methods step (`ha_bridge.py:237-311`) leans on Python `method_define` and a bash+curl actuator; the c1f equivalent is not read yet (1 round to read `methods.c1f`).
-7. The relay forwards `/api/membrane/serve/*` to the door: under the owner token every HA user then has owner reach on the seat (unlike the Python seat's separate admin gating only in HA, `relay.py:427-432`): the HA-side admin gates must stay, and `ADMIN_WRITE_EXACT` must be re-checked against the new route set.
+7. The relay forwards `/api/membrane/serve/*` to the door: under the admin token every HA user then has admin reach on the seat (unlike the Python seat's separate admin gating only in HA, `relay.py:427-432`): the HA-side admin gates must stay, and `ADMIN_WRITE_EXACT` must be re-checked against the new route set.
 8. A token with a ttl in a config entry silently expires without the reauth step; slice 1 must include it.
 
 ## 10. Build plan (red test first, each round a failing test then the fix; PRs based on main, no stacks)
@@ -129,7 +129,7 @@ New: (1) **golden fixtures from the oracle**: with the Python 0.7.53 seat, recor
 - R1 (1): record `tests/golden/ha/` from the 0.7.53 tag; red `native/tests/ha_1143.rs` for I1-I3 with a minted token.
 - R2 (1): `SeatClient` + config flow (label/hint, reauth, health check with the token); fake-HA tests.
 - R3 (1): conversation entity on `SeatClient`; seat gap: the speaker part and error words.
-- R4 (2): supervisor on `cliffvm` (argv, facts, owner-token readiness, backoff kept), fake-binary tests; wheel finder.
+- R4 (2): supervisor on `cliffvm` (argv, facts, admin-token readiness, backoff kept), fake-binary tests; wheel finder.
 - R5 (1): `membrane_ai` copy removed, manifest/pins, `async_migrate_entry` 1.3, docs/home-assistant.md rewritten.
 - R6-R8 (0-2): the clean-venv gate rehearsal, fallout (shared with packaging P10).
 
@@ -144,7 +144,7 @@ New: (1) **golden fixtures from the oracle**: with the Python 0.7.53 seat, recor
 1. **D-first**: the first slice = Assist + config + spawn (slice 1) [yes] vs panels first.
 2. **D-act**: the seat acts on HA by A (token to the seat; needs a native `bearer_file` for connect) or B (pull queue run by the component) [B].
 3. **D-token-ttl**: the connect token's life (30d? longer?) and the reauth flow [reauth yes; the number is yours].
-4. **D-write-who**: who may POST the `ha/*` routes: owner only, or owner plus a fact `ha_sub` [owner plus `ha_sub`].
+4. **D-write-who**: who may POST the `ha/*` routes: any verified token (DECIDED 2026-11-14: no users; the `ha_sub` fact is dropped).
 5. **D-copy**: delete `integrations/homeassistant/custom_components/membrane_ai` and its deploy scripts (`deploy/agdroid`, `deploy/brain`: Python-seat Termux supervision, DEAD with it) [yes].
 6. **D-sensors**: keep sensors rebuilt from c1f rows (counts, busy, paused, uptime) vs drop them; the 13 efield/thinker/loop keys die [rebuilt, small].
 7. **D-zoo**: keep the seat list and `select.membrane_seat` without Blurp cards [yes].

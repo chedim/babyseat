@@ -212,12 +212,12 @@
     ],
     "claims": [],
     "boot_facts": [
+      "admin_token_file",
       "anthropic_key_set",
       "chat_auth",
       "chat_claude_bin",
       "chat_max_turns",
       "chat_turn_timeout_s",
-      "owner_token_file",
       "started"
     ],
     "virtual": [
@@ -272,7 +272,7 @@
       "Http",
       "Request"
     ],
-    "members": 90,
+    "members": 87,
     "writes": [
       "Http:door.listen"
     ],
@@ -323,22 +323,18 @@
       "door"
     ],
     "classes": [
-      "Person",
       "Request"
     ],
-    "members": 9,
-    "writes": [
-      "*.first_seen",
-      "*.last_seen",
-      "*.name",
-      "*.sub"
-    ],
+    "members": 10,
+    "writes": [],
     "claims": [
       "/",
       "/index.html",
       "/membrane"
     ],
-    "boot_facts": [],
+    "boot_facts": [
+      "host_names"
+    ],
     "resident": [
       "Person"
     ]

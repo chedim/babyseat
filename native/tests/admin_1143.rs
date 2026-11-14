@@ -1,8 +1,7 @@
-//! Persons (#1143, swap step "persons"): a verified request makes and keeps `Person:<sub>` (name, sub, first_seen, last_seen), the owner is a person,
-//! the model's writing tools through the door (`entity_write`, `run_cliff`, a pack written by `entity_write`) are the owner's, and `cliffvm token mint`
-//! signs a token for another person. The oracle is the Python release (git tag v0.7.53): its JWT mode has no owner-only write check, its one 403 is
-//! `{"type":"error","error":{"message":...}}` (server.py `_json_err`), so that is the shape here; the wording of the message is flagged for the operator.
-//! The barest seat (no secret) is open by decision and makes no persons. Every wait has a timeout and the child is always reaped.
+//! THE ADMIN (#1143, operator 2026-11-14: "no users in this release"): every request that carries a VALID token (or the page cookie) is THE ADMIN, whatever its `sub` says.
+//! No `Person:<sub>` is made, there is no `operator` fact, no non-admin tier and no 403 `for the owner`: the model's writing tools (`entity_write`, `run_cliff`, a pack
+//! written by `entity_write`) run for any verified token. A request with no token is 401 as before. `cliffvm token mint` still signs a token (its `--sub` is a label).
+//! The barest seat (no secret) is open by decision. Every wait has a timeout and the child is always reaped.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -47,7 +46,7 @@ fn http(port: u16, method: &str, path: &str, tok: Option<&str>, body: &str) -> (
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
     let auth = tok.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
-    let raw = format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{auth}\r\n{body}", body.len());
+    let raw = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{auth}\r\n{body}", body.len());
     s.write_all(raw.as_bytes()).unwrap();
     let mut out = vec![];
     let _ = s.read_to_end(&mut out);
@@ -57,8 +56,8 @@ fn http(port: u16, method: &str, path: &str, tok: Option<&str>, body: &str) -> (
 }
 fn now() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() }
 fn secret_of(dir: &std::path::Path) -> Vec<u8> { std::fs::read_to_string(dir.join("door.secret")).unwrap().trim().as_bytes().to_vec() }
-fn owner_token(dir: &std::path::Path) -> String { std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string() }
-fn person_token(dir: &std::path::Path, sub: &str, name: &str) -> String { membrane_vm::jwt::mint(&secret_of(dir), sub, name, 3600.0, now()).unwrap() }
+fn admin_token(dir: &std::path::Path) -> String { std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string() }
+fn token_with_sub(dir: &std::path::Path, sub: &str, name: &str) -> String { membrane_vm::jwt::mint(&secret_of(dir), sub, name, 3600.0, now()).unwrap() }
 
 /// one tools/call on /mcp; -> (http status, body)
 fn call(port: u16, tok: &str, tool: &str, args: J) -> (u16, J) {
@@ -73,77 +72,67 @@ fn read_prop(port: u16, tok: &str, spec: &str, prop: &str) -> J {
     if t.contains(" has no ") { return J::Null; }   // the read tool's words for a property the entity does not have
     serde_json::from_str(&t).unwrap_or(json!(t))
 }
-const FORBIDDEN: fn() -> J = || json!({"type": "error", "error": {"message": "for the owner"}});
 
 #[test]
-fn a_verified_request_makes_the_person_and_keeps_first_seen_while_last_seen_moves() {
-    let dir = tmp("persons-make");
+fn a_token_with_any_sub_is_the_admin_and_writes_through_the_door() {
+    let dir = tmp("admin-any-sub");
     let (_run, port) = launch(&dir, true, &[]);
-    let (own, ann) = (owner_token(&dir), person_token(&dir, "ann", "Ann"));
-    assert_eq!(http(port, "GET", "/global/health", Some(&ann), "").0, 200);
-    // the owner reads the person back: name and sub from the token, both times set, and the entity is of the class Person
-    let first = read_prop(port, &own, "Person:ann", "first_seen");
-    assert!(first.as_f64().unwrap() > 1.0e9, "{first}");
-    assert_eq!(read_prop(port, &own, "Person:ann", "name"), json!("Ann"));
-    assert_eq!(read_prop(port, &own, "Person:ann", "sub"), json!("ann"));
-    let (st, q) = call(port, &own, "entity_query", json!({"q": "kind:Person"}));
-    assert_eq!(st, 200);
-    assert!(text_of(&q).contains("Person:ann"), "{q}");
-    std::thread::sleep(Duration::from_millis(1500));
-    assert_eq!(http(port, "GET", "/global/health", Some(&ann), "").0, 200);
-    assert_eq!(read_prop(port, &own, "Person:ann", "first_seen"), first, "first_seen is the first request's, kept");
-    assert!(read_prop(port, &own, "Person:ann", "last_seen").as_f64().unwrap() >= first.as_f64().unwrap() + 1.0, "last_seen moved");
+    let adm = admin_token(&dir);
+    // `bob` and `ha` used to be second persons (403 `for the owner`); now each is the admin: entity_write, run_cliff and a pack written by entity_write all run
+    for (i, sub) in ["bob", "ha", "owner", "seat:internal"].iter().enumerate() {
+        let t = token_with_sub(&dir, sub, "Anybody");
+        let (st, b) = call(port, &t, "entity_write", json!({"spec": format!("Note:w{i}"), "prop": "text", "value": "hi"}));
+        assert_eq!(st, 200, "sub {sub}: {b}");
+        assert_eq!(read_prop(port, &adm, &format!("Note:w{i}"), "text"), json!("hi"), "sub {sub}");
+        let (st, b) = call(port, &t, "run_cliff", json!({"code": format!("('Note:r{i}').text = 'yo'")}));
+        assert_eq!(st, 200, "sub {sub}: {b}");
+        assert_eq!(read_prop(port, &adm, &format!("Note:r{i}"), "text"), json!("yo"), "sub {sub}");
+    }
+    let (st, b) = call(port, &token_with_sub(&dir, "bob", "Bob"), "entity_write", json!({"spec": "Pack:harmless", "prop": "text", "value": "PACK harmless 1\nHarmless.x getter: 1\n"}));
+    assert_eq!(st, 200, "a pack is written by any verified token: {b}");
+    // and the barest answers: no token is still 401, whatever it is asked
+    let (st, _) = call(port, "", "entity_write", json!({"spec": "Note:none", "prop": "text", "value": "x"}));
+    assert_eq!(st, 401);
+    assert_eq!(read_prop(port, &adm, "Note:none", "text"), J::Null, "a tokenless write changed nothing");
 }
 
 #[test]
-fn a_refused_request_makes_no_person_and_the_owner_is_a_person_too() {
-    let dir = tmp("persons-refused");
+fn no_person_is_made_by_a_verified_request_and_nobody_reads_a_sub_as_an_identity() {
+    let dir = tmp("admin-no-person");
     let (_run, port) = launch(&dir, true, &[]);
-    let own = owner_token(&dir);
-    let eve = membrane_vm::jwt::mint(b"another secret of at least 32 bytes!!", "eve", "Eve", 3600.0, now()).unwrap();
+    let (adm, ann) = (admin_token(&dir), token_with_sub(&dir, "ann", "Ann"));
+    assert_eq!(http(port, "GET", "/global/health", Some(&ann), "").0, 200);
+    assert_eq!(http(port, "GET", "/global/health", Some(&adm), "").0, 200);
+    for who in ["ann", "admin", "owner"] { assert_eq!(read_prop(port, &adm, &format!("Person:{who}"), "sub"), J::Null, "no Person:{who}"); }
+    let (st, q) = call(port, &adm, "entity_query", json!({"q": "kind:Person"}));
+    assert_eq!(st, 200);
+    assert!(!text_of(&q).contains("Person:"), "{q}");
+    // the page's config names the admin, not the token's sub
+    let (st, b) = http(port, "GET", "/ui/conf", Some(&ann), "");
+    assert_eq!(st, 200);
+    let who: J = serde_json::from_str(&b).unwrap();
+    assert_eq!(who["who"]["sub"], "admin", "{b}");
+    // a refused token is 401 (the control: nothing about the sub opens the door)
+    let eve = membrane_vm::jwt::mint(b"another secret of at least 32 bytes!!", "admin", "Admin", 3600.0, now()).unwrap();
     assert_eq!(http(port, "GET", "/global/health", Some(&eve), "").0, 401);
     assert_eq!(http(port, "GET", "/global/health", None, "").0, 401);
-    assert_eq!(read_prop(port, &own, "Person:eve", "sub"), J::Null, "a refused token is nobody");
-    assert_eq!(read_prop(port, &own, "Person:owner", "sub"), json!("owner"), "the owner's token made the owner's person");
 }
 
 #[test]
-fn only_the_owner_writes_through_the_door_and_the_refusal_is_a_403_that_changes_nothing() {
-    let dir = tmp("persons-gate");
+fn the_boot_token_is_the_admin_token_in_admin_token_and_there_is_no_operator_fact() {
+    let dir = tmp("admin-boot");
     let (_run, port) = launch(&dir, true, &[]);
-    let (own, bob) = (owner_token(&dir), person_token(&dir, "bob", "Bob"));
-    // bob: entity_write, run_cliff and a pack written by entity_write are all refused: 403 in the released error shape, and nothing happened
-    let (st, b) = call(port, &bob, "entity_write", json!({"spec": "Note:one", "prop": "text", "value": "hi"}));
-    assert_eq!((st, &b), (403, &FORBIDDEN()), "{b}");
-    let (st, b) = call(port, &bob, "run_cliff", json!({"code": "('Note:two').text = 'hi'"}));
-    assert_eq!((st, &b), (403, &FORBIDDEN()), "{b}");
-    let (st, b) = call(port, &bob, "entity_write", json!({"spec": "Pack:evil", "prop": "text", "value": "PACK evil 1\nEvil.x getter: 1\n"}));
-    assert_eq!((st, &b), (403, &FORBIDDEN()), "{b}");
-    assert_eq!(read_prop(port, &own, "Note:one", "text"), J::Null);
-    assert_eq!(read_prop(port, &own, "Note:two", "text"), J::Null);
-    assert_eq!(read_prop(port, &own, "Pack:evil", "text"), J::Null);
-    // reads stay open to any verified person, and so does the tool list
-    assert_eq!(call(port, &bob, "entity_read", json!({"spec": "Person:bob"})).0, 200);
-    assert_eq!(call(port, &bob, "entity_query", json!({"q": "kind:Person"})).0, 200);
-    assert_eq!(http(port, "POST", "/mcp", Some(&bob), &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).to_string()).0, 200);
-    // the owner writes
-    let (st, b) = call(port, &own, "entity_write", json!({"spec": "Note:one", "prop": "text", "value": "hi"}));
-    assert_eq!(st, 200, "{b}");
-    assert_eq!(read_prop(port, &own, "Note:one", "text"), json!("hi"));
-    let (st, b) = call(port, &own, "run_cliff", json!({"code": "('Note:two').text = 'yo'"}));
-    assert_eq!(st, 200, "{b}");
-    assert_eq!(read_prop(port, &own, "Note:two", "text"), json!("yo"));
-}
-
-#[test]
-fn the_owner_is_the_person_the_operator_fact_names() {
-    let dir = tmp("persons-operator");
-    let (_run, port) = launch(&dir, true, &["--fact", "operator=ann"]);
-    let (own, ann, owner_sub) = (owner_token(&dir), person_token(&dir, "ann", "Ann"), person_token(&dir, "owner", "Owner"));
-    // the boot's owner token is ann's; a token with sub ann is the owner; a token with the sub `owner` is not when the operator is ann
-    assert_eq!(call(port, &own, "entity_write", json!({"spec": "Note:a", "prop": "text", "value": "1"})).0, 200);
-    assert_eq!(call(port, &ann, "entity_write", json!({"spec": "Note:b", "prop": "text", "value": "1"})).0, 200);
-    assert_eq!(call(port, &owner_sub, "entity_write", json!({"spec": "Note:c", "prop": "text", "value": "1"})).0, 403);
+    assert!(!dir.join("owner.token").exists() && dir.join("admin.token").exists(), "the file is admin.token now");
+    let t = admin_token(&dir);
+    let c = membrane_vm::jwt::verify(&t, &secret_of(&dir), now()).unwrap();
+    assert_eq!(c["sub"], "admin");
+    assert_eq!(http(port, "GET", "/global/health", Some(&t), "").0, 200);
+    // `--fact operator=<name>` names nobody any more: the boot token is still the admin's
+    let dir2 = tmp("admin-operator-fact");
+    let (_run2, _port2) = launch(&dir2, true, &["--fact", "operator=ann"]);
+    assert_eq!(membrane_vm::jwt::verify(&admin_token(&dir2), &secret_of(&dir2), now()).unwrap()["sub"], "admin");
+    let facts = std::fs::read_to_string(format!("{}/../membrane/packs/facts.json", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    assert!(!facts.contains("\"operator\"") && !facts.contains("owner_token") && facts.contains("admin_token_file"), "the facts name no operator and no owner token");
 }
 
 #[test]
@@ -182,7 +171,7 @@ fn token_mint_prints_a_token_the_door_accepts_with_the_sub_the_name_and_the_ttl(
     assert_eq!((claims["sub"].as_str(), claims["name"].as_str()), (Some("cara"), Some("Cara")));
     assert_eq!(claims["exp"].as_f64().unwrap() - claims["iat"].as_f64().unwrap(), 7200.0);
     assert_eq!(http(port, "GET", "/global/health", Some(tok), "").0, 200, "the running door takes it");
-    assert_eq!(read_prop(port, &owner_token(&dir), "Person:cara", "name"), json!("Cara"), "and the first request made the person");
+    assert_eq!(read_prop(port, &admin_token(&dir), "Person:cara", "name"), J::Null, "and the first request made no person");
     // the units of the released CLI: seconds, s, m, h, d
     for (ttl, secs) in [("90", 90.0), ("45s", 45.0), ("15m", 900.0), ("12h", 43200.0), ("30d", 2592000.0)] {
         let (rc, out, err) = mint(&["--sub", "x", "--ttl", ttl, "--secret-file", sf.to_str().unwrap()]);

@@ -20,7 +20,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
     d
 }
 
-/// scripts/seat on a fresh data folder, a free port, the fake claude `/usr/bin/true`; -> the seat and its owner token
+/// scripts/seat on a fresh data folder, a free port, the fake claude `/usr/bin/true`; -> the seat and its admin token
 fn seat(tag: &str) -> Run { let dir = tmp(tag); start_in(dir) }
 /// the same on the folder `dir` (a second start on it is a restart: the store, the secret and the page's cookie are kept)
 fn start_in(dir: std::path::PathBuf) -> Run { start_with(dir, &[]) }
@@ -30,7 +30,7 @@ fn start_with(dir: std::path::PathBuf, facts: &[&str]) -> Run { launch(dir, fact
 /// (what the removed second launcher started; the test starts it itself, no script)
 fn seat_full(tag: &str) -> Run { launch(tmp(tag), &[], true) }
 fn launch(dir: std::path::PathBuf, facts: &[&str], full: bool) -> Run {
-    let _ = std::fs::remove_file(dir.join("d/owner.token"));
+    let _ = std::fs::remove_file(dir.join("d/admin.token"));
     let root = format!("{}/..", env!("CARGO_MANIFEST_DIR"));
     let mut child = if full {
         let d = dir.join("d");
@@ -54,7 +54,7 @@ fn launch(dir: std::path::PathBuf, facts: &[&str], full: bool) -> Run {
     }
     assert!(port != 0, "the door came up");
     std::mem::forget(rx);
-    let token = wait("the owner token", || std::fs::read_to_string(dir.join("d/owner.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
+    let token = wait("the admin token", || std::fs::read_to_string(dir.join("d/admin.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
     Run { child, port, token, dir }
 }
 
@@ -67,7 +67,7 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
     }
 }
 
-/// one request on its own connection, with the owner token; -> (status, body text). No answer in `secs` seconds is a FAILURE, never a wait.
+/// one request on its own connection, with the admin token; -> (status, body text). No answer in `secs` seconds is a FAILURE, never a wait.
 fn http(run: &Run, method: &str, path: &str, body: &str, secs: u64) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", run.port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(secs))).unwrap();
@@ -260,7 +260,7 @@ fn bare(run: &Run, method: &str, path: &str) -> u16 {
 }
 
 #[test]
-fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_owner() {
+fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_admin() {
     let run = seat("fieldvm");
     assert_eq!(bare(&run, "GET", "/ui/fieldvm"), 401, "the snapshot is the seat's field: not public");
     let (st, s) = api(&run, "GET", "/ui/fieldvm", J::Null);

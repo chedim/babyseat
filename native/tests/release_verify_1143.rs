@@ -1,8 +1,8 @@
 //! RELEASE VERIFICATION (#1143, 2026-11-14): the auth checklist of the release, proved against REAL private seats started by the release launcher (`scripts/seat`: the shipped packs,
 //! the strict door, its own data folder, a free port, a FAKE `claude` that never reaches a model). docs/release-verification.md is the table of what each test proves.
 //!   1. the JWT secret: persists across restarts, mode 0600, never in a reply, a log, the store; reuse by a second seat; missing / empty / short / unreadable secret files;
-//!   2. the owner cookie of the page, and the way in for a person who has only a token;
-//!   3. a second person: reads work, every owner-only write is a 403 `for the owner` and changes nothing; the facts of the one chat;
+//!   2. the admin cookie of the page, and the way in for a person who has only a token;
+//!   3. NO USERS (operator 2026-11-14): any valid token is THE ADMIN whatever its `sub` says (reads and every write work, nothing is a 403); the facts of the one chat;
 //!   4. the bypasses: forged and out-of-life tokens, token placement, path tricks, methods, proxy headers, and a TOKENLESS request that must change nothing.
 //! (4 of the Home Assistant item is `tests/ha/test_release_launcher.py`, the browser part `tests/js/release_verify.test.mjs`.)
 //! No wall-clock assertions: every wait polls a condition with a deadline that only bounds a hang. Every child is reaped; no live seat is touched.
@@ -29,7 +29,7 @@ fn tmp(tag: &str) -> PathBuf {
 }
 fn now() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() }
 
-/// a fake claude: answers `Seat answer: <prompt>`; a prompt that starts with `DO:` first writes `Note:via-chat` through the seat's /mcp with the OWNER's token, which the turn
+/// a fake claude: answers `Seat answer: <prompt>`; a prompt that starts with `DO:` first writes `Note:via-chat` through the seat's /mcp with the admin's token, which the turn
 /// hands to its CLI in the environment (what a model that obeys the message could do): the fact test of the one chat reads it back
 const FAKE: &str = r#"#!/usr/bin/env python3
 import json, os, re, sys, urllib.request
@@ -40,7 +40,7 @@ out({"type": "system", "subtype": "init", "session_id": "fake-1", "tools": []})
 if prompt.startswith("DO:"):
     cfg = sys.argv[sys.argv.index("--mcp-config") + 1]
     url = re.search(r"http://[^'\"]+/mcp", cfg).group(0)
-    req = urllib.request.Request(url, method="POST", headers={"Authorization": "Bearer " + os.environ["MEMBRANE_OWNER_TOKEN"], "Content-Type": "application/json"},
+    req = urllib.request.Request(url, method="POST", headers={"Authorization": "Bearer " + os.environ["MEMBRANE_ADMIN_TOKEN"], "Content-Type": "application/json"},
         data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_write", "arguments": {"spec": "Note:via-chat", "prop": "text", "value": "written by a turn"}}}).encode())
     urllib.request.urlopen(req, timeout=60).read()
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Seat answer: " + prompt, "num_turns": 1, "session_id": "fake-1"})
@@ -128,8 +128,12 @@ impl Resp {
 fn raw(host: &str, port: u16, method: &str, target: &str, headers: &[(&str, &str)], body: &str) -> Resp {
     let mut s = TcpStream::connect((host, port)).unwrap();
     s.set_read_timeout(Some(common::IO)).unwrap();
-    let mut req = format!("{method} {target} HTTP/1.1\r\nHost: t\r\nConnection: close\r\n");
-    for (k, v) in headers { req.push_str(&format!("{k}: {v}\r\n")); }
+    // the Host is the real address the client dialled unless the caller names one (an empty value sends none): the door's Host check (door_auth.c1f) reads it
+    let named = headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host"));
+    let mut req = format!("{method} {target} HTTP/1.1\r\n");
+    if !named { req.push_str(&format!("Host: {host}:{port}\r\n")); }
+    req.push_str("Connection: close\r\n");
+    for (k, v) in headers { if !(k.eq_ignore_ascii_case("host") && v.is_empty()) { req.push_str(&format!("{k}: {v}\r\n")); } }
     if !body.is_empty() || method == "POST" || method == "PUT" || method == "PATCH" { req.push_str(&format!("Content-Length: {}\r\n", body.len())); }
     req.push_str("\r\n");
     s.write_all(req.as_bytes()).unwrap();
@@ -155,7 +159,7 @@ fn mcp_call(s: &Seat, tok: &str, tool: &str, args: J) -> Resp {
 }
 fn mcp_text(r: &Resp) -> String { r.json()["result"]["content"][0]["text"].as_str().unwrap_or("").to_string() }
 fn read_prop(s: &Seat, tok: &str, spec: &str, prop: &str) -> String { mcp_text(&mcp_call(s, tok, "entity_read", json!({"spec": spec, "prop": prop}))) }
-/// every entity of the seat, whole, page after page (the owner's tool)
+/// every entity of the seat, whole, page after page (the admin's tool)
 fn all_entities(s: &Seat, tok: &str) -> String {
     let mut all = String::new();
     for page in 0..100 {
@@ -180,7 +184,7 @@ fn keys(s: &Seat, tok: &str) -> Vec<String> {
 }
 
 fn secret_of(dir: &Path) -> Vec<u8> { std::fs::read_to_string(dir.join("door.secret")).unwrap().trim().as_bytes().to_vec() }
-fn owner_token(dir: &Path) -> String { std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string() }
+fn admin_token(dir: &Path) -> String { std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string() }
 fn mode(p: &Path) -> u32 { std::fs::metadata(p).unwrap().permissions().mode() & 0o777 }
 fn mint_cli(dir: &Path, sub: &str, name: &str) -> String {
     let o = Command::new(BIN).args(["token", "mint", "--sub", sub, "--name", name, "--ttl", "1h", "--secret-file", dir.join("door.secret").to_str().unwrap()]).output().unwrap();
@@ -204,7 +208,6 @@ fn lan_ip() -> Option<String> {
     if a.is_loopback() || a.is_unspecified() { None } else { Some(a.to_string()) }
 }
 fn cookie_of(r: &Resp) -> Option<String> { r.header("set-cookie").map(String::from) }
-const FORBIDDEN: fn() -> J = || json!({"type": "error", "error": {"message": "for the owner"}});
 const UNAUTH: fn() -> J = || json!({"error": {"message": "missing or invalid token", "type": "unauthorized"}});
 
 // =====================================================================================================================================================================================
@@ -229,27 +232,27 @@ fn reply_corpus(s: &Seat, tok: &str) -> String {
 fn the_secret_persists_across_restarts_tokens_survive_it_and_a_foreign_secret_is_refused() {
     let dir = tmp("secret-persist");
     let mut a = start(&dir, None, &[]);
-    let (sec1, own1) = (secret_of(&dir), owner_token(&dir));
+    let (sec1, own1) = (secret_of(&dir), admin_token(&dir));
     let bob1 = mint_cli(&dir, "bob", "Bob");
     assert_eq!(sec1.len(), 64, "64 hex characters");
     assert!(sec1.iter().all(|c| c.is_ascii_hexdigit()), "hex");
     assert_eq!(mode(&dir.join("door.secret")), 0o600, "the secret file is private");
-    assert_eq!(mode(&dir.join("owner.token")), 0o600, "so is the owner token file");
+    assert_eq!(mode(&dir.join("admin.token")), 0o600, "so is the admin token file");
     for t in [&own1, &bob1] { assert_eq!(get(&a, "/global/health", Some(t)).status, 200); }
     stop(&mut a);
 
     let mut b = start(&dir, None, &[]);
     assert_eq!(secret_of(&dir), sec1, "the secret is kept, not remade");
     assert_eq!(mode(&dir.join("door.secret")), 0o600);
-    let own2 = owner_token(&dir);
-    assert_eq!(mode(&dir.join("owner.token")), 0o600);
-    assert_ne!(own2, own1, "the owner token is regenerated at the boot");
-    for (what, t) in [("the owner token of the first boot", &own1), ("the one regenerated at this boot", &own2), ("a person's token of the first boot", &bob1)] {
+    let own2 = admin_token(&dir);
+    assert_eq!(mode(&dir.join("admin.token")), 0o600);
+    assert_ne!(own2, own1, "the admin token is regenerated at the boot");
+    for (what, t) in [("the admin token of the first boot", &own1), ("the one regenerated at this boot", &own2), ("a person's token of the first boot", &bob1)] {
         assert_eq!(get(&b, "/global/health", Some(t)).status, 200, "{what} verifies after the restart");
     }
-    let other = forge(b"another secret of at least 32 bytes!!", hs256(), claims("owner", 3600.0));
+    let other = forge(b"another secret of at least 32 bytes!!", hs256(), claims("admin", 3600.0));
     assert_eq!(get(&b, "/global/health", Some(&other)).status, 401, "a token of a DIFFERENT secret is refused");
-    assert_eq!(get(&b, "/global/health", Some(&forge(&sec1, hs256(), claims("owner", 3600.0)))).status, 200, "and one signed with this secret is not");
+    assert_eq!(get(&b, "/global/health", Some(&forge(&sec1, hs256(), claims("admin", 3600.0)))).status, 200, "and one signed with this secret is not");
     stop(&mut b);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -258,7 +261,7 @@ fn the_secret_persists_across_restarts_tokens_survive_it_and_a_foreign_secret_is
 fn the_secret_and_every_token_are_in_no_reply_log_store_or_journal() {
     let dir = tmp("secret-leak");
     let mut s = start(&dir, None, &[]);
-    let (sec, own, bob) = (secret_of(&dir), owner_token(&dir), mint_cli(&dir, "bob", "Bob"));
+    let (sec, own, bob) = (secret_of(&dir), admin_token(&dir), mint_cli(&dir, "bob", "Bob"));
     let sec_s = String::from_utf8(sec.clone()).unwrap();
     // exercise what writes: a page fetch (mints a cookie), a login, a person's first request, a chat turn, a setting, an allow-list entry
     let page = raw("127.0.0.1", s.port, "GET", "/", &[], "");
@@ -270,18 +273,18 @@ fn the_secret_and_every_token_are_in_no_reply_log_store_or_journal() {
     assert_eq!(mcp_call(&s, &own, "entity_write", json!({"spec": "HaAllow:k", "prop": "services", "value": ["light.*"]})).status, 200);
     common::wait_for("the chat turn is done", common::WAIT, || { let r = get(&s, "/membrane/chat/messages", Some(&own)); if r.body.contains("\"state\":\"done\"") { Some(()) } else { None } });
     let corpus = reply_corpus(&s, &own);
-    let needles: Vec<(&str, &str)> = vec![("the secret", &sec_s), ("the owner token", &own), ("a person's token", &bob), ("the page's cookie token", &cookie_tok)];
+    let needles: Vec<(&str, &str)> = vec![("the secret", &sec_s), ("the admin token", &own), ("a person's token", &bob), ("the page's cookie token", &cookie_tok)];
     for (what, n) in &needles {
         assert!(!corpus.contains(*n), "{what} is in a reply or an entity");
         // the secret in the other encodings a reply could carry it in
         assert!(!corpus.contains(&b64u(n.as_bytes())) && !corpus.contains(&membrane_vm::jwt::hex(n.as_bytes())), "{what} (base64url or hex) is in a reply or an entity");
     }
-    assert!(!corpus.contains(&format!("{}", &own[own.find('.').unwrap() + 1..own.rfind('.').unwrap()])), "not even the owner token's claims part");
+    assert!(!corpus.contains(&format!("{}", &own[own.find('.').unwrap() + 1..own.rfind('.').unwrap()])), "not even the admin token's claims part");
     let scan_files = |label: &str| {
         for e in std::fs::read_dir(&dir).unwrap() {
             let p = e.unwrap().path();
             let name = p.file_name().unwrap().to_string_lossy().to_string();
-            if name == "door.secret" || name == "owner.token" || name == "fake-claude" || p.is_dir() { continue; }
+            if name == "door.secret" || name == "admin.token" || name == "fake-claude" || p.is_dir() { continue; }
             let bytes = std::fs::read(&p).unwrap();
             for (what, n) in &needles { assert!(!bytes.windows(n.len()).any(|w| w == n.as_bytes()), "{label}: {what} is in the file {name} (the store, its journal or the log)"); }
         }
@@ -293,7 +296,7 @@ fn the_secret_and_every_token_are_in_no_reply_log_store_or_journal() {
     let err = std::fs::read_to_string(dir.join("seat.err")).unwrap();
     for (what, n) in &needles { assert!(!err.contains(*n), "{what} is on the seat's stderr"); }
     scan_files("seat stopped");
-    // the seat's own environment variable holds the owner token (docs/auth.md): the seat's `ps` line must not
+    // the seat's own environment variable holds the admin token (docs/auth.md): the seat's `ps` line must not
     let ps = Command::new("ps").args(["-axww", "-o", "command"]).output().unwrap();
     let ps = String::from_utf8_lossy(&ps.stdout).to_string();
     assert!(!ps.contains(&sec_s) && !ps.contains(&own), "a process listing shows no secret and no token");
@@ -304,17 +307,17 @@ fn the_secret_and_every_token_are_in_no_reply_log_store_or_journal() {
 fn a_second_seat_started_with_the_first_ones_secret_accepts_the_first_ones_tokens() {
     let d1 = tmp("reuse-1");
     let mut a = start(&d1, None, &[]);
-    let (own_a, bob_a) = (owner_token(&d1), mint_cli(&d1, "bob", "Bob"));
+    let (own_a, bob_a) = (admin_token(&d1), mint_cli(&d1, "bob", "Bob"));
     let d2 = tmp("reuse-2");
     std::fs::copy(d1.join("door.secret"), d2.join("door.secret")).unwrap();
     std::fs::set_permissions(d2.join("door.secret"), std::fs::Permissions::from_mode(0o600)).unwrap();
     let mut b = start(&d2, None, &[]);
     assert_eq!(secret_of(&d2), secret_of(&d1), "the file is kept as it is");
-    for (what, t) in [("the first seat's owner token", &own_a), ("its person's token", &bob_a)] {
+    for (what, t) in [("the first seat's admin token", &own_a), ("its person's token", &bob_a)] {
         assert_eq!(get(&b, "/global/health", Some(t)).status, 200, "the second seat accepts {what}");
     }
-    assert_eq!(get(&b, "/global/health", Some(&owner_token(&d2))).status, 200);
-    assert_eq!(get(&a, "/global/health", Some(&owner_token(&d2))).status, 200, "and the first accepts the second's");
+    assert_eq!(get(&b, "/global/health", Some(&admin_token(&d2))).status, 200);
+    assert_eq!(get(&a, "/global/health", Some(&admin_token(&d2))).status, 200, "and the first accepts the second's");
     // the same secret is the same cookie name: two seats on one host would share (and overwrite) it
     let ca = cookie_of(&raw("127.0.0.1", a.port, "GET", "/", &[], "")).unwrap();
     let cb = cookie_of(&raw("127.0.0.1", b.port, "GET", "/", &[], "")).unwrap();
@@ -328,7 +331,7 @@ fn a_second_seat_started_with_the_first_ones_secret_accepts_the_first_ones_token
     let mut c = start(&d3, None, &[]);
     assert_eq!(std::fs::read_to_string(d3.join("door.secret")).unwrap().trim(), py, "kept, not remade");
     assert_eq!(get(&c, "/global/health", Some(&forge(py.as_bytes(), hs256(), claims("alice", 600.0)))).status, 200, "a token the old seat signed with it");
-    assert_eq!(get(&c, "/global/health", Some(&owner_token(&d3))).status, 200);
+    assert_eq!(get(&c, "/global/health", Some(&admin_token(&d3))).status, 200);
     stop(&mut c);
     for d in [d1, d2, d3] { let _ = std::fs::remove_dir_all(d); }
 }
@@ -343,7 +346,7 @@ fn a_missing_or_empty_secret_file_is_made_and_a_short_one_is_a_refusal_not_an_op
         assert_eq!(secret_of(&dir).len(), 64, "{tag}: a new secret");
         assert_eq!(mode(&dir.join("door.secret")), 0o600, "{tag}");
         assert_eq!(get(&s, "/global/health", None).status, 401, "{tag}: the door is strict");
-        assert_eq!(get(&s, "/global/health", Some(&owner_token(&dir))).status, 200, "{tag}");
+        assert_eq!(get(&s, "/global/health", Some(&admin_token(&dir))).status, 200, "{tag}");
         stop(&mut s);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -353,7 +356,7 @@ fn a_missing_or_empty_secret_file_is_made_and_a_short_one_is_a_refusal_not_an_op
     let Err(Refused::Exit(code, err)) = try_start(&dir, None, &[]) else { panic!("a seat started with a 8-byte secret") };
     assert_ne!(code, 0);
     assert!(err.contains("32"), "the refusal names the rule: {err}");
-    assert!(!dir.join("owner.token").exists(), "no owner token is written for a secret that cannot sign one");
+    assert!(!dir.join("admin.token").exists(), "no admin token is written for a secret that cannot sign one");
     assert_eq!(std::fs::read_to_string(dir.join("door.secret")).unwrap(), "tooshort\n", "and the file is left as it was");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -362,7 +365,7 @@ fn a_missing_or_empty_secret_file_is_made_and_a_short_one_is_a_refusal_not_an_op
 fn an_unreadable_secret_file_is_a_refusal_the_secret_is_never_silently_replaced() {
     let dir = tmp("secret-unreadable");
     let mut a = start(&dir, None, &[]);
-    let (sec, own) = (secret_of(&dir), owner_token(&dir));
+    let (sec, own) = (secret_of(&dir), admin_token(&dir));
     stop(&mut a);
     std::fs::set_permissions(dir.join("door.secret"), std::fs::Permissions::from_mode(0o000)).unwrap();
     let r = try_start(&dir, None, &[]);
@@ -372,7 +375,7 @@ fn an_unreadable_secret_file_is_a_refusal_the_secret_is_never_silently_replaced(
         Ok(mut s) => { stop(&mut s); panic!("a seat started on a secret file it cannot read"); }
     }
     assert_eq!(secret_of(&dir), sec, "the secret on disk is the one it was: nobody's tokens were revoked");
-    assert_eq!(owner_token(&dir), own, "and no new owner token was written");
+    assert_eq!(admin_token(&dir), own, "and no new admin token was written");
     // a folder where the file should be: refused too
     let d2 = tmp("secret-dir");
     std::fs::create_dir(d2.join("door.secret")).unwrap();
@@ -382,11 +385,11 @@ fn an_unreadable_secret_file_is_a_refusal_the_secret_is_never_silently_replaced(
 
 #[test]
 fn naming_no_secret_at_all_is_the_open_barest_seat_and_says_so() {
-    // `--fact door_secret_file=` (empty) after the launcher's own: no secret, no owner token, an OPEN door, and the page's config says `auth: none`. By decision (docs/cliffvm.md): the
+    // `--fact door_secret_file=` (empty) after the launcher's own: no secret, no admin token, an OPEN door, and the page's config says `auth: none`. By decision (docs/cliffvm.md): the
     // operator asked for it by name. The test pins that the open mode cannot be reached by ACCIDENT: a missing file is made, an empty one is made, a short one is refused (the tests above).
     let dir = tmp("secret-none");
     let mut s = start(&dir, None, &["door_secret_file="]);
-    assert!(!dir.join("owner.token").exists());
+    assert!(!dir.join("admin.token").exists());
     let r = get(&s, "/ui/conf", None);
     assert_eq!(r.status, 200, "open: {}", r.body);
     assert_eq!(r.json()["auth"], json!("none"), "and the page's config tells it");
@@ -407,14 +410,14 @@ fn forged_expired_and_malformed_tokens_are_all_the_same_401_and_the_edges_of_the
     let ok = signed(hs256(), claims("zed", 600.0));
     let exp = |off: f64| signed(hs256(), claims("zed", off));
     let with = |f: &dyn Fn(&mut J)| { let mut c = claims("zed", 600.0); f(&mut c); signed(hs256(), c) };
-    let none_alg = format!("{}.{}.", b64u(json!({"alg": "none", "typ": "JWT"}).to_string().as_bytes()), b64u(claims("owner", 600.0).to_string().as_bytes()));
+    let none_alg = format!("{}.{}.", b64u(json!({"alg": "none", "typ": "JWT"}).to_string().as_bytes()), b64u(claims("admin", 600.0).to_string().as_bytes()));
     let parts: Vec<&str> = ok.split('.').collect();
     let flip = |s: &str| { let mut c: Vec<char> = s.chars().collect(); let i = c.len() / 2; c[i] = if c[i] == 'A' { 'B' } else { 'A' }; c.into_iter().collect::<String>() };
     let mut cases: Vec<(&str, String, u16)> = vec![
         ("a good token", ok.clone(), 200),
         ("alg none, no signature", none_alg.clone(), 401),
         ("alg none with the signature slot of a good token", format!("{}.{}.{}", b64u(json!({"alg": "none"}).to_string().as_bytes()), parts[1], parts[2]), 401),
-        ("alg NONE", signed(json!({"alg": "NONE"}), claims("owner", 600.0)), 401),
+        ("alg NONE", signed(json!({"alg": "NONE"}), claims("admin", 600.0)), 401),
         ("alg HS512 (signed with HS256's mac)", signed(json!({"alg": "HS512", "typ": "JWT"}), claims("zed", 600.0)), 401),
         ("alg hs256 in lower case", signed(json!({"alg": "hs256", "typ": "JWT"}), claims("zed", 600.0)), 401),
         ("alg RS256", signed(json!({"alg": "RS256", "typ": "JWT"}), claims("zed", 600.0)), 401),
@@ -439,7 +442,7 @@ fn forged_expired_and_malformed_tokens_are_all_the_same_401_and_the_edges_of_the
         ("an aud (a token scoped to someone else; this seat names no audience)", with(&|c| c["aud"] = json!("another-service")), 401),
         ("an iss (this seat names no issuer: not checked)", with(&|c| c["iss"] = json!("anyone")), 200),
         ("the signature changed by one character", format!("{}.{}.{}", parts[0], parts[1], flip(parts[2])), 401),
-        ("the claims changed (sub -> owner), the old signature kept", format!("{}.{}.{}", parts[0], b64u(claims("owner", 600.0).to_string().as_bytes()), parts[2]), 401),
+        ("the claims changed (sub -> admin), the old signature kept", format!("{}.{}.{}", parts[0], b64u(claims("admin", 600.0).to_string().as_bytes()), parts[2]), 401),
         ("a fourth segment", format!("{ok}.x"), 401),
         ("two segments", format!("{}.{}", parts[0], parts[1]), 401),
         ("the padded base64 form", format!("{}=.{}.{}", parts[0], parts[1], parts[2]), 401),
@@ -450,8 +453,8 @@ fn forged_expired_and_malformed_tokens_are_all_the_same_401_and_the_edges_of_the
     ];
     // the secret one byte different, and the secret in another case
     let mut other = sec.clone(); other[0] = if other[0] == b'a' { b'b' } else { b'a' };
-    cases.push(("signed with the secret one character off", forge(&other, hs256(), claims("owner", 600.0)), 401));
-    cases.push(("signed with the secret in upper case", forge(String::from_utf8(sec.clone()).unwrap().to_uppercase().as_bytes(), hs256(), claims("owner", 600.0)), 401));
+    cases.push(("signed with the secret one character off", forge(&other, hs256(), claims("admin", 600.0)), 401));
+    cases.push(("signed with the secret in upper case", forge(String::from_utf8(sec.clone()).unwrap().to_uppercase().as_bytes(), hs256(), claims("admin", 600.0)), 401));
     for (what, tok, want) in cases {
         let r = health(&tok);
         assert_eq!(r.status, want, "{what}");
@@ -465,7 +468,7 @@ fn forged_expired_and_malformed_tokens_are_all_the_same_401_and_the_edges_of_the
 #[test]
 fn a_token_is_read_only_from_the_authorization_header_or_this_seats_cookie() {
     let s = seat("placement");
-    let (own, sec) = (owner_token(&s.dir), secret_of(&s.dir));
+    let (own, sec) = (admin_token(&s.dir), secret_of(&s.dir));
     let path = "/global/health";
     let cname = membrane_vm::jwt::cookie_name(&sec);
     let st = |target: &str, h: &[(&str, &str)]| raw("127.0.0.1", s.port, "GET", target, h, "").status;
@@ -493,7 +496,7 @@ fn a_token_is_read_only_from_the_authorization_header_or_this_seats_cookie() {
     // a bad Authorization never falls back to a good cookie
     assert_eq!(st(path, &[("Authorization", "Bearer not.a.jwt"), ("Cookie", &format!("{cname}={own}"))]), 401, "bad header + good cookie");
     // two Authorization headers: the door takes one of them (the last): it never mixes them to a better token
-    let bad = forge(b"another secret of at least 32 bytes!!", hs256(), claims("owner", 600.0));
+    let bad = forge(b"another secret of at least 32 bytes!!", hs256(), claims("admin", 600.0));
     assert_eq!(st(path, &[("Authorization", &format!("Bearer {own}")), ("Authorization", &format!("Bearer {bad}"))]), 401, "good then bad: the bad one decides");
 }
 
@@ -506,8 +509,7 @@ const PROTECTED: &[&str] = &["/mcp", "/membrane/ha/calls", "/membrane/ha/catalog
 #[test]
 fn path_tricks_methods_and_headers_never_open_a_protected_route_to_a_caller_without_a_token() {
     let s = seat("paths");
-    let own = owner_token(&s.dir);
-    let bob = mint_cli(&s.dir, "bob", "Bob");
+    let own = admin_token(&s.dir);
     let tricks = |p: &str| -> Vec<String> {
         vec![p.to_string(), format!("{p}/"), format!("{p}/."), format!("{p}/.."), format!("{p}/../{}", p.trim_start_matches('/')), format!("//{}", p.trim_start_matches('/')), format!("/./{}", p.trim_start_matches('/')),
              format!("{p}//"), p.to_uppercase(), format!("{p}%2f.."), format!("{p}%00"), format!("{p};x=1"), format!("{p}?x=/ui/www/"), format!("{p}#/ui/www/"), format!("/ui/serve{p}"), format!("/ui/serve/{p}"),
@@ -529,16 +531,9 @@ fn path_tricks_methods_and_headers_never_open_a_protected_route_to_a_caller_with
         }
     }
     assert!(checked > 2000, "{checked}");
-    // a person who is not the owner reaches no owner-only route by any spelling: 403, 404 or 405, never the route's answer
-    for t in tricks("/membrane/ha/calls").into_iter().chain(tricks("/membrane/ha/metrics")).chain(tricks("/membrane/ha/catalog")) {
-        for m in ["GET", "HEAD", "OPTIONS", "POST"] {
-            let r = raw("127.0.0.1", s.port, m, &t, &[("Authorization", &format!("Bearer {bob}")), ("Content-Type", "application/json")], if m == "POST" { r#"{"entities":[],"services":[]}"# } else { "" });
-            assert!(!r.body.contains("\"calls\":") && !r.body.contains("\"rows\":") && !(r.status == 200 && r.body.contains("\"ok\":true")), "{m} {t} gave bob the owner's answer: {} {}", r.status, r.body);
-        }
-    }
-    // the owner's own calls still work through the prefix
+    // a valid token's own calls still work through the prefix
     assert_eq!(raw("127.0.0.1", s.port, "GET", "/ui/serve/membrane/ha/calls", &[("Authorization", &format!("Bearer {own}"))], "").status, 200);
-    // a HEAD to a route whose reply is written for GET used to hold the owner's connection for ever (no answer at all): it is a 405 with `allow`, at once
+    // a HEAD to a route whose reply is written for GET used to hold the token's connection for ever (no answer at all): it is a 405 with `allow`, at once
     let h = raw("127.0.0.1", s.port, "HEAD", "/membrane/ha/metrics", &[("Authorization", &format!("Bearer {own}"))], "");
     assert_eq!(h.status, 405); assert_eq!(h.header("allow"), Some("GET"));
     assert_eq!(raw("127.0.0.1", s.port, "HEAD", "/session", &[("Authorization", &format!("Bearer {own}"))], "").status, 405);
@@ -548,11 +543,11 @@ fn path_tricks_methods_and_headers_never_open_a_protected_route_to_a_caller_with
 #[test]
 fn a_request_with_no_token_changes_nothing_whatever_it_answers() {
     let s = seat("tokenless-writes");
-    let own = owner_token(&s.dir);
-    // a session and a message of the owner's, so there is something to rename, delete and abort
+    let own = admin_token(&s.dir);
+    // a session and a message of the admin's, so there is something to rename, delete and abort
     let sid = send(&s, "POST", "/session", Some(&own), &json!({"title": "mine"}).to_string()).json()["id"].as_str().unwrap().to_string();
     assert_eq!(send(&s, "POST", &format!("/session/{sid}/prompt_async"), Some(&own), &json!({"parts": [{"type": "text", "text": "first"}]}).to_string()).status, 204);
-    common::wait_for("the owner's turn is done", common::WAIT, || if get(&s, &format!("/session/{sid}/message"), Some(&own)).body.contains("Seat answer: first") { Some(()) } else { None });
+    common::wait_for("the admin's turn is done", common::WAIT, || if get(&s, &format!("/session/{sid}/message"), Some(&own)).body.contains("Seat answer: first") { Some(()) } else { None });
     let before = (keys(&s, &own), all_entities(&s, &own));
     let _ = &before.1;
     let sessions_before = get(&s, "/session", Some(&own)).body;
@@ -601,25 +596,25 @@ fn a_request_with_no_token_changes_nothing_whatever_it_answers() {
 fn a_request_through_a_proxy_is_not_this_machine_whichever_header_says_so() {
     let s = seat("proxy-headers");
     let plain = raw("127.0.0.1", s.port, "GET", "/", &[], "");
-    assert!(cookie_of(&plain).is_some(), "the control: the bare loopback page is given the owner cookie");
+    assert!(cookie_of(&plain).is_some(), "the control: the bare loopback page is given the admin cookie");
     for (h, v) in [("X-Forwarded-For", "203.0.113.9"), ("x-forwarded-for", "203.0.113.9, 10.0.0.1"), ("Forwarded", "for=203.0.113.9"), ("X-Real-IP", "203.0.113.9")] {
         let r = raw("127.0.0.1", s.port, "GET", "/", &[(h, v)], "");
         assert_eq!(r.status, 200, "{h}: the shell stays public");
         assert_eq!(cookie_of(&r), None, "{h}: a proxied caller is given no cookie (docs/auth.md: a request carrying X-Forwarded-For, Forwarded or X-Real-IP is off-box even on loopback)");
     }
     // behind a TLS proxy the cookie a login sets is Secure
-    let own = owner_token(&s.dir);
+    let own = admin_token(&s.dir);
     let r = raw("127.0.0.1", s.port, "POST", "/ui/login", &[("Content-Type", "application/json"), ("X-Forwarded-Proto", "https")], &json!({"token": own}).to_string());
     assert_eq!(r.status, 200);
     assert!(cookie_of(&r).unwrap().contains("; Secure"), "{:?}", cookie_of(&r));
 }
 
 // =====================================================================================================================================================================================
-// 2. THE OWNER COOKIE (the page's side is tests/js/release_verify.test.mjs); the login route
+// 2. THE ADMIN COOKIE (the page's side is tests/js/release_verify.test.mjs); the login route
 // =====================================================================================================================================================================================
 
 #[test]
-fn the_page_fetched_from_this_machine_is_given_the_owner_cookie_with_the_attributes_the_door_names() {
+fn the_page_fetched_from_this_machine_is_given_the_admin_cookie_with_the_attributes_the_door_names() {
     let s = seat("cookie");
     let sec = secret_of(&s.dir);
     let r = raw("127.0.0.1", s.port, "GET", "/", &[], "");
@@ -631,21 +626,21 @@ fn the_page_fetched_from_this_machine_is_given_the_owner_cookie_with_the_attribu
     assert!(!ck.contains("Secure") && !ck.contains("Domain"), "plain http, host-only: {ck}");
     let tok = ck.split(';').next().unwrap().split_once('=').unwrap().1;
     let c = membrane_vm::jwt::verify(tok, &sec, now()).unwrap();
-    assert_eq!(c["sub"], "owner");
+    assert_eq!(c["sub"], "admin");
     assert!((c["exp"].as_f64().unwrap() - c["iat"].as_f64().unwrap() - 604800.0).abs() < 2.0, "7 days");
     assert_eq!(r.header("cache-control"), Some("no-store, max-age=0"), "a cookie-bearing page is never cached");
     // the cookie opens the protected routes, and /ui/conf says who it is
     let cookie = ck.split(';').next().unwrap().to_string();
     let who = raw("127.0.0.1", s.port, "GET", "/ui/conf", &[("Cookie", &cookie)], "").json();
-    assert_eq!(who["who"]["sub"], "owner"); assert_eq!(who["auth"], "jwt");
+    assert_eq!(who["who"]["sub"], "admin"); assert_eq!(who["auth"], "jwt");
     for f in ["/index.html", "/membrane", "/ui/www/boot.js"] { assert_eq!(raw("127.0.0.1", s.port, "GET", f, &[], "").status, 200, "{f}"); }
     assert_eq!(cookie_of(&raw("127.0.0.1", s.port, "GET", "/ui/www/boot.js", &[], "")), None, "only the page itself carries the cookie, not its files");
-    // the operator fact names a different owner: the cookie is that person's
+    // a leftover `--fact operator=ann` names nobody: the cookie is still the admin's
     let d2 = tmp("cookie-op");
     let mut s2 = start(&d2, None, &["operator=ann"]);
     let ck2 = cookie_of(&raw("127.0.0.1", s2.port, "GET", "/", &[], "")).unwrap();
     let c2 = membrane_vm::jwt::verify(ck2.split(';').next().unwrap().split_once('=').unwrap().1, &secret_of(&d2), now()).unwrap();
-    assert_eq!(c2["sub"], "ann");
+    assert_eq!(c2["sub"], "admin");
     stop(&mut s2);
     let _ = std::fs::remove_dir_all(&d2);
 }
@@ -653,22 +648,22 @@ fn the_page_fetched_from_this_machine_is_given_the_owner_cookie_with_the_attribu
 #[test]
 fn the_login_route_turns_a_token_into_the_cookie_and_logout_clears_it() {
     let s = seat("login");
-    let (own, sec) = (owner_token(&s.dir), secret_of(&s.dir));
+    let (own, sec) = (admin_token(&s.dir), secret_of(&s.dir));
     let bob = mint_cli(&s.dir, "bob", "Bob");
     let name = membrane_vm::jwt::cookie_name(&sec);
     let login = |ct: &str, body: &str| raw("127.0.0.1", s.port, "POST", "/ui/login", &[("Content-Type", ct)], body);
     let r = login("application/json", &json!({"token": bob}).to_string());
     assert_eq!(r.status, 200, "{}", r.body);
-    assert_eq!(r.json(), json!({"ok": true, "who": {"sub": "bob", "name": "Bob"}}));
+    assert_eq!(r.json(), json!({"ok": true, "who": {"sub": "admin", "name": "admin"}}), "the login answers the admin, whatever the token's sub says");
     let ck = cookie_of(&r).unwrap();
     for a in [format!("{name}={bob}"), "; Path=/".into(), "; HttpOnly".into(), "; SameSite=Strict".into()] { assert!(ck.contains(&a), "{a} in {ck}"); }
     let age: f64 = ck.split("Max-Age=").nth(1).unwrap().split(';').next().unwrap().parse().unwrap();
     assert!(age > 3500.0 && age <= 3600.0, "the cookie lives as long as the token: {age}");
-    assert_eq!(raw("127.0.0.1", s.port, "GET", "/session", &[("Cookie", &format!("{name}={bob}"))], "").status, 200, "the cookie is bob's session");
+    assert_eq!(raw("127.0.0.1", s.port, "GET", "/session", &[("Cookie", &format!("{name}={bob}"))], "").status, 200, "the cookie of a token with sub bob is a session too");
     // refused: not JSON, a form, a bad token, a token of another secret, no token, a huge body, a GET
     assert_eq!(login("application/x-www-form-urlencoded", &format!("token={bob}")).status, 415, "a cross-site form cannot post a token");
     assert_eq!(login("text/plain", &json!({"token": bob}).to_string()).status, 415);
-    for b in [json!({"token": "garbage"}).to_string(), json!({}).to_string(), json!({"token": ""}).to_string(), json!({"token": forge(b"another secret of at least 32 bytes!!", hs256(), claims("owner", 600.0))}).to_string(), "not json".to_string()] {
+    for b in [json!({"token": "garbage"}).to_string(), json!({}).to_string(), json!({"token": ""}).to_string(), json!({"token": forge(b"another secret of at least 32 bytes!!", hs256(), claims("admin", 600.0))}).to_string(), "not json".to_string()] {
         let r = login("application/json", &b);
         assert_eq!(r.status, 401, "{b}"); assert_eq!(cookie_of(&r), None); assert_eq!(r.json(), UNAUTH());
     }
@@ -677,8 +672,8 @@ fn the_login_route_turns_a_token_into_the_cookie_and_logout_clears_it() {
     // the seat's own internal token never logs in
     let internal = forge(&sec, hs256(), claims("seat:internal", 600.0));
     assert_eq!(login("application/json", &json!({"token": internal}).to_string()).status, 401);
-    // an owner's login is the owner's cookie; logout clears it
-    assert_eq!(login("application/json", &json!({"token": own}).to_string()).json()["who"]["sub"], "owner");
+    // the boot's token logs in as the admin too; logout clears it
+    assert_eq!(login("application/json", &json!({"token": own}).to_string()).json()["who"]["sub"], "admin");
     let out = raw("127.0.0.1", s.port, "POST", "/ui/logout", &[("Content-Type", "application/json")], "{}");
     assert_eq!(out.status, 200);
     let c = cookie_of(&out).unwrap();
@@ -692,7 +687,7 @@ fn the_page_through_the_machines_lan_address_is_given_no_cookie_and_the_routes_a
     let Some(ip) = lan_ip() else { println!("no LAN address on this machine: the LAN case is skipped"); return; };
     let dir = tmp("lan");
     let mut s = start(&dir, Some("0.0.0.0"), &[]);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     let page = raw(&ip, s.port, "GET", "/", &[], "");
     assert_eq!(page.status, 200, "the shell is public");
     assert_eq!(cookie_of(&page), None, "a peer that is not loopback is given no cookie");
@@ -706,96 +701,121 @@ fn the_page_through_the_machines_lan_address_is_given_no_cookie_and_the_routes_a
     assert_eq!(l.status, 200);
     let cookie = cookie_of(&l).unwrap().split(';').next().unwrap().to_string();
     assert_eq!(raw(&ip, s.port, "GET", "/ui/fieldvm", &[("Cookie", &cookie)], "").status, 200);
-    // the page over the LAN with a cookie it already holds does NOT get a fresh one: only the loopback peer is given the owner's
+    // the page over the LAN with a cookie it already holds does NOT get a fresh one: only the loopback peer is given the admin's
     assert_eq!(cookie_of(&raw(&ip, s.port, "GET", "/", &[("Cookie", &cookie)], "")), None);
     stop(&mut s);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn fact_the_page_is_given_the_owner_cookie_whatever_host_name_the_request_carries() {
-    // A FACT, NOT A POLICY (docs/release-verification.md, decision): the door tells "this machine" by the PEER address only. A loopback peer that names ANOTHER host in `Host:` (the shape of a
-    // DNS-rebinding page: the browser's address bar says evil.example, the name resolves to 127.0.0.1) is given the owner's cookie, which that page's script cannot read (HttpOnly) but its own
-    // fetches ride. When the operator decides on a host allow-list this test flips.
+fn the_page_cookie_is_given_only_for_a_host_name_of_this_machine_and_a_rebinding_page_gets_none() {
+    // THE HOST CHECK (operator 2026-11-14): a DNS-rebinding page (the address bar says evil.example, the name resolves to 127.0.0.1) reaches the door from a loopback peer; it must NOT be given the
+    // admin cookie. Only localhost, 127.0.0.1, [::1] (any case, any port) and the names of the fact `host_names` are. The decision: NO COOKIE (the page answers 200 and shows its plain text),
+    // not a 421/400: the shell is public and static, a refusal would add nothing a missing cookie does not already deny, and a refusal would break a legitimate proxy name the operator forgot to list.
     let s = seat("host-rebind");
-    let r = raw("127.0.0.1", s.port, "GET", "/", &[("Host", "evil.example:80")], "");
-    assert_eq!(r.status, 200);
-    assert!(cookie_of(&r).is_some(), "today a loopback peer with any Host is the owner's page");
+    let name = membrane_vm::jwt::cookie_name(&secret_of(&s.dir));
+    for h in ["evil.example:80", "evil.example", "localhost.evil.example", "127.0.0.1.evil.example:80", "[::2]:80", "10.0.0.5", "", "localhostx"] {
+        let hdrs: Vec<(&str, &str)> = vec![("Host", h)];
+        let r = raw("127.0.0.1", s.port, "GET", "/", &hdrs, "");
+        assert_eq!(r.status, 200, "the shell is served: {h}");
+        assert_eq!(cookie_of(&r), None, "Host {h:?} from loopback gets NO cookie");
+    }
+    // a page with no cookie meets 401 on the protected routes, through the prefix as well
+    for p in ["/ui/conf", "/session", "/ui/serve/ui/conf", "/membrane/chat/messages"] { assert_eq!(raw("127.0.0.1", s.port, "GET", p, &[("Host", "evil.example")], "").status, 401, "{p}"); }
+    let port = s.port;
+    for h in ["localhost".to_string(), "LOCALHOST".into(), format!("localhost:{port}"), "127.0.0.1".into(), format!("127.0.0.1:{port}"), "[::1]".into(), format!("[::1]:{port}")] {
+        let r = raw("127.0.0.1", s.port, "GET", "/", &[("Host", &h)], "");
+        let ck = cookie_of(&r).unwrap_or_else(|| panic!("Host {h} is this machine's: a cookie"));
+        assert!(ck.starts_with(&format!("{name}=")), "{h}: {ck}");
+    }
+    // a bearer token is not affected by the Host: any name, same answer
+    let own = admin_token(&s.dir);
+    let r = raw("127.0.0.1", s.port, "GET", "/global/health", &[("Host", "evil.example"), ("Authorization", &format!("Bearer {own}"))], "");
+    assert_eq!(r.status, 200, "a script with a token works whatever Host it names");
+}
+
+#[test]
+fn the_host_names_fact_adds_names_for_the_cookie_and_nothing_else() {
+    let d = tmp("host-names");
+    let mut s = start(&d, None, &["host_names=[\"Seat.Lan\",\"box.home\"]"]);
+    let ck = |h: &str| cookie_of(&raw("127.0.0.1", s.port, "GET", "/", &[("Host", h)], ""));
+    assert!(ck("seat.lan:4311").is_some() && ck("SEAT.LAN").is_some() && ck("box.home").is_some(), "the listed names");
+    assert!(ck("localhost").is_some(), "the three defaults stay");
+    assert!(ck("evil.example").is_none() && ck("seat.lan.evil.example").is_none() && ck("home").is_none(), "an unlisted name, or one that only ends or starts like a listed one");
+    stop(&mut s);
+    let d2 = tmp("host-names-text");
+    let mut s2 = start(&d2, None, &["host_names=seat.lan, box.home"]);
+    let ck2 = |h: &str| cookie_of(&raw("127.0.0.1", s2.port, "GET", "/", &[("Host", h)], ""));
+    assert!(ck2("box.home:80").is_some() && ck2("seat.lan").is_some() && ck2("evil.example").is_none(), "comma text works too");
+    stop(&mut s2);
+    let _ = std::fs::remove_dir_all(&d); let _ = std::fs::remove_dir_all(&d2);
 }
 
 // =====================================================================================================================================================================================
-// 3. A SECOND PERSON
+// 3. NO USERS: ANY VALID TOKEN IS THE ADMIN
 // =====================================================================================================================================================================================
 
 #[test]
-fn a_second_person_reads_everything_the_page_reads_and_is_refused_every_owner_only_write_with_nothing_changed() {
+fn a_token_with_any_sub_reads_and_writes_everything_the_admin_does_and_a_tokenless_caller_still_changes_nothing() {
     let s = seat("bob");
-    let (own, bob) = (owner_token(&s.dir), mint_cli(&s.dir, "bob", "Bob"));
+    let (own, bob) = (admin_token(&s.dir), mint_cli(&s.dir, "bob", "Bob"));
     // reads: health, chat history, the settings feed, sessions, the page's boot read, tools list and reads
     for p in ["/global/health", "/membrane/chat/messages", "/ui/settings", "/session", "/session/status", "/ui/fieldvm", "/ui/conf", "/membrane/models", "/membrane/options", "/v1/models", "/membrane/state", "/membrane/stats"] {
         let r = get(&s, p, Some(&bob));
         assert_eq!(r.status, 200, "bob reads {p}: {}", r.body);
     }
-    assert_eq!(get(&s, "/ui/conf", Some(&bob)).json()["who"], json!({"sub": "bob", "name": "Bob"}));
-    assert!(get(&s, "/ui/settings", Some(&bob)).json()["settings"].as_array().map(|a| a.len() > 20).unwrap_or(false), "the whole settings feed");
+    assert_eq!(get(&s, "/ui/conf", Some(&bob)).json()["who"], json!({"sub": "admin", "name": "admin"}), "the sub is no identity: the page is told the admin");
+    assert!(get(&s, "/ui/settings", Some(&bob)).json()["settings"].as_array().map(|a| a.len() > 15).unwrap_or(false), "the whole settings feed");
+    assert!(!get(&s, "/ui/settings", Some(&bob)).body.contains("access.people") && !get(&s, "/ui/settings", Some(&bob)).body.contains("access.owner"), "no People row and no row for a person");
     assert_eq!(send(&s, "POST", "/mcp", Some(&bob), &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).to_string()).status, 200);
-    assert_eq!(mcp_call(&s, &bob, "entity_read", json!({"spec": "Setting:chat.max_steps", "prop": "current"})).status, 200);
-    assert_eq!(mcp_call(&s, &bob, "entity_query", json!({"q": "kind:Setting", "k": 3})).status, 200);
-    assert_eq!(get(&s, "/global/health", Some(&own)).status, 200);   // the owner's own person row exists before the snapshot
-    let before = (keys(&s, &own), read_prop(&s, &own, "Setting:chat.max_steps", "current"), read_prop(&s, &own, "Minds:seat", "loops"), get(&s, "/membrane/options", Some(&own)).body);
-    // writes: the owner's
-    let refused = |what: &str, r: Resp| { assert_eq!((r.status, r.json()), (403, FORBIDDEN()), "{what}: {}", r.body); };
-    refused("entity_write of a Note", mcp_call(&s, &bob, "entity_write", json!({"spec": "Note:bobs", "prop": "text", "value": "hi"})));
-    refused("run_cliff", mcp_call(&s, &bob, "run_cliff", json!({"code": "('Note:bobs2').text = 'hi'"})));
-    refused("a Setting write", mcp_call(&s, &bob, "entity_write", json!({"spec": "Setting:chat.max_steps", "prop": "set", "value": 7})));
-    refused("the chat model setting", mcp_call(&s, &bob, "entity_write", json!({"spec": "Setting:model.chat", "prop": "set", "value": "evil-model"})));
-    refused("the allow-list setting", mcp_call(&s, &bob, "entity_write", json!({"spec": "Setting:home.allow", "prop": "set", "value": [{"name": "all", "services": ["lock.*"], "entities": ["lock.*"]}]})));
-    refused("a HaAllow write", mcp_call(&s, &bob, "entity_write", json!({"spec": "HaAllow:bob", "prop": "services", "value": ["lock.*"]})));
-    refused("a HaCall write", mcp_call(&s, &bob, "entity_write", json!({"spec": "HaCall:b1", "prop": "request", "value": {"domain": "lock", "service": "unlock", "target": {"entity_id": "lock.front"}}})));
-    refused("a pack", mcp_call(&s, &bob, "entity_write", json!({"spec": "Pack:evil", "prop": "text", "value": "PACK evil 1\n"})));
-    refused("the owner's own Person row", mcp_call(&s, &bob, "entity_write", json!({"spec": "Person:owner", "prop": "sub", "value": "bob"})));
-    refused("POST /membrane/options", send(&s, "POST", "/membrane/options", Some(&bob), &json!({"self_cpu_share": 0.9}).to_string()));
-    refused("POST /membrane/options (a model)", send(&s, "POST", "/membrane/options", Some(&bob), &json!({"loops": "claude"}).to_string()));
-    refused("POST /membrane/models", send(&s, "POST", "/membrane/models", Some(&bob), &json!({"loops": "claude"}).to_string()));
-    refused("the same through the page's prefix", send(&s, "POST", "/ui/serve/membrane/models", Some(&bob), &json!({"loops": "claude"}).to_string()));
-    refused("the same through the page's prefix (mcp)", send(&s, "POST", "/ui/serve/mcp", Some(&bob), &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_write", "arguments": {"spec": "Note:b3", "prop": "text", "value": "x"}}}).to_string()));
-    for (m, p, b) in [("GET", "/membrane/ha/calls", ""), ("GET", "/membrane/ha/metrics", ""), ("POST", "/membrane/ha/calls", r#"{"id":"b1","claim":true}"#), ("POST", "/membrane/ha/catalog", r#"{"entities":[{"entity_id":"x.y"}],"services":[]}"#)] {
-        refused(&format!("{m} {p}"), send(&s, m, p, Some(&bob), b));
-    }
-    // and not one of them changed anything
-    let after = (keys(&s, &own), read_prop(&s, &own, "Setting:chat.max_steps", "current"), read_prop(&s, &own, "Minds:seat", "loops"), get(&s, "/membrane/options", Some(&own)).body);
-    assert_eq!(after.0.iter().filter(|k| !before.0.contains(k)).collect::<Vec<_>>(), Vec::<&String>::new(), "a refused write made an entity");
-    assert_eq!((&after.1, &after.2, &after.3), (&before.1, &before.2, &before.3));
-    for (spec, prop) in [("HaCatalog:ha", "entities"), ("HaAllow:bob", "services"), ("HaCall:b1", "claim"), ("Setting:home.allow", "current")] { assert!(!read_prop(&s, &own, spec, prop).contains("lock") && !read_prop(&s, &own, spec, prop).contains("x.y"), "{spec}"); }
-    // the same calls from the OWNER work (the control)
-    assert_eq!(mcp_call(&s, &own, "entity_write", json!({"spec": "Setting:chat.max_steps", "prop": "set", "value": 7})).status, 200);
+    // writes: every one works for bob (each was a 403 before this release dropped users)
+    let done = |what: &str, r: Resp| { assert_eq!(r.status, 200, "{what}: {}", r.body); };
+    done("entity_write of a Note", mcp_call(&s, &bob, "entity_write", json!({"spec": "Note:bobs", "prop": "text", "value": "hi"})));
+    assert!(read_prop(&s, &own, "Note:bobs", "text").contains("hi"));
+    done("run_cliff", mcp_call(&s, &bob, "run_cliff", json!({"code": "('Note:bobs2').text = 'hi'"})));
+    assert!(read_prop(&s, &own, "Note:bobs2", "text").contains("hi"));
+    done("a Setting write", mcp_call(&s, &bob, "entity_write", json!({"spec": "Setting:chat.max_steps", "prop": "set", "value": 7})));
     assert_eq!(read_prop(&s, &own, "Setting:chat.max_steps", "current"), "7");
-    assert_eq!(send(&s, "POST", "/membrane/options", Some(&own), &json!({"self_cpu_share": 0.7}).to_string()).status, 200);
-    assert_eq!(get(&s, "/membrane/ha/metrics", Some(&own)).status, 200);
+    done("a HaAllow write", mcp_call(&s, &bob, "entity_write", json!({"spec": "HaAllow:bob", "prop": "services", "value": ["light.*"]})));
+    done("a pack", mcp_call(&s, &bob, "entity_write", json!({"spec": "Pack:harmless", "prop": "text", "value": "PACK harmless 1\n"})));
+    done("POST /membrane/options", send(&s, "POST", "/membrane/options", Some(&bob), &json!({"self_cpu_share": 0.7}).to_string()));
+    done("POST /membrane/models", send(&s, "POST", "/membrane/models", Some(&bob), &json!({"loops": "claude"}).to_string()));
+    done("the same through the page's prefix", send(&s, "POST", "/ui/serve/membrane/models", Some(&bob), &json!({"loops": "claude"}).to_string()));
+    done("the same through the page's prefix (mcp)", send(&s, "POST", "/ui/serve/mcp", Some(&bob), &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_write", "arguments": {"spec": "Note:b3", "prop": "text", "value": "x"}}}).to_string()));
+    for (m, p, b) in [("GET", "/membrane/ha/calls", ""), ("GET", "/membrane/ha/metrics", ""), ("POST", "/membrane/ha/catalog", r#"{"entities":[{"entity_id":"x.y"}],"services":[]}"#)] { done(&format!("{m} {p}"), send(&s, m, p, Some(&bob), b)); }
+    let r = send(&s, "POST", "/membrane/ha/calls", Some(&bob), r#"{"id":"b1","claim":true}"#);
+    assert!(r.status != 401 && r.status != 403, "a claim of an unknown call is the route's own answer, not a refusal: {} {}", r.status, r.body);
+    // no `Person` was made for anybody
+    assert!(!mcp_text(&mcp_call(&s, &own, "entity_query", json!({"q": "kind:Person"}))).contains("Person:"), "no users: no Person entities");
+    // the control that did not change: no token, a bad token, a token of another key: 401 and NOTHING written
+    let before = keys(&s, &own);
+    for (what, tok) in [("no token", None), ("a bad token", Some("garbage".to_string())), ("another key", Some(forge(b"another secret of at least 32 bytes!!", hs256(), claims("admin", 600.0))))] {
+        for (m, p, b) in [("POST", "/mcp", json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_write", "arguments": {"spec": "Note:nobody", "prop": "text", "value": "x"}}}).to_string()),
+                          ("POST", "/membrane/models", json!({"loops": "claude"}).to_string()), ("POST", "/membrane/ha/catalog", r#"{"entities":[{"entity_id":"z.z"}],"services":[]}"#.to_string())] {
+            let r = send(&s, m, p, tok.as_deref(), &b);
+            assert_eq!(r.status, 401, "{what}: {m} {p}: {}", r.body);
+        }
+    }
+    assert_eq!(keys(&s, &own).iter().filter(|k| !before.contains(k)).collect::<Vec<_>>(), Vec::<&String>::new(), "a tokenless request made an entity");
+    assert!(read_prop(&s, &own, "Note:nobody", "text").contains(" has no "), "and wrote nothing");
 }
 
 #[test]
-fn a_token_with_the_sub_ha_cannot_reach_the_home_assistant_routes_and_the_operator_fact_moves_the_owner() {
+fn tokens_with_the_sub_ha_bob_or_anything_reach_the_home_assistant_routes_the_same_and_the_operator_fact_changes_nothing() {
     let s = seat("ha-sub");
-    let own = owner_token(&s.dir);
-    let ha = mint_cli(&s.dir, "ha", "Home Assistant");
-    for (m, p) in [("GET", "/membrane/ha/calls"), ("GET", "/membrane/ha/metrics"), ("POST", "/membrane/ha/calls"), ("POST", "/membrane/ha/catalog")] {
-        let r = send(&s, m, p, Some(&ha), "{}");
-        assert_eq!((r.status, r.json()), (403, FORBIDDEN()), "{m} {p}");
+    let own = admin_token(&s.dir);
+    for sub in ["ha", "bob", "former-owner", "admin", "anything at all"] {
+        let t = mint_cli(&s.dir, sub, "Home Assistant");
+        for (m, p) in [("GET", "/membrane/ha/calls"), ("GET", "/membrane/ha/metrics"), ("POST", "/membrane/ha/catalog")] {
+            let r = send(&s, m, p, Some(&t), r#"{"entities":[],"services":[]}"#);
+            assert_eq!(r.status, 200, "sub {sub}: {m} {p}: {}", r.body);
+        }
     }
-    assert_eq!(get(&s, "/global/health", Some(&ha)).status, 200, "it is a verified person: health and Assist's calls work");
     assert_eq!(get(&s, "/membrane/ha/calls", Some(&own)).status, 200);
-    // a token minted with the sub `owner` IS the owner (that is how Home Assistant is given the owner's: docs/home-assistant.md)
-    let minted_owner = mint_cli(&s.dir, "owner", "Home Assistant");
-    assert_eq!(get(&s, "/membrane/ha/calls", Some(&minted_owner)).status, 200);
-    // `--fact operator=ann` moves it: the sub `owner` is nobody special then
     let d2 = tmp("ha-op");
     let mut s2 = start(&d2, None, &["operator=ann"]);
-    let owner_sub = mint_cli(&d2, "owner", "x");
-    let ann = mint_cli(&d2, "ann", "Ann");
-    assert_eq!(get(&s2, "/membrane/ha/calls", Some(&owner_sub)).status, 403);
-    assert_eq!(get(&s2, "/membrane/ha/calls", Some(&ann)).status, 200);
-    assert_eq!(get(&s2, "/membrane/ha/calls", Some(&owner_token(&d2))).status, 200, "the boot's owner token is ann's");
+    for sub in ["former-owner", "ann", "ha"] { assert_eq!(get(&s2, "/membrane/ha/calls", Some(&mint_cli(&d2, sub, "x"))).status, 200, "sub {sub}: a leftover operator fact makes nobody special"); }
+    assert_eq!(get(&s2, "/membrane/ha/calls", Some(&admin_token(&d2))).status, 200);
     stop(&mut s2);
     let _ = std::fs::remove_dir_all(&d2);
 }
@@ -816,36 +836,36 @@ fn a_tokenless_caller_meets_the_documented_public_set_and_nothing_else() {
 }
 
 #[test]
-fn the_one_chat_has_no_second_person_a_message_of_bobs_is_the_chats_and_runs_with_the_owners_power() {
-    // THE FACTS of the decision "everyone with access is the owner" (docs/release-verification.md, decision 1). Nothing here is changed policy; each assertion states what the door does TODAY.
+fn the_one_chat_has_no_second_person_a_message_of_bobs_is_the_chats_and_runs_with_the_admins_power() {
+    // THE FACTS of the decision "everyone with access is the admin" (docs/release-verification.md, decision 1; the operator's 2026-11-14 order: no users). Each assertion states what the door does TODAY.
     let s = seat("one-chat");
-    let (own, bob) = (owner_token(&s.dir), mint_cli(&s.dir, "bob", "Bob"));
-    // the owner has a session; bob sees it, writes into it, renames and deletes it (the session routes check only that the caller is verified)
-    let sid = send(&s, "POST", "/session", Some(&own), &json!({"title": "owner's"}).to_string()).json()["id"].as_str().unwrap().to_string();
-    assert!(get(&s, "/session", Some(&bob)).body.contains(&sid), "bob sees the owner's session: the sessions are not per person");
+    let (own, bob) = (admin_token(&s.dir), mint_cli(&s.dir, "bob", "Bob"));
+    // the admin has a session; bob sees it, writes into it, renames and deletes it (the session routes check only that the caller is verified)
+    let sid = send(&s, "POST", "/session", Some(&own), &json!({"title": "admin's"}).to_string()).json()["id"].as_str().unwrap().to_string();
+    assert!(get(&s, "/session", Some(&bob)).body.contains(&sid), "bob sees the admin's session: the sessions are not per person");
     assert_eq!(send(&s, "PATCH", &format!("/session/{sid}"), Some(&bob), &json!({"title": "bob renamed it"}).to_string()).status, 200, "bob renames it");
     assert_eq!(send(&s, "POST", "/membrane/chat/message", Some(&bob), &json!({"text": "hello from bob"}).to_string()).status, 202, "bob's message goes to THE chat");
     common::wait_for("bob's message is answered", common::WAIT, || if get(&s, "/membrane/chat/messages", Some(&own)).body.contains("Seat answer: hello from bob") { Some(()) } else { None });
     let hist = get(&s, "/membrane/chat/messages", Some(&own)).json();
     let m = hist["messages"].as_array().unwrap().iter().find(|m| m["text"] == "hello from bob").unwrap();
     assert!(m.get("person").is_none() && m.get("sub").is_none() && m.get("from").is_none(), "the message does not say who sent it: {m}");
-    // the turn's CLI carries the OWNER's token: a message of bob's that makes the model write, writes as the owner
+    // the turn's CLI carries the admin's token: a message of bob's that makes the model write, writes as the admin
     assert_eq!(send(&s, "POST", "/membrane/chat/message", Some(&bob), &json!({"text": "DO: write a note"}).to_string()).status, 202);
-    common::wait_for("the turn wrote the note with the owner's token", common::WAIT, || if read_prop(&s, &own, "Note:via-chat", "text").contains("written by a turn") { Some(()) } else { None });
-    assert_eq!(mcp_call(&s, &bob, "entity_write", json!({"spec": "Note:direct", "prop": "text", "value": "x"})).status, 403, "while bob's own write through the same door is refused");
+    common::wait_for("the turn wrote the note with the admin's token", common::WAIT, || if read_prop(&s, &own, "Note:via-chat", "text").contains("written by a turn") { Some(()) } else { None });
+    assert_eq!(mcp_call(&s, &bob, "entity_write", json!({"spec": "Note:direct", "prop": "text", "value": "x"})).status, 200, "and bob's own write through the same door works too: bob is the admin");
     // the seat's controls take bob's ask (the door records it for `membrane::presence`, as the page's pause button asks)
     let r = send(&s, "POST", "/membrane/seat/pause", Some(&bob), &json!({"paused": true}).to_string());
     assert!(r.status != 403 && r.status != 401, "bob's pause is not refused for who he is (this seat has no presence entity, so it answers {}: {})", r.status, r.body);
-    assert_eq!(send(&s, "DELETE", &format!("/session/{sid}"), Some(&bob), "").status, 200, "bob deletes the owner's session");
+    assert_eq!(send(&s, "DELETE", &format!("/session/{sid}"), Some(&bob), "").status, 200, "bob deletes the admin's session");
 }
 
 #[test]
-fn an_open_connection_of_the_owner_does_not_hand_its_credentials_to_a_person_who_reads_the_entities() {
+fn an_open_connection_of_the_admin_does_not_hand_its_credentials_to_a_person_who_reads_the_entities() {
     // the page holds `GET /event` open all the time; its Request entity is alive while it is held, and `entity_read` is any verified person's tool
     let s = seat("held-request");
-    let (own, bob) = (owner_token(&s.dir), mint_cli(&s.dir, "bob", "Bob"));
+    let (own, bob) = (admin_token(&s.dir), mint_cli(&s.dir, "bob", "Bob"));
     let mut held = TcpStream::connect(("127.0.0.1", s.port)).unwrap();
-    held.write_all(format!("GET /event HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer {own}\r\nCookie: x={own}\r\n\r\n").as_bytes()).unwrap();
+    held.write_all(format!("GET /event HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {own}\r\nCookie: x={own}\r\n\r\n").as_bytes()).unwrap();
     held.set_read_timeout(Some(common::IO)).unwrap();
     let mut buf = [0u8; 256];
     let n = held.read(&mut buf).unwrap();
@@ -856,7 +876,7 @@ fn an_open_connection_of_the_owner_does_not_hand_its_credentials_to_a_person_who
     for id in ids {
         for prop in ["headers", "body", "query"] {
             let t = read_prop(&s, &bob, &id, prop);
-            assert!(!t.contains(&own), "bob read the owner's token from {id}.{prop}: {t}");
+            assert!(!t.contains(&own), "bob read the admin's token from {id}.{prop}: {t}");
         }
         assert!(!mcp_text(&mcp_call(&s, &bob, "entity_read", json!({"spec": id}))).contains(&own), "{id} whole");
     }

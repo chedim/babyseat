@@ -201,7 +201,7 @@ only on a network you trust. [JWT mode](docs/auth.md) is on by default (a token 
 1. HACS → ⋮ → Custom repositories → `https://github.com/chedim/membrane`,
    category *Integration*.
 2. Install **babyseat (membrane)**, restart Home Assistant.
-3. Run a seat, mint a token for Home Assistant (`cliffvm token mint --sub owner`), then
+3. Run a seat, mint a token for Home Assistant (`cliffvm token mint --sub ha`), then
    Settings → Devices & services → Add integration → the seat's URL and the token.
 
 Since 0.7.60 the integration is a thin client of a seat you run: it adds the seat
@@ -210,7 +210,7 @@ model read states and call services through Home Assistant (an allow-list you wr
 default deny; only what you exposed to Assist), shows a few entities for the seat
 (reachable, busy, model, turns today, last answer, last error; a select for its
 model) and adds the services `membrane.send_message` and `membrane.ask`. The seat's
-use of the house, the entities and the select need the owner's token. It does
+use of the house, the entities and the select need the admin's token. It does
 not start a seat; the panels, the per-user relay, speech input and the several-seats
 list are a later slice (see
 [docs/home-assistant.md](docs/home-assistant.md), [docs/hass-plan.md](docs/hass-plan.md)).

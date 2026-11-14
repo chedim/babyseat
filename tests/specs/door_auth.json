@@ -132,7 +132,7 @@
   ]
  },
  {
-  "name": "a loopback request on the bare route WITH the owner token is served",
+  "name": "a loopback request on the bare route WITH the admin token is served",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/door.c1f",

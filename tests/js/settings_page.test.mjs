@@ -1,11 +1,11 @@
 // The SETTINGS VIEW in a real browser (#1143): a REAL private cliffvm barest seat (the shipped packs + the barest app + the page's ui folder, own store, own port; the barest door is open: everyone who
-// reaches the page is the owner, as in the view; the owner check on a person's token is proved in native/tests/settings_1143.rs) and the page in headless Chrome over the DevTools protocol. Asserted:
+// reaches the page is the admin, as in the view; that any token with any sub writes is proved in native/tests/settings_1143.rs) and the page in headless Chrome over the DevTools protocol. Asserted:
 //   1. Settings opens: one section per group in the operator's order (Model, Chat, Home, Import, Access, Limits), no Map group, no Field tab, no dead setting, a restart row has no control;
 //   2. the chat step limit is changed with the keyboard (type, Enter): the row says Applied, "In force" shows the new value, and the SEAT holds it (read back through its own door);
 //   3. 0 is refused: the seat's reason is shown next to the row, the value in force is unchanged;
 //   4. a text row (the chat model) saves with the Save button (a real mouse click);
 //   5. the allow-list editor: add an entry, type its fields, Save: the seat holds the entry; remove it, Save: it is gone;
-//   6. no secret is on the page (the API key, a provider url's password, the door secret, the owner key), only the NAME of the variable;
+//   6. no secret is on the page (the API key, a provider url's password, the door secret, the admin key), only the NAME of the variable;
 //   7. no script error. SHOTS=<dir> saves the screenshots: settings-dark, settings-light, settings-phone.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';

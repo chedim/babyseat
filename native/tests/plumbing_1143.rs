@@ -52,7 +52,7 @@ fn open_seat(tag: &str) -> Run {
 fn http(port: u16, method: &str, path: &str, extra: &str, body: &str) -> (u16, String, String) {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
-    s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}", body.len()).as_bytes()).unwrap();
+    s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}", body.len()).as_bytes()).unwrap();
     let mut out = vec![];
     let _ = s.read_to_end(&mut out);
     let i = out.windows(4).position(|w| w == b"\r\n\r\n").expect("an HTTP answer");
@@ -60,11 +60,11 @@ fn http(port: u16, method: &str, path: &str, extra: &str, body: &str) -> (u16, S
     (head.split_whitespace().nth(1).unwrap().parse().unwrap(), head, String::from_utf8_lossy(&out[i + 4..]).to_string())
 }
 fn bearer(t: &str) -> String { format!("Authorization: Bearer {t}\r\n") }
-fn owner_token(r: &Run) -> String {
+fn admin_token(r: &Run) -> String {
     let t = std::time::Instant::now();
     loop {
-        if let Ok(s) = std::fs::read_to_string(r.data.join("owner.token")) { if !s.trim().is_empty() { return s.trim().to_string(); } }
-        assert!(t.elapsed() < Duration::from_secs(30), "the owner token file");
+        if let Ok(s) = std::fs::read_to_string(r.data.join("admin.token")) { if !s.trim().is_empty() { return s.trim().to_string(); } }
+        assert!(t.elapsed() < Duration::from_secs(30), "the admin token file");
         std::thread::sleep(Duration::from_millis(100));
     }
 }
@@ -77,7 +77,7 @@ fn the_binary_the_health_route_and_the_conf_report_the_version_0_7_60() {
     let o = Command::new(BIN).arg("--version").output().unwrap();
     assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "cliffvm 0.7.60");
     let run = launcher("version");
-    let tok = owner_token(&run);
+    let tok = admin_token(&run);
     let (st, _, b) = http(run.port, "GET", "/global/health", &bearer(&tok), "");
     assert_eq!((st, json(&b)["version"].as_str().map(String::from)), (200, Some("0.7.60".to_string())), "{b}");
     let (st, _, b) = http(run.port, "GET", "/ui/conf", &bearer(&tok), "");
@@ -96,18 +96,18 @@ fn scripts_seat_full_is_gone_and_no_script_names_it() {
 }
 
 #[test]
-fn the_launcher_makes_a_door_secret_and_an_owner_token_and_the_strict_door_serves_the_page_and_the_house_routes() {
+fn the_launcher_makes_a_door_secret_and_an_admin_token_and_the_strict_door_serves_the_page_and_the_house_routes() {
     let run = launcher("strict");
     let secret = run.data.join("door.secret");
-    let tok = owner_token(&run);
+    let tok = admin_token(&run);
     assert!(std::fs::read_to_string(&secret).unwrap().trim().len() >= 64, "a long secret");
     // the page shell loads with no token; a protected route answers 401
     let (st, head, body) = http(run.port, "GET", "/", "", "");
     assert_eq!(st, 200, "{head}");
     assert!(body.to_lowercase().contains("<html") || body.to_lowercase().contains("<!doctype"), "the page");
     assert_eq!(http(run.port, "GET", "/membrane/ha/calls", "", "").0, 401, "no token, no house route");
-    // `cliffvm token mint` works on the launcher's secret, and so does the owner's own token
-    let minted = Command::new(BIN).args(["token", "mint", "--sub", "owner", "--ttl", "15m", "--secret-file", secret.to_str().unwrap()]).output().unwrap();
+    // `cliffvm token mint` works on the launcher's secret, and so does the admin's own token
+    let minted = Command::new(BIN).args(["token", "mint", "--sub", "admin", "--ttl", "15m", "--secret-file", secret.to_str().unwrap()]).output().unwrap();
     assert!(minted.status.success(), "{}", String::from_utf8_lossy(&minted.stderr));
     let minted = String::from_utf8_lossy(&minted.stdout).trim().to_string();
     for t in [tok.clone(), minted] {
@@ -123,7 +123,7 @@ fn the_launcher_makes_a_door_secret_and_an_owner_token_and_the_strict_door_serve
     assert_eq!(http(run.port, "GET", "/v1/models", &bearer(&tok), "").0, 200);
     // the metrics Home Assistant's sensors read
     assert_eq!(http(run.port, "GET", "/membrane/ha/metrics", &bearer(&tok), "").0, 200);
-    // a localhost peer is not the owner: the page's owner cookie comes from loopback, the bare route stays closed
+    // a localhost peer is not the admin: the page's admin cookie comes from loopback, the bare route stays closed
     assert!(head.to_lowercase().contains("set-cookie"), "the page is given its cookie: {head}");
 }
 
@@ -149,7 +149,7 @@ fn run_help_prints_the_usage_and_exits_zero() {
 #[test]
 fn conf_reports_the_auth_mode_the_door_really_has() {
     let strict = launcher("auth-jwt");
-    let tok = owner_token(&strict);
+    let tok = admin_token(&strict);
     assert_eq!(json(&http(strict.port, "GET", "/ui/conf", &bearer(&tok), "").2)["auth"], "jwt");
     let open = open_seat("auth-none");
     let b = json(&http(open.port, "GET", "/ui/conf", "", "").2);
@@ -168,7 +168,7 @@ fn the_ui_views_fact_and_the_degraded_map_routes_are_gone() {
     }
     assert!(!repo().join("membrane/packs/door_map.c1f").exists(), "the degraded map pack is deleted");
     let run = launcher("nomap");
-    let tok = owner_token(&run);
+    let tok = admin_token(&run);
     for p in ["/membrane/map/field", "/membrane/map/field3d", "/membrane/map/blurp", "/membrane/field/entity?eid=x"] {
         assert_eq!(http(run.port, "GET", p, &bearer(&tok), "").0, 404, "{p}");
     }
