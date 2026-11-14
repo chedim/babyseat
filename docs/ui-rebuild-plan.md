@@ -29,14 +29,14 @@ What a view pack needs, and the wasm rounds (1 round = 20-45 min; sizes are my e
 | round | work | rounds | basis |
 |---|---|---|---|
 | W1 | dom v2: `input`, `textarea`, `select`, `form`, `label`, `svg`-free; attributes `value placeholder disabled type name style(allow-list) data-*`; events `input` (writes `value`), `submit`, `key` (Enter/Shift state), `focus`, `scroll`; a pack WRITES `value`/`focused`. Parity doc: "dom v2 5-8" for all views | 3-4 of the 5-8 | needed by chat and graph filter |
-
-**W1 status (2026-11-14): built** on branch `w53-dom2`: `DOM_ALLOW` (one table), form + SVG tags, the attributes, events as writes (`value`, `submitted`, `key`, `focused`, `scroll`), pack writes of `value`/`disabled`/`focused` without echo, refusals visible (`refused`, `data-refused`). Open decisions: `style` (refused for now), `href` (kept http(s)-only for the About link), `src` (refused), Enter-without-Shift `preventDefault` in a textarea, scroll writes unthrottled, no `checked`/`selected`/`multiple` yet.
 | W2 | page `Fetch` entity ("round 2" in the plan): the page's VM gets the seat's `Fetch` class; a write to `Fetch:<id>.request` makes a `fetch()` in JS, the receipt comes back as a write (`status`, `body`, `ms`), same shape as `fetch.c1f` on the seat; same-origin only, credentials same-origin | 2-3 (parity "fetch + SSE 4-6", shared with W3) | all reads and the send |
 | W3 | stream feed: a `Fetch` with `stream = true` (or `Stream:<id>`) writes each SSE frame as a `Chunk:<fetch>:<n>` entity, the style of the seat's own `Chunk` | 2-3 | message events |
 | W4 | input/events part two ("round 3"): pointer events (down/move/up/wheel with x, y), `keydown` with key name, reconciliation (below), virtualization (a windowed list node: only rows in view become elements), `scroll_to`/stick-to-bottom write | 3-4 (parity "list virtualization 3-4", "dom v2" rest) | graph canvas/SVG, long transcripts |
 | W5 | draw primitive for the graph: either SVG nodes in the allow-list (W1) or a `canvas` node with a draw list (parity "canvas 2D 4-6") | 0 if SVG, 4-6 if canvas **[D]** | graph |
 | W6 | storage effect (localStorage), 1-2 (parity) | 1-2 | login, drafts, last view |
 | W7 | JS-island bridge for WebGL / audio / mic (parity 3-4) | not in slice one | 3D field, voice |
+
+**W1 status (2026-11-14): built** on branch `w53-dom2`: `DOM_ALLOW` (one table), form + SVG tags, the attributes, events as writes (`value`, `submitted`, `key`, `focused`, `scroll`), pack writes of `value`/`disabled`/`focused` without echo, refusals visible (`refused`, `data-refused`). Operator answers 2026-11-14: `href` stays http(s)-only (About needs it); `style` and `src` stay refused; Enter-without-Shift `preventDefault` in a textarea is a HARDCODED SHELL BEHAVIOUR, fine for now; no scroll throttle yet; `checked selected multiple` are in the table.
 
 Reconciliation: today every `DomNode` write is a DOM write, applied once per frame; a pack that rebuilds a list rewrites every row. W4 adds keyed diffing
 (children order from an ordered `children` list, not from creation order), so a re-render touches only the rows that changed. Wasm-side cost: one round

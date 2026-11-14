@@ -488,7 +488,7 @@
   "expect": [
    {
     "eid": "membrane::Command:chat:1-1",
-    "prop": "cmd.4",
+    "prop": "cmd.12",
     "equals": "/nonexistent/claude-fake"
    },
    {
@@ -1039,6 +1039,376 @@
     "eid": "membrane::Chat:message:1-1:turn:response",
     "prop": "text",
     "equals": "claude failed (rc 1): Not logged in"
+   }
+  ]
+ },
+ {
+  "name": "one key check in plan: the boot fact anthropic_key_set true: the key is named for the child in key mode, and the turn runs",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "owner_env.ANTHROPIC_API_KEY",
+    "equals": "ANTHROPIC_API_KEY"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "plan.argv.0",
+    "equals": "env"
+   }
+  ]
+ },
+ {
+  "name": "one key check in plan: the boot fact anthropic_key_set false (unset or empty): the turn is refused and the key is named for nobody (no env_from the driver would fail on)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": false
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "owner_env",
+    "none": true
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "plan.refuse",
+    "contains": "ANTHROPIC_API_KEY"
+   }
+  ]
+ },
+ {
+  "name": "one key check in plan: the boot fact anthropic_key_set missing: the turn is refused and the key is named for nobody (no env_from the driver would fail on)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "owner_env",
+    "none": true
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "plan.refuse",
+    "contains": "ANTHROPIC_API_KEY"
+   }
+  ]
+ },
+ {
+  "name": "login mode: the key is not named for the child and the argv removes the key and every credential that outranks the login, but not the login's own token",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "chat_claude_bin": "/opt/fake/claude",
+     "chat_auth": "login",
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:owner:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "owner": "owner"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "owner_env",
+    "none": true
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.0",
+    "equals": "env"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.1",
+    "equals": "-u"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.2",
+    "equals": "ANTHROPIC_API_KEY"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.3",
+    "equals": "-u"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.4",
+    "equals": "ANTHROPIC_AUTH_TOKEN"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.5",
+    "equals": "-u"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.6",
+    "equals": "CLAUDE_CODE_USE_BEDROCK"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.7",
+    "equals": "-u"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.8",
+    "equals": "CLAUDE_CODE_USE_VERTEX"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.9",
+    "equals": "-u"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.10",
+    "equals": "CLAUDE_CODE_USE_FOUNDRY"
+   },
+   {
+    "eid": "membrane::Chat:message:1-1",
+    "prop": "argv.11",
+    "equals": "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
    }
   ]
  }

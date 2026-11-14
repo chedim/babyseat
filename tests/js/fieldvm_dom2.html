@@ -17,6 +17,7 @@ DomNode.submitted on-setter clear:
 `;
 const res = {}; const step = (s) => { res.step = s; document.getElementById('result').textContent = JSON.stringify(res); };
 const SVG = 'http://www.w3.org/2000/svg';
+window.addEventListener('error', e => { document.title += ' ERR ' + e.message; });
 try {
   step('start');
   const host = await start(document.getElementById('mount'), { packs: { t: PACK } });
@@ -130,6 +131,6 @@ try {
   document.getElementById('pform').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await frame();
   res.pageSubmit = typeof host.get('DomNode:page:#pform').submitted;
 } catch (e) { res.error = String(e && e.stack || e); }
-res.done = true;
+res.done = true; res.title = document.title;
 document.getElementById('result').textContent = JSON.stringify(res);
 </script>

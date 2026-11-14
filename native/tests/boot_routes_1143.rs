@@ -417,3 +417,13 @@ fn the_released_constants_are_launch_facts_and_keep_the_released_values_without_
     assert_eq!((o["defaults"].clone(), o["current_tau_s"].clone(), o["background"]["chat_auth"].clone()), (json!({"self_cpu_share": 0.25, "code_runs_keep": 10}), json!(90.0), json!("login")), "{o}");
     assert_eq!((o["self_cpu_share"].clone(), o["code_runs_keep"].clone()), (json!(0.25), json!(10)), "an unset option reads its default: {o}");
 }
+
+#[test]
+fn an_unknown_chat_auth_is_shown_as_the_fact_says_with_no_new_field_and_the_turns_refusal_is_where_it_shows() {
+    let (_, d) = api(&seat("auth-default"), "GET", "/ui/serve/membrane/options", J::Null);
+    let run = start_with(tmp("auth-unknown"), &["chat_auth=oauth"]);
+    let (_, o) = api(&run, "GET", "/ui/serve/membrane/options", J::Null);
+    assert_eq!(o["background"]["chat_auth"], json!("oauth"), "the fact as it is, not dressed up as a usable mode: {o}");
+    let keys = |v: &J| -> Vec<String> { let mut k: Vec<String> = v["background"].as_object().unwrap().keys().cloned().collect(); k.sort(); k };
+    assert_eq!(keys(&o), keys(&d), "the released options shape gained no field");
+}

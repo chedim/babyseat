@@ -6,7 +6,7 @@ help entities: `Help:c1f` (where the help is and the language), `Help:packs`, `H
 `entity_read` and lists them with `entity_query` `kind:Help`. `native/tests/help_1143.rs` pins the text.
 
 ```
-Modify your banner to help you maintain continuity. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.
+Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.
 ```
 
 ---

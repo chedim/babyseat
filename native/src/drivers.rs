@@ -28,10 +28,27 @@ use crate::store::{Poll, Store};
 pub const DEFAULT_COMMAND_TIMEOUT_S: f64 = 120.0;
 /// what a handed-over secret (`env_from`) becomes where the child printed it
 pub const MASK: &str = "***";
+/// A handed-over value shorter than this many characters is NOT masked: it is no credential, and replacing every occurrence of a short word
+/// would corrupt the child's stream-json. The operator approved 16 (2026-11-13): real keys and tokens are far longer.
+pub const MIN_SECRET_CHARS: usize = 16;
 /// after the SIGTERM of a timeout the group gets this long to end; then it is killed with SIGKILL (the operator, 2026-11-13)
 pub const KILL_GRACE_MS: u64 = 2000;
 /// the exit code of a receipt whose run was killed by its timeout (the convention of GNU `timeout`)
 pub const TIMEOUT_RC: i64 = 124;
+
+/// Where a chunk may end: the last newline of `held` that no handed-over value spans. A value is one line (an API key), so the last newline is
+/// safe; a value that holds a newline is cut only at a newline at least its length before the end of what was read, where it would be whole in `held`
+/// (and not at one inside an occurrence of it), so a chunk never ends in the middle of a secret.
+fn cut_at(held: &[u8], secrets: &[String]) -> Option<usize> {
+    let guard = secrets.iter().filter(|s| s.contains('\n')).map(|s| s.len()).max().unwrap_or(0);
+    let mut end = if guard == 0 { held.len() } else { (held.len() + 1).saturating_sub(guard) };
+    let inside = |i: usize| secrets.iter().any(|s| { let n = s.as_bytes(); !n.is_empty() && held.windows(n.len()).enumerate().any(|(a, w)| w == n && a <= i && i + 1 < a + n.len()) });
+    while let Some(i) = held[..end].iter().rposition(|b| *b == b'\n') {
+        if guard == 0 || !inside(i) { return Some(i); }
+        end = i;
+    }
+    None
+}
 
 /// the limit of a run in seconds: the run value's `timeout_s`, else the entity's, else the boot fact; a number above 0, else the refusal's words
 pub fn timeout_of(st: &Store, req: &J, props: &Map<String, J>) -> Result<f64, String> {
@@ -219,7 +236,7 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 // the values handed over are SECRETS: whatever the child prints of them (a 401 page, a debug line) is masked before it reaches a chunk, a receipt or any row
                 let mut secrets: Vec<String> = Vec::new();
                 for (k, var) in &env_from {
-                    match std::env::var(var) { Ok(v) => { if !v.is_empty() { secrets.push(v.clone()); } c.env(k, v); } Err(_) => return receipt(&id, 2, format!("environment variable {} is not set (for {})", var, k), Map::new()) }
+                    match std::env::var(var) { Ok(v) => { if v.chars().count() >= MIN_SECRET_CHARS { secrets.push(v.clone()); } c.env(k, v); } Err(_) => return receipt(&id, 2, format!("environment variable {} is not set (for {})", var, k), Map::new()) }
                 }
                 let mask = |t: String| -> String { secrets.iter().fold(t, |t, s| t.replace(s.as_str(), MASK)) };
                 let epoch = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
@@ -265,7 +282,7 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                                 all.extend_from_slice(&buf[..k]);
                                 if partial {
                                     held.extend_from_slice(&buf[..k]);
-                                    if let Some(i) = held.iter().rposition(|b| *b == b'\n') { let rest = held.split_off(i + 1); push(&held, &mut n); held = rest; }
+                                    if let Some(i) = cut_at(&held, &secrets) { let rest = held.split_off(i + 1); push(&held, &mut n); held = rest; }
                                 }
                             }
                         }

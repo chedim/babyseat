@@ -219,7 +219,7 @@ fn the_help_is_positive_and_domain_neutral() {
     }
 }
 
-const DOCTRINE: &str = "Modify your banner to help you maintain continuity. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.";
+const DOCTRINE: &str = "Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.";
 
 #[test]
 fn the_doctrine_in_the_chat_turn_is_the_operators_four_sentences_and_the_help_tells_where_it_lives() {
