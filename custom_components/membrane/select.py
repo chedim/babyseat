@@ -1,4 +1,4 @@
-"""The seat's model as a select: the models the seat lists (`GET /membrane/options`, background.models) and the one it runs on (background.loops); choosing one is the owner's write
+"""The seat's model as a select: the models the seat lists (`GET /membrane/options`, background.models) and the one it runs on (background.loops); choosing one is a write
 `POST /membrane/options {loops: <model>}`, the page's own post (docs/home-assistant.md)."""
 from __future__ import annotations
 

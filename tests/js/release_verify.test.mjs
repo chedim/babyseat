@@ -1,12 +1,12 @@
-// RELEASE VERIFICATION, the browser side (#1143, docs/release-verification.md items 2 and 3): the page of a STRICT seat (the release launcher scripts/seat: the door secret, the owner cookie), in
+// RELEASE VERIFICATION, the browser side (#1143, docs/release-verification.md items 2 and 3): the page of a STRICT seat (the release launcher scripts/seat: the door secret, the admin cookie), in
 // headless Chrome over the DevTools protocol, against a FAKE claude (no model, no login, no network), a free port, its own data folder. Asserted:
-//   1. the page fetched from loopback is given its owner cookie (HttpOnly, SameSite=Strict, Path=/, this seat's name, a token of the owner signed with the seat's secret, no script can read it) and THEN works:
+//   1. the page fetched from loopback is given its admin cookie (HttpOnly, SameSite=Strict, Path=/, this seat's name, a token of the admin signed with the seat's secret, no script can read it) and THEN works:
 //      the chat (a message, its answer, the history after a reload) and the settings (read, write one, the seat holds it); no secret and no token is on the page;
 //   2. the same page through the machine's LAN address (a seat started with --bind 0.0.0.0: scripts/seat has no --bind) gets NO cookie; the protected routes are 401 with the plain text reason;
 //      the page says in text that it could not start (never blank); it offers NO sign-in screen (REPORTED as a gap, not asserted away); the door's way in, POST /ui/login, works from the page and then
 //      the page runs;
-//   3. a second person (bob, a minted non-owner token) who logs in the same way: the chat works and is THE chat (his message shows in the owner's history), settings read, a settings write is refused
-//      and the refusal is shown in text; the seat did not change.
+//   3. NO USERS (operator 2026-11-14): a token with the sub `bob` logs in the same way and IS THE ADMIN: the page is told the admin, the chat works and is THE chat (his message shows in the
+//      admin's history), no Person is made, settings read, and a settings write is APPLIED (it was refused `for the owner` before); the seat holds it.
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createHmac } from 'node:crypto';
@@ -51,7 +51,7 @@ function lanSeat() {
   children.push(child);
   return { dir, port, child };
 }
-const owner = (s) => readFileSync(path.join(s.dir, 'owner.token'), 'utf8').trim();
+const admin = (s) => readFileSync(path.join(s.dir, 'admin.token'), 'utf8').trim();
 const secret = (s) => readFileSync(path.join(s.dir, 'door.secret'), 'utf8').trim();
 const mint = (s, sub, name) => spawnSync(bin, ['token', 'mint', '--sub', sub, '--name', name, '--ttl', '1h', '--secret-file', path.join(s.dir, 'door.secret')], { encoding: 'utf8' }).stdout.trim();
 async function up(s, host = '127.0.0.1') { for (let i = 0; i < 300; i++) { try { if ((await fetch(`http://${host}:${s.port}/`)).ok) return; } catch {} await sleep(200); } throw new Error('the seat did not come up'); }
@@ -110,7 +110,7 @@ try {
   await b.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 760, deviceScaleFactor: 1, mobile: false });
   const urlA = `http://127.0.0.1:${A.port}`;
 
-  // 1. the loopback page: the owner cookie, then a working page
+  // 1. the loopback page: the admin cookie, then a working page
   assert.equal((await b.cookies(urlA)).length, 0, 'a fresh browser holds no cookie');
   await b.open(`${urlA}/`);
   await b.until(Q('[data-key="DomNode:chat:input"]'), 'the chat composer');
@@ -120,7 +120,7 @@ try {
   assert.match(ck.name, /^membrane_jwt_[0-9a-f]{8}$/);
   assert.equal(ck.httpOnly, true, 'HttpOnly'); assert.equal(ck.sameSite, 'Strict', 'SameSite=Strict'); assert.equal(ck.path, '/'); assert.equal(ck.secure, false, 'plain http: not Secure');
   assert.ok(ck.expires > Date.now() / 1000 + 6 * 86400 && ck.expires < Date.now() / 1000 + 8 * 86400, 'seven days');
-  assert.ok(signedBy(ck.value, secret(A)), 'a token signed with this seat\'s secret'); assert.equal(claimsOf(ck.value).sub, 'owner');
+  assert.ok(signedBy(ck.value, secret(A)), 'a token signed with this seat\'s secret'); assert.equal(claimsOf(ck.value).sub, 'admin');
   assert.equal(await b.ev(`document.cookie`), '', 'no script of the page can read it');
   // chat: a message and its answer, then the history after a reload
   await b.type('hello release'); await b.enter();
@@ -134,9 +134,9 @@ try {
   assert.equal(await b.ev(textOf(K('chat.max_steps', 'now'))), 'In force: 2048 steps', 'read');
   await b.fill(K('chat.max_steps', 'in'), '41'); await b.enter();
   await b.until(`${textOf(K('chat.max_steps', 'state'))} === 'Applied.' && ${textOf(K('chat.max_steps', 'now'))} === 'In force: 41 steps'`, 'the write applied');
-  assert.equal(await rpc(A, owner(A), 'entity_read', { spec: 'Setting:chat.max_steps', prop: 'current' }), '41', 'the seat holds it');
+  assert.equal(await rpc(A, admin(A), 'entity_read', { spec: 'Setting:chat.max_steps', prop: 'current' }), '41', 'the seat holds it');
   const html = await b.ev(`document.documentElement.outerHTML + ' ' + document.body.innerText`);
-  for (const s of [owner(A), secret(A), ck.value]) assert.ok(!html.includes(s), 'the page shows no token and no secret');
+  for (const s of [admin(A), secret(A), ck.value]) assert.ok(!html.includes(s), 'the page shows no token and no secret');
   assert.deepEqual(b.errors, [], 'no script error (loopback)');
 
   if (!B) { console.log('release verify: the LAN part is skipped (no non-loopback IPv4 address on this machine)'); }
@@ -157,7 +157,7 @@ try {
     const fields = await b.ev(`document.querySelectorAll('input, textarea, form, [contenteditable], a[href*="login"], button').length`);
     if (fields === 0) gaps.push('the page offers NO sign-in screen: a person with only a token has no way in from the page (POST /ui/login exists)');
     // the way in the door has: POST /ui/login with a token, from the page's own origin
-    const tok = owner(B);
+    const tok = admin(B);
     assert.equal(await b.ev(`fetch('/ui/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: ${JSON.stringify(tok)} }) }).then((r) => r.status)`), 200, 'login');
     const lc = (await b.cookies(urlB)).filter((c) => c.name.startsWith('membrane_jwt'));
     assert.equal(lc.length, 1); assert.equal(lc[0].httpOnly, true); assert.equal(lc[0].sameSite, 'Strict');
@@ -165,28 +165,24 @@ try {
     await b.until(Q('[data-key="DomNode:chat:input"]'), 'the page runs once the cookie is there');
     assert.equal(await b.ev(`document.getElementById('boot')`), null, 'the error text is gone');
 
-    // 3. a second person: his token through the same login; the page is THE chat
+    // 3. no users: a token with the sub bob through the same login; the page is THE chat and bob is the admin
     const bob = mint(B, 'bob', 'Bob');
     assert.equal(await b.ev(`fetch('/ui/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then((r) => r.status)`), 200);
     assert.equal(await b.ev(`fetch('/ui/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: ${JSON.stringify(bob)} }) }).then((r) => r.status)`), 200);
     await b.open(`${urlB}/`);
     await b.until(Q('[data-key="DomNode:chat:input"]'), 'the chat for bob');
-    assert.equal(await b.ev(`fetch('/ui/conf').then((r) => r.json()).then((j) => j.who.sub)`), 'bob', 'the page is bob\'s');
+    assert.equal(await b.ev(`fetch('/ui/conf').then((r) => r.json()).then((j) => j.who.sub)`), 'admin', 'the page is the admin\'s, whatever the token\'s sub says');
     await b.type('hello from bob'); await b.enter();
     await b.until(`${answers}.includes('Final answer to: hello from bob')`, 'bob\'s answer');
-    assert.match(await rpc(B, owner(B), 'entity_query', { q: 'kind:Person' }), /Person:bob/, 'the seat knows bob');
-    const hist = await (await fetch(`http://127.0.0.1:${B.port}/membrane/chat/messages`, { headers: { authorization: `Bearer ${owner(B)}` } })).text();
-    assert.ok(hist.includes('hello from bob'), 'his message is in THE chat the owner reads');
+    assert.doesNotMatch(await rpc(B, admin(B), 'entity_query', { q: 'kind:Person' }), /Person:/, 'no users: no Person is made');
+    const hist = await (await fetch(`http://127.0.0.1:${B.port}/membrane/chat/messages`, { headers: { authorization: `Bearer ${admin(B)}` } })).text();
+    assert.ok(hist.includes('hello from bob'), 'his message is in THE chat the admin reads');
     await b.press('[data-key="DomNode:shell:nav:settings"]');
     await b.until(`document.querySelectorAll('.setrow').length >= 20`, 'settings read for bob');
     assert.equal(await b.ev(textOf(K('chat.max_steps', 'now'))), 'In force: 2048 steps');
     await b.fill(K('chat.max_steps', 'in'), '9'); await b.enter();
-    await b.until(`/\\S/.test(${textOf(K('chat.max_steps', 'state'))}) && ${textOf(K('chat.max_steps', 'state'))} !== 'Applied.'`, 'a refusal is shown in text');
-    const refusal = await b.ev(textOf(K('chat.max_steps', 'state')));
-    console.log(`release verify: bob's refused settings write shows: ${JSON.stringify(refusal)}`);
-    assert.match(refusal, /owner|refus|forbid|403/i, 'the text says why');
-    assert.equal(await b.ev(textOf(K('chat.max_steps', 'now'))), 'In force: 2048 steps', 'the value in force did not change');
-    assert.equal(await rpc(B, owner(B), 'entity_read', { spec: 'Setting:chat.max_steps', prop: 'current' }), '2048', 'the seat did not change');
+    await b.until(`${textOf(K('chat.max_steps', 'state'))} === 'Applied.'`, 'the write is applied, nothing refuses bob');
+    assert.equal(await rpc(B, admin(B), 'entity_read', { spec: 'Setting:chat.max_steps', prop: 'current' }), '9', 'the seat holds it: bob is the admin');
   }
   for (const g of gaps) console.log(`release verify: GAP: ${g}`);
   console.log('release verify: ok');

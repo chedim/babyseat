@@ -1,6 +1,6 @@
 #!/bin/sh
 # The smoke test of a built dist folder (CI runs it on every platform; run it by hand the same way): the folder is intact, `cliffvm --version` names the stamped version,
-# `cliffvm serve --port 0` comes up from the folder alone (cwd elsewhere), /global/health answers 200 with the owner token and 401 without, and the seat is stopped.
+# `cliffvm serve --port 0` comes up from the folder alone (cwd elsewhere), /global/health answers 200 with the admin token and 401 without, and the seat is stopped.
 #   scripts/dist/smoke.sh <dist folder>
 # Needs curl. No claude CLI and no API key are used: no chat turn runs.
 set -eu
@@ -34,7 +34,7 @@ done
 url=http://127.0.0.1:$port
 code=$(curl -s -o /dev/null -w '%{http_code}' "$url/global/health")
 [ "$code" = 401 ] || { echo "smoke: health without a token answered $code (want 401)" >&2; exit 1; }
-tok=$(cat "$work/data/owner.token")
+tok=$(cat "$work/data/admin.token")
 body=$(curl -s -w ' %{http_code}' -H "Authorization: Bearer $tok" "$url/global/health")
-case "$body" in *healthy*' 200') ;; *) echo "smoke: health with the owner token answered: $body" >&2; exit 1 ;; esac
+case "$body" in *healthy*' 200') ;; *) echo "smoke: health with the admin token answered: $body" >&2; exit 1 ;; esac
 echo "smoke: ok ($ver, port $port)"

@@ -48,7 +48,7 @@ Write side (model-written memory):
 |---|---|---|
 | model-written rows | 20: 19 `Session:N` + the banner | 54: 53 `Note:sessionN` + the banner |
 | bytes | 45.8 KB (entities 24.1 KB; banner text 21.7 KB) | 65.1 KB (banner text 2.1 KB) |
-| sample titles | `Session:1` ... `Session:19`, `membrane::Banner:owner:main` | `Note:session1` ... `Note:session9`, banner |
+| sample titles | `Session:1` ... `Session:19`, `membrane::Banner:admin:main` | `Note:session1` ... `Note:session9`, banner |
 | gold key tokens all present (answerable, n=24 / 1) | 14/24 (58%) | 1/1 (read by hand: both "an hour" and "about two hours" are in Notes 3 and 14) |
 | at least half the key tokens | 22/24 (92%) | 1/1 |
 | no `Keep` entities, no packs | the model used neither; it wrote entities of its own classes | same |

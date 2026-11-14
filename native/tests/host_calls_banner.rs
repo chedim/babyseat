@@ -30,13 +30,13 @@ fn world(fail: bool) -> (Core, Fields, H) {
     let mut f = Fields::goalgraph();
     f.set_pack("banner", PACK).unwrap();
     let mut c = Core::new();
-    c.load("Banner:owner:s1".into(), "Banner".into(), json!({"k": 2}).as_object().unwrap().clone(), None, 0.0);
+    c.load("Banner:admin:s1".into(), "Banner".into(), json!({"k": 2}).as_object().unwrap().clone(), None, 0.0);
     (c, f, H { calls: RefCell::new(vec![]), fail })
 }
 
 fn ask(c: &mut Core, f: &mut Fields, h: &H, text: &str, seq: &mut i64) {
     *seq += 1;
-    let w = Write { eid: "Banner:owner:s1".into(), prop: "ask".into(), new: json!(text), old: J::Null, writer: "person".into(), chain: json!({}), seq: *seq };
+    let w = Write { eid: "Banner:admin:s1".into(), prop: "ask".into(), new: json!(text), old: J::Null, writer: "person".into(), chain: json!({}), seq: *seq };
     c.hear(w.clone(), None, 5.0);
     f.react(c, h, w, 5.0, seq);
 }
@@ -50,7 +50,7 @@ fn a_getter_calls_the_host_on_a_live_round_and_never_at_a_rebuild() {
     ask(&mut c, &mut f, &h, "what do cats do?", &mut seq);
     assert_eq!(h.calls.borrow().len(), 1);
     assert_eq!(h.calls.borrow()[0], ("recall".to_string(), json!(["what do cats do?", 2]).to_string()));
-    assert_eq!(c.docs["Banner:owner:s1"].props["lines"], json!(["cats chase mice", "dogs bark"]));
+    assert_eq!(c.docs["Banner:admin:s1"].props["lines"], json!(["cats chase mice", "dogs bark"]));
 }
 
 #[test]
@@ -59,6 +59,6 @@ fn a_host_error_is_the_getters_error_shown_on_the_entity() {
     let mut seq = 0;
     f.rebuild(&mut c, 1.0, &mut seq);
     ask(&mut c, &mut f, &h, "what do cats do?", &mut seq);
-    let refused = c.docs["Banner:owner:s1"].props.get("refused").cloned().unwrap_or(J::Null);
+    let refused = c.docs["Banner:admin:s1"].props.get("refused").cloned().unwrap_or(J::Null);
     assert!(refused.as_str().unwrap_or("").contains("the store is away"), "{refused}");
 }

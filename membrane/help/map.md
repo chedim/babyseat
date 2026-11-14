@@ -18,7 +18,7 @@ on its entity; work → a method or goal on the thing it is about. What isn't sa
 
 ## The banner
 The banner is the middle message of every turn (the doctrine first, the person's message last): the one block with
-the state. By default it is a short message that tells you to build your own. It is `Banner:<owner>:<chat>`;
+the state. By default it is a short message that tells you to build your own. It is `Banner:<admin>:<chat>`;
 read it with `entity read`. Its one dial here is `mode`, changed with `entity edit` (read it back after): `help`
 (the placeholder, the default) or `off` (nothing). The whole banner block other seats get (recalled facts, open
 goals, decisions waiting) never loads on a map-mode seat: use your tools.

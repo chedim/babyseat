@@ -18,7 +18,7 @@ IMPORT fetch 1
 -- property, argv, row, journal line, log or reply ever holds it (the same discipline as ANTHROPIC_API_KEY, docs/cliffvm.md "The claude turn's auth").
 --
 -- THE LOOP is explicit entities, no hidden state:
---   `...:turn.oai`            the endpoint's settings for this turn {url, model, bearer_env, timeout_s, max_turns, mcp, owner_env}; `...:turn.oai_tools` the OpenAI function tools
+--   `...:turn.oai`            the endpoint's settings for this turn {url, model, bearer_env, timeout_s, max_turns, mcp, admin_env}; `...:turn.oai_tools` the OpenAI function tools
 --   `Fetch:oai:<mid>:tools`   the door's `tools/list` (the door's own list is reused, never copied here)
 --   `...:turn:round:<n>`      one model call (ChatRound): {mid, n, messages}; what it said is read from its Fetch's receipt (the call asks `keep`)
 --   `Fetch:oai:<mid>:<n>`     the call; `Fetch:oai:<mid>:<n>:<i>` the door's `tools/call` of the round's call i; the receipts are the facts the next step reads
@@ -42,7 +42,7 @@ ChatMessage.oai_cfg getter:
   WHEN this.over: None
   ELSE WHEN this.oai_entry == None and not this.oai_local: None
   ELSE WHEN this.oai_root == '': {'refuse': 'The model ' + this.model_eff + ' is not a claude rung, and its cloud_models entry names no base_url. Add "base_url": "<the endpoint, e.g. https://api.example.com>" (and "api_key_env": "<the NAME of the environment variable that holds its key>") to the entry in the cloud_models fact, restart the seat, then send the message again.'}
-  ELSE: {'url': this.oai_root + str(prop(this.oai_entry, 'chat_path') or '/v1/chat/completions'), 'model': this.model_eff, 'bearer_env': prop(this.oai_entry, 'api_key_env'), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'owner_env': 'MEMBRANE_OWNER_TOKEN' if this.owner_file != None else None}
+  ELSE: {'url': this.oai_root + str(prop(this.oai_entry, 'chat_path') or '/v1/chat/completions'), 'model': this.model_eff, 'bearer_env': prop(this.oai_entry, 'api_key_env'), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
 ChatMessage.oai_plan getter: {'refuse': prop(this.oai_cfg, 'refuse')} if prop(this.oai_cfg, 'refuse') != None else {'oai': this.oai_cfg}
 
 -- ---- start: the door's tool list, then round 1 -------------------------------------------------------------------------------------------------------------
@@ -51,7 +51,7 @@ Chat.plan on-setter oai-start:
     membrane::Chat[this.cp]:turn.state = 'running'
     membrane::Chat[this.cp]:turn.started = clock
     membrane::Chat[this.cp]:turn.oai = prop(this.plan, 'oai')
-    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': prop(prop(this.plan, 'oai'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'oai'), 'owner_env'), 'timeout_s': prop(prop(this.plan, 'oai'), 'timeout_s')}
+    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': prop(prop(this.plan, 'oai'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'oai'), 'admin_env'), 'timeout_s': prop(prop(this.plan, 'oai'), 'timeout_s')}
 ChatMessage.oai_trr getter: prop('Fetch:oai:' + this.cp + ':tools', 'request_result')
 ChatMessage.oai_tj getter: ([j for j in [json(str(prop(this.oai_trr, 'body') or ''))] if j is not Error] or [{}])[0]
 ChatMessage.oai_tlist getter: prop(prop(this.oai_tj, 'result'), 'tools')
@@ -131,7 +131,7 @@ ChatCall.bad getter: not (json(str(this.args or '') or '{}') is Dict)
 ChatCall.input getter: {} if this.bad else json(str(this.args or '') or '{}')
 ChatCall.creq getter:
   WHEN this.go != True or this.bad or this.cfg == None: None
-  ELSE: {'id': {'mid': this.cp, 'n': this.n, 'i': this.i}, 'url': prop(this.cfg, 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': this.name, 'arguments': this.input}}, 'bearer_env': prop(this.cfg, 'owner_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
+  ELSE: {'id': {'mid': this.cp, 'n': this.n, 'i': this.i}, 'url': prop(this.cfg, 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': this.name, 'arguments': this.input}}, 'bearer_env': prop(this.cfg, 'admin_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
 Chat.creq on-setter oai-tool-send:
   WHEN this.creq != None:
     (this.rq).request = this.creq

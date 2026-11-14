@@ -18,10 +18,6 @@ class SeatAuthError(SeatError):
     """The door answered 401: the token is wrong, signed by another key, or past its life."""
 
 
-class SeatForbidden(SeatError):
-    """The door answered 403: the token is a person's, not the owner's (the seat's use of Home Assistant is the owner's: docs/home-assistant.md)."""
-
-
 class SeatUnreachable(SeatError):
     """Nothing answered (refused, timed out, not HTTP)."""
 
@@ -73,8 +69,6 @@ class SeatClient:
             raise SeatUnreachable(f"{type(e).__name__}: {e}" if str(e) else type(e).__name__) from e
         if status == 401:
             raise SeatAuthError("the seat refused the token (wrong, or past its life)")
-        if status == 403:
-            raise SeatForbidden("the seat says this is for the owner: the token is not the owner's")
         return status, body
 
     async def health(self) -> dict:
@@ -104,7 +98,7 @@ class SeatClient:
             raise SeatTurnError(str(err))
         return reply_text(body)
 
-    # ---- the seat's use of Home Assistant (slice 2; the routes of membrane/packs/ha.c1f, the owner's) ----------------------------------------------------
+    # ---- the seat's use of Home Assistant (slice 2; the routes of membrane/packs/ha.c1f; any verified token is the admin) ----------------------------------------------------
 
     async def calls(self) -> list:
         """The pending calls the model wrote: [{id, request}]."""
@@ -143,7 +137,7 @@ class SeatClient:
         return body if status == 200 and isinstance(body, dict) else {}
 
     async def set_model(self, model: str) -> None:
-        """The seat's model, through the owner-only options route (the page's own post: {loops: <model>})."""
+        """The seat's model, through the options route (the page's own post: {loops: <model>})."""
         status, body = await self._call("POST", "/membrane/options", HEALTH_TIMEOUT_S, {"loops": model})
         if status != 200:
             cause = (body or {}).get("error") if isinstance(body, dict) else None

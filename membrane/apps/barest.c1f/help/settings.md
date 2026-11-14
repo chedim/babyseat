@@ -2,7 +2,7 @@
 
 Every setting a person may look at or change is an entity, `Setting:<group>.<key>`. `entity_query` `kind:Setting` lists them all. The groups, in the order a window shows them: `model`, `chat`, `map`, `home`, `import`, `access`, `limits`.
 A row is data you read: `label`, `help` (one sentence), `kind`, `live`, `order`, and for a number `min`, `max`, `whole` and `unit`; `default`; `how` (what a row that is only shown says about changing it).
-`current` is the value in force right now. It reads the one owner of the value, so it never drifts: the value written to the row, else the launch fact the row names (`fact`), else `default`.
+`current` is the value in force right now. It reads the one source of the value, so it never drifts: the value written to the row, else the launch fact the row names (`fact`), else `default`.
 
 ## kind and live
 
@@ -11,8 +11,8 @@ A row is data you read: `label`, `help` (one sentence), `kind`, `live`, `order`,
 
 ## Change a setting: write `set`
 
-`Setting:<group>.<key>.set = <value>` is the one door. A good value is written to its owner, `applied` says when, and `refused` is empty. A value that does not fit is refused with the reason, in `refused`, and nothing else is written: a number outside its range is never rounded into it.
-Everyone with access is the owner, so the write is the same for everyone; when the seat itself turns a write down (for the owner only), the reply holds the reason as text.
+`Setting:<group>.<key>.set = <value>` is the one door. A good value is written to its source, `applied` says when, and `refused` is empty. A value that does not fit is refused with the reason, in `refused`, and nothing else is written: a number outside its range is never rounded into it.
+Everyone with access is the admin, so the write is the same for everyone; when the seat itself turns a write down, the reply holds the reason as text.
 
 ```c1f
 -- given Setting:chat.timeout {"label": "Answer time limit", "kind": "number", "live": "live", "default": 21600, "min": 1, "max": 604800}

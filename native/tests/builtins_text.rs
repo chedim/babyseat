@@ -82,12 +82,12 @@ fn concat_joins_lists_and_plus_stays_vector_addition() {
 
 #[test]
 fn unspeak_group_by_distinct_before() {
-    assert_eq!(ev("unspeak(t)", json!({"t": "[user#owner: owner]\nship it"})), json!("ship it"));
+    assert_eq!(ev("unspeak(t)", json!({"t": "[user#admin: admin]\nship it"})), json!("ship it"));
     assert_eq!(ev("unspeak(t)", json!({"t": "[user: Ann] [HA user: Bo]\nhi"})), json!("hi"));   // as speakers.py: stacked tags
     assert_eq!(ev("unspeak(t)", json!({"t": "[HA user: Bo]\n[user#x: y]\nhi"})), json!("hi"));
     assert_eq!(ev("unspeak(t)", json!({"t": "no speaker"})), json!("no speaker"));
     // the shadow's catch (2026-11-10): a tag followed by text on the same line, as speakers._ID_LINE strips it
-    assert_eq!(ev("unspeak(t)", json!({"t": "[user#owner: owner] had more thoughts on 1043"})), json!("had more thoughts on 1043"));
+    assert_eq!(ev("unspeak(t)", json!({"t": "[user#admin: admin] had more thoughts on 1043"})), json!("had more thoughts on 1043"));
     assert_eq!(ev("unspeak(t)", json!({"t": "[user: Ann]  hi\nthere"})), json!("hi\nthere"));
     let rows = json!([{"k": "a", "v": 1}, {"k": "b", "v": 2}, {"k": "a", "v": 3}]);
     assert_eq!(ev("group_by(r, 'k')", json!({"r": rows})),
