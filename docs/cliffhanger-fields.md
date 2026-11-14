@@ -251,12 +251,18 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
   the `aria-*` / `data-*` prefixes). Refused, with a visible reason (`data-refused` on the element, `refused` {name:
   reason} on the DomNode): `style`, `src`, `srcdoc`, `formaction`, every `on*`, a `href` that is not http(s), and a tag
   outside the table (made a div). Events are written back as entity writes: `input`/`change` -> `value` (the text),
-  `submit` -> `submitted` (time; the default navigation is cancelled), `keydown` -> `key` `{key, shift, ctrl, time}`
+  `submit` -> `submitted` (time; the default navigation is cancelled), `keydown` -> `key` `{key, shift, ctrl, composing, time}` (`composing` = `isComposing`: an IME's Enter)
   (Enter without Shift in a textarea is `preventDefault`ed: that is how a chat sends), `focus`/`blur` -> `focused`
   (bool), `scroll` -> `scroll` `{top, height, client}`, `click` -> `clicked`. The other direction: a pack's write of
   `value`, `disabled` or `focused` (a `focus()` / `blur()` call) updates the element; an event whose value or flag the
   field already holds writes nothing, and a `value` equal to the element's own is not set (the caret and the user's
   typing stay). Page elements (`link`) get the same events. Test: `tests/js/fieldvm_dom2.test.mjs` (headless Chrome).
+- **Shell gaps closed (w60, #1143):** a pack's write of `scroll` `{top: n}` or `'end'` scrolls the element (after the round's other writes, so
+  the rows written in the same round are there; the measured `{top, height, client}` is written back, so the field holds what is true; an
+  event's own `{top, height, client}` is no command). `before` (a sibling DomNode eid) puts a node above that sibling when it is made; writing
+  it again moves the node; any other write never reorders. The shell's explicit drivers, called by the mount (nothing starts by itself):
+  `host.run_clock(ms)` / `host.stop_clock()` (one `setInterval` that ticks the field; `host.timers` is the seam a test fakes) and
+  `host.track_hidden()` (`Conn:page.hidden`, a bool, at start and on `visibilitychange`). Test: `tests/js/fieldvm_shell.test.mjs`.
 - **The page's own DOM:** `link(document.body)` puts every page element (open shadow roots included) in the field as
   `DomNode:page:#<id>` (`DomNode:page:<n>` without an id) with `page=true`, its tag, parent, id, own text and the
   allow-listed attributes. A new element is born whole, a change is written (only what differs from the field, so a

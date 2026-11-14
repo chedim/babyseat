@@ -6,14 +6,12 @@ IMPORT fetch 1
 -- chat the way membrane/apps/barest.c1f/ui/chat.js does: the turns (who, the message, the answer or its pending line, the tools folded under it), a
 -- textarea and Send, "Load older turns". The page's shell (ui/chatmount.js) births ONE entity, `View:chat` {open: true}, when the page is asked for the pack
 -- view (the seat fact `ui_views` or `?ui=pack`); nothing here runs before that.
---   View:chat       the view: the settings (the legacy constants, below), the polls, the cursor of the older turns, the generation of the list
+--   View:chat       the view: the settings (the legacy constants, below), the polls, the cursor of the older turns
 --   Composer:chat   {draft, sending, error}: the text in the box, one POST at a time (the double-submit guard), the note of a failed send
 --   ChatRow:<id>    one turn: `raw` is the history route's row (the page's `GET /membrane/chat/messages`), everything shown is a getter of it
 --   Fetch:history / Fetch:send / Fetch:older   the three calls (the page's Fetch, fieldvm.js W2): the request is the effect, the receipt `request_result` comes back
--- WHAT THE SHELL DOES NOT DO YET (gaps, each a decision in docs/ui-rebuild-plan.md): no scroll write (the log is not kept at the bottom: `near` is the state,
--- nothing moves the log), no ordered children (a list of older turns is a NEW list, generation g+1, drawn in order; the old one is hidden), no `composing` on the
--- key event (the rule below honours it once it arrives), no `document.hidden` (the legacy chat paused its polls in a hidden tab), no stream (W3: the answer
--- appears when the poll sees it).
+-- THE SHELL (fieldvm.js) gives this pack: a `scroll` write on a DomNode, `before` (an ordered child), `composing` on the key event, `Conn:page.hidden` and the clock
+-- (`run_clock`, started by the mount). It does not give a stream (W3: the answer appears when the poll sees it) or an index in a FOR.
 
 -- THE LEGACY CONSTANTS are Boot facts (the page's Boot:seat is fed by the snapshot, door_fieldvm.c1f); the view reads them once, when it opens, each
 -- with the value chat.js had when no fact says otherwise (docs/release-parity.md: chat_page_size 20, chat_poll_size 10, chat_list_poll_ms 3000,
@@ -39,9 +37,9 @@ View.open on-setter chat-draw:
     ('DomNode:chat:older:btn').tag = 'button'
     ('DomNode:chat:older:btn').type = 'button'
     ('DomNode:chat:older:btn').text = 'Load older turns'
-    ('DomNode:chat:list:0').parent = 'DomNode:chat:log'
-    ('DomNode:chat:list:0').tag = 'ol'
-    ('DomNode:chat:list:0').class = 'rows'
+    ('DomNode:chat:list').parent = 'DomNode:chat:log'
+    ('DomNode:chat:list').tag = 'ol'
+    ('DomNode:chat:list').class = 'rows'
     ('DomNode:chat:note').parent = 'DomNode:chat:root'
     ('DomNode:chat:note').tag = 'div'
     ('DomNode:chat:note').class = 'msg'
@@ -69,7 +67,6 @@ View.open on-setter chat-draw:
     this.stick_px = ([b.chat_stick_px for b in instances('Boot') if b.chat_stick_px != None] or [80])[0]
     this.tool_chars = ([b.chat_tool_chars for b in instances('Boot') if b.chat_tool_chars != None] or [90])[0]
     this.tick_ms = this.active_ms
-    this.gen = 0
     this.polling = True
     this.seq = 1
     ('Fetch:history').request = {'id': 'load-1', 'url': '/membrane/chat/messages?limit=' + str(this.page_size)}
@@ -92,14 +89,14 @@ ChatRow.ans_text getter:
 ChatRow.ans_class getter: ('bubble note' if this.state == 'error' else 'bubble seat') if prop(this.raw, 'response') else 'bubble seat pending'
 -- the finished tools (a page row carries `tool_calls`, [] while the turn runs: as the legacy chat, that wins) else the names
 ChatRow.tool_list getter: prop(this.raw, 'tool_calls') if prop(this.raw, 'tool_calls') != None else [{'name': x} for x in (prop(this.raw, 'tools') or [])]
--- a tool's input is shortened to `tool_chars` with an ellipsis; a tool is keyed by its name and what it shows (two identical calls are one line: a FOR has no index)
-ChatRow.tool_rows getter: [{'k': str(prop(x, 'name') or prop(x, 'eid') or '') + '|' + ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else ''), 'name': str(prop(x, 'name') or prop(x, 'eid') or ''), 'in': ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else '')} for x in this.tool_list]
-ChatRow.view getter: {'id': this.rid, 'gen': this.gen, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows} if this.raw != None and this.gen != None else None
+-- a tool's input is shortened to `tool_chars` with an ellipsis; a tool is keyed by its call id (the history route's `id`; a name-only list has none, so its key is the name)
+ChatRow.tool_rows getter: [{'k': str(prop(x, 'id') or ((prop(x, 'name') or prop(x, 'eid') or '') + '|' + ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else ''))), 'name': str(prop(x, 'name') or prop(x, 'eid') or ''), 'in': ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else '')} for x in this.tool_list]
+ChatRow.view getter: {'id': this.rid, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows} if this.raw != None else None
 
 ChatRow.view on-setter chat-draw-row:
   WHEN this.view != None:
-    base = 'DomNode:chat:row:' + str(prop(this.view, 'gen')) + ':' + prop(this.view, 'id')
-    (base).parent = 'DomNode:chat:list:' + str(prop(this.view, 'gen'))
+    base = 'DomNode:chat:row:' + prop(this.view, 'id')
+    (base).parent = 'DomNode:chat:list'
     (base).tag = 'li'
     (base).class = 'msg'
     (base).data-state = prop(this.view, 'state')
@@ -136,6 +133,12 @@ ChatRow.view on-setter chat-draw-row:
       (base + ':tools:t:' + prop(tl, 'k') + ':in').tag = 'span'
       (base + ':tools:t:' + prop(tl, 'k') + ':in').class = 'tin'
       (base + ':tools:t:' + prop(tl, 'k') + ':in').text = prop(tl, 'in')
+
+-- the log is kept at the bottom: after a row is drawn, unless the person scrolled up (`near` false; no scroll seen yet counts as near). The shell scrolls
+-- after the round's other writes, so the new row is already in the log.
+ChatRow.view on-setter chat-stick:
+  WHEN this.view != None and prop('View:chat', 'near') != False:
+    ('DomNode:chat:log').scroll = 'end'
 
 -- ---- the composer ----
 DomNode.value on-setter chat-draft:
@@ -193,12 +196,11 @@ Fetch.cv on-setter chat-history-rows:
   WHEN this.eid == 'Fetch:history' and prop(this.cv, 'ok'):
     FOR m IN (prop(this.cv, 'messages') or []):
       ('ChatRow:' + str(prop(m, 'id'))).born = True
-      ('ChatRow:' + str(prop(m, 'id'))).gen = prop('View:chat', 'gen')
       ('ChatRow:' + str(prop(m, 'id'))).raw = m
 
 -- ---- the polls: a rule on the clock (the shell ticks it): `list_ms` after the last answer, `active_ms` while a turn is not finished; one request at a time ----
 View.tick on-setter chat-poll:
-  WHEN this.open and not this.polling and this.tick - (this.last_poll or 0) >= (this.active_ms if len([r for r in instances('ChatRow') if not r.done]) > 0 else this.list_ms) / 1000:
+  WHEN this.open and not this.polling and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= (this.active_ms if len([r for r in instances('ChatRow') if not r.done]) > 0 else this.list_ms) / 1000:
     n = (this.seq or 0) + 1
     this.seq = n
     this.polling = True
@@ -209,7 +211,6 @@ Fetch.cv on-setter chat-sent:
   WHEN this.eid == 'Fetch:send' and prop(this.cv, 'ok') and prop(this.cv, 'id') != '':
     sid = prop(this.cv, 'id')
     ('ChatRow:' + sid).born = True
-    ('ChatRow:' + sid).gen = prop('View:chat', 'gen')
     ('ChatRow:' + sid).raw = {'id': sid, 'text': strip(str(prop('Composer:chat', 'draft') or '')), 'state': 'queued', 'tools': []}
     ('View:chat').last_poll = 0
     ('Composer:chat').sending = False
@@ -229,17 +230,13 @@ DomNode.clicked on-setter chat-older-click:
     ('Fetch:older').request = {'id': 'older-' + str(n), 'url': '/membrane/chat/messages?limit=' + str(prop('View:chat', 'page_size')) + '&before=' + str(prop('View:chat', 'next'))}
 Fetch.cv on-setter chat-older-rows:
   WHEN this.eid == 'Fetch:older' and prop(this.cv, 'ok') and prop(this.cv, 'messages') != None:
-    g = (prop('View:chat', 'gen') or 0) + 1
-    ('View:chat').gen = g
-    ('DomNode:chat:list:' + str(g)).parent = 'DomNode:chat:log'
-    ('DomNode:chat:list:' + str(g)).tag = 'ol'
-    ('DomNode:chat:list:' + str(g)).class = 'rows'
-    ('DomNode:chat:list:' + str(g - 1)).hidden = True
+    oldest = ([prop(e, 'eid') for e in sort_by(sort_by([{'eid': 'DomNode:chat:row:' + r.rid, 'ms': r.ms, 'nr': r.nr} for r in instances('ChatRow')], 'nr'), 'ms')] or [None])[0]
+    fresh = [m for m in prop(this.cv, 'messages') if prop('ChatRow:' + str(prop(m, 'id')), 'raw') == None]
+    FOR m IN fresh:
+      ('DomNode:chat:row:' + str(prop(m, 'id'))).before = oldest
     FOR m IN prop(this.cv, 'messages'):
       ('ChatRow:' + str(prop(m, 'id'))).born = True
       ('ChatRow:' + str(prop(m, 'id'))).raw = m
-    FOR e IN sort_by(sort_by([{'eid': r.eid, 'ms': r.ms, 'nr': r.nr} for r in instances('ChatRow')], 'nr'), 'ms'):
-      (prop(e, 'eid')).gen = g
     ('View:chat').next = prop(this.cv, 'next') if prop(this.cv, 'more') else None
     ('View:chat').older_out = False
     ('DomNode:chat:older').hidden = not prop(this.cv, 'more')
@@ -250,7 +247,7 @@ Fetch.cv on-setter chat-older-rows:
     ('DomNode:chat:older:btn').text = 'Load older turns (the seat did not answer: try again)'
     ('DomNode:chat:older:btn').disabled = False
 
--- ---- the log's scroll: near the bottom within `stick_px` (kept as state; the shell has no scroll write to act on it yet) ----
+-- ---- the log's scroll: near the bottom within `stick_px`; a pack write of `scroll` (the command 'end', no height) is not a measure ----
 DomNode.scroll on-setter chat-scroll:
-  WHEN this.eid == 'DomNode:chat:log':
+  WHEN this.eid == 'DomNode:chat:log' and prop(this.scroll, 'height') != None:
     ('View:chat').near = prop(this.scroll, 'height') - prop(this.scroll, 'top') - prop(this.scroll, 'client') < prop('View:chat', 'stick_px')

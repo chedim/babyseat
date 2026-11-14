@@ -379,7 +379,7 @@ shipped packs (`boot fs proc fetch store door door_tools chat chat_turn`) plus t
   **A parent owns its children** (`host.rs` `drain_apply`): `retire = true` on an entity also retires every entity whose eid starts with `<eid>:` (engine and store), so retiring a turn retires its
   answer and tools, retiring a message its turn. Tests: `host_loop.rs` (`retiring_an_entity_retires_what_its_path_owns...`), `seat_process.rs` (`a_turn_is_an_entity...`).
   `GET /membrane/chat/messages?limit=N&before=<message id>` is THE HISTORY, one answer `{messages, more, next}`: the newest N turns (default 20, at least 1),
-  oldest first inside the page, each the message's `page_view`: the `view` of the per-message route plus `tool_calls: [{name, input}]`, the finished tools
+  oldest first inside the page, each the message's `page_view`: the `view` of the per-message route plus `tool_calls: [{id, name, input}]` (`id` = the call's own entity key, distinct per call), the finished tools
   read from the ChatTool entities under the turn (`[]` while the turn runs; `tools` stays the names). The RESULT is not in the page route (the page shows none, and a result can be
   megabytes): the shared `ChatMessage.history_view` keeps `tool_calls: [{name, input, result}]` for other adapters (the opencode session-messages one). `before` = a message id gives the turns older than it (an unknown
   id is a 404; a POST is a 405); `more` says older turns exist and `next` is the oldest id of the page, the next `before` (null at the end). Order = the message's `at`, then the

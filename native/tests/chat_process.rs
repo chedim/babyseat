@@ -1095,6 +1095,14 @@ fn history(port: u16, query: &str) -> J {
     assert_eq!(st, 200, "{body}");
     serde_json::from_str(&body).unwrap_or_else(|e| panic!("{e}: {body}"))
 }
+/// a message's `tool_calls` as the page draws them: each carries an `id` (a distinct string, so two identical calls are two lines); returned without it
+fn calls_of(m: &J) -> J {
+    let tc = m["tool_calls"].as_array().unwrap_or_else(|| panic!("tool_calls: {m}"));
+    let ids: Vec<&str> = tc.iter().map(|t| t["id"].as_str().unwrap_or_else(|| panic!("a tool call without an id: {t}"))).collect();
+    let mut u = ids.clone(); u.sort(); u.dedup();
+    assert_eq!(u.len(), ids.len(), "the call ids are distinct: {ids:?}");
+    J::Array(tc.iter().map(|t| { let mut t = t.as_object().unwrap().clone(); t.remove("id"); J::Object(t) }).collect())
+}
 fn texts(h: &J) -> Vec<String> { h["messages"].as_array().unwrap().iter().map(|m| m["text"].as_str().unwrap().to_string()).collect() }
 /// the request number inside a message id `<ms>-<n>`: the Request:<n> that posted it
 fn req_n(id: &str) -> u64 { id.rsplit('-').next().unwrap().parse().unwrap() }
@@ -1117,7 +1125,7 @@ fn the_history_route_pages_the_newest_turns_oldest_first_with_their_tools_and_a_
     assert_eq!(h["next"], json!(ids[40]), "the cursor is the oldest id of the page");
     let last = &h["messages"][19];
     assert_eq!((last["id"].clone(), last["state"].clone(), last["response"].clone()), (json!(ids[59]), json!("done"), json!("Answer to m59")), "{last}");
-    assert_eq!(last["tool_calls"], json!([{"name": "entity_read", "input": {"spec": "Q:m59"}}]), "the page route carries name and input only: {last}");
+    assert_eq!(calls_of(last), json!([{"name": "entity_read", "input": {"spec": "Q:m59"}}]), "the page route carries an id, the name and the input only: {last}");
     assert_eq!(last["tools"], json!(["entity_read"]), "the view's own `tools` stay the names");
     assert_eq!(last, &view(port, &ids[59]).as_object().map(|v| { let mut v = v.clone(); v.insert("tool_calls".into(), last["tool_calls"].clone()); J::Object(v) }).unwrap(), "the per-message view plus tool_calls (name, input)");
     // `before` pages to older turns, across the boundary, to the very first
@@ -1167,7 +1175,7 @@ fn an_empty_chat_has_an_empty_history_and_a_running_message_is_in_the_newest_pag
     let m = h["messages"].as_array().unwrap();
     assert_eq!(m.len(), 4, "{h}");
     assert_eq!((m[3]["id"].clone(), m[3]["state"].clone(), m[3]["text"].clone()), (json!(id), json!("running"), json!("hold on")), "{h}");
-    assert_eq!(m[3]["tool_calls"], json!([]));
+    assert_eq!(calls_of(&m[3]), json!([]));
     assert_eq!(m[0]["id"], json!(done[0]));
     let queued = send(port, "hold again");
     let h = history(port, "");
@@ -1177,7 +1185,7 @@ fn an_empty_chat_has_an_empty_history_and_a_running_message_is_in_the_newest_pag
     std::fs::write(dir.join(format!("go.{}", tag_of("hold again"))), "").unwrap();
     wait("done", || (view(port, &queued)["state"] == "done").then_some(()));
     let h = history(port, "?limit=2");
-    assert_eq!(h["messages"][1]["tool_calls"], json!([{"name": "entity_read", "input": {"spec": "Q:hold again"}}]));
+    assert_eq!(calls_of(&h["messages"][1]), json!([{"name": "entity_read", "input": {"spec": "Q:hold again"}}]));
     assert!(terminate(&mut run));
 }
 
@@ -1190,7 +1198,7 @@ fn a_tool_that_read_a_large_result_gives_a_small_page_while_the_shared_view_keep
     assert_eq!(st, 200);
     assert!(body.len() < 5000, "the page route is small ({} bytes) though the tool result is 200 KB", body.len());
     let h: J = serde_json::from_str(&body).unwrap();
-    assert_eq!(h["messages"][0]["tool_calls"], json!([{"name": "entity_read", "input": {"spec": "Q:big read"}}]));
+    assert_eq!(calls_of(&h["messages"][0]), json!([{"name": "entity_read", "input": {"spec": "Q:big read"}}]));
     // the shared view (the future opencode adapter's) still carries the result
     let (t, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}"), "prop": "history_view"}));
     assert!(t.len() > 200000 && t.contains("\"result\""), "history_view keeps the whole result ({} bytes)", t.len());
@@ -1209,7 +1217,7 @@ fn the_history_after_a_restart_with_nothing_warmed_is_still_the_full_newest_page
     assert_eq!(texts(&h), (5..25).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h}");
     assert_eq!((h["more"].clone(), h["next"].clone()), (json!(true), json!(ids[5])));
     assert_eq!(h["messages"][19]["response"], json!("Answer to m24"));
-    assert_eq!(h["messages"][19]["tool_calls"], json!([{"name": "entity_read", "input": {"spec": "Q:m24"}}]), "tools of an unloaded turn come with the page");
+    assert_eq!(calls_of(&h["messages"][19]), json!([{"name": "entity_read", "input": {"spec": "Q:m24"}}]), "tools of an unloaded turn come with the page");
     let h2 = history(port2, &format!("?before={}", ids[5]));
     assert_eq!(texts(&h2), (0..5).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), "{h2}");
     assert_eq!((h2["more"].clone(), h2["next"].clone()), (json!(false), J::Null));
@@ -1229,10 +1237,10 @@ fn a_messages_tools_come_in_the_order_they_were_called_loaded_or_not() {
     let id = send(port, "three");
     wait("done", || (view(port, &id)["state"] == "done").then_some(()));
     let want = json!([{"name": "entity_read", "input": {"n": 1}}, {"name": "entity_query", "input": {"n": 2}}, {"name": "entity_write", "input": {"n": 3}}]);
-    assert_eq!(history(port, "")["messages"][0]["tool_calls"], want, "by call, not by id (tz1 < tz2 < tz3)");
+    assert_eq!(calls_of(&history(port, "")["messages"][0]), want, "by call, not by id (tz1 < tz2 < tz3)");
     assert!(terminate(&mut run));
     let (_run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "warm_rows=0"]);
-    assert_eq!(history(port2, "")["messages"][0]["tool_calls"], want, "after a cold restart");
+    assert_eq!(calls_of(&history(port2, "")["messages"][0]), want, "after a cold restart");
 }
 
 #[test]
