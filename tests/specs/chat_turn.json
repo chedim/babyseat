@@ -34,11 +34,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -272,11 +272,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -358,11 +358,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -448,11 +448,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -542,11 +542,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -682,11 +682,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -779,11 +779,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -882,11 +882,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -979,11 +979,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -1076,11 +1076,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -1155,11 +1155,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -1233,11 +1233,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -1313,11 +1313,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -1447,11 +1447,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -1521,11 +1521,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -1595,11 +1595,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {
@@ -1669,11 +1669,11 @@
     }
    },
    {
-    "eid": "membrane::Banner:owner:main",
+    "eid": "membrane::Banner:admin:main",
     "class": "Banner",
     "props": {
      "chat": "main",
-     "owner": "owner"
+     "admin": "admin"
     }
    },
    {

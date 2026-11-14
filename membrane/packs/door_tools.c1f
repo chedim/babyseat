@@ -50,7 +50,7 @@ Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate ent
 -- ---- entity_write: a write by name (a computed property name) -------------------------------------------------------------------------------
 Request.mc_w_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
 Request.mc_w_prop getter: strip(str(prop(this.mc_args, 'prop') or ''))
--- A bare id names the `membrane::` one when only that exists: the chat's own entities (Chat:main, Banner:owner:main, ...) are spelled with that
+-- A bare id names the `membrane::` one when only that exists: the chat's own entities (Chat:main, Banner:admin:main, ...) are spelled with that
 -- namespace in their packs, and a bare spelling of one of them reaches it instead of creating a second entity. An id that already has a row,
 -- or has no `membrane::` twin, is used as written.
 Request.mc_w_id getter: ('membrane::' + this.mc_w_spec) if prop('membrane::' + this.mc_w_spec, 'eid') != None and prop(this.mc_w_spec, 'eid') == None else this.mc_w_spec

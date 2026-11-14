@@ -76,8 +76,8 @@ fn the_headers_import_makes_every_session_a_chat_session_with_a_pending_ledger_a
         assert_eq!(h.get(&format!("membrane::Legacy:session:{sid}"), "state"), json!("pending"), "{sid}");
         assert_eq!(h.get(&format!("membrane::Legacy:session:{sid}"), "converter"), json!(1));
     }
-    // the owner mapping: no owner -> the operator person (the fact `operator`, else `owner`); a named owner -> Person:<slug>, made now; the owner called "owner" is the operator's sub too
-    assert_eq!(h.get("membrane::Chat:session:ses_a", "owner"), json!("Person:owner"));
+    // the owner mapping: no owner -> the operator person (`Person:admin`: no users, no operator fact); a named owner -> Person:<slug>, made now; the owner called "owner" is the operator's sub too
+    assert_eq!(h.get("membrane::Chat:session:ses_a", "owner"), json!("Person:admin"));
     assert_eq!(h.get("membrane::Chat:session:ses_b", "owner"), json!("Person:ada-lovelace"));
     assert_eq!(h.get("Person:ada-lovelace", "name"), json!("Ada Lovelace"));
     assert_eq!(h.get("Person:ada-lovelace", "sub"), json!("ada-lovelace"));

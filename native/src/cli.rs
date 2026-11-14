@@ -225,7 +225,7 @@ usage: cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--store <s
 Starts the barest seat: the packs listed in <root>/apps/barest.packs, and the app <root>/apps/barest.c1f (the page is its ui/ folder), with the claude CLI as the only model.
   --port <n>         the door's port (0 = any free port). Default: the one launcher.c1f says (4096).
   --bind <addr>      the address the door opens on. Default 127.0.0.1 (this machine only); 0.0.0.0 opens it to the network.
-  --data-dir <dir>   the seat's data: its store (seat.sqlite), the door's secret (door.secret, made at the first run, mode 0600) and the owner token (owner.token, new at every start, mode 0600).
+  --data-dir <dir>   the seat's data: its store (seat.sqlite), the door's secret (door.secret, made at the first run, mode 0600) and the admin token (admin.token, new at every start, mode 0600).
                      Default: $XDG_DATA_HOME/membrane, else ~/Library/Application Support/membrane (macOS) or ~/.local/share/membrane.
   --store <sqlite>   the store file, instead of <data-dir>/seat.sqlite.
   --root <dir>       the dist folder (has packs/ apps/). Default: the folder above the one this binary is in (bin/cliffvm); the repo's membrane/ folder has the same shape.
@@ -234,7 +234,7 @@ Starts the barest seat: the packs listed in <root>/apps/barest.packs, and the ap
   --fact <name>=<value>   a Boot fact, after the defaults so it wins (repeatable): JSON when the value parses, else text. Defaults: packs/launcher.c1f.
 
 The chat answers through the claude CLI: CLAUDE_BIN names it, else `claude` on PATH. It authenticates with ANTHROPIC_API_KEY from this environment (the default);
-the CLI's own login is an opt-in: --fact chat_auth=login. A local tool presents the owner token: curl -H \"Authorization: Bearer $(cat <data-dir>/owner.token)\" <url>/global/health";
+the CLI's own login is an opt-in: --fact chat_auth=login. A local tool presents the admin token: curl -H \"Authorization: Bearer $(cat <data-dir>/admin.token)\" <url>/global/health";
 
 #[derive(Debug, PartialEq, Default)]
 pub struct ServeArgs { pub port: Option<u16>, pub bind: Option<String>, pub data_dir: Option<String>, pub store: Option<String>, pub root: Option<String>, pub legacy: Option<String>, pub facts: Vec<(String, J)> }
@@ -312,16 +312,16 @@ pub fn serve_plan(s: &ServeArgs, exe: &std::path::Path, env: &dyn Fn(&str) -> Op
     Ok(ServePlan { run: RunArgs { apps, store, port: s.port, bind: s.bind.clone(), ui_dir: None, facts }, data, notes })
 }
 
-/// `serve`: tell what was found, run the seat, and once the door is up tell the URL and how a local tool uses the owner token.
+/// `serve`: tell what was found, run the seat, and once the door is up tell the URL and how a local tool uses the admin token.
 pub fn serve(s: &ServeArgs, exe: &std::path::Path, stop: &AtomicBool) -> i32 {
     let plan = match serve_plan(s, exe, &|k| std::env::var(k).ok()) { Ok(p) => p, Err(e) => { eprintln!("cliffvm serve: {e}"); return 2; } };
     for n in &plan.notes { println!("{n}"); }
-    println!("cliffvm serve: data {} (the door's secret and the owner token are made here)", plan.data);
-    let token = format!("{}/owner.token", plan.data);
+    println!("cliffvm serve: data {} (the door's secret and the admin token are made here)", plan.data);
+    let token = format!("{}/admin.token", plan.data);
     run_with(&plan.run, stop, &|host, port| {
         let url = format!("http://{host}:{port}/");
         println!("cliffvm serve: open {url}");
-        println!("cliffvm serve: a localhost peer is not the owner: a local tool sends the owner token, written (mode 600, new at every start) to {token}");
+        println!("cliffvm serve: a localhost peer is not the admin: a local tool sends the admin token, written (mode 600, new at every start) to {token}");
         println!("cliffvm serve: curl -H \"Authorization: Bearer $(cat {token})\" {url}global/health");
         use std::io::Write; let _ = std::io::stdout().flush();
     })

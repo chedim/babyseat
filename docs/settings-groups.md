@@ -26,7 +26,7 @@ Design only, no code. Tree `memo-hotfix-0753` (`af7e506c`). Every number or defa
 | per-person voice (`Config:voice:in|out:<slug>`: on, mode, device) | `POST /membrane/voice/state` (`door_voice.c1f`) | per-person: excluded by the operator's rule |
 | the page's name prompt, `membrane.chat.sid`, `membrane.home.left`, `dockedSidebar`, `sidebarPanelOrder`, `sidebarHiddenPanels` | browser `localStorage` (old `host.js:20`, `panel.js:2674`, `home.js:3105`) | per-device; no storage effect in the browser VM yet (W6, `ui-rebuild-plan.md`) |
 | a chat's own model pick | `Chat:session:<sid>.smodel`, `door_session.c1f:149-164` | an act in the chat, not a setting |
-| the banner `text`, the doctrine/system prompt | `Banner:owner:main.text` is the model's (`default_banner.c1f`, `Help:banner`); the prompt is pack code (`chat_turn.c1f:90`) | replaced by writing a pack, not by a value |
+| the banner `text`, the doctrine/system prompt | `Banner:admin:main.text` is the model's (`default_banner.c1f`, `Help:banner`); the prompt is pack code (`chat_turn.c1f:90`) | replaced by writing a pack, not by a value |
 | session titles | `PATCH /session/<sid>` | a chat action |
 
 ## Groups and order
@@ -71,8 +71,8 @@ Columns: **key**; **lives**; **type / values**; **default**; **change today**; *
 | `chat.poll_busy_ms` ("Check for news every", ms, while answering) | `chat_active_poll_ms` | number | 700 | launch only | page load | - | no |
 | `chat.stick_px` ("Stay at the bottom within", px) | `chat_stick_px` | number | 80 | launch only | page load | - | no |
 | `chat.tool_chars` ("Tool input shown up to", characters) | `chat_tool_chars` | whole number | 90 | launch only | page load | - | no |
-| `chat.header_label` ("Header word of the context note") | `Banner:owner:main.header_dial` (`default_banner.c1f:14`) | text | `CONVERSATION` | `entity_write` | yes (banner getter recomputes) | yes | no |
-| `chat.error_label` ("Words before a failed turn's note") | `Banner:owner:main.error_dial` (`default_banner.c1f:15`) | text | `THE PREVIOUS TURN ENDED WITH AN ERROR` | `entity_write` | yes | yes | no |
+| `chat.header_label` ("Header word of the context note") | `Banner:admin:main.header_dial` (`default_banner.c1f:14`) | text | `CONVERSATION` | `entity_write` | yes (banner getter recomputes) | yes | no |
+| `chat.error_label` ("Words before a failed turn's note") | `Banner:admin:main.error_dial` (`default_banner.c1f:15`) | text | `THE PREVIOUS TURN ENDED WITH AN ERROR` | `entity_write` | yes | yes | no |
 
 The six `chat_*` rows are the old page's constants (`ui-rebuild-plan.md` decision 6). In a c1f UI they are values the view pack reads; I recommend they become real settings (item B) or are dropped as constants (decision 3). The two labels are only worth a row if the operator wants them; they are the banner's, and the model may replace the whole banner (decision 4).
 

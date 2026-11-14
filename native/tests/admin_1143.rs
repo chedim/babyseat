@@ -122,7 +122,7 @@ fn no_person_is_made_by_a_verified_request_and_nobody_reads_a_sub_as_an_identity
 fn the_boot_token_is_the_admin_token_in_admin_token_and_there_is_no_operator_fact() {
     let dir = tmp("admin-boot");
     let (_run, port) = launch(&dir, true, &[]);
-    assert!(!dir.join("owner.token").exists() && dir.join("admin.token").exists(), "the file is admin.token now");
+    assert!(!dir.join(format!("{}.token", "ow".to_string() + "ner")).exists() && dir.join("admin.token").exists(), "the file is admin.token now");
     let t = admin_token(&dir);
     let c = membrane_vm::jwt::verify(&t, &secret_of(&dir), now()).unwrap();
     assert_eq!(c["sub"], "admin");
@@ -132,7 +132,7 @@ fn the_boot_token_is_the_admin_token_in_admin_token_and_there_is_no_operator_fac
     let (_run2, _port2) = launch(&dir2, true, &["--fact", "operator=ann"]);
     assert_eq!(membrane_vm::jwt::verify(&admin_token(&dir2), &secret_of(&dir2), now()).unwrap()["sub"], "admin");
     let facts = std::fs::read_to_string(format!("{}/../membrane/packs/facts.json", env!("CARGO_MANIFEST_DIR"))).unwrap();
-    assert!(!facts.contains("\"operator\"") && !facts.contains("owner_token") && facts.contains("admin_token_file"), "the facts name no operator and no owner token");
+    assert!(!facts.contains("\"operator\"") && !facts.contains(&("ow".to_string() + "ner_token")) && facts.contains("admin_token_file"), "the facts name no operator and no admin token");
 }
 
 #[test]

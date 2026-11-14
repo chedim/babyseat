@@ -1,10 +1,10 @@
 # Help:banner - your banner is your entity
 
 Your banner reaches you at the start of every turn, between the standing text and the incoming message. It is the entity
-`Banner:owner:main`, and its `text` is the whole banner: what you define there is what you receive, as you wrote it. The text is a getter,
+`Banner:admin:main`, and its `text` is the whole banner: what you define there is what you receive, as you wrote it. The text is a getter,
 so it is live: it is recomputed when what it reads changes, and every turn shows the world as it is now.
 
-Read it with `entity_read {spec: "Banner:owner:main", prop: "text"}` to see the banner as it will reach you. The banner you start with
+Read it with `entity_read {spec: "Banner:admin:main", prop: "text"}` to see the banner as it will reach you. The banner you start with
 shows the conversation and the time, and the previous turn's error when there was one (its entity id and its whole text). It is a starting point for your own.
 
 ## Write your banner
@@ -17,10 +17,10 @@ completely. Put in it what the next turn needs: what you are doing, what is open
 -- given Stop:a {"name": "Lisbon", "done": true}
 -- given Stop:b {"name": "Porto", "done": false}
 -- given Stop:c {"name": "Faro", "done": false}
--- given Banner:owner:main {}
--- reads Banner:owner:main.text = "trip: 1 of 3 stops done; next Porto"
+-- given Banner:admin:main {}
+-- reads Banner:admin:main.text = "trip: 1 of 3 stops done; next Porto"
 -- write Stop:b.done = true
--- reads Banner:owner:main.text = "trip: 2 of 3 stops done; next Faro"
+-- reads Banner:admin:main.text = "trip: 2 of 3 stops done; next Faro"
 PACK trip 1
 IMPORT default_banner 1
 Banner.undone getter: sort_by([{'name': s.name, 'k': s.eid} for s in instances('Stop') if s.done != True], 'k')
@@ -28,15 +28,15 @@ Banner.text getter: 'trip: ' + str(len([s for s in instances('Stop') if s.done =
 ```
 
 A second way: give a class of your own the `text` getter and make it the banner's nearest class by writing the list of classes:
-`entity_write {spec: "Banner:owner:main", prop: "parents", value: ["cls:mybanner"]}`. The entity's classes are the list in `parents`, so
+`entity_write {spec: "Banner:admin:main", prop: "parents", value: ["cls:mybanner"]}`. The entity's classes are the list in `parents`, so
 the starting `Banner` class is then no longer one of them: its `text` stops, and what only it computed goes away. Write `["cls:banner"]` to go back.
 
 A banner of several parts is one getter that joins them, in the order you choose:
 
 ```c1f
 -- given Plan:now {"doing": "importing the ledger", "next": "check the totals"}
--- given Banner:owner:main {}
--- reads Banner:owner:main.text = "doing: importing the ledger\nnext: check the totals"
+-- given Banner:admin:main {}
+-- reads Banner:admin:main.text = "doing: importing the ledger\nnext: check the totals"
 PACK plan 1
 IMPORT default_banner 1
 Banner.doing getter: [p.doing for p in instances('Plan')]

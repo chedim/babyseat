@@ -88,7 +88,7 @@ ChatMessage.mcp_json getter:
   ELSE: str({'mcpServers': {'membrane': this.mcp_server}}) if this.mcp_server != None else None
 ChatMessage.banner_text getter:
   WHEN this.over: None
-  ELSE: prop('membrane::Banner:owner:main', 'text')
+  ELSE: prop('membrane::Banner:admin:main', 'text')
 ChatMessage.note getter:
   WHEN this.over: None
   ELSE: 'Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.'
@@ -98,7 +98,7 @@ ChatMessage.note getter:
 -- A banner with no `text` (the model's pack left it null) is SHOWN, not skipped: the turn runs with the banner error in the banner's slot, so the model can repair it (Help:banner).
 ChatMessage.banner_slot getter:
   WHEN this.over: None
-  ELSE: this.banner_text if this.banner_text != None and not (this.banner_text is Error) else 'BANNER ERROR: your banner `Banner:owner:main` has no `text` (the reason: ' + (why(this.banner_text) or 'it has no text property') + '). Give `Banner.text` a value again, in a pack that defines it; Help:banner shows how.'
+  ELSE: this.banner_text if this.banner_text != None and not (this.banner_text is Error) else 'BANNER ERROR: your banner `Banner:admin:main` has no `text` (the reason: ' + (why(this.banner_text) or 'it has no text property') + '). Give `Banner.text` a value again, in a pack that defines it; Help:banner shows how.'
 ChatMessage.sys getter:
   WHEN this.over: None
   ELSE: join([this.note, this.banner_slot], '\n\n')

@@ -2,7 +2,7 @@
 # The dev wrapper of `cliffvm serve` (the users' launcher, docs/packaging-plan.md): the same seat on THIS checkout's membrane/ folder (packs/, apps/, ui/ have the dist's shape), the data in ./.cliffvm.
 # Builds nothing: build the binary once with `cargo build --release --no-default-features --features bin` in native/.
 #   scripts/seat [--open] [--data-dir <dir>] [--store <sqlite>] [--port <n>] [--fact name=value ...]     (every option of `cliffvm serve --help` passes through)
-# Every default lives in membrane/packs/launcher.c1f; the door is strict (the secret and the owner token are in the data folder).
+# Every default lives in membrane/packs/launcher.c1f; the door is strict (the secret and the admin token are in the data folder).
 # CLIFFVM names the binary, CLAUDE_BIN the claude CLI (else the one on PATH). CLAUDE_AUTH=login passes --fact chat_auth=login (the claude CLI's login instead of ANTHROPIC_API_KEY).
 # --open (this wrapper's own) opens the page once the seat says its URL.
 set -eu

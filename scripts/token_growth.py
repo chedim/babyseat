@@ -156,7 +156,7 @@ def main():
             except Exception:
                 continue
             for x in rx:
-                if x.get("eid") == "membrane::Banner:owner:main" and x.get("prop") == "text" and isinstance(x.get("new"), str):
+                if x.get("eid") == "membrane::Banner:admin:main" and x.get("prop") == "text" and isinstance(x.get("new"), str):
                     k = re.search(r"Keeps are (\d+) chars", x["new"])
                     snaps.append((r["t"], len(x["new"]), x["new"].count("\n- ["), int(k.group(1)) if k else None))
     print("Banner text length right after a write (the write reply carries it; %d snapshots, MEASURED), median per stretch of 10 snapshots:\n" % len(snaps))
