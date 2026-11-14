@@ -341,7 +341,7 @@
   ]
  },
  {
-  "name": "/v1/models without a router: no lanes, no rungs",
+  "name": "/v1/models without a router: no lanes, the claude rung is listed (the seat runs it), another provider's rung is not",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/door.c1f",
@@ -380,6 +380,17 @@
     }
    },
    {
+    "eid": "Model:gpt-x",
+    "class": "Model",
+    "props": {
+     "name": "gpt-x",
+     "kind": "cloud",
+     "rung": true,
+     "listed": true,
+     "backend": "openai"
+    }
+   },
+   {
     "eid": "Request:1",
     "class": "Request",
     "props": {
@@ -413,7 +424,12 @@
    },
    {
     "eid": "Request:1",
-    "prop": "reply.body.data.2",
+    "prop": "reply.body.data.2.id",
+    "equals": "claude-sonnet"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.data.3",
     "none": true
    }
   ]
