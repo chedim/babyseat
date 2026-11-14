@@ -32,7 +32,7 @@ const port = 24000 + Math.floor(Math.random() * 900);
 const fake = path.join(dir, 'fake-claude');
 writeFileSync(fake, FAKE); chmodSync(fake, 0o755);
 const cloud = JSON.stringify([{ name: 'gpt', backend: 'openai', base_url: 'https://user:hunter2pw@example.test/v1', api_key_env: 'OTHER_PROVIDER_KEY' }]);
-const child = spawn(bin, ['run', ...packs, 'membrane/apps/barest.c1f', '--store', path.join(dir, 'field.sqlite3'), '--port', String(port), '--ui-dir', 'membrane/ui',
+const child = spawn(bin, ['run', ...packs, 'membrane/apps/barest.c1f', '--store', path.join(dir, 'field.sqlite3'), '--port', String(port),
   '--fact', `chat_claude_bin=${fake}`, '--fact', `cloud_models=${cloud}`],
   { cwd: repo, stdio: 'ignore', env: { ...process.env, ANTHROPIC_API_KEY: KEY } });
 const url = `http://127.0.0.1:${port}`;
@@ -128,6 +128,7 @@ try {
   await b.until(`/whole number/.test(${textOf(K('chat.max_steps', 'state'))})`, 'a step count is whole');
 
   // 4. a text row with the Save button: the chat model
+  assert.equal(await b.ev(textOf('.setchoice')), 'gpt', 'the seat\'s model list is buttons under the box (the box stays a text input)');
   await b.fill(K('model.chat', 'in'), 'claude-agent:sonnet'); await b.press(K('model.chat', 'save'));
   await b.until(`${textOf(K('model.chat', 'state'))} === 'Applied.' && ${textOf(K('model.chat', 'now'))} === 'In force: claude-agent:sonnet'`, 'the model applied');
   assert.equal(await rpc('entity_read', { spec: 'Minds:seat', prop: 'loops' }), 'claude-agent:sonnet', 'the chat\'s own reader holds it');

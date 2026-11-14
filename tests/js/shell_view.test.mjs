@@ -6,9 +6,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { initSync, Field } from '../../membrane/ui/fieldvm_core.js';
+import { initSync, Field } from '../../membrane/apps/barest.c1f/ui/fieldvm_core.js';
 
-const ui = new URL('../../membrane/ui/', import.meta.url);
+const ui = new URL('../../membrane/apps/barest.c1f/ui/', import.meta.url);
 initSync({ module: readFileSync(fileURLToPath(new URL('fieldvm_core_bg.wasm', ui))) });
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
 const DOM = "PACK dom 1\nDomNode.tag getter: this.tag or 'div'\n";
@@ -52,7 +52,7 @@ const scenario = (name, fn) => { fn(); n++; console.log('  ok', name); };
 
 scenario('the skeleton: header, nav, status line, theme, one slot per view', () => {
   const w = world(); w.boot();
-  assert.equal(w.n('root').class, 'shell'); assert.equal(w.n('bar').tag, 'header'); assert.equal(w.n('title').text, 'Membrane seat');
+  assert.equal(w.n('root').class, 'shell'); assert.equal(w.n('bar').tag, 'header'); assert.equal(w.n('title').text, 'babyseat');
   assert.equal(w.n('nav').tag, 'nav'); assert.equal(w.n('nav')['aria-label'], 'Views');
   assert.equal(w.n('status').role, 'status'); assert.equal(w.n('status')['aria-live'], 'polite');
   assert.deepEqual(['chat', 'field', 'settings'].map((k) => w.get('DomNode:shell:nav:' + k).text), ['Chat', 'Field', 'Settings']);

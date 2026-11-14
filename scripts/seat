@@ -50,7 +50,7 @@ while read -r name; do
   case "$name" in ''|'#'*) continue ;; esac
   set -- "$@" "membrane/packs/$name.c1f"
 done < membrane/apps/barest.packs
-set -- "$@" membrane/apps/barest.c1f --store "$store" --port "$port" --ui-dir membrane/ui
+set -- "$@" membrane/apps/barest.c1f --store "$store" --port "$port"
 # the strict door (the door's secret and the owner's token live in the data folder), and claude as the only model (a rung of the router's registry, picked for every mind; the router off;
 # the local backend is the default Ollama address: nothing needs to run there, a refused connection is an empty tag list)
 minds='{"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude","loops_auth":"chat","cortex_auth":"chat","workers_auth":"chat","think":"auto"}'

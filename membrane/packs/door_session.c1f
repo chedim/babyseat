@@ -81,7 +81,7 @@ Request.ss_view getter: prop(this.ss_eid, 'view') if this.ss_eid != None else No
 Request.ss_get_reply getter: {'status': 200, 'body': this.ss_view} if this.ss_view != None else this.ss_missing
 
 -- POST /session {title?}: the id is the time and the request's number (the clock is read in the setter, so it is the moment of the write)
-Request.ss_make getter: this.ss_route == 'root' and this.method == 'POST'
+Request.ss_make getter: this.entrant and this.ss_route == 'root' and this.method == 'POST'
 Request.ms_txt getter: words(replace(str(clock * 1000), '.', ' '))[0]
 Request.ss_title getter: strip(str(prop(this.jbody, 'title') or '')) or 'New session'
 Request.ss_make on-setter session-make:
@@ -95,14 +95,14 @@ Request.ss_create_reply getter:
   ELSE: {'status': 200, 'body': prop('membrane::Chat:session:' + this.ss_made, 'view')}
 
 -- PATCH /session/<sid> {title}: the reply is the session once the new title is in it
-Request.ss_new_title getter: strip(str(prop(this.jbody, 'title') or '')) if this.ss_route == 'one' and this.method == 'PATCH' else ''
+Request.ss_new_title getter: strip(str(prop(this.jbody, 'title') or '')) if this.entrant and this.ss_route == 'one' and this.method == 'PATCH' else ''
 Request.ss_rename getter: this.ss_new_title != '' and this.ss_view != None and prop(this.ss_view, 'title') != this.ss_new_title
 Request.ss_rename on-setter session-rename:
   WHEN this.ss_rename:
     membrane::Chat:session[this.ss_sid].stitle = this.ss_new_title
     membrane::Chat:session[this.ss_sid].upd = this.ms
 -- PATCH {model: {modelID, providerID}}: the session's model (the released handler's "THE MODEL'S PATCH"); the provider is always `membrane` here, an empty name changes nothing
-Request.ss_new_model getter: strip(str(prop(prop(this.jbody, 'model'), 'modelID') or prop(prop(this.jbody, 'model'), 'id') or '')) if this.ss_route == 'one' and this.method == 'PATCH' else ''
+Request.ss_new_model getter: strip(str(prop(prop(this.jbody, 'model'), 'modelID') or prop(prop(this.jbody, 'model'), 'id') or '')) if this.entrant and this.ss_route == 'one' and this.method == 'PATCH' else ''
 Request.ss_remodel getter: this.ss_new_model != '' and this.ss_view != None and prop(prop(this.ss_view, 'model'), 'id') != this.ss_new_model
 Request.ss_remodel on-setter session-remodel:
   WHEN this.ss_remodel:
@@ -115,7 +115,7 @@ Request.ss_patch_reply getter:
   ELSE: {'status': 200, 'body': this.ss_view}
 
 -- DELETE /session/<sid>: the session and its messages (with their turns, answers and tools, which their paths own) are retired
-Request.ss_gone getter: this.ss_route == 'one' and this.method == 'DELETE' and this.ss_view != None
+Request.ss_gone getter: this.entrant and this.ss_route == 'one' and this.method == 'DELETE' and this.ss_view != None
 -- a session owns its messages by the colon path (`Chat:session:<sid>:message:...`): retiring the header retires them, their turns, answers and tools. The time rows (`Chat:main:time:<id>:session:<sid>`) are not below it: found by the key's tail (no body read)
 Request.ss_gone_rows getter: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 AND substr(k, -length(?3)) = ?3', 'membrane::Chat:main:time:', 'membrane::Chat:main:time;', ':session:' + this.ss_sid) if this.ss_gone else None
 Request.ss_gone_rows on-setter session-delete:
@@ -142,7 +142,7 @@ Request.ss_status_reply getter:
 -- POST /session/<sid>/prompt_async (204 at once) or /message (200 {info, parts} when the turn is over): the text parts are joined by newlines, the message is the chat's
 -- (packs/chat.c1f: ChatMessage, its body, its turn; `queued` starts the turn, chat_turn.c1f) with `sid` naming the session. The session id is in the message's key (the status reads it there).
 Request.sm_text getter: strip(join([str(prop(p, 'text') or '') for p in (prop(this.jbody, 'parts') or []) if prop(p, 'type') == 'text'], '\n'))
-Request.sm_post getter: (this.ss_route == 'prompt_async' or this.ss_route == 'message') and this.method == 'POST'
+Request.sm_post getter: this.entrant and (this.ss_route == 'prompt_async' or this.ss_route == 'message') and this.method == 'POST'
 -- a streamed partial of the person's speech (`stream` named, `final: false`) is no turn: 204 at once, nothing stored; the final transcript carries the whole utterance and is the turn
 -- (the released seat coalesces the partials in its speaker lane for display; the answered text is the final one's)
 Request.sm_interim getter: str(prop(this.jbody, 'stream') or '') != '' and prop(this.jbody, 'final') == False
@@ -233,7 +233,7 @@ Request.ml_assts getter: [{'id': r['id'], 'h': 1, 'row': prop(r['eid'], 'oc_arow
 Request.ml_flat getter: [x['row'] for x in sort_by(sort_by(concat(this.ml_users, this.ml_assts), 'h'), 'id')]
 -- THE LAZY HISTORY (#1143): a session imported as a header only (packs/legacy_import.c1f: its ledger `Legacy:session:<sid>` is pending or importing) gets its messages the first time it is opened:
 -- `ml_ask` is true for an authed list request where the launch fact `legacy_page` (user rows per query, no default) is told; legacy_import's setter on it writes the ledger's `open` (and the reply waits (`ml_lazy`) until the ledger says done or error. A session with no ledger is native: nothing is written, nothing waits.
-Request.ml_ask getter: this.ml_on and len([b for b in instances('Boot') if b.legacy_page != None]) > 0 and prop('membrane::Legacy:session:' + this.ss_sid, 'state') != None
+Request.ml_ask getter: this.entrant and this.ml_on and len([b for b in instances('Boot') if b.legacy_page != None]) > 0 and prop('membrane::Legacy:session:' + this.ss_sid, 'state') != None
 Request.ml_lazy getter: this.ml_ask and prop('membrane::Legacy:session:' + this.ss_sid, 'state') in ['pending', 'importing']
 Request.ml_reply getter:
   WHEN this.ss_view == None: this.ss_missing
@@ -332,7 +332,7 @@ Chunk.oc_go on-setter oc-chunk:
 -- that follows ends each turn as the chat always ends one, with the text below as its error (`fail_why`). The reply is `true` (the Python seat's) at once; a session with nothing running is `true` too.
 ChatMessage.fail_why getter:
   WHEN this.aborted == True and this.rr != None: 'aborted: the turn was stopped from the page'
-Request.ab_on getter: this.ss_route == 'abort' and this.method == 'POST' and this.ss_view != None
+Request.ab_on getter: this.entrant and this.ss_route == 'abort' and this.method == 'POST' and this.ss_view != None
 Request.ab_turns getter: [replace(c.eid, 'membrane::Command:chat:', '') for c in instances('Command') if startswith(c.eid, 'membrane::Command:chat:') and c.run_result == None and prop('membrane::Chat:' + replace(c.eid, 'membrane::Command:chat:', ''), 'sid') == this.ss_sid] if this.ab_on else None
 Request.ab_turns on-setter abort-stop:
   WHEN this.ab_turns != None:

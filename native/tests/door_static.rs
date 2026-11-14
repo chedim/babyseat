@@ -19,7 +19,7 @@ impl Host for H {
 
 const DOOR: &str = include_str!("../../membrane/packs/door.c1f");
 
-fn ui_dir() -> String { format!("{}/../membrane/ui", env!("CARGO_MANIFEST_DIR")) }
+fn ui_dir() -> String { format!("{}/../membrane/apps/barest.c1f/ui", env!("CARGO_MANIFEST_DIR")) }
 
 fn world() -> (Core, Fields, u64) { world_with(json!({"ui_dir": ui_dir()})) }
 
@@ -78,7 +78,7 @@ fn the_page_and_its_files_are_served_with_their_types() {
     let (mut c, mut f, port) = world();
     for (path, ctype, file) in [("/", "text/html; charset=utf-8", "index.html"), ("/index.html", "text/html; charset=utf-8", "index.html"),
                                 ("/membrane", "text/html; charset=utf-8", "index.html"),
-                                ("/ui/www/home.js", "application/javascript; charset=utf-8", "home.js"),
+                                ("/ui/www/boot.js", "application/javascript; charset=utf-8", "boot.js"),
                                 ("/ui/www/fieldvm_core_bg.wasm", "application/wasm", "fieldvm_core_bg.wasm"),
                                 ("/favicon.ico", "image/svg+xml", "favicon.svg")] {
         let (head, body) = split(&get(&mut c, &mut f, port, &format!("GET {path} HTTP/1.1\r\nHost: t\r\n\r\n")));
@@ -95,7 +95,7 @@ fn a_missing_file_a_traversal_and_a_post_are_refused() {
                           ("GET /ui/www/../index.html HTTP/1.1\r\nHost: t\r\n\r\n", "404"),
                           ("GET /ui/www/%2e%2e/index.html HTTP/1.1\r\nHost: t\r\n\r\n", "404"),
                           ("GET /ui/www//etc/passwd HTTP/1.1\r\nHost: t\r\n\r\n", "404"),
-                          ("POST /ui/www/home.js HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n", "405"),
+                          ("POST /ui/www/boot.js HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n", "405"),
                           ("GET /nowhere HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer TOKEN\r\n\r\n", "404"),
                           ("GET /nowhere HTTP/1.1\r\nHost: t\r\n\r\n", "401")] {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();

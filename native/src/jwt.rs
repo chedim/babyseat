@@ -132,6 +132,7 @@ pub fn verify(token: &str, secret: &[u8], now: f64) -> Result<J, String> {
     let hdr_raw = base64_decode(parts[0], true).ok_or("header is not base64url")?;
     let hdr: J = serde_json::from_slice(&hdr_raw).map_err(|_| "header is not json")?;
     if hdr.get("alg").and_then(|a| a.as_str()) != Some("HS256") { return Err("alg is not HS256".into()); }
+    if hdr.get("crit").is_some() { return Err("crit".into()); }   // jwtauth.py: a critical extension this verifier does not know is refused (RFC 7515 4.1.11)
     let sig = base64_decode(parts[2], true).ok_or("signature is not base64url")?;
     let want = hmac_sha256(secret, format!("{}.{}", parts[0], parts[1]).as_bytes());
     if !same(&sig, &want) { return Err("signature".into()); }
@@ -139,6 +140,9 @@ pub fn verify(token: &str, secret: &[u8], now: f64) -> Result<J, String> {
     let num = |k: &str| claims.get(k).and_then(|v| v.as_f64());
     let exp = num("exp").ok_or("exp is required")?;
     if now > exp + LEEWAY { return Err("expired".into()); }
+    // jwtauth.py: a time claim that is present must be a number, and `aud` is refused when the seat names no audience (a token scoped to someone else, RFC 7519 4.1.3)
+    for k in ["nbf", "iat"] { if claims.get(k).is_some() && num(k).is_none() { return Err(format!("{k} is not a number")); } }
+    if claims.get("aud").is_some() { return Err("aud".into()); }
     if let Some(nbf) = num("nbf") { if now + LEEWAY < nbf { return Err("not yet valid".into()); } }
     if let Some(iat) = num("iat") { if now + LEEWAY < iat { return Err("issued in the future".into()); } }
     match claims.get("sub").and_then(|s| s.as_str()) {

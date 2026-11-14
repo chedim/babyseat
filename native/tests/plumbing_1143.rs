@@ -45,7 +45,7 @@ fn open_seat(tag: &str) -> Run {
     for l in std::fs::read_to_string(repo().join("membrane/apps/barest.packs")).unwrap().lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
         args.push(repo().join(format!("membrane/packs/{l}.c1f")).display().to_string());
     }
-    args.extend(["membrane/apps/barest.c1f".into(), "--store".into(), data.join("s.sqlite").display().to_string(), "--port".into(), "0".into(), "--ui-dir".into(), "membrane/ui".into()].map(String::from));
+    args.extend(["membrane/apps/barest.c1f".into(), "--store".into(), data.join("s.sqlite").display().to_string(), "--port".into(), "0".into()].map(String::from));
     let child = Command::new(BIN).current_dir(repo()).args(&args).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     watch(child, data)
 }

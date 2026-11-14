@@ -10,15 +10,15 @@
    "why": "how the claude turn authenticates and what options.background.chat_auth shows (--fact chat_auth=...): api_key (the DEFAULT: the key of the seat's ANTHROPIC_API_KEY) or login (the claude CLI's own login, an explicit opt-in; it was the released constant)"
   },
   "agent_writes": {
-   "wired": true,
+   "wired": false,
    "why": "whether the model may write memory (--no-agent-writes)"
   },
   "nerve_pause_off": {
-   "wired": true,
+   "wired": false,
    "why": "MEMBRANE_NERVE_PAUSE=0: the kill switch for the pause route"
   },
   "ledger": {
-   "wired": true,
+   "wired": false,
    "why": "the operator's ledger file path (the decisions pack writes it)"
   },
   "door_port": {
@@ -35,7 +35,7 @@
   },
   "ui_dir": {
    "wired": true,
-   "why": "the folder of the UI's files (membrane/ui)"
+   "why": "the folder of the UI's files: the lowest layer under each app's own ui/ folder (--ui-dir; none by default)"
   },
   "build_id": {
    "wired": true,
@@ -54,7 +54,7 @@
    "why": "the person's home folder (opencode /path)"
   },
   "seat_project": {
-   "wired": true,
+   "wired": false,
    "why": "the project id (opencode /project)"
   },
   "seat_name": {
@@ -70,7 +70,7 @@
    "why": "the seat's other names, for /ui/conf"
   },
   "seat_stt": {
-   "wired": true,
+   "wired": false,
    "why": "the speech-to-text server url, else the browser listens"
   },
   "seat_voice_out": {
@@ -184,10 +184,6 @@
   "quota_probe_s": {
    "wired": false,
    "why": "the quota probe interval the page shows, seconds (released PROBE_S 600); a `--fact` setting, default 600"
-  },
-  "map_tile_k": {
-   "wired": false,
-   "why": "the field map's tile size `tile_k` in the empty 3D projection (released 150); a `--fact` setting, default 150"
   },
   "field_tau_s": {
    "wired": false,

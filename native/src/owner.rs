@@ -23,7 +23,13 @@ fn private_write(path: &Path, text: &str) -> Result<(), String> {
 
 /// The secret at `path`: kept when it is there and not empty, else made (32 random bytes as 64 hex characters, mode 0600).
 pub fn ensure_secret(path: &Path) -> Result<Vec<u8>, String> {
-    if let Ok(t) = std::fs::read_to_string(path) { if !t.trim().is_empty() { return Ok(t.trim().as_bytes().to_vec()); } }
+    // only a file that is NOT THERE (or empty) is made: a file that is there and cannot be read (permissions, a folder) is a refusal, never a silent new secret that logs everyone out
+    match std::fs::read_to_string(path) {
+        Ok(t) if !t.trim().is_empty() => return Ok(t.trim().as_bytes().to_vec()),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: cannot read the door secret: {e} (the seat will not replace a secret it cannot read)", path.display())),
+    }
     if let Some(dir) = path.parent() { std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?; }
     let mut raw = [0u8; 32];
     std::io::Read::read_exact(&mut std::fs::File::open("/dev/urandom").map_err(|e| format!("/dev/urandom: {e}"))?, &mut raw).map_err(|e| format!("/dev/urandom: {e}"))?;

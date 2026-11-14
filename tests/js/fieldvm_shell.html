@@ -7,7 +7,7 @@
 <div id="mount"></div>
 <pre id="result">pending</pre>
 <script type="module">
-import { start } from '/membrane/ui/fieldvm.js';
+import { start } from '/membrane/apps/barest.c1f/ui/fieldvm.js';
 const frame = () => new Promise(r => setTimeout(r, 40));
 const res = {}; const step = (s) => { res.step = s; document.getElementById('result').textContent = JSON.stringify(res); };
 try {
