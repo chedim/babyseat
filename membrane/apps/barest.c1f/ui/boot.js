@@ -38,7 +38,7 @@ function loadPacks(host, packs) {
   for (const e of snap.entities || []) host.feed(e.eid, e.cls, e.props, true);
   host.page.set('DomNode:page:html', document.documentElement);     // the theme: the shell writes `data-theme` on it (an allow-listed attribute)
   host.track_hidden();                                                // Conn:page.hidden: the polls pause in a hidden tab
-  host.feed('Shell:main', 'Shell', { view: 'chat', sid: 'main', load_errors: host.errors }, true);
+  host.feed('Shell:main', 'Shell', { view: 'chat', load_errors: host.errors }, true);
   host.feed('Shell:main', 'Shell', { open: true }, true);
   app.replaceChildren(mount);
   host.run_clock(CLOCK_MS);

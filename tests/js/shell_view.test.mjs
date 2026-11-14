@@ -1,7 +1,7 @@
 // The barest page's SHELL as a c1f view pack (membrane/apps/barest.c1f/shell_view.c1f, #1143), with the chat and field views plugged into it, on the wasm engine in Node:
 // the page's VM with the packs `dom`, `fetch`, `shell_view`, `chat_view`, `field_view`. The test plays the HOST (a DomNode event is a write; a `Fetch:<x>.request` is answered by a
 // write of `request_result`; a `retire` write removes the entity) and the CLOCK (`tick`), as ui/boot.js and fieldvm.js do. Asserted: the page's skeleton, the nav (Chat, Field, Settings),
-// the Settings placeholder and the view-pack contract (a stub pack plugs into the slot), the sessions (list, new, switch: the chat follows), the status line, errors as text (a 403 with its
+// the Settings placeholder and the view-pack contract (a stub pack plugs into the slot), the status line, errors as text (a 403 with its
 // reason), the theme, and the work per tick (a bound on the writes of an idle page).
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +42,7 @@ function world(extra = {}) {
   w.n = (k) => w.get('DomNode:shell:' + k) || {};
   w.click = (eid) => w.write(eid, 'clicked', w.t);
   // the bootstrap: the page's html element is a page node; the shell's entities are fed view and sid first, `open` last
-  w.boot = (props = {}) => { w.feed('Shell:main', 'Shell', { view: 'chat', sid: 'main', ...props }); w.feed('Shell:main', 'Shell', { open: true }); };
+  w.boot = (props = {}) => { w.feed('Shell:main', 'Shell', { view: 'chat', ...props }); w.feed('Shell:main', 'Shell', { open: true }); };
   return w;
 }
 const SESSIONS = [{ id: 'ses_1', title: 'Plan the trip', time: { created: 1, updated: 2 } }, { id: 'ses_2', title: 'Ada notes', time: { created: 3, updated: 4 } }];
@@ -50,7 +50,7 @@ const MSG = (id, text, state = 'done', response = 'ok') => ({ id, text, state, r
 let n = 0;
 const scenario = (name, fn) => { fn(); n++; console.log('  ok', name); };
 
-scenario('the skeleton: header, nav, status line, theme, sessions, one slot per view', () => {
+scenario('the skeleton: header, nav, status line, theme, one slot per view', () => {
   const w = world(); w.boot();
   assert.equal(w.n('root').class, 'shell'); assert.equal(w.n('bar').tag, 'header'); assert.equal(w.n('title').text, 'Membrane seat');
   assert.equal(w.n('nav').tag, 'nav'); assert.equal(w.n('nav')['aria-label'], 'Views');
@@ -58,9 +58,6 @@ scenario('the skeleton: header, nav, status line, theme, sessions, one slot per 
   assert.deepEqual(['chat', 'field', 'settings'].map((k) => w.get('DomNode:shell:nav:' + k).text), ['Chat', 'Field', 'Settings']);
   for (const k of ['chat', 'field', 'settings']) assert.equal(w.get('DomNode:shell:slot:' + k).parent, 'DomNode:shell:views');
   assert.equal(w.n('error').role, 'alert'); assert.equal(w.n('error').hidden, true, 'no error, no alert');
-  assert.equal(w.n('sessions').hidden, false, 'the sessions show with the chat');
-  assert.equal(w.get('DomNode:shell:s:main').text, 'Main chat');
-  assert.equal(w.get('DomNode:shell:s:main')['aria-current'], 'true');
 });
 
 scenario('the chat is the default view; Field and Settings slots are hidden; the Settings slot says Settings', () => {
@@ -82,7 +79,6 @@ scenario('navigation: Field opens its view lazily; Settings shows the placeholde
   assert.equal(w.get('DomNode:shell:nav:field')['aria-current'], 'page'); assert.equal(w.get('DomNode:shell:nav:chat')['aria-current'], undefined);
   assert.equal(w.get('Scene:field').open, true); assert.equal(w.get('DomNode:f:root').parent, 'DomNode:shell:slot:field');
   assert.equal(w.get('Nav:field').filled, true);
-  assert.equal(w.n('sessions').hidden, true, 'the sessions belong to the chat');
   w.click('DomNode:shell:nav:settings');
   assert.equal(w.get('DomNode:shell:slot:settings').hidden, false); assert.equal(w.get('DomNode:shell:slot:settings:empty').hidden, false);
   assert.equal(w.get('Nav:field').active, false);
@@ -92,7 +88,7 @@ scenario('navigation: Field opens its view lazily; Settings shows the placeholde
   for (let i = 0; i < 20; i++) w.tick(0.1);
   assert.equal(w.get('Scene:field').heat, before, 'the layout is paused');
   w.click('DomNode:shell:nav:chat');
-  assert.equal(w.get('DomNode:shell:slot:chat').hidden, false); assert.equal(w.n('sessions').hidden, false);
+  assert.equal(w.get('DomNode:shell:slot:chat').hidden, false);
 });
 
 scenario('the view-pack contract: a pack registers a Nav, draws into its slot and the placeholder goes', () => {
@@ -118,66 +114,20 @@ Nav.active on-setter stub-draw:
   assert.equal(w.get('DomNode:shell:slot:settings').hidden, false);
 });
 
-scenario('sessions: the list, the switch (the chat follows), a new session', () => {
+scenario('ONE chat: no session list, no New session; the history is read with no sid and older pages with before; a send has no sid', () => {
   const w = world(); w.boot();
-  assert.equal(w.asked('sessions').url, '/session');
-  assert.equal(w.asked('history').url, '/membrane/chat/messages?limit=20&sid=', 'the main chat asks for the turns of no session');
-  w.reply('sessions', 200, SESSIONS);
-  assert.equal(w.get('DomNode:shell:s:ses_1').text, 'Plan the trip'); assert.equal(w.get('DomNode:shell:s:ses_2').text, 'Ada notes');
-  assert.equal(w.get('DomNode:shell:s:ses_1').parent, 'DomNode:shell:sli:ses_1');
-  w.reply('history', 200, { messages: [MSG('1000-1', 'in main')], more: false, next: null });
-  assert.equal(w.get('DomNode:chat:row:1000-1:me').text, 'in main');
-  w.click('DomNode:shell:s:ses_1');
-  assert.equal(w.get('Focus:session').sid, 'ses_1');
-  assert.equal(w.get('DomNode:shell:s:ses_1')['aria-current'], 'true'); assert.equal(w.get('DomNode:shell:s:main')['aria-current'], undefined);
-  assert.match(w.asked('history').url, /^\/membrane\/chat\/messages\?limit=20&sid=ses_1$/);
-  assert.equal(w.get('DomNode:chat:row:1000-1'), null, 'the rows of the other session are gone');
-  w.reply('history', 200, { messages: [MSG('2000-2', 'in the trip')], more: false, next: null });
-  assert.equal(w.get('DomNode:chat:row:2000-2:me').text, 'in the trip');
-  // a late answer of the session left is not drawn into this one
-  w.click('DomNode:shell:s:main');
-  const late = w.asked('history');
-  w.write('Fetch:history', 'request_result', { id: 'poll-99@ses_1', status: 'ok', rc: 0, head: '200', http_status: 200, headers: {}, body: JSON.stringify({ messages: [MSG('3000-3', 'late')], more: false, next: null }), started: w.t, finished: w.t, ms: 1 });
-  assert.equal(w.get('DomNode:chat:row:3000-3:me'), null, 'a stale answer is dropped');
-  assert.ok(late.url.endsWith('&sid='));
-  // a send in a session names it; the main chat sends no sid
-  w.click('DomNode:shell:s:ses_2');
-  w.reply('history', 200, { messages: [], more: false, next: null });
+  assert.equal(w.get('DomNode:shell:sessions'), null, 'no sessions column'); assert.equal(w.get('DomNode:shell:newsession'), null); assert.equal(w.get('Fetch:sessions'), null, 'no sessions fetch');
+  assert.equal(w.asked('history').url, '/membrane/chat/messages?limit=20', 'every turn of the seat, newest page first');
+  w.reply('history', 200, { messages: [MSG('1000-1', 'in main')], more: true, next: '1000-1' });
+  assert.equal(w.get('DomNode:chat:row:1000-1:me').text, 'in main'); assert.equal(w.get('DomNode:chat:older').hidden, false);
+  w.click('DomNode:chat:older:btn');
+  assert.equal(w.asked('older').url, '/membrane/chat/messages?limit=20&before=1000-1', 'Load older pages with before, no sid');
+  w.reply('older', 200, { messages: [MSG('900-0', 'an imported turn')], more: false, next: null });
+  assert.equal(w.get('DomNode:chat:row:900-0').before, 'DomNode:chat:row:1000-1', 'the older turn sits above, in the same thread');
   w.write('DomNode:chat:input', 'value', 'hello'); w.write('DomNode:chat:form', 'submitted', w.t);
-  assert.deepEqual(JSON.parse(w.asked('send').body), { text: 'hello', sid: 'ses_2' });
-  w.reply('send', 202, { id: '4000-4' });
-  w.click('DomNode:shell:s:main');
-  w.write('DomNode:chat:input', 'value', 'plain'); w.write('DomNode:chat:form', 'submitted', w.t);
-  assert.deepEqual(JSON.parse(w.asked('send').body), { text: 'plain' });
-});
-
-scenario('a new session: POST /session, the new one is picked and the list asked again; a refusal is text with its reason', () => {
-  const w = world(); w.boot(); w.reply('sessions', 200, SESSIONS);
-  w.click('DomNode:shell:newsession');
-  const q = w.asked('newsession');
-  assert.equal(q.method, 'POST'); assert.equal(q.url, '/session');
-  w.click('DomNode:shell:newsession'); assert.equal(w.reqs('newsession').length, 1, 'one at a time');
-  w.reply('newsession', 200, { id: 'ses_3', title: 'New session' });
-  assert.equal(w.get('Shell:main').sid, 'ses_3'); assert.equal(w.get('Focus:session').sid, 'ses_3');
-  assert.equal(w.reqs('sessions').length, 2, 'the list is asked again');
-  w.reply('sessions', 200, [...SESSIONS, { id: 'ses_3', title: 'New session' }]);
-  assert.equal(w.get('DomNode:shell:s:ses_3')['aria-current'], 'true');
-  // a refusal shows its reason; it is not silent
-  const v = world(); v.boot(); v.reply('sessions', 200, SESSIONS);
-  v.click('DomNode:shell:newsession'); v.reply('newsession', 403, { error: 'for the owner' });
-  assert.equal(v.n('error').hidden, false);
-  assert.match(v.n('error').text, /A new session could not be made: for the owner\./);
-  v.click('DomNode:shell:newsession'); v.fail('newsession', 'Failed to fetch');
-  assert.match(v.n('error').text, /Failed to fetch/);
-});
-
-scenario('a session list that fails is text, and the main chat still works', () => {
-  const w = world(); w.boot();
-  w.reply('sessions', 404, { error: 'not found' });
-  assert.match(w.n('error').text, /The sessions could not be listed: not found\./); assert.equal(w.n('error').hidden, false);
-  assert.equal(w.get('DomNode:shell:s:main').text, 'Main chat');
-  const v = world(); v.boot(); v.fail('sessions', 'Failed to fetch');
-  assert.match(v.n('error').text, /Failed to fetch/);
+  assert.deepEqual(JSON.parse(w.asked('send').body), { text: 'hello' });
+  w.reply('send', 403, { error: 'for the owner' });
+  assert.match(w.get('DomNode:chat:note:bubble').text, /for the owner/, 'a refusal is text');
 });
 
 scenario('the status line: connected or not, idle or a turn running; a poll every status_ms, not while hidden', () => {
@@ -215,7 +165,7 @@ scenario('the theme cycles system, light, dark on the page element', () => {
 });
 
 scenario('the work of a tick is bounded: an idle page between polls writes nothing', () => {
-  const w = world(); w.boot(); w.reply('sessions', 200, SESSIONS); w.reply('status', 200, {});
+  const w = world(); w.boot(); w.reply('status', 200, {});
   w.reply('history', 200, { messages: [MSG('1-1', 'x'), MSG('2-2', 'y')], more: false, next: null });
   const per = [];
   for (let i = 0; i < 20; i++) { const before = w.log.length; w.tick(0.1); per.push(w.log.length - before); }

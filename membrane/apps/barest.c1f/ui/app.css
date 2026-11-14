@@ -35,10 +35,10 @@ html, body { height: 100%; }
 #boot[role="alert"] { color: var(--note-ink); background: var(--note); padding: 8px 12px; border-radius: 8px; }
 #mount, .shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-/* the shell (shell_view.c1f): the bar, the nav, the sessions, the slots, the errors */
+/* the shell (shell_view.c1f): the bar, the nav, the slots, the errors */
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .bar h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: .01em; }
-.bar { order: 0; } .shell-error { order: 1; } .shell-body { order: 2; } .bar h1 { order: 0; } .nav { order: 1; } .conn { order: 2; } .theme { order: 3; } .sessions { order: 0; } .views { order: 1; }   /* the shell's children are made in the order the views register: the CSS fixes the page's order */
+.bar { order: 0; } .shell-error { order: 1; } .shell-body { order: 2; } .bar h1 { order: 0; } .nav { order: 1; } .conn { order: 2; } .theme { order: 3; }   /* the shell's children are made in the order the views register: the CSS fixes the page's order */
 .nav { display: flex; gap: 6px; }
 .nav button[aria-current="page"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .conn { font-size: 12px; color: var(--mute); margin-left: auto; }
@@ -46,10 +46,6 @@ html, body { height: 100%; }
 .conn[data-ok="1"]::before { background: var(--ok); }
 .shell-error { margin: 8px 16px 0; padding: 8px 12px; border-radius: 8px; background: var(--note); color: var(--note-ink); }
 .shell-body { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 12px 16px 16px; }
-.sessions { flex: 0 0 220px; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
-.sessionlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.sessionlist button { width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sessionlist button[aria-current="true"] { border-color: var(--accent); background: var(--me); }
 .views { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .slot { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .slot > .empty { margin: auto; color: var(--mute); font-size: 18px; }
@@ -166,8 +162,5 @@ html, body { height: 100%; }
 
 @media (max-width: 800px) {
   .shell-body { flex-direction: column; padding: 8px 16px 12px; }
-  .sessions { flex: 0 0 auto; flex-direction: row; align-items: center; overflow-x: auto; max-height: 52px; }
-  .sessionlist { flex-direction: row; }
-  .sessionlist button { width: auto; max-width: 160px; }
   .conn { margin-left: 0; }
 }
