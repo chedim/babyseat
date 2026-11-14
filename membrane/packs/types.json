@@ -205,7 +205,7 @@
       "ChatMessage.cost": "Any",
       "ChatMessage.evl": "List(Any)",
       "ChatMessage.evs": "List(Any)",
-      "ChatMessage.failed": "Text?",
+      "ChatMessage.fail_why": "Text?",
       "ChatMessage.final": "Any",
       "ChatMessage.finals": "List(Any)",
       "ChatMessage.key_set": "Bool?",
@@ -753,7 +753,7 @@
   },
   "door_session": {
     "getters": {
-      "ChatMessage.failed": "Text?",
+      "ChatMessage.fail_why": "Text?",
       "ChatMessage.model_shown": "Any",
       "ChatMessage.oc_acc": "Text",
       "ChatMessage.oc_aid": "Text",
@@ -1106,7 +1106,8 @@
   },
   "entity": {
     "getters": {
-      "Entity.summary": "Text?"
+      "Entity.summary": "Text?",
+      "Error.failed": "Any"
     },
     "writes": {},
     "findings": []

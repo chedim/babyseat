@@ -333,6 +333,14 @@ pub struct Fields {
     /// PRIVILEGE: pack -> who granted it (docs/c1f-layers.md). A privileged pack is exempt from rule B (it may write and create any class)
     /// and from nothing else: rule A (only the owner declares getters and setters on a class) is `compose`'s and stays.
     granted: std::collections::BTreeMap<String, String>,
+    /// the class `Error` bookkeeping (docs/c1f-error.md): the derived writes a `compute` made (the round's loop takes them into its queue), how many times each entity's
+    /// class entry flipped in this run, the entities whose flip was held back until the run ends, and whether a run is going (only a run can loop)
+    late: Vec<Write>,
+    flips: std::collections::HashMap<String, u8>,
+    class_deferred: std::collections::BTreeSet<String>,
+    /// entities that arrived (restored, loaded) holding a `failed`: its entries are checked against the getters at the next run
+    recon: std::collections::BTreeSet<String>,
+    in_run: bool,
     /// LAYERS: (eid, prop) -> the pack whose arm supplied a layered getter's value
     layer_of: std::collections::HashMap<(String, String), String>,
     /// the target (eid, prop) -> the (pack, setter) that wrote it FIRST this round: a stacked setter of another pack skips its write to it
@@ -382,7 +390,7 @@ impl Fields {
     pub fn goalgraph() -> Self {
         let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], unload_asked: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
-            known: Default::default(), primed: false, packs: Default::default(),
+            known: Default::default(), primed: false, late: vec![], flips: Default::default(), class_deferred: Default::default(), recon: Default::default(), in_run: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
         f.packs.insert("goalgraph".into(), gg);
@@ -463,6 +471,8 @@ impl Fields {
             eids.sort();
             for e in eids { self.emit_unchecked(core, &mut work, &e, &prop, J::Null, "pack-removed", seq, now); }
         }
+        self.reconcile_all(core, seq, now);       // a failure of a getter the field no longer has leaves with it
+        work.extend(std::mem::take(&mut self.late));
         if !work.is_empty() { self.new_round(); self.run(core, host, work, now, seq); }
     }
 
@@ -645,7 +655,7 @@ impl Fields {
     fn may_write_ent(&self, core: &Core, pack: &str, eid: &str) -> Result<(), String> {
         if pack.is_empty() || self.is_privileged(pack) { return Ok(()); }
         let Some(e) = core.docs.get(eid) else { return Ok(()) };
-        let names = e.class_names();
+        let names: Vec<String> = e.class_names().into_iter().filter(|c| !c.eq_ignore_ascii_case(crate::vm::ERROR_CLASS)).collect();   // the VM's own Error entry is no class of the writer's
         let mut first_err = None;
         for c in &names {
             match self.may_write(pack, c) {
@@ -683,7 +693,89 @@ impl Fields {
     }
 
     /// A new round: what the field wrote so far is forgotten (the loop guard, the first-write claims of the layers).
-    fn new_round(&mut self) { self.visited.clear(); self.claimed.clear(); }
+    fn new_round(&mut self) { self.visited.clear(); self.claimed.clear(); self.flips.clear(); }
+
+
+    // ---- the class `Error` (docs/c1f-error.md) ----------------------------------------------------------------------------------------
+    // A failed property is written by the VM as TWO derived writes (writer `error`: stamped like a getter's value, never journalled): the reason into the entity's `failed`
+    // dict, and the class `Error` on top of its class list (`parents`) while `failed` is not empty. Both are plain properties of the entity: they persist, a read of a
+    // property in `failed` is the Error (`View::attr`), and the getter keeps recomputing under it, so a success clears the entry.
+
+    /// How many times an entity's class entry may flip (gain, then lose, the class `Error`) inside ONE run before the rest is held until the run ends. A flip wakes the
+    /// readers of the class list, and a getter whose failure depends on the class list could flip it again: the bound makes that end.
+    const CLASS_FLIPS: u8 = 2;
+
+    /// A derived write of the VM's own bookkeeping: heard and put in `out` as `emit_as` does, but queued in `late` for the loop (a `compute` has no queue of its own).
+    fn derive(&mut self, core: &mut Core, eid: &str, prop: &str, new: J, seq: &mut i64, now: f64) {
+        let mut tmp = VecDeque::new();
+        self.emit_as(core, &mut tmp, eid, prop, new, "error", seq, now, false);
+        self.late.extend(tmp);
+    }
+
+    /// Property `prop` of `eid` now fails with `reason` (or no longer does): the entry in `failed` follows, and the class entry with it.
+    fn set_failure(&mut self, core: &mut Core, eid: &str, prop: &str, reason: Option<&str>, seq: &mut i64, now: f64) {
+        if prop == "failed" { return; }
+        let Some(e) = core.docs.get(eid) else { return };
+        if e.failure(prop) == reason { return; }
+        let mut next = e.props.get("failed").and_then(|f| f.as_object()).cloned().unwrap_or_default();
+        match reason { Some(r) => { next.insert(prop.to_string(), J::String(r.to_string())); } None => { next.remove(prop); } }
+        self.derive(core, eid, "failed", if next.is_empty() { J::Null } else { J::Object(next) }, seq, now);
+        self.sync_class(core, eid, false, seq, now);
+    }
+
+    /// The class `Error` is in the entity's list exactly while its `failed` is not empty. A flip beyond `CLASS_FLIPS` in one run is held (`class_deferred`).
+    fn sync_class(&mut self, core: &mut Core, eid: &str, forced: bool, seq: &mut i64, now: f64) {
+        let Some(e) = core.docs.get(eid) else { return };
+        let want = e.props.get("failed").and_then(|f| f.as_object()).map_or(false, |f| !f.is_empty());
+        let is_err = |n: &str| n.eq_ignore_ascii_case(crate::vm::ERROR_CLASS);
+        let parents = e.props.get("parents").cloned().unwrap_or(J::Null);
+        let have = crate::vm::parent_names(&parents).iter().any(|n| is_err(n));
+        if want == have { return; }
+        if !forced && self.in_run {
+            let n = self.flips.entry(eid.to_string()).or_default();
+            if *n >= Self::CLASS_FLIPS { self.class_deferred.insert(eid.to_string()); return; }
+            *n += 1;
+        }
+        let mut rest: Vec<J> = match &parents { J::Array(a) => a.clone(), J::Null => vec![], p => vec![p.clone()] };
+        rest.retain(|p| !p.as_str().map_or(false, |s| is_err(s.rsplit(':').next().unwrap_or(""))));
+        let own = format!("cls:{}", e.cls.to_lowercase());
+        let new = if want {
+            if rest.is_empty() { rest.push(J::String(own)); }
+            rest.insert(0, J::String(format!("cls:{}", crate::vm::ERROR_CLASS.to_lowercase())));
+            J::Array(rest)
+        } else if rest.is_empty() || (rest.len() == 1 && rest[0].as_str().map_or(false, |s| s.eq_ignore_ascii_case(&own))) { J::Null } else { J::Array(rest) };   // back to the birth default
+        if forced { self.emit_quiet(core, eid, "parents", new, seq, now); } else { self.derive(core, eid, "parents", new, seq, now); }
+    }
+
+    /// A derived write that wakes nobody (not queued, no reader marked): the end of a run settling an entity whose class entry flipped too often.
+    fn emit_quiet(&mut self, core: &mut Core, eid: &str, prop: &str, new: J, seq: &mut i64, now: f64) {
+        let mut tmp = VecDeque::new();
+        self.emit_as(core, &mut tmp, eid, prop, new, "error", seq, now, false);
+    }
+
+    /// The derived writes a `compute` made, outside a run: the readers of what they changed are marked (the loop of a run queues them instead).
+    fn flush_late(&mut self) {
+        for w in std::mem::take(&mut self.late) {
+            self.mark(&w.eid, &w.prop);
+            if w.prop == "parents" { self.mark_key(&(crate::vm::CLASS_READ.to_string(), crate::vm::ERROR_CLASS.to_string())); }
+            self.mark_refs(&w.prop, &w.old, &w.new);
+        }
+    }
+
+    /// An entity's `failed` names only properties it has a getter for NOW (a pack removed or redefined while it was stored, a class dropped): the others leave.
+    fn reconcile_failed(&mut self, core: &mut Core, eid: &str, seq: &mut i64, now: f64) {
+        let Some(e) = core.docs.get(eid) else { return };
+        let Some(f) = e.props.get("failed").and_then(|f| f.as_object()) else { return };
+        let live: std::collections::HashSet<String> = self.getters_of(core, eid).into_iter().map(|i| self.getters[i].prop.clone()).collect();
+        let gone: Vec<String> = f.keys().filter(|k| !live.contains(*k)).cloned().collect();
+        for k in gone { self.set_failure(core, eid, &k, None, seq, now); }
+    }
+
+    fn reconcile_all(&mut self, core: &mut Core, seq: &mut i64, now: f64) {
+        let mut es: Vec<String> = core.docs.iter().filter(|(_, e)| e.props.contains_key("failed")).map(|(k, _)| k.clone()).collect();
+        es.sort();
+        for e in es { self.reconcile_failed(core, &e, seq, now); }
+    }
 
     fn has_getter(&self, cls: &str, prop: &str) -> bool { self.getters.iter().any(|g| g.cls == cls && g.prop == prop) }
 
@@ -796,8 +888,10 @@ impl Fields {
         self.reads.insert(key, ins);
         match r {
             Ok(v) => {
-                match &nil { Some(n) if v.is_null() => { core.note_why(&key2, Some(n)); core.nulled.remove(&key2); } _ => { core.note_why(&key2, None); if v.is_null() { core.nulled.insert(key2); } else { core.nulled.remove(&key2); } } }   // a null remembers why (and whether it is a failure)
+                let mut fail: Option<String> = None;
+                match &nil { Some(n) if v.is_null() => { core.note_why(&key2, Some(n)); core.nulled.remove(&key2); if let crate::vm::Note::Error(r) = n { fail = Some(r.clone()); } } _ => { core.note_why(&key2, None); if v.is_null() { core.nulled.insert(key2.clone()); } else { core.nulled.remove(&key2); } } }   // a null remembers why; a failure goes to the entity's `failed`
                 { let nested = if v.is_array() || v.is_object() { std::mem::take(&mut core.nested_last) } else { vec![] }; core.set_nested(eid, &g.prop, nested); }
+                self.set_failure(core, eid, &g.prop, fail.as_deref(), seq, now);
                 Some(v)
             }
             Err(e) => {
@@ -805,6 +899,7 @@ impl Fields {
                 let reason = format!("error in getter {}.{}: {}; the value is null", g.cls, g.prop, e);
                 self.receipt(core, eid, &format!("getter:{}", g.prop), reason, J::Null, seq, now);
                 core.note_why(&key2, Some(&crate::vm::Note::Error(e.clone())));
+                self.set_failure(core, eid, &g.prop, Some(&e), seq, now);
                 Some(J::Null)
             }
         }
@@ -821,14 +916,14 @@ impl Fields {
             let null = core.docs.get(&cur.0).map(|e| e.props.get(&cur.1).map(|v| v.is_null()).unwrap_or(true)).unwrap_or(false);
             let gi = self.getters_of(core, &cur.0).into_iter().find(|&i| self.getters[i].prop == cur.1);
             if !null || gi.is_none() || !seen.insert(cur.clone()) { break; }
-            let reason = core.why.get(&cur).cloned();
+            let reason = core.reason_of(&cur);
             let mut node = json!({"eid": cur.0, "prop": cur.1, "reason": reason});
             if let Some(l) = core.locals.get(&cur) { node["locals"] = J::Object(l.clone()); }
             out.push(node);
             let Some(r) = reason else { break };
             // the input that is itself a null getter with the same reason is where this one came from
             let next = self.reads.get(&(cur.0.clone(), gi.unwrap())).and_then(|ins| ins.iter().find(|k| {
-                core.why.get(*k) == Some(&r) && core.docs.get(&k.0).map(|e| e.props.get(&k.1).map(|v| v.is_null()).unwrap_or(true)).unwrap_or(false)
+                core.reason_of(k).as_ref() == Some(&r) && core.docs.get(&k.0).map(|e| e.props.get(&k.1).map(|v| v.is_null()).unwrap_or(true)).unwrap_or(false)
             }).cloned());
             match next { Some(n) => cur = n, None => break }
         }
@@ -879,7 +974,7 @@ impl Fields {
         self.known.insert(e.to_string());
         if let Some(c) = core.docs.get(e).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c)); }
         for gi in self.getters_of(core, e) {
-            let Some(v) = self.compute(core, None, e, gi, now, seq) else { continue };
+            let v = self.compute(core, None, e, gi, now, seq); self.flush_late(); let Some(v) = v else { continue };
             let prop = self.getters[gi].prop.clone();
             if core.docs.get(e).and_then(|d| d.props.get(&prop)) == Some(&v) { continue; }
             *seq += 1;
@@ -905,10 +1000,12 @@ impl Fields {
             es.sort();
             for e in es {
                 if !self.is_node(core, &e, gi) { continue; }
-                let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
+                let v = self.compute(core, None, &e, gi, now, seq); self.flush_late(); let Some(v) = v else { continue };
                 if core.docs.get(&e).and_then(|d| d.props.get(&prop)) != Some(&v) { self.dirty.insert((self.glevel[gi], e, gi)); }
             }
         }
+        self.reconcile_all(core, seq, now);
+        self.flush_late();
     }
 
     /// Start-up (a rebuild, #994 decisions): compute every getter of every entity, lower levels first, and keep the
@@ -938,7 +1035,7 @@ impl Fields {
             if work.is_empty() { break; }
             for (gi, e) in work {
                 if !self.is_node(core, &e, gi) { continue; }
-                let Some(v) = self.compute(core, None, &e, gi, now, seq) else { continue };
+                let v = self.compute(core, None, &e, gi, now, seq); self.flush_late(); let Some(v) = v else { continue };
                 let prop = self.getters[gi].prop.clone();
                 let was = core.docs.get(&e).and_then(|d| d.props.get(&prop)).cloned();
                 if was.as_ref() == Some(&v) || (v.is_null() && was.is_none()) { continue; }
@@ -953,6 +1050,9 @@ impl Fields {
                 self.mark_refs(&prop, &was.unwrap_or(J::Null), &newv);
             }
         }
+        self.dirty.clear();
+        self.reconcile_all(core, seq, now);
+        self.flush_late();
         self.dirty.clear();
     }
 
@@ -1155,8 +1255,11 @@ impl Fields {
     /// recalculate, lowest level first, and a changed value is written (which can queue more). Until both are empty.
     fn run(&mut self, core: &mut Core, host: &dyn Host, mut work: VecDeque<Write>, now: f64, seq: &mut i64) {
         core.last_now = now;
+        self.in_run = true;
         self.complete_arrivals(core, now);
         self.sync(core, now, seq);
+        for e in std::mem::take(&mut self.recon) { self.reconcile_failed(core, &e, seq, now); }
+        work.extend(std::mem::take(&mut self.late));
         for k in core.sql_ready() { self.mark_key(&(crate::vm::SQL.to_string(), k)); }   // a query's rows are in
         if !self.inbound_by_host { for (e, cls, props) in core.inbound() { self.arrive(core, e, cls, props, now); } }   // the door pushed an entity (a request): born
         for (e, verb, rec) in core.effect_receipts() {                                       // a driver effect finished
@@ -1171,13 +1274,21 @@ impl Fields {
                 self.step(core, host, &mut work, w, now, seq);
                 continue;
             }
-            let Some((_, e, gi)) = self.dirty.pop_first() else { break };
+            let Some((_, e, gi)) = self.dirty.pop_first() else {
+                // the run is quiet: an entity whose class entry flipped too often settles to what its `failed` says, without waking anyone
+                let held = std::mem::take(&mut self.class_deferred);
+                for e in held { self.sync_class(core, &e, true, seq, now); }
+                break;
+            };
             // a getter of a class the entity no longer has (its `parents` changed after something marked it) computes nothing
             if !core.docs.get(&e).map_or(false, |d| class_rank(core, &e, d, &self.getters[gi].cls).is_some()) { continue; }
-            let Some(v) = self.compute(core, Some(host), &e, gi, now, seq) else { continue };
+            let v = self.compute(core, Some(host), &e, gi, now, seq);
+            work.extend(std::mem::take(&mut self.late));   // what the compute wrote for a failure (`failed`, the class entry) is heard like any write
+            let Some(v) = v else { continue };
             let prop = self.getters[gi].prop.clone();
             self.emit_unchecked(core, &mut work, &e, &prop, v, &format!("getter:{}", prop), seq, now);
         }
+        self.in_run = false;
     }
 
     /// Load a stored entity that is not loaded yet (a lazy class), as a restore does: its row's properties (a getter's value is computed again), its `updated`, its
@@ -1198,6 +1309,7 @@ impl Fields {
             let (cls, keys): (String, Vec<String>) = (d.cls.clone(), d.props.keys().cloned().collect());
             self.mark_key(&(crate::vm::CLASS_READ.to_string(), cls));
             self.known.insert(e.clone());
+            if d.props.contains_key("failed") { self.recon.insert(e.clone()); }
             for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
             for p in keys { self.mark(&e, &p); }
             // what read this eid while it was not there (its `eid`, its class) reads it now
@@ -1210,6 +1322,7 @@ impl Fields {
     pub fn arrive(&mut self, core: &mut Core, e: String, cls: String, props: serde_json::Map<String, J>, now: f64) {
         let keys: Vec<String> = props.keys().cloned().collect();
         self.mark_key(&(crate::vm::CLASS_READ.to_string(), cls.clone()));      // an arrival is a birth: what lists the class (`instances`) recalculates
+        if props.contains_key("failed") { self.recon.insert(e.clone()); }
         core.load(e.clone(), cls, props, None, now);
         self.known.insert(e.clone());
         for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
@@ -1221,11 +1334,17 @@ impl Fields {
         self.mark(&w.eid, &w.prop);
         // a `parents` write names kinds the entity did not have at its birth: the getters of those kinds are computed in this round (a getter
         // that gets a value then is an ordinary change: its setters fire)
-        if w.prop == "parents" && self.known.contains(&w.eid) && w.new != w.old {
+        if w.prop == "parents" && w.writer == "field:error" {
+            // the VM's own class entry: no getter of the entity changes with it (the class declares no getter but `failed`), what lists the class or reads the list wakes
+            self.mark_key(&(crate::vm::CLASS_READ.to_string(), crate::vm::ERROR_CLASS.to_string()));
+        } else if w.prop == "parents" && self.known.contains(&w.eid) && w.new != w.old {
             for gi in self.getters_of(core, &w.eid) { self.dirty.insert((self.glevel[gi], w.eid.clone(), gi)); }
             // the classes the entity lost: what their getters wrote is cleared (as a removed pack's), unless another class still has the getter
             let gone = self.lost_props(core, &w.eid, &w.old);
             for p in gone { self.emit_unchecked(core, work, &w.eid, &p, J::Null, "class-dropped", seq, now); }
+            // a person's list is the whole list: the class `Error` follows `failed` anyway
+            self.sync_class(core, &w.eid, false, seq, now);
+            work.extend(std::mem::take(&mut self.late));
         }
         self.mark_refs(&w.prop, &w.old, &w.new);
         {

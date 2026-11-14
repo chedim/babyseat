@@ -188,12 +188,12 @@ Request.cl_out on-setter cliff-finish:
     (this.cl_gp).retire = True
     (this.cl_sp).retire = True
 
--- ---- entity_read: the store's row (stored properties) or one property through the field ---------------------------------------------------
+-- ---- entity_read: the store's row (stored properties, a failed property shown as `Error: <reason>` through the entity's `failed`) or one property through the field ---------------------------------------------------
 Request.mc_r_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
 Request.mc_r_prop getter: prop(this.mc_args, 'prop')
 Request.mc_r_id getter: ('membrane::' + this.mc_r_spec) if prop('membrane::' + this.mc_r_spec, 'eid') != None and prop(this.mc_r_spec, 'eid') == None else this.mc_r_spec
 Request.mc_r_bad getter: 'entity_read needs spec (the entity\'s id)' if this.mc_r_spec == '' else None
-Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json_extract(body, \'$.props\') AS props FROM c_field WHERE k = ?', this.mc_r_id) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else None
+Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json_patch(json_remove(json_extract(body, \'$.props\'), \'$.failed\'), COALESCE((SELECT json_group_object(key, \'Error: \' || value) FROM json_each(json_extract(body, \'$.props.failed\'))), \'{}\')) AS props FROM c_field WHERE k = ?', this.mc_r_id) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else None
 Request.mc_r_val getter: prop(this.mc_r_id, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None else None
 Request.mc_r_text getter:
   WHEN this.mc_tool != 'entity_read' or this.mc_r_bad != None: None
@@ -217,7 +217,7 @@ Request.mc_q_off getter: max(num(prop(this.mc_args, 'offset')) or 0, 0)
 Request.mc_q_k getter: min(max(num(prop(this.mc_args, 'k')) or 20, 1), 100)
 Request.mc_q_bad getter: 'entity_query: unsupported term ' + this.mc_q_other[0] + ' (kind:<Class>, kind!:<Class> and name~:<eid prefix>, joined with &)' if len(this.mc_q_other) > 0 else None
 Request.mc_q_on getter: this.mc_tool == 'entity_query' and this.mc_q_bad == None
-Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls, CASE WHEN ? = 1 THEN json_extract(body, \'$.props\') END AS props FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?', 1 if prop(this.mc_args, 'full') == True else 0, this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
+Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls, CASE WHEN ? = 1 THEN json_patch(json_remove(json_extract(body, \'$.props\'), \'$.failed\'), COALESCE((SELECT json_group_object(key, \'Error: \' || value) FROM json_each(json_extract(body, \'$.props.failed\'))), \'{}\')) END AS props FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?', 1 if prop(this.mc_args, 'full') == True else 0, this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
 Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name) if this.mc_q_on and prop(this.mc_args, 'count') == True else None
 Request.mc_q_text getter:
   WHEN not this.mc_q_on: None

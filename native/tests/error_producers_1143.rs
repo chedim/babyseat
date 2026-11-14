@@ -83,8 +83,8 @@ fn world(pack: &str, props: J) -> (Core, Fields) {
     (c, f)
 }
 fn val(c: &Core, p: &str) -> J { c.docs["Box:a"].props.get(p).cloned().unwrap_or(J::Null) }
-fn failed(c: &Core, p: &str) -> bool { c.failed.contains(&("Box:a".to_string(), p.to_string())) }
-fn why(c: &Core, p: &str) -> Option<String> { c.why.get(&("Box:a".to_string(), p.to_string())).cloned() }
+fn failed(c: &Core, p: &str) -> bool { c.docs["Box:a"].failure(p).is_some() }
+fn why(c: &Core, p: &str) -> Option<String> { c.reason_of(&("Box:a".to_string(), p.to_string())) }
 
 #[test]
 fn a_getter_body_that_raised_is_an_error_with_the_raised_text_and_a_receipt_still_names_the_getter() {

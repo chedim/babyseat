@@ -75,7 +75,12 @@ pub fn birth_props(cls: &str, mut props: Map<String, J>) -> Map<String, J> {
     props
 }
 
+/// The class a failed entity carries (docs/c1f-error.md): the root pack declares it, the VM writes it on top of the class list while `failed` is not empty.
+pub const ERROR_CLASS: &str = "Error";
+
 impl Ent {
+    /// The reason property `prop` failed with (the entity's `failed` dict), if it did.
+    pub fn failure(&self, prop: &str) -> Option<&str> { self.props.get("failed").and_then(|f| f.as_object()).and_then(|f| f.get(prop)).and_then(|r| r.as_str()) }
     /// THE CLASS LIST (#1143): the entity's `parents`, nearest first; the eid class (`cls`) only when it has none (the birth default).
     /// The root `Entity` is implicitly last and is not in the list.
     pub fn class_names(&self) -> Vec<String> {
@@ -197,8 +202,6 @@ pub struct Core {
     /// why a null getter value is null: (eid, prop) -> reason. The value itself is stored as a plain JSON null; reading it back through
     /// an expression gives `V::Nil(reason)` so the reason travels (fields.rs writes it, `why_chain` reads it)
     pub why: std::collections::BTreeMap<(String, String), String>,
-    /// the (entity, property) whose `why` is an ERROR (a failure), not a null's note: reading it back gives `V::Error` (docs/c1f-error.md)
-    pub failed: std::collections::BTreeSet<(String, String)>,
     /// (entity, property) a getter computed as a plain null (no reason): that null is held, not absent (`View::attr`)
     pub nulled: std::collections::BTreeSet<(String, String)>,
     /// the reasoned nulls inside the list or dict the last `eval_traced` returned (`expr::nested_nulls`), for the getter that stores it
@@ -274,7 +277,7 @@ fn bget<'a>(b: &'a Binding, v: &str) -> Option<&'a String> {
 }
 
 /// What a getter's null value says: a null's note (`absent`, `pending`, `None('why')`) or a FAILURE (`Error`, docs/c1f-error.md). Both are stored as a plain
-/// JSON null; the reason lives in `Core.why`, and an Error's kind in `Core.failed`.
+/// JSON null; a null's reason lives in `Core.why`, an Error's in the entity's own `failed` property (the class `Error`, `Fields::set_failure`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Note { Null(String), Error(String) }
 impl Note { pub fn reason(&self) -> &str { match self { Note::Null(r) | Note::Error(r) => r } } pub fn is_error(&self) -> bool { matches!(self, Note::Error(_)) } }
@@ -291,15 +294,18 @@ impl<'a> expr::World for View<'a> {
         match attr {
             "eid" => V::Str(eid.to_string()),
             // the first class of the list (the eid class when it is the first, as written there otherwise)
-            "cls" => V::Str(match e.class_names().into_iter().next() { Some(c) if !c.eq_ignore_ascii_case(&e.cls) => c, _ => e.cls.clone() }),
+            "cls" => V::Str(match e.class_names().into_iter().find(|c| !c.eq_ignore_ascii_case(ERROR_CLASS)) { Some(c) if !c.eq_ignore_ascii_case(&e.cls) => c, _ => e.cls.clone() }),
             "position" => e.pos.as_ref().map(|p| V::List(p.iter().map(|x| V::Float(*x)).collect())).unwrap_or(V::None),
             UPDATED => V::Float(self.core.updated.get(eid).copied().unwrap_or(0.0)),   // provided by the VM: shadows a stored property of that name
             TOUCHED if !e.props.contains_key(TOUCHED) => V::Int(e.touched.get() as i64),   // likewise (reading it is no touch), unless the entity stores a property of that name (the Python-era `Turn.touched`): its own wins
             PINNED => match self.core.pinned_reason(eid) { Some(r) => V::Str(r), None => V::Bool(false) },
-            _ => { e.touched.set(self.core.bump()); match e.props.get(attr) {
+            _ => { e.touched.set(self.core.bump());
+              // the class `Error` overlay: a property listed in the entity's `failed` reads as the Error, whatever it stores (the getter still recomputes under it)
+              if let Some(r) = e.failure(attr) { return V::Error(r.to_string()); }
+              match e.props.get(attr) {
                 Some(j) if !j.is_null() => { let mut v = expr::from_json(j); if matches!(v, V::List(_) | V::Dict(_)) { self.core.overlay_nested(eid, attr, &mut v); } v }
                 // a getter that computed None (`nulled`) is a plain null; a property the entity never had says `absent`, naming both
-                _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| if self.core.failed.contains(&(eid.to_string(), attr.to_string())) { V::Error(r.clone()) } else { V::Nil(r.clone()) }).unwrap_or_else(|| if self.core.nulled.contains(&(eid.to_string(), attr.to_string())) { V::None } else { V::Nil(format!("absent: {eid}.{attr}")) }),
+                _ => self.core.why.get(&(eid.to_string(), attr.to_string())).map(|r| V::Nil(r.clone())).unwrap_or_else(|| if self.core.nulled.contains(&(eid.to_string(), attr.to_string())) { V::None } else { V::Nil(format!("absent: {eid}.{attr}")) }),
             } },
         }
     }
@@ -380,7 +386,7 @@ pub enum Step {
 impl Core {
     pub fn new() -> Self {
         Core {
-            why: Default::default(), failed: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
+            why: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
             docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), queue_writes: true, dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
@@ -632,7 +638,7 @@ impl Core {
         self.state.remove(eid);
         let lo = (eid.to_string(), String::new());
         let keys: Vec<(String, String)> = self.why.range(lo.clone()..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
-        for k in keys { self.why.remove(&k); self.failed.remove(&k); }
+        for k in keys { self.why.remove(&k); }
         let keys: Vec<(String, String)> = self.nulled.range(lo.clone()..).take_while(|(e, _)| e == eid).cloned().collect();
         for k in keys { self.nulled.remove(&k); }
         let keys: Vec<(String, String)> = self.locals.range(lo..).take_while(|(k, _)| k.0 == eid).map(|(k, _)| k.clone()).collect();
@@ -796,12 +802,18 @@ impl Core {
         self.eval(src, &env)
     }
 
-    /// Record why a getter's value is null (or that it is not): `why` the reason, `failed` whether it is a failure. Nested notes are the caller's.
+    /// Record why a getter's value is null (or that it is not). A null's note is kept in `why`; a failure is NOT (it lives in the entity's `failed`,
+    /// `Fields::set_failure`). Nested notes are the caller's.
     pub fn note_why(&mut self, key: &(String, String), note: Option<&Note>) {
         match note {
-            Some(n) => { self.why.insert(key.clone(), n.reason().to_string()); if n.is_error() { self.failed.insert(key.clone()); } else { self.failed.remove(key); } }
-            None => { self.why.remove(key); self.failed.remove(key); }
+            Some(Note::Null(r)) => { self.why.insert(key.clone(), r.clone()); }
+            _ => { self.why.remove(key); }
         }
+    }
+
+    /// Why (entity, property) is null: a failure's reason (the entity's `failed`) or a null's note.
+    pub fn reason_of(&self, key: &(String, String)) -> Option<String> {
+        self.docs.get(&key.0).and_then(|e| e.failure(&key.1)).map(String::from).or_else(|| self.why.get(key).cloned())
     }
 
     /// The engine's own built-ins that need the Core: `sql(query, args...)` (the store driver, store.rs). None: not one.
