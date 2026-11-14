@@ -1,0 +1,178 @@
+{
+ "facts": [
+  {
+   "q": "What is Agatha to the user?",
+   "msgs": [
+    "1794591104070-2450"
+   ],
+   "keeps": [
+    "agatha"
+   ]
+  },
+  {
+   "q": "What model of boat is Agatha?",
+   "msgs": [
+    "1794592634468-7711"
+   ],
+   "keeps": [
+    "agatha-model"
+   ]
+  },
+  {
+   "q": "Which drive kit does the boat use?",
+   "msgs": [
+    "1794593107363-10457"
+   ],
+   "keeps": [
+    "agatha-drive-kit"
+   ]
+  },
+  {
+   "q": "Did the prop ship with the drive kit?",
+   "msgs": [
+    "1794593274361-10837"
+   ],
+   "keeps": [
+    "agatha-drive-kit"
+   ]
+  },
+  {
+   "q": "Did the user check that the reduction matched when ordering the kit?",
+   "msgs": [
+    "1794593313645-11058"
+   ],
+   "keeps": [
+    "agatha-reduction-checked"
+   ]
+  },
+  {
+   "q": "How was the autopilot built and what is under maintenance?",
+   "msgs": [
+    "1794592852299-8987"
+   ],
+   "keeps": [
+    "agatha-autopilot"
+   ]
+  },
+  {
+   "q": "Which computer does the assistant run on?",
+   "msgs": [
+    "1794592915946-9365"
+   ],
+   "keeps": [
+    "host-macbook"
+   ]
+  },
+  {
+   "q": "What is the battery voltage and chemistry?",
+   "msgs": [
+    "1794595373225-5476"
+   ],
+   "keeps": [
+    "agatha-rig"
+   ]
+  },
+  {
+   "q": "What was Blurp and when was it disabled?",
+   "msgs": [
+    "1794591589363-2638"
+   ],
+   "keeps": [
+    "blurp-disabled"
+   ]
+  },
+  {
+   "q": "What did membrane and the semantic field start as?",
+   "msgs": [
+    "1794591151153-2722"
+   ],
+   "keeps": [
+    "babyseat"
+   ]
+  },
+  {
+   "q": "How does the user describe the old python version?",
+   "msgs": [
+    "1794591340404-933"
+   ],
+   "keeps": [
+    "py-is-prototype"
+   ]
+  },
+  {
+   "q": "What is the longest river that lies entirely in Europe?",
+   "msgs": [
+    "1794589309706-4573",
+    "1794589485741-4845"
+   ],
+   "keeps": [
+    "geo-quiz"
+   ]
+  },
+  {
+   "q": "What is the largest lake in the Americas by surface area?",
+   "msgs": [
+    "1794589495634-4853"
+   ],
+   "keeps": [
+    "geo-quiz"
+   ]
+  },
+  {
+   "q": "Why must the logic move out of /tmp?",
+   "msgs": [
+    "1794633984512-6292"
+   ]
+  },
+  {
+   "q": "Which new magic entity writes results back to the assistant?",
+   "msgs": [
+    "1794586305503-4641"
+   ]
+  },
+  {
+   "q": "Which motor controller did the user ask about as an upgrade?",
+   "msgs": [
+    "1794595146184-4227"
+   ]
+  },
+  {
+   "q": "When was the assistant restarted with the lazy loading feature?",
+   "msgs": [
+    "1794595578745-317"
+   ]
+  },
+  {
+   "q": "What tool did the user propose to detect lost continuity in the chat?",
+   "msgs": [
+    "1794596063870-1828"
+   ],
+   "keeps": [
+    "continuity-watchdog"
+   ]
+  },
+  {
+   "q": "Which build is the assistant running in?",
+   "msgs": [
+    "1794636482003-187"
+   ],
+   "keeps": [
+    "rc1"
+   ]
+  },
+  {
+   "q": "Which package was the assistant told to install for synonyms?",
+   "msgs": [
+    "1794633416422-3840"
+   ],
+   "keeps": [
+    "nltk-wordnet"
+   ]
+  }
+ ],
+ "abstain": [
+  "What is the name of the user's dog?",
+  "Which airline did the user fly to Lisbon last summer?",
+  "What is the user's favorite pizza topping?"
+ ]
+}
