@@ -56,13 +56,14 @@ export ANTHROPIC_API_KEY=sk-ant-...                # the claude turn's key (see 
 ./dist/0.7.60/bin/cliffvm serve
 ```
 
-It prints, in this order:
+With no `ANTHROPIC_API_KEY` it first warns that the chat will refuse a message until you set one. It prints, in this order:
 
 ```
 cliffvm serve: claude CLI: /path/to/claude
 cliffvm serve: data ~/Library/Application Support/membrane (the door's secret and the admin token are made here)
 cliffvm: door listening on 127.0.0.1:4096
 cliffvm serve: open http://127.0.0.1:4096/
+cliffvm serve: a localhost peer is not the admin: a local tool sends the admin token, written (mode 600, new at every start) to <data>/admin.token
 cliffvm serve: curl -H "Authorization: Bearer $(cat <data>/admin.token)" http://127.0.0.1:4096/global/health
 ```
 
