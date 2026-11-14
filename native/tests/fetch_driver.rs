@@ -337,3 +337,24 @@ fn a_stream_that_stalls_past_the_timeout_also_ends_with_a_done_chunk() {
     assert_eq!(done.len(), 1);
     assert!(done[0].as_str().unwrap_or("").contains("read"), "{:?}", done);
 }
+
+// A Fetch receipt carries the same timing a Command's does (#1143, a live finding): started and finished (epoch seconds) and ms.
+#[test]
+fn a_fetch_receipt_carries_started_finished_and_ms_like_a_commands_and_a_refusal_too() {
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    let (port, _rx) = serve(|_| { std::thread::sleep(std::time::Duration::from_millis(300)); vec![b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec()] });
+    let (mut c, mut f) = world();
+    let t0 = now();
+    put(&mut c, &mut f, json!({"id": "t1", "url": format!("http://127.0.0.1:{port}/")}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").is_some());
+    let t1 = now();
+    let r = c.docs["Fetch:m"].props["request_result"].clone();
+    let (st, fin, ms) = (r["started"].as_f64().unwrap_or_else(|| panic!("{r}")), r["finished"].as_f64().unwrap(), r["ms"].as_f64().unwrap());
+    assert!(st >= t0 - 0.01 && fin <= t1 + 0.01 && st < fin, "{st} {fin} within {t0}..{t1}");
+    assert!(ms >= 250.0 && ((fin - st) * 1000.0 - ms).abs() < 5.0, "ms {ms} vs {st}..{fin}");
+    // a refusal (a bad url) has them too
+    put(&mut c, &mut f, json!({"id": "t2", "url": "nonsense"}));
+    pump(&mut c, &mut f, |c| c.docs["Fetch:m"].props.get("request_result").map(|r| r["id"] == json!("t2")).unwrap_or(false));
+    let r = &c.docs["Fetch:m"].props["request_result"];
+    assert!(r["started"].is_f64() && r["finished"].is_f64() && r["ms"].is_u64(), "{r}");
+}

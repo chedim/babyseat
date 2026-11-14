@@ -140,7 +140,19 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
         }
         ("Fetch", "request") => {                          // outbound http (fetch.rs): the receipt is data; a stream arrives as Chunk entities
             let req2 = req.clone();
-            st.effect_limited(eid, verb, Box::new(move |sh, eid| crate::fetch::request(&Store::from_shared(sh), eid, &req2)));
+            st.effect_limited(eid, verb, Box::new(move |sh, eid| {
+                // the same timing a Command's receipt carries (started, finished in epoch seconds; ms), on a refusal too
+                let epoch = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+                let (t_start, t_clock) = (epoch(), std::time::Instant::now());
+                let mut r = crate::fetch::request(&Store::from_shared(sh), eid, &req2);
+                let round3 = |x: f64| (x * 1000.0).round() / 1000.0;
+                if let Some(m) = r.as_object_mut() {
+                    m.insert("started".into(), json!(round3(t_start)));
+                    m.insert("finished".into(), json!(round3(epoch())));
+                    m.insert("ms".into(), json!(t_clock.elapsed().as_millis() as u64));
+                }
+                r
+            }));
         }
         ("Request", "verify") => {                         // a token the request carries: checked with its door's secret
             let (req2, http) = (req.clone(), props.get("http").and_then(|h| h.as_str()).unwrap_or("").to_string());

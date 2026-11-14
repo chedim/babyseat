@@ -152,9 +152,14 @@ if os.path.exists(os.path.join(here, "fail")):
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 out({"type": "system", "subtype": "init", "session_id": "fake-1", "tools": ["mcp__membrane__entity_read"]})
+if os.path.exists(os.path.join(here, "die")):   # killed by a signal after its init line, with something on stderr
+    sys.stderr.write("fake: about to be killed\n"); sys.stderr.flush()
+    import signal; os.kill(os.getpid(), signal.SIGKILL)
+if os.path.exists(os.path.join(here, "noresult")):   # ends cleanly with no result line and no text
+    sys.exit(0)
 padp = os.path.join(here, "pad")   # a file `pad`: ~200 KB of partial-message lines before the answer (the raw output of a long turn)
 if os.path.exists(padp):
-    for i in range(200):
+    for i in range(int(open(padp).read().strip() or 200)):   # the file's number is the line count (default 200)
         out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": ("pad %d " % i) * 160}}})
 cfg = json.loads(argv[argv.index("--mcp-config") + 1])
 url = cfg["mcpServers"]["membrane"]["url"]
@@ -1426,6 +1431,11 @@ fn a_timed_out_commands_result_props_are_errors_that_tell_the_remedy_and_the_par
     // entity_read shows the kind too, and says it is an error
     let (t, e) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "output"}));
     assert!(e && t == format!("Error: {want}"), "entity_read: {t}");
+    // the WHOLE-entity read shows each failed result prop as `Error: <reason>` too (it left them out)
+    let (t, _) = call(port, "entity_read", json!({"spec": "Command:t2"}));
+    for p in ["output", "ok", "rc", "errors"] {
+        assert!(t.lines().any(|l| l == format!("{p}: Error: {want}")), "the whole read shows {p} as an Error: {t}");
+    }
     // a model-style getter over it keeps the Error and the reason
     let pack = "PACK shx 1\nSh.out getter: prop('Command:t2', 'output')\nSh.len getter: this.out + '!'\n";
     put(port, "Pack:shx", "text", json!(pack));
@@ -1614,5 +1624,49 @@ fn a_turn_whose_cli_sends_a_wrong_token_fails_visibly() {
     assert_eq!(v["state"], "error", "{v}");
     let r = v["response"].as_str().unwrap();
     assert!(r.contains("claude failed") && r.contains("401"), "the 401 reaches the answer: {r}");
+    assert!(terminate(&mut run));
+}
+
+// ---- a turn that finished with an answer but whose output was too big to read in one evaluation (#1143, the live "error with no cause") ------
+// The live finding: a 115 s turn, rc 0, a result line, 1 MB of stream-json: `ChatMessage.evs` parsed every line in ONE getter and passed the 10 ms self-time
+// allowance (a `Trip:...#evs` entity, `timeout N ms (allowance 10 ms)`), the Trip's Error flowed into `finals`/`failed`, and the turn ended `error` with no response
+// (the response write carried an Error, which setters refuse) and no cause. The fake pads its stream with N lines to make the same size.
+#[test]
+fn a_turn_with_a_final_answer_is_done_even_when_its_output_is_too_big_to_read_in_one_evaluation() {
+    let (mut run, port, dir) = fake_seat("bigdone", &[]);
+    std::fs::write(dir.join("pad"), "800").unwrap();
+    let id = send(port, "huge output");
+    let v = finish(port, &dir, &id, "huge output");
+    assert_eq!(v["state"], "done", "the stream gave a final answer: {v}");
+    assert_eq!(v["response"], "Final answer to: huge output", "{v}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_turn_the_cli_died_in_stores_its_cause_on_the_turn_the_response_and_the_next_banner() {
+    let (mut run, port, dir) = fake_seat("diedturn", &[]);
+    std::fs::write(dir.join("die"), "").unwrap();
+    let id = send(port, "dies");
+    let v = wait("the error", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
+    let r = v["response"].as_str().unwrap_or("").to_string();
+    assert!(r.contains("rc") && r.contains("about to be killed"), "the response names how it ended and the stderr: {v}");
+    assert!(r.contains("signal"), "a death by signal says so, not a bare rc: {v}");
+    let (e, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:message:{id}:turn"), "prop": "error"}));
+    assert!(e.contains("about to be killed"), "the turn itself carries the cause: {e}");
+    std::fs::remove_file(dir.join("die")).unwrap();
+    send(port, "after");
+    let sys = system_prompt(&dir, "after");
+    assert!(sys.contains("THE PREVIOUS TURN ENDED WITH AN ERROR") && sys.contains("about to be killed"), "{sys}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_run_that_ends_with_no_answer_at_all_is_an_error_that_says_so() {
+    let (mut run, port, dir) = fake_seat("noresultturn", &[]);
+    std::fs::write(dir.join("noresult"), "").unwrap();
+    let id = send(port, "silent");
+    let v = wait("the end", || { let v = view(port, &id); if v["state"] == "error" || v["state"] == "done" { Some(v) } else { None } });
+    assert_eq!(v["state"], "error", "{v}");
+    assert!(v["response"].as_str().unwrap_or("").contains("no answer"), "{v}");
     assert!(terminate(&mut run));
 }

@@ -284,9 +284,9 @@ struct View<'a> { core: &'a Core }
 impl<'a> expr::World for View<'a> {
     fn attr(&self, eid: &str, attr: &str) -> V {
         let Some(e) = self.core.docs.get(eid) else {
-            if self.core.unloaded.contains_key(eid) { self.core.wanted.borrow_mut().insert(eid.to_string()); }   // stored, not loaded: asked for (the host loads it between rounds)
+            if self.core.unloaded.contains_key(eid) { self.core.wanted.borrow_mut().insert(eid.to_string()); return V::None; }   // stored, not loaded: asked for (the host loads it between rounds), not absent
             if self.core.collected_set.contains(eid) { return V::Nil(COLLECTED.to_string()); }   // a virtual entity nothing held any more: a null that says so
-            return V::None;
+            return V::Nil(format!("absent: {eid} does not exist"));   // an entity that is not there: a null that says so
         };
         match attr {
             "eid" => V::Str(eid.to_string()),

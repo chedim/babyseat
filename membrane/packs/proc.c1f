@@ -30,6 +30,8 @@ Command.output getter:
 Command.errors getter:
   WHEN this.timed_out: Error(this.timeout_why)
   ELSE: prop(this.run_result, 'stderr') if this.run_result else None
+-- the result props that are Errors after a timeout, named for the whole-entity read (packs/door_tools.c1f, `mc_r_failed`)
+Command.failed_props getter: ['output', 'errors', 'ok', 'rc'] if this.timed_out else []
 Command.partial_output getter: prop(this.run_result, 'stdout') if this.timed_out else None
 Command.partial_errors getter: prop(this.run_result, 'stderr') if this.timed_out else None
 -- A run in flight is told apart from one never started (#1143): the engine notes `running` = {id, started} (the clock of the write) when it takes a `run` (the

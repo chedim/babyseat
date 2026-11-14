@@ -127,3 +127,17 @@ fn a_write_of_the_value_a_property_holds_runs_no_setter_and_a_new_value_does() {
     go(2);          // a new value runs it
     assert_eq!(h.get("Watch:main", "last_keeps"), json!(4));
 }
+
+// ---- a missing ENTITY says so too (#1143, a live finding): `why(Box:zzz.total)` was a plain null ----
+
+#[test]
+fn a_missing_entity_is_a_null_that_says_it_does_not_exist_and_a_missing_property_on_a_real_one_still_names_the_property() {
+    let h = host("PACK sem 1\nBox.ent getter: why(prop('Box:zzz', 'total'))\nBox.lit getter: why(Box:zzz.total)\nBox.real getter: why(prop('Box:b', 'total'))\nBox.alt getter: prop('Box:zzz', 'total') or 5\nBox.isnone getter: prop('Box:zzz', 'total') == None\n");
+    born(&h, "Box:b", json!({}));
+    born(&h, "Box:a", json!({}));
+    assert_eq!(h.get("Box:a", "ent"), json!("absent: Box:zzz does not exist"));
+    assert_eq!(h.get("Box:a", "lit"), json!("absent: Box:zzz does not exist"));
+    assert_eq!(h.get("Box:a", "real"), json!("absent: Box:b.total"));
+    assert_eq!(h.get("Box:a", "alt"), json!(5), "still null the old ways");
+    assert_eq!(h.get("Box:a", "isnone"), json!(true));
+}

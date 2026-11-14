@@ -143,7 +143,7 @@
       "ChatMessage",
       "Chunk"
     ],
-    "members": 49,
+    "members": 51,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
@@ -151,6 +151,7 @@
       "membrane:*.cost",
       "membrane:*.duration",
       "membrane:*.ended",
+      "membrane:*.error",
       "membrane:*.mention",
       "membrane:*.result",
       "membrane:*.run",
@@ -546,7 +547,7 @@
       "Request",
       "Return"
     ],
-    "members": 85,
+    "members": 86,
     "writes": [
       "*.[]",
       "*.go",
@@ -813,7 +814,7 @@
     "classes": [
       "Command"
     ],
-    "members": 10,
+    "members": 11,
     "writes": [],
     "claims": [],
     "boot_facts": [

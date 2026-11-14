@@ -94,6 +94,7 @@ Chat.plan on-setter turn-start:
   WHEN prop(this.plan, 'refuse') != None:
     membrane::Chat:message[this.mid]:turn.state = 'error'
     membrane::Chat:message[this.mid]:turn.ended = clock
+    membrane::Chat:message[this.mid]:turn.error = prop(this.plan, 'refuse')
     membrane::Chat:message[this.mid]:turn:response = ChatResponse(text: prop(this.plan, 'refuse'), error: True)
   ELSE WHEN prop(this.plan, 'argv') != None:
     membrane::Chat:message[this.mid]:turn.state = 'running'
@@ -125,15 +126,24 @@ Chunk.part on-setter partial-in:
 -- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
 ChatMessage.rr getter: prop('membrane::Command:chat:' + this.mid, 'run_result')
 ChatMessage.rc getter: prop(this.rr, 'rc')
-ChatMessage.evs getter: [e for e in [json(l) for l in lines(str(prop(this.rr, 'stdout') or ''))] if e is not Error and prop(e, 'type') != None]
-ChatMessage.finals getter: [e for e in this.evs if prop(e, 'type') == 'result']
+-- THE STREAM IS READ IN SMALL EVALUATIONS (#1143, a live turn that ended `error` with no cause): a long turn's stdout is a megabyte of lines, and one getter that parsed them all
+-- passed the self-time allowance (a Trip: its Error flowed on into `failed`). The result line is read on its own (`rlines`, `finals`: one line parsed), and `evs` skips the
+-- `stream_event` partials (the bulk, 90% of the bytes: they were the live text, the finished messages say the same). `evl` is `evs` or an empty list: a stream that could not be read costs
+-- the tools and the spoken text, never the answer the result line gave.
+ChatMessage.rlines getter: [l for l in lines(str(prop(this.rr, 'stdout') or '')) if '"result"' in l]
+ChatMessage.evs getter: [e for e in [json(l) for l in lines(str(prop(this.rr, 'stdout') or '')) if not (startswith(l, '{"type":"stream_event"') or startswith(l, '{"type": "stream_event"'))] if e is not Error and prop(e, 'type') != None]
+ChatMessage.evl getter: this.evs if this.evs is List else []
+ChatMessage.finals getter: [e for e in [json(l) for l in this.rlines] if e is not Error and prop(e, 'type') == 'result']
 ChatMessage.final getter: this.finals[-1]
-ChatMessage.texts getter: [join([prop(b, 'text') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'text'], '') for e in this.evs if prop(e, 'type') == 'assistant']
+ChatMessage.texts getter: [join([prop(b, 'text') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'text'], '') for e in this.evl if prop(e, 'type') == 'assistant']
 ChatMessage.spoken getter: strip(join([t for t in this.texts if t != ''], '\n\n'))
 ChatMessage.capped getter: str(prop(this.final, 'subtype') or '') == 'error_max_turns'
 ChatMessage.failed getter:
   WHEN this.rr == None: None
+  ELSE WHEN this.final == None and this.rc == -1: 'claude ended without an exit code (killed by a signal, or it never started) (rc -1): ' + strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or ''))
   ELSE WHEN this.final == None and this.rc != 0: 'claude failed (rc ' + str(this.rc) + '): ' + strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or ''))
+  ELSE WHEN this.final == None and this.evs is Error: 'claude ended with no result line and its output could not be read (' + (why(this.evs) or 'unreadable') + ')'
+  ELSE WHEN this.final == None and this.spoken == '': 'claude ended with no answer at all (rc ' + str(this.rc) + ': no result line, no text)'
   ELSE WHEN prop(this.final, 'is_error') == True: 'claude reported an error: ' + str(prop(this.final, 'result'))
   ELSE: None
 ChatMessage.answer getter:
@@ -147,9 +157,9 @@ ChatMessage.tokens getter: prop(this.final, 'usage')
 ChatMessage.cost getter: prop(this.final, 'total_cost_usd')
 ChatMessage.calls getter: prop(this.final, 'num_turns')
 ChatMessage.took getter: prop(this.final, 'duration_ms')
-ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evs if prop(e, 'type') == 'assistant'], ' '))
+ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evl if prop(e, 'type') == 'assistant'], ' '))
 -- the ids of the tools in the order they were called (the stream's order): the page reads each tool entity by `...:turn:tool:<id>` in this order
-ChatMessage.tools_idlist getter: join([join([str(prop(b, 'id')) for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evs if prop(e, 'type') == 'assistant'], ' ')
+ChatMessage.tools_idlist getter: join([join([str(prop(b, 'id')) for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evl if prop(e, 'type') == 'assistant'], ' ')
 -- the turn is over once its state is done or error. The finish below runs only while it is not: the answer is derived from the receipt, and the slimming
 -- below changes the receipt, so a finished turn keeps the response it wrote.
 ChatMessage.over getter: this.tstate == 'done' or this.tstate == 'error'
@@ -157,6 +167,7 @@ Chat.answer on-setter turn-finish:
   WHEN this.answer != None and not this.over:
     membrane::Chat:message[this.mid]:turn.state = 'error' if this.failed != None else 'done'
     membrane::Chat:message[this.mid]:turn.ended = clock
+    membrane::Chat:message[this.mid]:turn.error = this.failed
     membrane::Chat:message[this.mid]:turn.usage = this.tokens
     membrane::Chat:message[this.mid]:turn.cost = this.cost
     membrane::Chat:message[this.mid]:turn.calls = this.calls
@@ -167,10 +178,10 @@ Chat.answer on-setter turn-finish:
     FOR t IN ([this.answer] if this.failed == None else []):
       membrane::Chat:message[this.mid]:turn:response:body = SemText(text: t)
       membrane::Chat:message[this.mid]:turn:response:body.mention = True
-    FOR e IN [x for x in this.evs if prop(x, 'type') == 'assistant']:
+    FOR e IN [x for x in this.evl if prop(x, 'type') == 'assistant']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:
         membrane::Chat:message[this.mid]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
-    FOR e IN [x for x in this.evs if prop(x, 'type') == 'user']:
+    FOR e IN [x for x in this.evl if prop(x, 'type') == 'user']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_result']:
         body = prop(b, 'content')
         membrane::Chat:message[this.mid]:turn:tool[prop(b, 'tool_use_id')].result = body if body is Text else join([prop(c, 'text') for c in (body if body is List else [])], '\n')
@@ -203,4 +214,5 @@ Boot.interrupted on-setter turn-interrupted:
     FOR i IN this.interrupted:
       membrane::Chat:message[i]:turn.state = 'error'
       membrane::Chat:message[i]:turn.ended = clock
+      membrane::Chat:message[i]:turn.error = 'interrupted: the seat stopped while this turn was running'
       membrane::Chat:message[i]:turn:response = ChatResponse(text: 'interrupted: the seat stopped while this turn was running', error: True)
