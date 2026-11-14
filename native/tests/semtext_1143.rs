@@ -351,3 +351,19 @@ fn the_help_teaches_semtext_and_never_the_tokenizer_builtin() {
     assert!(c.contains("`Help:semtext`"), "Help:c1f names the topic");
     assert!(std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help.c1f")).unwrap().contains("Help:semtext.file"), "the entity is seeded");
 }
+
+// ---- the mention cascade never refuses itself (#1143, the model's live finding) ----
+fn no_refusal(h: &Host, what: &str) { assert_eq!(h.get(B, "refused"), J::Null, "{what}: the cascade refused its own write"); }
+
+#[test]
+fn a_mention_never_refuses_its_own_cascade_the_first_time_nor_again() {
+    let h = with_body(M);
+    mention(&h, B, json!(true));
+    no_refusal(&h, "the first mention");
+    assert_eq!(h.get(B, "mentioned"), json!(true));
+    mention(&h, B, json!(2));
+    no_refusal(&h, "a second mention of a text that was mentioned");
+    assert_eq!(h.get(B, "mentioned"), json!(2), "and the second mention finished: `mentioned` is the mention value last finished");
+    mention(&h, B, json!(true));
+    no_refusal(&h, "a third");
+}

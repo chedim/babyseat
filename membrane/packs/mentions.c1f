@@ -79,7 +79,6 @@ SemText.mention on-setter mention-spans:
     ws = head([w for w in this.words if len([c for c in inner if c['start'] <= w['start'] and w['end'] <= c['end']]) == 0], cap)
     ids = head(this.identifiers, cap)
     ps = head(this.paths, cap)
-    this.mentioned = None
     this.mention_n = len(ws) + len(ids) + len(ps)
     FOR r IN ws:
       Span:of[this.skey]['w'][r['start']] = Span(of: this, layer: 'word', start: r['start'], end: r['end'])
@@ -99,9 +98,10 @@ Span.target getter:
   ELSE WHEN this.layer == 'path': Path:path[this.lemma]
   ELSE: None
 
--- the classified spans of this text, as rows; only while a mention is under way (a text that was mentioned, or never, reads nothing of the spans)
+-- the classified spans of this text, as rows; only while a mention is under way (a text that was mentioned, or never, reads nothing of the spans).
+-- `mentioned` is the `mention` value last finished (written ONCE per mention, by `record-mentions`: a field write a round already made is refused, so the setter above does not reset it): a new value of `mention` is a mention under way again.
 SemText.mention_done getter:
-  WHEN this.mention == None or this.mentioned == True: []
+  WHEN this.mention == None or this.mentioned == this.mention: []
   ELSE: [{'id': s.layer + ':' + s.lemma, 'layer': s.layer, 'k': s.lemma, 'sent': s.sentence_no} for s in instances('Span') if s.of == this and s.classified == True]
 SemText.mention_table getter:
   WHEN this.mention_n == None or this.mention_n == 0 or len(this.mention_done) != this.mention_n: None
@@ -122,7 +122,7 @@ SemText.mention_table on-setter record-mentions:
       Path:path[k] = Path(path: k)
       Path:path[k].mentioned_in = concat([e for e in (prop('Path:path:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
     this.mentions = concat([Word:lemma[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'word'], [Identifier:name[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'identifier'], [Path:path[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'path'])
-    this.mentioned = True
+    this.mentioned = this.mention
 
 -- how many texts mention an entity
 Word.texts getter: len(this.mentioned_in or [])

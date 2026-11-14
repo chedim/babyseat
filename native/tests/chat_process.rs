@@ -801,6 +801,18 @@ fn a_clifflet_reads_and_joins_several_entities_in_one_call_and_its_errors_say_wh
 }
 
 #[test]
+fn a_clifflet_printout_shows_the_reason_of_a_null_inside_a_list_or_a_dict() {
+    let (mut run, port) = start("cliff-nested", MCP_PACKS, &[]);
+    put(port, "Note:a", "n", json!(3));
+    let (t, e) = cliff(port, "[Note:a.n, Note:a.missing, None('boom')]");
+    assert!(!e && t.contains("absent") && t.contains("Note:a.missing") && t.contains("boom"), "a list: {t}");
+    let (t, e) = cliff(port, "{'ok': Note:a.n, 'gap': Note:a.nothing}");
+    assert!(!e && t.contains("Note:a.nothing") && t.contains("\"ok\":3"), "a dict: {t}");
+    assert_eq!(cliff(port, "[1, None]"), ("[1,null]".to_string(), false), "a null with no reason stays null");
+    assert!(terminate(&mut run));
+}
+
+#[test]
 fn a_clifflet_that_writes_lands_its_writes_and_returns_their_reactions() {
     let (mut run, port) = start("cliff2", MCP_PACKS, &[]);
     let (t, e) = cliff(port, "q = 5\nNote:w1.n = q\nNote:w2.n = q + 1");

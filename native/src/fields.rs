@@ -815,7 +815,8 @@ impl Fields {
         match r {
             Ok(v) => {
                 self.clear_trip(core, &trip, seq, now);   // a fresh evaluation in time: the kill no longer applies
-                match &nil { Some(why) if v.is_null() => { core.why.insert(key2, why.clone()); } _ => { core.why.remove(&key2); } }   // a null remembers why
+                match &nil { Some(why) if v.is_null() => { core.why.insert(key2.clone(), why.clone()); core.nulled.remove(&key2); } _ => { core.why.remove(&key2); if v.is_null() { core.nulled.insert(key2); } else { core.nulled.remove(&key2); } } }   // a null remembers why
+                { let nested = if v.is_array() || v.is_object() { std::mem::take(&mut core.nested_last) } else { vec![] }; core.set_nested(eid, &g.prop, nested); }
                 Some(v)
             }
             Err(e) if crate::expr::parse_timeout(&e).is_some() => {

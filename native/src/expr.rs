@@ -672,6 +672,51 @@ pub trait World {
 
 pub fn nullish(v: &V) -> bool { matches!(v, V::None | V::Nil(_)) }
 
+/// The separator of one path's steps (a list index, a dict key) in the key a nested reasoned null is remembered under.
+pub const PATH_SEP: char = '\u{1}';
+
+/// The reasoned nulls INSIDE a list or a dict, each as (path, reason): the path is the list indexes and dict keys down to it, joined by `PATH_SEP`.
+/// A stored value is JSON, where every null is plain; the engine remembers these beside it (`Core.why`) so that a read of the stored value gives them back.
+pub fn nested_nulls(v: &V) -> Vec<(String, String)> {
+    fn walk(v: &V, path: &mut Vec<String>, out: &mut Vec<(String, String)>) {
+        match v {
+            V::List(l) => for (i, x) in l.iter().enumerate() { path.push(i.to_string()); walk(x, path, out); path.pop(); },
+            V::Dict(d) => for (k, x) in d { path.push(k.clone()); walk(x, path, out); path.pop(); },
+            V::Nil(r) if !path.is_empty() => out.push((path.join(&PATH_SEP.to_string()), r.clone())),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    walk(v, &mut vec![], &mut out);
+    out
+}
+
+/// `nested_nulls` read back: the null at each path becomes the reasoned null again (a path that no longer fits the value is skipped).
+pub fn overlay_nulls(v: &mut V, nulls: &[(String, String)]) {
+    fn put(v: &mut V, path: &[&str], reason: &str) {
+        match path.split_first() {
+            None => if matches!(v, V::None) { *v = V::Nil(reason.to_string()); },
+            Some((step, rest)) => match v {
+                V::List(l) => if let Some(x) = step.parse::<usize>().ok().and_then(|i| l.get_mut(i)) { put(x, rest, reason); },
+                V::Dict(d) => if let Some((_, x)) = d.iter_mut().find(|(k, _)| k == step) { put(x, rest, reason); },
+                _ => {}
+            },
+        }
+    }
+    for (path, reason) in nulls { put(v, &path.split(PATH_SEP).collect::<Vec<_>>(), reason); }
+}
+
+/// A value as JSON text for a person or a model to read (`str` of a list or a dict, the clifflet's printout): like `to_json`, except that a reasoned null
+/// INSIDE a container is written `{"$null": "<reason>"}` so the reason is on the page. (`to_json`, what is stored and sent, keeps every null plain.)
+pub fn to_json_shown(v: &V) -> Result<serde_json::Value, Err> {
+    use serde_json::Value as J;
+    Ok(match v {
+        V::List(l) => J::Array(l.iter().map(|x| match x { V::Nil(r) => Ok(J::Object(std::iter::once(("$null".to_string(), J::String(r.clone()))).collect())), x => to_json_shown(x) }).collect::<Result<_, Err>>()?),
+        V::Dict(d) => J::Object(d.iter().map(|(k, x)| Ok((k.clone(), match x { V::Nil(r) => J::Object(std::iter::once(("$null".to_string(), J::String(r.clone()))).collect()), x => to_json_shown(x)? }))).collect::<Result<_, Err>>()?),
+        v => to_json(v)?,
+    })
+}
+
 /// The null an operation on null operands gives: the first reason carried, else `absent`.
 fn null_of(vals: &[&V], what: &str) -> Option<V> {
     for v in vals { if let V::Nil(r) = v { return Some(V::Nil(r.clone())); } }
@@ -895,9 +940,9 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
             out.sort_by(|x, y| {
                 let (p, q) = (field(x), field(y));
                 let o = match (&p, &q) {
-                    (V::None, V::None) => std::cmp::Ordering::Equal,
-                    (V::None, _) => std::cmp::Ordering::Less,
-                    (_, V::None) => std::cmp::Ordering::Greater,
+                    (a, b) if nullish(a) && nullish(b) => std::cmp::Ordering::Equal,
+                    (a, _) if nullish(a) => std::cmp::Ordering::Less,
+                    (_, b) if nullish(b) => std::cmp::Ordering::Greater,
                     _ => py_cmp(&p, &q).unwrap_or(std::cmp::Ordering::Equal),
                 };
                 if desc { o.reverse() } else { o }
@@ -1033,7 +1078,7 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         // ---- time ----
         "localtime" => { argn(1)?; let ts = match &a[0] { V::Int(n) => *n as f64, V::Float(f) => *f, _ => return Err("localtime(ts): a number".into()) }; Ok(crate::clock::local(ts)) }
         "json" => { argn(1)?; match &a[0] { V::Str(t) => serde_json::from_str::<serde_json::Value>(t).map(|j| from_json(&j)).or_else(|_| Ok::<V, String>(V::None)), V::None | V::Nil(_) => Ok(V::None), _ => Err("json(text): a string".into()) } }
-        "str" => { argn(1)?; Ok(V::Str(match &a[0] { V::Str(t) => t.clone(), V::List(_) | V::Dict(_) => to_json(&a[0])?.to_string(), v => py_str(v) })) }
+        "str" => { argn(1)?; Ok(V::Str(match &a[0] { V::Str(t) => t.clone(), V::List(_) | V::Dict(_) => to_json_shown(&a[0])?.to_string(), v => py_str(v) })) }
         "referencing" => {
             argn(2)?;
             let e = match &a[0] { V::Ent(e) | V::Str(e) => e.clone(), _ => return Ok(V::List(vec![])) };
