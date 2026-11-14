@@ -242,6 +242,39 @@ What exists (tests: `native/tests/link_slice1_1143.rs`, `tests/js/link_caps.test
 - **Differs from the design:** (1) no `held`/retire native hooks: `Vm` is stored and swept at boot (the decision D21 pick); the `ns::` replicas of section 2 do not exist yet; the Page's lifetime is its Vm's reference. (2) The report is not under `Page:main` of the page's own VM namespace: the page's `Page:main` stays local; the seat's copy is `<ns>::Page:main`. (3) `Vm.state` has no heartbeat to refresh it: a healthy quiet page turns `stale` (read: "not heard"). (4) A page that fails to start before `link_view` runs never reports and has no `Vm` (a `Vm` made at the snapshot would show it; not built). (5) Page `Page:main.report` is readable with a `prop` only (`entity_read` without one reads the store, and a virtual class has no row). (6) `GET /ui/fieldvm` answers with `page` and `Link:page` also for old callers: extra fields only.
 - **Hidden classes (the field view is disabled):** `Vm` and `Page` are NOT added to `map_hidden`: a `Vm` is a row the person may want to see on the map once the field view is back; revisit then.
 
+## 15b. Slice 2: engine interface (for the seat route and the JS glue; engine side built in `native/src/link.rs`, `vm.rs`, `fields.rs`, `web.rs`, `host.rs`)
+
+The contract between the engine (this section) and the link owner/transport (`/ui/link`, `fieldvm.js`). The engine never talks to a network: it names what it wants (`subs`/`unsubs`) and takes what arrives (`feed_val*`).
+
+**Foreign namespace rule.** The engine has ONE own namespace, a string told to it: wasm `Field.set_ns("p1a2b3c4d")` (the page calls it once with `Link:page.ns` from the snapshot, before any pack runs); host (seat) `Host::set_ns` (the seat's is `membrane`, set at open). Until it is told, nothing is foreign (the old behaviour). An id is FOREIGN when it contains `::` and the text before the first `::` is not the own namespace. A bare id (no `::`) is local, and so is every id under the own namespace. Inside a VM its own ids stay bare; foreign ids are spelled with their prefix (`membrane::Setting:chat.header`). Names are `[A-Za-z0-9_]+` (lexer).
+
+**Reads of a foreign `<eid>.<prop>`** (a getter, a setter condition, any block):
+- no replica value yet: the reasoned null with the exact text `pending: <eid>.<prop>` (for example `pending: membrane::Setting:chat.header.val`);
+- a value after `feed_val*` applied it: the value (a JSON null from the owner reads as `absent: <eid>.<prop>`, as any absent property);
+- after `feed_gone`: `absent: <eid> does not exist`; after `feed_refused(reason)`: `refused: <reason>` (all props of that entity). A later `feed_val*` makes the entity live again.
+- A foreign-id entity the VM holds as an ordinary local entity (written through the door, never fed by `feed_val*`, like the slice-1 `<ns>::Page:main` on the seat) is NOT a replica: it reads normally, runs its getters and setters, and makes no subscription.
+
+**Subscriptions by dependency.** A foreign `(eid, prop)` is SUBSCRIBED while a getter's read list holds it (the same `deps` table), or for the round (plus the grace) in which a setter/block read it. Two readers = one subscription. When nothing reads it any more it is dropped after the GRACE: the end of the first round at engine time `t` at which it is unread starts the grace; it is unsubscribed at the first round end with engine time `>= t + 0.5` (decision 5; `LINK_GRACE_S`). The engine has no wall clock: "time" is the `now` (seconds, a float) the host passes to every round (`write`, `settle`, `tick`, `feed_val*`). A getter that drops and re-reads the same prop inside the grace never unsubscribes. If no round runs after the drop, nothing is dropped: the host must run a round (`settle(now)`) at or after `due` (below).
+
+**Notices: `Field.drain()`** (wasm) returns, next to the existing fields, three more:
+```json
+{"writes": [...], "calls": [...],
+ "subs":   [{"eid": "membrane::Setting:chat.header", "props": ["val", "label"]}],
+ "unsubs": [{"eid": "membrane::Setting:chat.old",    "props": ["val"]}],
+ "due": 1731600000.5}
+```
+`subs`/`unsubs`: arrays sorted by `eid`, props sorted, per entity (decision 6). They are DELTAS since the previous `drain()`: `subs` = keys that became subscribed and were not announced yet; `unsubs` = keys announced earlier that are now dropped (a sub and its unsub inside one drain period cancel: neither is sent). `due` = the engine time at which the next unsub becomes decidable (a round at `now >= due` will emit it), or `null`. A reconnect: call `Field.link_reset()`; the next `drain()` announces EVERY live subscription again in `subs` (the `hello`/`resync` set). The host (seat) has the same notices: `Host::link_notices() -> (subs, unsubs, due)` (the same JSON values).
+
+**Applying values.** All apply as an OUTSIDE write of writer `link:val` in ONE round, then the readers recompute (drain shows their derived writes):
+- `Field.feed_val(eid, prop, value_json, rev, now)` one prop;
+- `Field.feed_vals(eid, props_json, rev, now)` several props of one entity (`props_json` is a JSON object `{prop: value}`; the delta, props not named keep their value);
+- `Field.feed_gone(eid, rev, now)`; `Field.feed_refused(eid, reason, rev, now)`.
+`rev` is a number (JS number, an integer below 2^53) the OWNER assigns; it is OPAQUE to the engine (never compared, never ordered): the engine only stores the last one applied per entity and gives it back in `Field.replicas()` = `[{"eid": ..., "rev": ...}]` (what the client sends as `have` in `hello`/`resync`). Ordering and duplicates are the link's job (frame `n`). A replica is created by the first `feed_val*`, is class `class_of_eid(eid)` (the text after `::` up to the next colon), is RAM only, is NOT journalled and NOT stored (on the seat as well, decision 17 for the page side; the seat's journalled copy of a page value is a slice-3 question), and is INERT: no getter computes on it, no setter fires on it, a write that lands on it only wakes its readers.
+
+**Retire.** Retiring (`retire = true`, host and wasm `Field.remove`) a `Vm:<ns>` entity retires every entity whose id starts with `<ns>::` too, forgets their replica notes and drops their subscriptions (no unsub notice: the owner is gone). On the seat, a VIRTUAL entity under `<ns>::` is held by a live `Vm:<ns>`.
+
+**Open for the owner side (not engine):** per-node revision counters, coalescing, the allow-list, `max_value`, caps, rates: in c1f (w117-linkseat). The engine imposes no limit on replicas or subscriptions.
+
 ## 16. Placement by imports (design, not built)
 
 The capability list of section 15 is the input: each VM reports `provides` (the packs it runs, `{pack, major}`) and, per pack, `requires` (its IMPORT lines) and `closure` (all it needs, transitively). The function is `eligible(closure, {vm: provides})` in `fieldvm.js` (tested over the real packs in `tests/js/link_caps.test.mjs`).
