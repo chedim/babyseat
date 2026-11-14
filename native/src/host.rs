@@ -394,6 +394,9 @@ impl Host {
         self.drain_apply();
     }
 
+    /// How many times `instances(<class>)` walked every loaded entity so far (the engine's cache misses): a count of work for the tests.
+    pub fn inst_scans(&self) -> u64 { self.eng().0.inst_scans() }
+
     pub(crate) fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
         let _t = self.txn();
         let _r = self.round_at(ts);
