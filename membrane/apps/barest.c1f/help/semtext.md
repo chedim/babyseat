@@ -20,6 +20,8 @@ The layers are `sentences`, `words`, `identifiers`, `paths`, `urls` and `numbers
 Your own legs are SemTexts too: a command's output, a file's content when it changes, a page you fetched, your plan. Each gets the
 same properties, and each can be mentioned (below). The chat makes one for every message you receive (`Chat:message:<id>:body`) and one for
 every answer you give (`Chat:message:<id>:turn:response:body`); a tool's result is plain text.
+Your earlier answers are entities you can read: `entity_read` of `Chat:message:<id>:turn:response`, property `text`. The message ids come from
+`GET /membrane/chat/messages?limit=N` (a `Fetch`, see Help:c1f).
 
 ## A part of a text as an entity
 
