@@ -1,7 +1,7 @@
 //! The graph link, slice 1 (#1143, docs/graph-link.md "Slice 1: built"): the page tells the seat what it loaded and what it can do. The seat side, on the shipped
 //! barest seat (no real `claude`, an ephemeral port): `GET /ui/fieldvm` names the page (`page`: `p` + 8 hex digits, one per load, and the entity `Link:page` the page's packs read),
 //! the classes `Vm` (stored, one row per page, swept when the seat starts) and `Page` (virtual, held by its `Vm`) take the page's writes through the ordinary door (`POST /mcp`
-//! `entity_write`), the SEAT stamps `Vm.seen`, `Vm.state` is `connected` or `stale` by the fact `link_stale_s`, and `Help:page` tells a model how to read it all.
+//! `entity_write`), the SEAT stamps `Vm.seen`, `Vm.state` is `connected` or `stale` by the fact `link_lease_s` (slice 2: the lease of a page that talks), and `Help:page` tells a model how to read it all.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -107,7 +107,7 @@ fn two_pages_are_two_roots_and_a_silent_one_is_stale_by_the_fact() {
     assert_eq!(q.lines().count(), 2, "{q}");
     drop(run);
     let dir = tmp("t2");
-    let run = start(&dir, &["link_stale_s=0"]);
+    let run = start(&dir, &["link_lease_s=0"]);
     let a = snap(run.port)["page"].as_str().unwrap().to_string();
     tell(run.port, &a);
     assert_eq!(read(run.port, &format!("Vm:{a}"), "state"), "stale", "0 seconds of silence allowed: stale at once");

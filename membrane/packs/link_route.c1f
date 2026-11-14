@@ -1,0 +1,182 @@
+PACK link_route 1
+IMPORT boot 1
+IMPORT door 1
+IMPORT link 1
+VIRTUAL LinkPeer
+RESIDENT LinkAllow
+-- THE GRAPH LINK, SLICE 2, THE SEAT SIDE (#1143, docs/graph-link.md "Slice 2: built"): the OWNER of the values a page subscribes to. ONE door route, `POST /ui/link` (the family `link` of door.c1f); the page's engine names what it reads
+-- (`Field.drain()` `subs` / `unsubs`, docs/graph-link.md 15b), the page's host (fieldvm.js) posts ONE frame per flush and feeds what comes back (`feed_vals`).
+--   FRAME (page -> seat)  {v: 1, ns, n, ack, hidden, epoch, resync?, subs: [[eid, prop], ...], unsubs: [[eid, prop], ...]}     ns = the page's name (`Vm:<ns>`), n = its frame counter (from 1; a frame seen twice is dropped by n),
+--                         ack = the highest frame number of the SEAT it has applied, hidden = the page is hidden, epoch = the seat's epoch it last saw. (`reads` and `wr` writes are slice 3: not read here.)
+--   REPLY (seat -> page)  {v: 1, epoch, n, resync?, vals: [{id, prop, value} | {id, refused}], dup?, superseded?, refused?}   n = the seat's frame counter: only a reply that carries values takes a new number
+-- THE LONG POLL (decision 18): a frame with news for the seat (subs, unsubs, a change of hidden, the first frame, `resync`) is answered at once; an EMPTY frame is the poll: it is held until a value is due, until the hold (`link_hold_s`,
+-- 25 s) is over (an empty reply: the keepalive), or until a newer frame of the same page arrives (the old one is released with `superseded`). A hidden page is always answered at once and sent no value.
+-- STATE, NOT EVENTS (docs/graph-link.md section 11): per page ONE `LinkPeer:<ns>` (RAM, held by `Vm:<ns>.peer`) and per subscription ONE `LinkPeer:<ns>:k_...` row, a colon child of it (collected with it). A sub's `val` is a GETTER over the
+-- entity it names (so the dependency engine is the subscription), `ver` counts its changes, `sig` = ver + verdict is what the page last acked (`ackd`): the sub is DUE while they differ. So many changes between two polls are ONE value,
+-- the last (coalescing), a lost reply is sent again (nothing is acked), and the memory per link is its subscriptions. A page that is `link_window` (8) frames behind gets a RESYNC snapshot of every subscription instead of a queue.
+-- The frame number that carried a value is its revision for the page (`feed_vals` rev); the epoch is the seat's boot, a page that sees it change resubscribes everything.
+-- POLICY (decision 11) is DATA: `LinkAllow:<name>` {prefixes} entities (any pack, the operator or the model writes them); a subscription is served only when the seat id starts with a listed prefix. The seed is two entities,
+-- `LinkAllow:setting` {prefixes: ['Setting:']} and `LinkAllow:doorbell` {prefixes: ['Doorbell:']} (the chat page's doorbell). `Chat:` is NEVER served, whatever the list says. Everyone with a valid token is the admin (a tokenless request is the door's 401); there are no per-person rights.
+-- The CAPS (decision 8): `link_max_subs` 200 per link (the rest are answered `refused`, not queued), `link_max_links` 16 per seat (the 17th link is answered `refused: too many links`), `link_max_value` 65536 characters a value (a bigger
+-- one is `refused: too large`, never sent), `link_max_frame` 262144 characters a frame (413). The LEASE (decision 16): a page silent past `link_lease_s` (60) is gone, past `link_lease_hidden_s` (600) when it said it is hidden: its link row and
+-- subscriptions are retired (the `Vm` stays, `stale`). Every number is a fact of the Boot entity that overrides it (packs/link.c1f `Boot.lk_*`).
+
+-- ---- the allow-list (data) ----------------------------------------------------------------------------------------------------------
+Boot.started on-setter link-allow-seed:
+  WHEN prop('LinkAllow:seed', 'done') == None:
+    ('LinkAllow:seed').done = True
+    ('LinkAllow:setting').prefixes = ['Setting:']
+    ('LinkAllow:doorbell').prefixes = ['Doorbell:']
+
+-- ---- the doorbell: the smallest value that tells the chat page "something happened" (decision 10) ---------------------------------------
+-- `Doorbell:chat.at` is the time of the last message posted or turn change (written by packs/chat.c1f), NOT under `Chat:`, so it may be subscribed while the chat itself never is. The page polls the history route only when it changes.
+
+-- ---- the route ------------------------------------------------------------------------------------------------------------------
+Request.o_link getter: this.route == '/ui/link'
+Request.m_link getter: ['POST']
+Request.lk_ns getter: str(prop(this.jbody, 'ns') or '')
+Request.lk_ns_ok getter: len(this.lk_ns) == 9 and startswith(this.lk_ns, 'p') and this.lk_ns == lower(this.lk_ns) and len([c for c in ['_', '#', '.', '/', ':', '-', '~', ' '] if c in this.lk_ns]) == 0
+Request.lk_n getter: prop(this.jbody, 'n')
+Request.lk_shape getter: this.lk_ns_ok and this.lk_n is Int and this.lk_n >= 1
+Request.lk_big getter: len(this.body or '') > ([b.lk_max_frame for b in instances('Boot')] or [262144])[0]
+Request.lk_ready getter: this.entrant and this.o_link and not this.lk_big and this.lk_shape
+Request.lk_peer getter: 'LinkPeer:' + this.lk_ns
+Request.lk_epoch getter: ([b.lk_epoch for b in instances('Boot')] or [None])[0]
+Request.lk_hidden getter: prop(this.jbody, 'hidden') == True
+Request.lk_ack getter: prop(this.jbody, 'ack') if (prop(this.jbody, 'ack') is Int and (str(prop(this.jbody, 'epoch') or '') == '' or str(prop(this.jbody, 'epoch')) == str(this.lk_epoch))) else 0
+-- the ids as the page spells them (the seat is `membrane::`, so `membrane::Setting:x` is the seat's `Setting:x`); a sub is the colon child `LinkPeer:<ns>:k_<id with : as ~>~~<prop>` of its page's row
+Request.lk_pairs getter: [[s[0], s[1]] for s in (prop(this.jbody, 'subs') or []) if s is List and len(s) == 2 and s[0] is Text and s[1] is Text and s[0] != '' and s[1] != '']
+Request.lk_subs getter: [{'wid': s[0], 'sid': (after(s[0], 'membrane::') if startswith(s[0], 'membrane::') else s[0]), 'sprop': s[1], 'key': 'LinkPeer:' + this.lk_ns + ':k_' + replace((after(s[0], 'membrane::') if startswith(s[0], 'membrane::') else s[0]), ':', '~') + '~~' + s[1]} for s in this.lk_pairs]
+Request.lk_unpairs getter: [[s[0], s[1]] for s in (prop(this.jbody, 'unsubs') or []) if s is List and len(s) == 2 and s[0] is Text and s[1] is Text and s[0] != '' and s[1] != '']
+Request.lk_unkeys getter: [k for k in ['LinkPeer:' + this.lk_ns + ':k_' + replace((after(s[0], 'membrane::') if startswith(s[0], 'membrane::') else s[0]), ':', '~') + '~~' + s[1] for s in this.lk_unpairs] if prop(k, 'sid') != None]
+Request.lk_fresh getter: [w for w in this.lk_subs if prop(prop(w, 'key'), 'live') != True]
+Request.lk_room getter: ([b.lk_max_subs for b in instances('Boot')] or [200])[0] - len([s for s in instances('LinkPeer') if s.sid != None and s.ns == this.lk_ns and s.live == True and s.capped != True])
+Request.lk_take getter: head(this.lk_fresh, max(0, this.lk_room))
+Request.lk_over getter: tail(this.lk_fresh, max(0, len(this.lk_fresh) - max(0, this.lk_room)))
+Request.lk_maxl getter: ([b.lk_max_links for b in instances('Boot')] or [16])[0]
+Request.lk_hold getter: ([b.lk_hold for b in instances('Boot')] or [25])[0]
+
+-- THE FRAME: one setter takes it. The checks come in order: a frame seen before (n not above the last) is a duplicate and changes nothing; a new page when the seat holds the most links is refused; else the page's row is stamped
+-- (heard, hidden, the last n, the ack), what the page has acked is marked, the unsubs and subs are written. `lk_now` says the page told something (answer at once); `lk_took` that the frame was taken.
+Request.lk_plan getter:
+  WHEN this.lk_ready != True: None
+  ELSE WHEN this.lk_n <= (prop(this.lk_peer, 'last_n') or 0): {'kind': 'dup'}
+  ELSE WHEN prop(this.lk_peer, 'ns') == None and len([p for p in instances('LinkPeer') if p.sid == None]) >= this.lk_maxl: {'kind': 'full'}
+  ELSE: {'kind': 'take', 'ns': this.lk_ns, 'n': this.lk_n, 'ack': this.lk_ack, 'hidden': this.lk_hidden, 'unkeys': this.lk_unkeys, 'take': this.lk_take, 'over': this.lk_over, 'quick': len(this.lk_subs) + len(this.lk_unkeys) > 0 or this.lk_hidden != (prop(this.lk_peer, 'hidden') == True) or prop(this.lk_peer, 'last_n') == None or prop(this.jbody, 'resync') == True or this.lk_hidden, 'mine': prop(this.lk_peer, 'mine') or []}
+-- (the setter reads ONLY the plan, the one value computed last: a getter read inside a setter may be one round old)
+Request.lk_plan on-setter link-frame:
+  WHEN this.lk_plan != None and this.lk_took != True and prop(this.lk_plan, 'kind') == 'dup':
+    this.lk_dup = True
+  ELSE WHEN this.lk_plan != None and this.lk_took != True and prop(this.lk_plan, 'kind') == 'full':
+    this.lk_full = True
+  ELSE WHEN this.lk_plan != None and this.lk_took != True:
+    pl = this.lk_plan
+    ns = prop(pl, 'ns')
+    ('LinkPeer:' + ns).ns = ns
+    ('LinkPeer:' + ns).heard = clock
+    ('LinkPeer:' + ns).hidden = prop(pl, 'hidden')
+    ('LinkPeer:' + ns).last_n = prop(pl, 'n')
+    ('LinkPeer:' + ns).ack = prop(pl, 'ack')
+    ('LinkPeer:' + ns).cur = this.eid
+    ('LinkPeer:' + ns).up = True
+    ('Vm:' + ns).connected_at = prop('Vm:' + ns, 'connected_at') or clock
+    FOR s IN prop(pl, 'mine'):
+      (s.eid).ackd = s.sent_sig if (s.sent_n != None and s.sent_n <= prop(pl, 'ack')) else s.ackd
+    FOR k IN prop(pl, 'unkeys'):
+      (k).live = False
+    FOR w IN prop(pl, 'take'):
+      (prop(w, 'key')).sid = prop(w, 'sid')
+      (prop(w, 'key')).wid = prop(w, 'wid')
+      (prop(w, 'key')).sprop = prop(w, 'sprop')
+      (prop(w, 'key')).ns = ns
+      (prop(w, 'key')).capped = False
+      (prop(w, 'key')).ackd = None
+      (prop(w, 'key')).live = True
+    FOR w IN prop(pl, 'over'):
+      (prop(w, 'key')).sid = prop(w, 'sid')
+      (prop(w, 'key')).wid = prop(w, 'wid')
+      (prop(w, 'key')).sprop = prop(w, 'sprop')
+      (prop(w, 'key')).ns = ns
+      (prop(w, 'key')).capped = True
+      (prop(w, 'key')).ackd = None
+      (prop(w, 'key')).live = True
+    this.lk_at = clock
+    this.lk_now = prop(pl, 'quick')
+    this.lk_took = True
+
+-- the page's row holds itself by its Vm (a virtual row is collected when nothing holds it)
+LinkPeer.up on-setter link-hold:
+  WHEN this.up == True and this.sid == None:
+    ('Vm:' + this.ns).peer = this
+
+-- ---- the reply: composed ONCE, from what is due; what it carried is marked sent -----------------------------------------------------
+Request.lk_dues getter: prop(this.lk_peer, 'dues') or []
+Request.lk_draft getter:
+  WHEN this.lk_ready != True: None
+  ELSE WHEN this.lk_dup == True: {'v': 1, 'dup': True, 'epoch': this.lk_epoch, 'n': prop(this.lk_peer, 'out_n') or 0, 'vals': []}
+  ELSE WHEN this.lk_full == True: {'v': 1, 'refused': 'too many links (the most is ' + str(this.lk_maxl) + ' per seat)', 'epoch': this.lk_epoch, 'n': 0, 'vals': []}
+  ELSE WHEN this.lk_took != True: None
+  ELSE WHEN prop(this.lk_peer, 'cur') != this.eid: {'v': 1, 'superseded': True, 'epoch': this.lk_epoch, 'n': prop(this.lk_peer, 'out_n') or 0, 'vals': []}
+  ELSE WHEN len(this.lk_dues) > 0 or this.lk_now == True or this.lk_hidden or clock - this.lk_at >= this.lk_hold: {'v': 1, 'epoch': this.lk_epoch, 'n': (prop(this.lk_peer, 'out_n') or 0) + (1 if len(this.lk_dues) > 0 else 0), 'resync': prop(this.lk_peer, 'snap') == True, 'vals': [d['row'] for d in this.lk_dues]}
+  ELSE: None
+Request.lk_draft on-setter link-reply:
+  WHEN this.lk_draft != None and this.lk_out == None:
+    d = this.lk_draft
+    n = prop(d, 'n')
+    FOR x IN (this.lk_dues if (prop(d, 'resync') != None and n > (prop(this.lk_peer, 'out_n') or 0)) else []):
+      (x['key']).sent_n = n
+      (x['key']).sent_sig = x['sig']
+    this.lk_out = d
+Request.lk_out on-setter link-count:
+  WHEN this.lk_out != None and this.lk_took == True and prop(this.lk_out, 'n') > (prop(this.lk_peer, 'out_n') or 0):
+    ('LinkPeer:' + this.lk_ns).out_n = prop(this.lk_out, 'n')
+Request.r_link getter:
+  WHEN this.lk_big: {'status': 413, 'body': {'error': {'message': 'a frame is at most ' + str(([b.lk_max_frame for b in instances('Boot')] or [262144])[0]) + ' characters', 'type': 'membrane_error'}}}
+  ELSE WHEN not this.lk_shape: {'status': 400, 'body': {'error': {'message': 'a frame needs ns (the page name the seat gave) and n (the page\'s frame counter, from 1)', 'type': 'membrane_error'}}}
+  ELSE WHEN this.lk_out != None: {'status': 200, 'headers': {'cache-control': 'no-store'}, 'body': this.lk_out}
+  ELSE: None
+
+-- ---- the link of one page: its subscriptions, what is due ----------------------------------------------------------------------------
+-- (a row WITHOUT `sid` is the page's link; a row with `sid` is one subscription (one entity's one property); the getters of the other kind answer None)
+LinkPeer.mine getter: [s for s in instances('LinkPeer') if s.sid != None and s.ns == this.ns] if this.sid == None and this.ns != None else None
+LinkPeer.window getter: ([b.lk_window for b in instances('Boot')] or [8])[0]
+LinkPeer.snap getter: (this.out_n or 0) - (this.ack or 0) >= this.window if this.sid == None else None
+LinkPeer.dues getter:
+  WHEN this.sid != None or this.mine == None: None
+  ELSE WHEN this.hidden == True: []
+  ELSE: [{'key': s.eid, 'sig': s.sig, 'row': s.row} for s in this.mine if s.live == True and (s.due == True or this.snap == True)]
+LinkPeer.lease getter: (([b.lk_lease_hidden for b in instances('Boot')] or [600])[0] if this.hidden == True else ([b.lk_lease for b in instances('Boot')] or [60])[0]) if this.sid == None else None
+LinkPeer.silent getter: clock - this.heard if this.sid == None and this.heard != None else None
+LinkPeer.gone getter: this.silent != None and this.silent >= this.lease
+LinkPeer.gone on-setter link-expire:
+  WHEN this.gone == True:
+    ('Vm:' + this.ns).heard = this.heard
+    ('Vm:' + this.ns).was_hidden = this.hidden == True
+    FOR s IN this.mine:
+      (s.eid).retire = True
+    (this.eid).retire = True
+
+-- a subscription: the verdict, then the value (a getter over the entity named, read ONLY when the verdict is yes), its change counter, the signature the page last acked
+LinkPeer.allowed getter: len([a for a in instances('LinkAllow') if len([x for x in (a.prefixes or []) if str(x) != '' and startswith(this.sid, str(x))]) > 0]) > 0 if this.sid != None else None
+LinkPeer.veto getter:
+  WHEN this.sid == None: None
+  ELSE WHEN '::' in this.sid: 'refused: only the seat own entities can be subscribed, not ' + str(this.wid)
+  ELSE WHEN startswith(this.sid, 'Chat:') or this.sid == 'Chat':
+    'refused: chat is never sent to a page (the chat page asks the chat route; it subscribes only the doorbell)'
+  ELSE WHEN this.allowed != True: 'refused: not replicated (' + this.sid + ' is not under a prefix of the allow-list, LinkAllow:*)'
+  ELSE WHEN this.capped == True: 'refused: too many subscriptions (the most is ' + str(([b.lk_max_subs for b in instances('Boot')] or [200])[0]) + ' per link)'
+  ELSE: None
+LinkPeer.val getter: prop(this.sid, this.sprop) if this.sid != None and this.live == True and this.veto == None else None
+LinkPeer.size getter: len(str(this.val)) if this.val != None else 0
+LinkPeer.maxv getter: ([b.lk_max_value for b in instances('Boot')] or [65536])[0]
+LinkPeer.why getter:
+  WHEN this.sid == None: None
+  ELSE WHEN this.veto != None: this.veto
+  ELSE WHEN this.size > this.maxv: 'refused: too large (' + str(this.size) + ' characters, the most is ' + str(this.maxv) + ')'
+  ELSE: None
+LinkPeer.sig getter: str(this.ver or 0) + '|' + str(this.why) if this.sid != None else None
+LinkPeer.due getter: this.live == True and this.ackd != this.sig if this.sid != None else False
+LinkPeer.row getter: ({'id': this.wid, 'refused': this.why} if this.why != None else {'id': this.wid, 'prop': this.sprop, 'value': this.val}) if this.sid != None else None
+LinkPeer.val on-setter link-ver:
+  WHEN this.sid != None:
+    this.ver = (this.ver or 0) + 1
