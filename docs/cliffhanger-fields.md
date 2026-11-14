@@ -251,6 +251,16 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
   pack's own write never echoes), a removed element leaves the field (`Fields::remove`: what read or referenced it
   recalculates). Packs read page elements, put their nodes in them (`parent = 'DomNode:page:#chat'`) and write to them;
   writing `text` replaces the element's content.
+- **Fetch (W2, #1143):** the page's VM has the seat's `Fetch` class (the pack text of `membrane/packs/fetch.c1f`, `FETCH_PACK`). A pack writes
+  `Fetch:<id>.request = {id, url, method?, headers?, body?, timeout_s?}`; the shell makes ONE `fetch()` and writes `request_result` back in the
+  seat's shape: `{id, status:'ok', rc:0, head:'<code> <text>', http_status, headers (lower-case names), body, started, finished, ms}`; a failure is
+  `{id, status:'error', rc, head:<reason>, started, finished, ms}` (rc 2 refused before sending, rc 1 network failure, abort, timeout). A non-2xx is
+  a normal result with its `http_status`. Same origin only (`location.origin`, credentials `same-origin`, so the owner cookie goes with it; any
+  other origin is refused with a reason); verbs GET/POST/PATCH/DELETE; headers `content-type` and `accept` only (never authorization or cookie);
+  `body` text only. No page-side timeout unless the request has `timeout_s`. `abort = true` on the entity aborts the one in flight. The same
+  request id written again on the same entity is not fetched twice. `stream` is accepted and ignored (the receipt's `note` says so: W3).
+  What the seat's own snapshot and events carry (`feed(..., mirror=true)`) is never fetched again. "Toward the seat: read-only" now means the
+  page may CALL the seat's routes this way; it still never writes the seat's field.
 - **Caching:** the loader asks for the wasm by its content hash (`fieldvm_version.js`), since the seat caches `.wasm`.
 - **Tests:** `tests/js/fieldvm_core.test.mjs` (the wasm engine in Node) and `tests/js/fieldvm_link.test.mjs` (the page
   link in headless Chrome over the DevTools protocol).
