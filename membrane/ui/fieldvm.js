@@ -248,7 +248,7 @@ class Host {
     else if (ev.type === 'wheel') { ev.preventDefault(); const b = el.getBoundingClientRect(); this.write(eid, 'wheel', { dy: ev.deltaY, x: ev.clientX - b.left, y: ev.clientY - b.top, w: b.width, h: b.height, time: this.now() }); }
     else if (ev.type.startsWith('pointer')) {                       // a press, a move WITH a button held, a release: a hover writes nothing (the field is not flooded)
       if (ev.type === 'pointermove' && !ev.buttons) return;
-      if (ev.type === 'pointerdown' && el.setPointerCapture) { try { el.setPointerCapture(ev.pointerId); } catch {} }   // the drag goes on outside the element
+      if (ev.type === 'pointerdown' && ev.target === el && el.setPointerCapture) { try { el.setPointerCapture(ev.pointerId); } catch {} }   // only a press ON the element itself captures: a press on a child (a dot in the scene) must still become that child's click; the drag goes on outside the element
       const b = el.getBoundingClientRect();
       this.write(eid, 'pointer', { type: ev.type, x: ev.clientX - b.left, y: ev.clientY - b.top, w: b.width, h: b.height, buttons: ev.buttons, time: this.now() });
     }
@@ -278,7 +278,8 @@ class Host {
       const why = reason(prop, v);
       if (why) { this.refuseDom(el, eid, prop, why); el.removeAttribute(prop); return; }
       if (v == null || v === false) { el.removeAttribute(prop); return; }
-      el.setAttribute(prop, v === true ? '' : String(v));
+      const sv = v === true ? '' : String(v);
+      if (el.getAttribute(prop) !== sv) el.setAttribute(prop, sv);          // an unchanged value is no DOM mutation
     }
   }
 

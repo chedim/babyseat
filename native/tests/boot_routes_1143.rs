@@ -309,7 +309,7 @@ fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_owner() {
     assert!(about.starts_with("PACK about 1") && about.contains("IMPORT dom 1"), "{about}");
     assert_eq!(about, std::fs::read_to_string(format!("{}/../membrane/packs/about.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap(), "the file's text, whole");
     // no entity of a view class is mirrored yet; the one entity is `Boot:seat`, the chat view's settings (null: the pack's own default stands), and `views` is the per-view switch (default legacy)
-    assert_eq!(s["entities"], json!([{"eid": "Boot:seat", "cls": "Boot", "props": {"chat_page_size": null, "chat_poll_size": null, "chat_list_poll_ms": null, "chat_active_poll_ms": null, "chat_stick_px": null, "chat_tool_chars": null, "field_window": 150, "field_poll_ms": 2000}}]), "{s}");
+    assert_eq!(s["entities"], json!([{"eid": "Boot:seat", "cls": "Boot", "props": {"chat_page_size": null, "chat_poll_size": null, "chat_list_poll_ms": null, "chat_active_poll_ms": null, "chat_stick_px": null, "chat_tool_chars": null, "field_window": 150, "field_poll_ms": 2000, "chat_poll_timeout_s": null, "shell_status_ms": null, "shell_panel_chars": null}}]), "{s}");
     assert_eq!(s["views"], json!({"chat": "legacy", "field": "legacy"}), "no fact ui_views: every view is legacy");
     // the same through the page's prefix; read only
     let (st, s2) = api(&run, "GET", "/ui/serve/ui/fieldvm", J::Null);

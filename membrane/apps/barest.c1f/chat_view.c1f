@@ -1,6 +1,7 @@
 PACK chat_view 1
 IMPORT dom 1
 IMPORT fetch 1
+IMPORT shell_view 1
 -- THE BARE CHAT AS A VIEW PACK (#1143, the first vertical slice of the UI rebuild: docs/ui-rebuild-plan.md section (c)).
 -- It runs in the PAGE's field engine (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f, and does not run it) and draws the
 -- chat the way membrane/apps/barest.c1f/ui/chat.js does: the turns (who, the message, the answer or its pending line, the tools folded under it), a
@@ -16,14 +17,34 @@ IMPORT fetch 1
 -- THE LEGACY CONSTANTS are Boot facts (the page's Boot:seat is fed by the snapshot, door_fieldvm.c1f); the view reads them once, when it opens, each
 -- with the value chat.js had when no fact says otherwise (docs/release-parity.md: chat_page_size 20, chat_poll_size 10, chat_list_poll_ms 3000,
 -- chat_active_poll_ms 700, chat_stick_px 80, chat_tool_chars 90).
+-- THE SHELL (shell_view.c1f) plugs this view in: it registers `Nav:chat` when the shell opens, the view opens when `Nav:chat` becomes active and draws into the slot
+-- `DomNode:shell:slot:chat`; `Focus:session.sid` ('main' = the chat with no session) names the session it shows: a change retires the rows and loads the new session's turns (an answer
+-- of the session left is dropped: the request id carries its session, `<id>@<sid>`). With no shell (no `Focus:session`, no `Nav:chat`) it is the plain bare chat, as before.
+Shell.open on-setter chat-register:
+  WHEN this.open:
+    ('Nav:chat').title = 'Chat'
+    ('Nav:chat').order = 10
+Nav.active on-setter chat-activate:
+  WHEN this.eid == 'Nav:chat' and this.active == True and not prop('View:chat', 'open'):
+    ('View:chat').open = True
+
+-- A CALL CANNOT WEDGE THE VIEW: every call carries `timeout_s` (the Boot fact `chat_poll_timeout_s`; 10 s is the value TRIED, not decided). A poll that never answers (a stalled connection, a seat that
+-- went away mid-request) used to leave `polling` true for ever, so the turn that finished on the seat stayed "Waiting for a turn…" on the page; now the host aborts it, the receipt is an error, the
+-- poll is armed again and the next one reads the message's state. A poll that fails is shown as text on the chat (`Composer`'s note line) and goes away with the next good answer.
+
 -- the clock is ticked by the shell at the fastest poll (the active one): a poll is due when its period has passed since the last one
 View.tick getter: clock
+
+-- the session of the turns the view shows, as the history route's query (`&sid=`: a session; `&sid=` empty: the chat with no session; nothing: no shell, every turn)
+View.sidq getter: '' if this.sid_now == None else '&sid=' + ('' if this.sid_now == 'main' else str(this.sid_now))
+View.rid_tail getter: '' if this.sid_now == None else '@' + str(this.sid_now)
 
 -- ---- the view: the skeleton, the first load ----
 View.open on-setter chat-draw:
   WHEN this.open:
     ('DomNode:chat:root').tag = 'div'
     ('DomNode:chat:root').class = 'chatview'
+    ('DomNode:chat:root').parent = 'DomNode:shell:slot:chat'
     ('DomNode:chat:log').parent = 'DomNode:chat:root'
     ('DomNode:chat:log').tag = 'div'
     ('DomNode:chat:log').class = 'log'
@@ -40,6 +61,11 @@ View.open on-setter chat-draw:
     ('DomNode:chat:list').parent = 'DomNode:chat:log'
     ('DomNode:chat:list').tag = 'ol'
     ('DomNode:chat:list').class = 'rows'
+    ('DomNode:chat:pollnote').parent = 'DomNode:chat:root'
+    ('DomNode:chat:pollnote').tag = 'div'
+    ('DomNode:chat:pollnote').class = 'pollnote'
+    ('DomNode:chat:pollnote').role = 'status'
+    ('DomNode:chat:pollnote').hidden = True
     ('DomNode:chat:note').parent = 'DomNode:chat:root'
     ('DomNode:chat:note').tag = 'div'
     ('DomNode:chat:note').class = 'msg'
@@ -66,10 +92,14 @@ View.open on-setter chat-draw:
     this.active_ms = ([b.chat_active_poll_ms for b in instances('Boot') if b.chat_active_poll_ms != None] or [700])[0]
     this.stick_px = ([b.chat_stick_px for b in instances('Boot') if b.chat_stick_px != None] or [80])[0]
     this.tool_chars = ([b.chat_tool_chars for b in instances('Boot') if b.chat_tool_chars != None] or [90])[0]
+    this.timeout_s = ([b.chat_poll_timeout_s for b in instances('Boot') if b.chat_poll_timeout_s != None] or [10])[0]
     this.tick_ms = this.active_ms
     this.polling = True
     this.seq = 1
-    ('Fetch:history').request = {'id': 'load-1', 'url': '/membrane/chat/messages?limit=' + str(this.page_size)}
+    sid = prop('Focus:session', 'sid')
+    this.sid_now = sid
+    ('Fetch:history').request = {'timeout_s': this.timeout_s, 'id': 'load-1' + ('' if sid == None else '@' + sid), 'url': '/membrane/chat/messages?limit=' + str(this.page_size) + ('' if sid == None else '&sid=' + ('' if sid == 'main' else sid))}
+    ('Nav:chat').filled = True
 
 -- ---- one turn: everything shown is a getter of the history row ----
 ChatRow.rid getter: str(prop(this.raw, 'id') or '')
@@ -157,7 +187,7 @@ Composer.go on-setter chat-send:
     ('View:chat').seq = n
     this.error = ''
     this.sending = True
-    ('Fetch:send').request = {'id': 'send-' + str(n), 'url': '/membrane/chat/message', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'text': strip(str(this.draft))})}
+    ('Fetch:send').request = {'timeout_s': prop('View:chat', 'timeout_s'), 'id': 'send-' + str(n), 'url': '/membrane/chat/message', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'text': strip(str(this.draft)), 'sid': prop('View:chat', 'sid_now')} if prop('View:chat', 'sid_now') != None and prop('View:chat', 'sid_now') != 'main' else {'text': strip(str(this.draft))})}
 
 -- both controls are disabled while a POST is out; a disabled box loses the focus, so it is let go while sending and given back after (the legacy `input.focus()`)
 Composer.sending on-setter chat-lock:
@@ -180,7 +210,13 @@ Fetch.cv getter:
   jb = {} if bd is Error else bd
   hs = prop(rq, 'http_status')
   good = prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300
-  {'rid': prop(rq, 'id'), 'ok': good, 'id': str(prop(jb, 'id') or ''), 'why': (str(prop(jb, 'error')) if prop(jb, 'error') else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed'), 'messages': prop(jb, 'messages'), 'more': prop(jb, 'more') == True, 'next': prop(jb, 'next')} if rq != None else None
+  {'rid': prop(rq, 'id'), 'sid': (after(str(prop(rq, 'id')), '@') if '@' in str(prop(rq, 'id')) else None), 'ok': good, 'id': str(prop(jb, 'id') or ''), 'why': (str(prop(jb, 'error')) if prop(jb, 'error') else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed'), 'messages': prop(jb, 'messages'), 'more': prop(jb, 'more') == True, 'next': prop(jb, 'next')} if rq != None else None
+
+-- a read of the turns that fails (or times out) is said in text, and the line goes with the next good answer
+Fetch.cv on-setter chat-history-note:
+  WHEN this.eid == 'Fetch:history' and prop(this.cv, 'sid') == prop('View:chat', 'sid_now'):
+    ('DomNode:chat:pollnote').hidden = prop(this.cv, 'ok') == True
+    ('DomNode:chat:pollnote').text = '' if prop(this.cv, 'ok') == True else 'The seat did not answer the last read of the turns (' + str(prop(this.cv, 'why')) + '); the view asks again.'
 
 -- the newest page: the first load also holds the cursor of the older turns (legacy `load`); a poll only draws what is new or changed
 Fetch.cv on-setter chat-history-done:
@@ -188,12 +224,12 @@ Fetch.cv on-setter chat-history-done:
     ('View:chat').polling = False
     ('View:chat').last_poll = clock
 Fetch.cv on-setter chat-history-first:
-  WHEN this.eid == 'Fetch:history' and prop(this.cv, 'ok') and prop(this.cv, 'messages') != None and startswith(str(prop(this.cv, 'rid')), 'load') and not prop('View:chat', 'loaded'):
+  WHEN this.eid == 'Fetch:history' and prop(this.cv, 'ok') and prop(this.cv, 'messages') != None and startswith(str(prop(this.cv, 'rid')), 'load') and not prop('View:chat', 'loaded') and prop(this.cv, 'sid') == prop('View:chat', 'sid_now'):
     ('View:chat').loaded = True
     ('View:chat').next = prop(this.cv, 'next') if prop(this.cv, 'more') else None
     ('DomNode:chat:older').hidden = not prop(this.cv, 'more')
 Fetch.cv on-setter chat-history-rows:
-  WHEN this.eid == 'Fetch:history' and prop(this.cv, 'ok'):
+  WHEN this.eid == 'Fetch:history' and prop(this.cv, 'ok') and prop(this.cv, 'sid') == prop('View:chat', 'sid_now'):
     FOR m IN (prop(this.cv, 'messages') or []):
       ('ChatRow:' + str(prop(m, 'id'))).born = True
       ('ChatRow:' + str(prop(m, 'id'))).raw = m
@@ -204,7 +240,7 @@ View.tick on-setter chat-poll:
     n = (this.seq or 0) + 1
     this.seq = n
     this.polling = True
-    ('Fetch:history').request = {'id': 'poll-' + str(n), 'url': '/membrane/chat/messages?limit=' + str(this.poll_size)}
+    ('Fetch:history').request = {'timeout_s': this.timeout_s, 'id': 'poll-' + str(n) + this.rid_tail, 'url': '/membrane/chat/messages?limit=' + str(this.poll_size) + this.sidq}
 
 -- ---- the send: a 2xx with an id puts the message in the log at once (queued) and clears the box; anything else is the note and the draft stays ----
 Fetch.cv on-setter chat-sent:
@@ -227,7 +263,7 @@ DomNode.clicked on-setter chat-older-click:
     ('View:chat').seq = n
     ('View:chat').older_out = True
     ('DomNode:chat:older:btn').disabled = True
-    ('Fetch:older').request = {'id': 'older-' + str(n), 'url': '/membrane/chat/messages?limit=' + str(prop('View:chat', 'page_size')) + '&before=' + str(prop('View:chat', 'next'))}
+    ('Fetch:older').request = {'timeout_s': prop('View:chat', 'timeout_s'), 'id': 'older-' + str(n), 'url': '/membrane/chat/messages?limit=' + str(prop('View:chat', 'page_size')) + '&before=' + str(prop('View:chat', 'next')) + prop('View:chat', 'sidq')}
 Fetch.cv on-setter chat-older-rows:
   WHEN this.eid == 'Fetch:older' and prop(this.cv, 'ok') and prop(this.cv, 'messages') != None:
     oldest = ([prop(e, 'eid') for e in sort_by(sort_by([{'eid': 'DomNode:chat:row:' + r.rid, 'ms': r.ms, 'nr': r.nr} for r in instances('ChatRow')], 'nr'), 'ms')] or [None])[0]
@@ -251,3 +287,22 @@ Fetch.cv on-setter chat-older-rows:
 DomNode.scroll on-setter chat-scroll:
   WHEN this.eid == 'DomNode:chat:log' and prop(this.scroll, 'height') != None:
     ('View:chat').near = prop(this.scroll, 'height') - prop(this.scroll, 'top') - prop(this.scroll, 'client') < prop('View:chat', 'stick_px')
+
+-- ---- the session switch (the shell writes `Focus:session.sid`): the rows of the session left go, the new session's newest turns are asked for ----
+-- the request id carries the session, so what the old session answers late is dropped (chat-history-rows)
+Focus.sid on-setter chat-session:
+  WHEN this.eid == 'Focus:session' and prop('View:chat', 'open') and prop('View:chat', 'sid_now') != this.sid:
+    n = (prop('View:chat', 'seq') or 0) + 1
+    sq = '&sid=' + ('' if this.sid == 'main' else str(this.sid))
+    FOR r IN instances('ChatRow'):
+      (r.eid).retire = True
+    FOR x IN [x for x in instances('DomNode') if startswith(x.eid, 'DomNode:chat:row:')]:
+      (x.eid).retire = True
+    ('View:chat').seq = n
+    ('View:chat').sid_now = this.sid
+    ('View:chat').loaded = False
+    ('View:chat').next = None
+    ('View:chat').older_out = False
+    ('View:chat').polling = True
+    ('DomNode:chat:older').hidden = True
+    ('Fetch:history').request = {'timeout_s': prop('View:chat', 'timeout_s'), 'id': 'load-' + str(n) + '@' + str(this.sid), 'url': '/membrane/chat/messages?limit=' + str(prop('View:chat', 'page_size')) + sq}

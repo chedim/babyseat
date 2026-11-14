@@ -10,7 +10,7 @@ chat.c1f/
   chat.c1f            packs: c1f files, loaded in dependency order (a pack after the packs it imports)
   chat_turn.c1f       packs with no import relation load in ALPHABETICAL order of their file path
   ui/index.html       every other file is DATA at its path (served by the door; an entity of the file's path)
-  ui/chat.js
+  ui/boot.js
 ```
 
 `cliffvm run <app> [<app>...]` (a folder `<name>.c1f/` or one pack file). Several apps are loaded in the order given on the command line;

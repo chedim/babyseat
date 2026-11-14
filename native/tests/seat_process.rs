@@ -18,6 +18,8 @@ impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn app_ui() -> std::path::PathBuf { repo().join("membrane/apps/barest.c1f/ui") }
+/// a file the page loads: the app folder's own, else the shared ui folder's (the host, fieldvm.js)
+fn app_file(rel: &str) -> std::path::PathBuf { let a = app_ui().join(rel); if a.is_file() { a } else { repo().join("membrane/ui").join(rel) } }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -131,15 +133,13 @@ fn module_imports(js: &str) -> Vec<String> {
 #[test]
 fn the_page_and_its_files_are_served_with_their_content_types_and_every_reference_exists() {
     let (mut run, port) = seat("page", true);
-    assert!(std::fs::read_to_string(app_ui().join("graph.js")).unwrap().contains("['zoomin', 1.15], ['zoomout', 1 / 1.15]") && std::fs::read_to_string(app_ui().join("graph.js")).unwrap().contains("this.zoomAt(this.w / 2, this.h / 2, f)"), "graph.js wires both buttons to zoomAt");
     let (st, ct, html) = http(port, "GET", "/", "");
     assert_eq!(st, 200);
     assert!(ct.starts_with("text/html"), "{ct}");
-    assert!(html.contains("<canvas") && html.contains("id=\"composer\""), "the page holds the graph canvas and the chat composer");
+    assert!(html.contains("id=\"app\"") && html.contains("ui/www/boot.js") && html.len() < 700, "the page is a bootstrap: one mount node and the boot script (every view is a c1f pack)");
     assert_eq!(http(port, "GET", "/index.html", "").0, 200);
-    assert!(html.contains("id=\"zoomin\"") && html.contains("id=\"zoomout\"") && html.contains("aria-label=\"Zoom in\"") && html.contains("aria-label=\"Zoom out\""), "the zoom buttons are in the page");
     let files = page_files(&html);
-    assert!(files.iter().any(|f| f.ends_with("app.js")) && files.iter().any(|f| f.ends_with("app.css")), "{files:?}");
+    assert!(files.iter().any(|f| f.ends_with("boot.js")) && files.iter().any(|f| f.ends_with("app.css")), "{files:?}");
     let mut js: Vec<String> = vec![];
     for f in &files {
         let rel = f.trim_start_matches("ui/www/");
@@ -154,10 +154,10 @@ fn the_page_and_its_files_are_served_with_their_content_types_and_every_referenc
     // the modules' own imports exist and are served too
     let mut i = 0;
     while i < js.len() {
-        let src = std::fs::read_to_string(app_ui().join(&js[i])).unwrap();
+        let src = std::fs::read_to_string(app_file(&js[i])).unwrap();
         for m in module_imports(&src) {
-            assert!(app_ui().join(&m).is_file(), "{} imports {m}, which is not under the app folder", js[i]);
-            assert_eq!(http(port, "GET", &format!("/ui/www/{m}"), "").0, 200, "{m}");
+            assert!(app_ui().join(&m).is_file() || repo().join("membrane/ui").join(&m).is_file(), "{} imports {m}, which is in neither the app folder nor the ui folder", js[i]);
+            if app_ui().join(&m).is_file() { assert_eq!(http(port, "GET", &format!("/ui/www/{m}"), "").0, 200, "{m}"); }   // the shared host (fieldvm.js) is the seat's --ui-dir, which this seat is not given
             if !js.contains(&m) { js.push(m); }
         }
         i += 1;
@@ -166,7 +166,7 @@ fn the_page_and_its_files_are_served_with_their_content_types_and_every_referenc
     // a syntax check of every script, when node is there
     if Command::new("node").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false) {
         for f in &js {
-            let p = app_ui().join(f);
+            let p = app_file(f);
             let tmpf = std::env::temp_dir().join(format!("seatcheck-{}-{}.mjs", std::process::id(), f.replace('/', "_")));
             std::fs::copy(&p, &tmpf).unwrap();
             let o = Command::new("node").arg("--check").arg(&tmpf).output().unwrap();

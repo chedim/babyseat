@@ -136,6 +136,8 @@ fn every_row_has_its_descriptor_as_data_in_the_designed_group_and_order() {
         assert!((gi, order) >= last, "{id}: groups run Model, Chat, Map, Home, Import, Access, Limits and rows keep their order");
         last = (gi, order);
     }
+    // the Map group is hidden from the window while the field view is disabled (operator 2026-11-14); every other row is listed
+    for (id, _, _) in ROWS { assert_eq!(get(run.port, &format!("Setting:{id}"), "hidden"), if id.starts_with("map.") { json!("True") } else { J::Null }, "{id}: hidden only for the Map rows"); }
     // what the operator dropped is not a row: the dead settings and the page's own constants
     let (_, all) = rpc(run.port, None, "entity_query", json!({"q": "kind:Setting", "k": 100}));
     assert_eq!(all.lines().filter(|l| l.starts_with("Setting:")).count(), ROWS.len(), "exactly the designed rows: {all}");

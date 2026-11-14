@@ -63,7 +63,7 @@ fn ids(a: &J) -> Vec<String> { a["nodes"].as_array().unwrap().iter().map(|n| n["
 fn store() -> std::path::PathBuf {
     let dir = tmp("s");
     let run = start(&dir, &[]);
-    for e in ["Zed:a", "Message:1", "Zed:a:note", "Span:1", "Zed:b", "SemText:1", "Zed:c", "Zed:c:x", "Zed:d", "Chat:message:7", "Chat:message:7:body", "Chat:main"] { put(run.port, e); }
+    for e in ["Zed:a", "Message:1", "Zed:a:note", "Span:1", "Zed:b", "SemText:1", "Zed:c", "Zed:c:x", "Zed:d", "Chat:message:7", "Chat:message:7:body", "Chat:main", "membrane::Chat:message:9", "membrane::Chat:message:9:turn:tool:toolu_x", "membrane::Chat:main", "membrane::Chat:session:ses_1", "other::Chat:message:3", "Chat:session:ses_2", "Keep:a::b"] { put(run.port, e); }
     std::thread::sleep(Duration::from_millis(300));
     drop(run);
     dir
@@ -130,8 +130,14 @@ fn chat_messages_and_their_bodies_are_hidden_by_the_eid_prefix_on_the_k_column()
     let got = ids(&a);
     // a chat message and its body have cls = Chat (the eid's class), so the class list cannot hide them: the prefix does
     assert!(!got.iter().any(|i| i.starts_with("Chat:message:")), "{a}");
-    assert!(got.contains(&"Chat:main".to_string()), "the chat itself stays: {a}");
-    assert_eq!(a["hidden_prefixes"], json!(["Chat:message:"]), "{a}");
+    // the chat's own header entities are no entity of the field either (operator 11-14): the main chat and the session headers, plain and namespaced
+    for gone in ["Chat:main", "Chat:session:ses_2", "membrane::Chat:main", "membrane::Chat:session:ses_1"] { assert!(!got.contains(&gone.to_string()), "{gone} is hidden by default: {a}"); }
+    // any leading `<name>::` is a namespace, not just membrane::; a `::` deeper in the eid is not one
+    assert!(!got.contains(&"other::Chat:message:3".to_string()), "another namespace too: {a}");
+    assert!(got.contains(&"Keep:a::b".to_string()), "a :: inside the eid is not a namespace: {a}");
+    // the stored form behind the `membrane::` namespace (the chat packs write it: `membrane::Chat:message:<id>:turn:tool:...`) is hidden by the same prefix; the namespaced chat stays
+    assert!(!got.iter().any(|i| i.starts_with("membrane::Chat:message:")), "{a}");
+    assert_eq!(a["hidden_prefixes"], json!(["Chat:message:", "Chat:session:", "Chat:main"]), "{a}");
     // n_total leaves them out too
     let n = a["n_total"].as_i64().unwrap();
     let (_, b) = active(run.port, "?m=1");
@@ -177,4 +183,27 @@ fn the_edges_route_lists_an_entitys_owner_children_and_refs_from_one_row_and_the
     assert_eq!(a["children"].as_array().unwrap().len(), 1, "{a}");
     // only the one row's body was read: the other entities stay unloaded
     assert_eq!(call(run.port, "run_cliff", json!({"code": "len(instances('Gr'))"})), "0");
+}
+
+#[test]
+fn the_entity_route_lists_one_entitys_class_and_properties_from_its_row_and_loads_nothing() {
+    let dir = tmp("entityrow");
+    let run = start(&dir, &["warm_rows=0"]);
+    put(run.port, "Gr:a");
+    call(run.port, "entity_write", json!({"spec": "Gr:a", "prop": "note", "value": "hello world"}));
+    call(run.port, "entity_write", json!({"spec": "Gr:a", "prop": "n", "value": 7}));
+    call(run.port, "entity_write", json!({"spec": "Gr:a", "prop": "link", "value": {"$ref": "Gr:b"}}));
+    drop(run);
+    let run = start(&dir, &["warm_rows=0"]);
+    let get = |q: &str| { let (s, b) = http(run.port, "GET", &format!("/ui/fieldvm/entity{q}"), ""); (s, serde_json::from_str::<J>(&b).unwrap_or(J::Null)) };
+    assert_eq!(get("").0, 400, "no eid, no answer");
+    assert_eq!(get("?eid=Gr:nowhere").0, 404, "an entity that does not exist");
+    let (st, e) = get("?eid=Gr:a");
+    assert_eq!(st, 200, "{e}");
+    assert_eq!((e["eid"].clone(), e["cls"].clone()), (json!("Gr:a"), json!("Gr")), "{e}");
+    let props: std::collections::BTreeMap<String, String> = e["props"].as_array().unwrap().iter().map(|p| (p["k"].as_str().unwrap().to_string(), p["v"].to_string())).collect();
+    assert_eq!(props["note"], "\"hello world\"", "{e}");
+    assert_eq!(props["n"], "7", "{e}");
+    assert!(props["link"].contains("Gr:b") && props["link"].contains("$ref"), "an object value is its JSON text: {e}");
+    assert_eq!(call(run.port, "run_cliff", json!({"code": "len(instances('Gr'))"})), "0", "only the one row's body was read");
 }

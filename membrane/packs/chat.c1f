@@ -69,8 +69,20 @@ Request.cm_go getter: this.method == 'POST' and this.route == '/membrane/chat/me
 Request.cm_go on-setter chat-stamp:
   WHEN this.cm_go:
     this.cm_at = clock
+-- an optional `sid` in the body names a session (packs/door_session.c1f, the page's session switcher): the message and its turn carry it, as the session API's own messages do
+Request.cm_sid getter: strip(str(prop(this.jbody, 'sid') or ''))
+Request.cm_at on-setter chat-message-sid:
+  WHEN this.cm_at != None and this.cm_sid != '':
+    id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + replace(this.eid, 'Request:', '')
+    membrane::Chat:main = Chat(name: 'main')
+    membrane::Chat:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at, sid: this.cm_sid)
+    membrane::Chat:message[id]:body = SemText(text: this.cm_text)
+    membrane::Chat:message[id]:body.mention = True
+    membrane::Chat:message[id]:turn = ChatTurn(message: 'membrane::Chat:message:' + id, queued_at: this.cm_at, sid: this.cm_sid)
+    membrane::Chat:message[id].queued = True
+    this.cm_id = id
 Request.cm_at on-setter chat-message:
-  WHEN this.cm_at != None:
+  WHEN this.cm_at != None and this.cm_sid == '':
     id = words(replace(str(this.cm_at * 1000), '.', ' '))[0] + '-' + replace(this.eid, 'Request:', '')
     membrane::Chat:main = Chat(name: 'main')
     membrane::Chat:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
@@ -112,7 +124,18 @@ Request.hs_before getter: ([q[1] for q in this.qpairs if q[0] == 'before'] or [N
 -- A message is lazy (`instances` would list only the loaded ones); each key is read by eid, which loads it. The order is `at` (the id's millisecond part: no body is read, a message body is large),
 -- then the request number in the id, newest first; the extra row only tells that older ones exist. `?3` is the cursor id ('' = none), `?4` the row count.
 -- rows are None while the query runs: the reply waits for them.
-Request.hs_rows getter: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k LIKE ?1 AND k NOT LIKE ?2 AND (?3 = \'\' OR CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) < CAST(substr(?3, 1, instr(?3, \'-\') - 1) AS INTEGER) OR (CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) = CAST(substr(?3, 1, instr(?3, \'-\') - 1) AS INTEGER) AND CAST(substr(k, 24 + instr(substr(k, 24), \'-\')) AS INTEGER) < CAST(substr(?3, instr(?3, \'-\') + 1) AS INTEGER))) ORDER BY CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) DESC, CAST(substr(k, 24 + instr(substr(k, 24), \'-\')) AS INTEGER) DESC LIMIT ?4', 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.hs_before or '', this.hs_limit + 1) if this.hs_on else []
+-- `sid` = a session id: only that session's turns; `sid=` (empty): the turns of no session; no `sid`: every turn
+Request.hs_sid getter: ([q[1] for q in this.qpairs if q[0] == 'sid'] or [None])[0]
+-- The candidate message keys: with no `sid` they come from the message rows' KEYS only (the `(cls, k)` index covers it, no body is read). With a `sid` they come from the TURN rows (`<message>:turn`, about 1 KB each: a message
+-- body is large and is never read for a filter); a turn carries the session id of its message (`sid`, written by the same setter), and every message has its turn. The two sources are one list of keys `m`.
+Request.hs_src getter:
+  WHEN this.hs_sid == None: 'SELECT k FROM c_field WHERE cls = \'Chat\' AND k LIKE ?1 AND k NOT LIKE ?2'
+  ELSE: 'SELECT substr(k, 1, length(k) - 5) AS k FROM c_field WHERE cls = \'Chat\' AND k LIKE ?1 AND k LIKE \'%:turn\' AND instr(substr(k, 24, length(k) - 28), \':\') = 0 AND coalesce(json_extract(body, \'$.props.sid\'), \'\') = ?5'
+Request.hs_sql getter: 'WITH m(k) AS (' + this.hs_src + ') SELECT k FROM m WHERE (?3 = \'\' OR CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) < CAST(substr(?3, 1, instr(?3, \'-\') - 1) AS INTEGER) OR (CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) = CAST(substr(?3, 1, instr(?3, \'-\') - 1) AS INTEGER) AND CAST(substr(k, 24 + instr(substr(k, 24), \'-\')) AS INTEGER) < CAST(substr(?3, instr(?3, \'-\') + 1) AS INTEGER))) ORDER BY CAST(substr(k, 24, instr(substr(k, 24), \'-\') - 1) AS INTEGER) DESC, CAST(substr(k, 24 + instr(substr(k, 24), \'-\')) AS INTEGER) DESC LIMIT ?4'
+Request.hs_rows getter:
+  WHEN not this.hs_on: []
+  ELSE WHEN this.hs_sid == None: sql(this.hs_sql, 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.hs_before or '', this.hs_limit + 1)
+  ELSE: sql(this.hs_sql, 'membrane::Chat:message:%', 'membrane::Chat:message:%:%', this.hs_before or '', this.hs_limit + 1, this.hs_sid)
 -- the cursor must be a message: the unknown id is a 404
 Request.hs_cut getter: sql('SELECT k FROM c_field WHERE k = ?', 'membrane::Chat:message:' + this.hs_before) if this.hs_on and this.hs_before != None else []
 Request.hs_ids getter: [{'eid': prop(r, 'k'), 'id': replace(prop(r, 'k'), 'membrane::Chat:message:', ''), 'at': num(before(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-')) / 1000, 'n': num(after(replace(prop(r, 'k'), 'membrane::Chat:message:', ''), '-'))} for r in head(this.hs_rows, this.hs_limit)] if this.hs_rows != None else None
