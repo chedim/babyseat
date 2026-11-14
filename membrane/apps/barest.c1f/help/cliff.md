@@ -42,11 +42,17 @@ concat([[p.eid, p.state] for p in instances('Pack') if startswith(p.eid, 'Pack:d
 
 ## A value that is null says why
 
-A null with a reason comes back as `error: <the reason>`; a plain null is the text `null`:
+A null with a reason comes back as `error: <the reason>`; a plain null is the text `null`. A missing property is a null that says `absent: <entity>.<property>`. A null INSIDE a list or a dict keeps its reason too, written `{"$null": "<reason>"}` in the text you read (a null with no reason stays `null`):
 
 ```cliff
 -- error: nothing measured yet
 None('nothing measured yet')
+```
+
+```cliff
+-- given Lamp:desk {"watts": 40}
+-- text [40,{"$null":"absent: Lamp:desk.room"}]
+[Lamp:desk.watts, Lamp:desk.room]
 ```
 
 ## A block that does not load
@@ -83,4 +89,6 @@ Lamp:desk.watts = base
 Lamp:desk.label = 'desk ' + str(base)
 ```
 
-The scratch the block runs in is removed after the call: nothing of it stays in the field except what your writes made.
+The scratch the block runs in is removed after the call: nothing of it stays in the field except what your writes made. That scratch is a pack of its own that lives for the
+one call, so a block holds lines of code and no header line: a class with a storage mode (`VIRTUAL`, `RESIDENT`), a getter or a setter that stays is a PACK. Keep it by writing its
+text to the entity `Pack:<name>`: `entity_write {spec: "Pack:mine", prop: "text", value: "PACK mine 1\nRESIDENT Keep\n..."}` (`Help:packs`).

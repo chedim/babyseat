@@ -81,6 +81,9 @@ A bare line `name = expr` (no dotted target; a write always has one, like `this.
     base + tax
   ```
 - a setter's body: locals feed the writes (and FOR loops) below them, per branch; a local made inside a FOR ends with it;
+- **Nulls and their reasons** (#1143; `native/tests/semantics_1143.rs`): reading a property an entity does not hold is the null `absent: <entity>.<property>` (`View::attr`; a getter that computed `None` is a plain null, `Core.nulled`; the help `Help:upgrade` says the same). A reasoned null inside a list or a dict is kept: in an expression it is the element itself; in a
+  value a getter STORED (JSON, where every null is plain: what is stored and sent is unchanged) the engine remembers the reason beside it in `Core.why` under `<prop> NUL <path>` (`expr::nested_nulls`, set by the getter that stores it, replaced with its next value, dropped with the entity) and a read of the stored list or dict puts the
+  reasoned nulls back (`overlay_nested`). `str` of a list or a dict writes such a null as `{"$null": "<reason>"}` (`expr::to_json_shown`; a null without a reason stays `null`), which is what `run_cliff` prints. Not covered: a nested null a SETTER wrote (setter values keep plain nulls).
 - a local that holds a reasoned null passes it on like any value; `Why(...)` (`why_chain`) lists the locals of the getter evaluation it explains
   (`locals: {name: value}`, a null shows its reason);
 - the loader refuses a local that shadows a property of `this` (a name the class reads or writes as `this.<name>`, or a setter trigger),
