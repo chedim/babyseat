@@ -27,6 +27,18 @@ function loadPacks(host, packs) {
   }
 }
 
+// THE PAGE'S OWN FACTS for the graph link (docs/graph-link.md, slice 1): read from the host (what it loaded, the DOM allow-list, its version), plus the device and width classes.
+// The width class is written again when the page crosses WIDE_PX (a decision: 700, the value tried); nothing else here runs on a timer.
+const WIDE_PX = 700;
+function link_facts(host) {
+  const ua = navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean' ? navigator.userAgentData.mobile : /Mobi|Android|iPhone|iPad/.test(navigator.userAgent);
+  const wide = window.matchMedia(`(min-width: ${WIDE_PX}px)`);
+  const put = () => host.feed('Host:page', 'Host', { width: wide.matches ? 'wide' : 'narrow' }, true);
+  host.feed('Host:page', 'Host', { ...host.describe(), device: ua ? 'mobile' : 'desktop' }, true);
+  put();
+  wide.addEventListener('change', put);
+}
+
 (async () => {
   const r = await fetch('/ui/fieldvm', { credentials: 'same-origin' });
   if (!r.ok) throw new Error(`the seat's /ui/fieldvm answered ${r.status}`);
@@ -38,6 +50,7 @@ function loadPacks(host, packs) {
   for (const e of snap.entities || []) host.feed(e.eid, e.cls, e.props, true);
   host.page.set('DomNode:page:html', document.documentElement);     // the theme: the shell writes `data-theme` on it (an allow-listed attribute)
   host.track_hidden();                                                // Conn:page.hidden: the polls pause in a hidden tab
+  link_facts(host);                                                   // Host:page: what the page holds, for the link pack (link_view.c1f) to tell the seat
   host.feed('Shell:main', 'Shell', { view: 'chat', load_errors: host.errors }, true);
   host.feed('Shell:main', 'Shell', { open: true }, true);
   app.replaceChildren(mount);

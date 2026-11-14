@@ -60,7 +60,12 @@ FieldVm.snapshot getter:
 Request.o_fieldvm getter: this.route in ['/ui/fieldvm', '/ui/fieldvm/active', '/ui/fieldvm/edges', '/ui/fieldvm/entity']
 Request.m_fieldvm getter: ['GET']
 Request.fv_seat getter: ([s for s in instances('FieldVm') if s.eid == 'FieldVm:seat'] or [None])[0]
-Request.fv_body getter: this.fv_seat.snapshot if this.fv_seat != None else None
+-- THE PAGE'S NAME (#1143, the graph link slice 1, docs/graph-link.md): each load of the page gets `page` = `p` + 8 hex digits (32 random bits, so two loads of one seat share a name about once in 4 billion pairs;
+-- the namespace must be a plain word for the lexer, so no hyphen) and the entity `Link:page` {ns, build} (`build` is the seat's `build_id`, the text `/ui/conf` says), which the page's link pack
+-- (apps/barest.c1f/link_view.c1f) reads. The page cannot name itself. The bytes are SQLite's (`randomblob`): a receipt like any `sql()`, asked for this route only.
+Request.fv_rows getter: sql("SELECT 'p' || lower(hex(randomblob(4))) AS p") if this.route == '/ui/fieldvm' and this.fv_seat != None and this.fv_seat.snapshot != None else None
+Request.fv_page getter: prop(this.fv_rows[0], 'p') if this.fv_rows != None and len(this.fv_rows) > 0 else None
+Request.fv_body getter: {'packs': prop(this.fv_seat.snapshot, 'packs'), 'entities': concat(prop(this.fv_seat.snapshot, 'entities'), [{'eid': 'Link:page', 'cls': 'Link', 'props': {'ns': this.fv_page, 'build': this.c_build}}]), 'page': this.fv_page} if this.fv_seat != None and this.fv_seat.snapshot != None and this.fv_page != None else None
 -- THE ACTIVE WINDOW (#1143, the field view pack apps/field.c1f/field_view.c1f; docs/field-view-plan.md slices 1-2, operator 2026-11-14): `GET /ui/fieldvm/active?m=<n>` answers
 -- `{nodes: [{id, cls, updated, parent}], n_total, hidden, m}`: the `m` entities written most recently (the `updated` column, newest first) whose class is not hidden, and how many there are in all.
 -- It reads the COLUMNS `k`, `cls`, `updated` of `c_field` and never a body, so an entity nobody loaded stays unloaded. `parent` is the nearest colon-prefix owner that is in the window too

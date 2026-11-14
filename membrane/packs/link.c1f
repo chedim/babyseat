@@ -1,0 +1,40 @@
+PACK link 1
+IMPORT boot 1
+RESIDENT Vm
+VIRTUAL Page
+-- THE GRAPH LINK, SLICE 1: WHAT THE PAGE TELLS THE SEAT (#1143, docs/graph-link.md sections 2 and 8, "Slice 1: built"). The page is a second field engine; it cannot be asked, so it tells.
+-- Its own pack (apps/barest.c1f/link_view.c1f, run in the browser) writes through the ordinary door (`POST /mcp`, `entity_write`; whoever reaches the page may write, there are no per-person rights):
+--   Vm:<ns>.caps              what this page can do, ONE write at start: protocol, encodings, frames, the DOM allow-list, the packs it runs (`provides`, each with its `requires`), the classes it can evaluate, limits, device class
+--   <ns>::Page:main.report    what it loaded and how it is: packs (name: size), load_errors, view, hidden, width class, build, host version; written again whenever one of those changes (never on a timer)
+-- `<ns>` is `p` + 8 hex digits, made by the SEAT for each load of the page (door_fieldvm.c1f, `Request.fv_page`) and given to the page in the snapshot as `Link:page.ns`: a page cannot name itself.
+-- The class `Vm` is the page's ROOT (one stored row per page; kind: the page). `Page` is VIRTUAL (a report is not memory: a restart forgets it) and is HELD by its `Vm` through `Vm.page`, a reference, so it is
+-- not collected. A restart retires every `Vm` (the tabs of the last run do not report again until they are loaded again).
+-- THE SEAT STAMPS THE TIME (the page has no wall clock it is held to): `Vm.seen` is `clock` at the last write of `caps` or `report`; `Vm.connected_at` at the first. `Vm.state` is `stale` when the page has
+-- been silent for `link_stale_s` seconds (the Boot fact; THE NUMBER IS A DECISION: 120 is the value tried) and `connected` otherwise. There is no heartbeat yet: a quiet, healthy page is `stale` after that
+-- time too. `stale` means "nothing has been heard", not "gone".
+
+Page.ns getter: before(this.eid, '::')
+Vm.stale_s getter: ([num(b.link_stale_s) for b in instances('Boot') if num(b.link_stale_s) != None] or [120])[0]
+Vm.silent getter: clock - this.seen if this.seen != None else None
+Vm.state getter:
+  WHEN this.seen == None: None
+  ELSE WHEN this.silent >= this.stale_s: 'stale'
+  ELSE: 'connected'
+Vm.kind getter: 'page'
+
+Vm.caps on-setter link-caps:
+  WHEN this.caps != None:
+    this.connected_at = this.connected_at or clock
+    this.seen = clock
+Page.report on-setter link-report:
+  WHEN this.report != None:
+    ('Vm:' + this.ns).page = this
+    ('Vm:' + this.ns).connected_at = prop('Vm:' + this.ns, 'connected_at') or clock
+    ('Vm:' + this.ns).seen = clock
+
+-- a restart: the roots of the last run are retired (their tabs report again only when they are loaded again)
+Boot.old_vms getter: sql('SELECT k FROM c_field WHERE json_extract(body, \'$.cls\') = \'Vm\'') if this.started != None else None
+Boot.old_vms on-setter link-sweep:
+  WHEN this.old_vms != None:
+    FOR r IN this.old_vms:
+      (prop(r, 'k')).retire = True
