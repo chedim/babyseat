@@ -227,7 +227,9 @@ class Host {
   // makes ONE fetch() and writes `request_result` back in the seat's shape (native/src/drivers.rs + fetch.rs: {id, status, rc, head,
   // http_status, headers, body, started, finished, ms}; a failure is {id, status:'error', rc, head: the reason, started, finished, ms}).
   // Same origin only, credentials same-origin (the owner cookie), never authorization or cookie. `abort = true` aborts the one in flight.
-  // No timeout unless the request carries `timeout_s`. `stream` is W3: accepted, ignored, and the receipt says so (`note`).
+  // No timeout unless the request carries `timeout_s`. W3: with `stream: true` the body is read as SSE; each frame's `data` is a page-local
+  // entity `Chunk:<fetch eid>:<n>` ({fetch, id, n, data, done}, the seat's Fetch Chunk), n from 1, a last `done: true` Chunk (n+1, `error` on
+  // a failure or abort), then the receipt without a body. Chunks are fed as mirrors: never fetched, never sent anywhere.
 
   fetches(writes) {
     for (const w of writes) {
@@ -273,16 +275,51 @@ class Host {
     (async () => {
       try {
         const resp = await fetch(new URL(req.url, origin).href, init);
-        const body = await resp.text();
+        const stream = req.stream === true && resp.body;
+        const body = stream ? null : await resp.text();
         const hs = {};
         for (const [k, v] of resp.headers) hs[String(k).toLowerCase()] = v;
-        const r = { status: 'ok', rc: 0, head: `${resp.status} ${resp.statusText || ''}`.trim(), http_status: resp.status, headers: hs, body };
-        if (req.stream) r.note = 'stream: not in this round (W3); the whole body is returned';
+        const r = { status: 'ok', rc: 0, head: `${resp.status} ${resp.statusText || ''}`.trim(), http_status: resp.status, headers: hs };
+        if (stream) { mine.n = 0; await this.sse(eid, id, resp.body, mine); this.chunk(eid, id, mine, '', true); }
+        else r.body = body;
         done(r);
       } catch (e) {
-        done({ status: 'error', rc: 1, head: mine.why || String((e && e.message) || e) });
+        const why = mine.why || String((e && e.message) || e);
+        if (mine.n !== undefined) this.chunk(eid, id, mine, '', true, why);
+        done({ status: 'error', rc: 1, head: why });
       } finally { if (timer) clearTimeout(timer); }
     })();
+  }
+
+  /** One Chunk of a stream: a page-local entity (a mirror feed: not fetched again). `mine.n` counts them. */
+  chunk(eid, id, mine, data, last = false, error) {
+    const n = ++mine.n;
+    const p = { fetch: eid, id, n, data, done: last };
+    if (error !== undefined) p.error = error;
+    this.feed(`Chunk:${eid}:${n}`, 'Chunk', p, true);
+  }
+
+  /** Read an SSE body: split on the blank line across reads (bytes decoded as a stream), one Chunk per frame that has `data`. */
+  async sse(eid, id, body, mine) {
+    const rd = body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    const frames = () => {
+      let m;
+      while ((m = /\r\n\r\n|\n\n|\r\r/.exec(buf))) {
+        const raw = buf.slice(0, m.index); buf = buf.slice(m.index + m[0].length);
+        const data = [];
+        for (const line of raw.split(/\r\n|\n|\r/)) {
+          if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+        }
+        if (data.length) this.chunk(eid, id, mine, data.join('\n'));
+      }
+    };
+    for (;;) {
+      const { value, done } = await rd.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      frames();
+    }
   }
 
   /** Link the page's own DOM under `top` into the field, and keep it in step (one batch per frame). */

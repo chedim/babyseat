@@ -194,17 +194,7 @@ for (const [req, why] of [[{ method: 'PUT' }, /method/], [{ headers: { authoriza
   assert.equal(calls.length, 2, 'a new id is a new request');
 }
 
-// 8. stream is accepted and ignored with a visible reason; the body is whole text
-{
-  const { host, calls } = await world();
-  put(host, 'Fetch:a', { id: 's', url: '/ev', stream: true });
-  await sleep(5);
-  assert.equal(calls.length, 1);
-  calls[0].resolve(reply(200, 'data: 1\n\n'));
-  await sleep(5);
-  const r = rec(host);
-  assert.equal(r.body, 'data: 1\n\n'); assert.match(r.note, /stream.*not in this round/);
-}
+// 8. (W3) a stream request is read as a stream: see fieldvm_stream.test.mjs
 
 // 9. a body that is not text is refused (text only for now); a request with no url is refused
 for (const req of [{ id: 'b', url: '/a', method: 'POST', body: { a: 1 } }, { id: 'c' }]) {

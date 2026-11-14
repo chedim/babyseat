@@ -270,7 +270,14 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
   a normal result with its `http_status`. Same origin only (`location.origin`, credentials `same-origin`, so the owner cookie goes with it; any
   other origin is refused with a reason); verbs GET/POST/PATCH/DELETE; headers `content-type` and `accept` only (never authorization or cookie);
   `body` text only. No page-side timeout unless the request has `timeout_s`. `abort = true` on the entity aborts the one in flight. The same
-  request id written again on the same entity is not fetched twice. `stream` is accepted and ignored (the receipt's `note` says so: W3).
+  request id written again on the same entity is not fetched twice.
+  **Stream (W3):** `request.stream = true` reads the body as SSE (bytes decoded as a stream, frames split on the blank line across reads; a
+  comment, an empty frame and a frame with no `data` are ignored; an unterminated tail at the end is dropped). Each frame is a page-local
+  entity `Chunk:<fetch eid>:<n>` = `{fetch: <fetch eid>, id: <request id>, n, data, done: false}` (n from 1; a multi-line `data` is joined with
+  `\n`; the SSE `event` name is not kept, the seat's Chunk has no such key). The end is a last Chunk `{n: n+1, data: '', done: true}` (with `error`
+  when the stream failed or was aborted), as the seat's `fetch.rs`, then `request_result` as for a plain fetch but with no `body`. A closed
+  connection is a failure receipt (`status:'error'`); there is no auto-reconnect. Chunks are fed as mirrors (never fetched, never sent) and all are
+  kept; the count is `n` of the last one. Test: `tests/js/fieldvm_stream.test.mjs`.
   What the seat's own snapshot and events carry (`feed(..., mirror=true)`) is never fetched again. "Toward the seat: read-only" now means the
   page may CALL the seat's routes this way; it still never writes the seat's field.
 - **Caching:** the loader asks for the wasm by its content hash (`fieldvm_version.js`), since the seat caches `.wasm`.
