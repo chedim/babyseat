@@ -13,6 +13,9 @@ The host loads the text at once: its classes, getters and setters are live for t
 - `Pack:lamps.error` is the loader's message (the line and what it found);
 - `Pack:lamps.good_text` is the last text that loaded. A refused text leaves the running pack as it was.
 
+The reply of the write says it too, on its first lines: `pack <name> loaded`, or `pack <name> did not load: <the loader's message>`. Read that line (or `Pack:<name>.state`, `.error`)
+after every pack you write: a pack that did not load does nothing, whatever you meant it to do.
+
 Write the whole text again to change the pack (it reloads in place). Write an empty text to remove it. An optional first line
 `PACK lamps 1` names the pack (the name must be the id) and `IMPORT <pack> <major>` lines name the packs whose classes you use.
 Comments start with `--`.
@@ -61,7 +64,15 @@ Packs stack in the order they were loaded; a pack loaded later is above the ones
 - getters: the arms of all layers form one list, the top layer's first; the first `WHEN` that holds wins, and an `ELSE:` arm in an
   upper layer ends the search there;
 - setters: every setter on a property fires, the top layer first; a setter with the SAME NAME as a lower one replaces it;
-- a layer overrides only what it imports (`IMPORT` the pack whose getter or setter you replace);
+- a layer overrides only what it imports: to change a getter or setter another pack defines, `IMPORT` that pack. Without it the pack does not load and says which pack it collides with
+  (`add IMPORT notes 1`). Example: `notes` defines `Note.line`; a second pack that wants a different `Note.line` is
+
+```
+PACK notes2 1
+IMPORT notes 1
+Note.line getter: 'note: ' + this.title + '!'
+```
+
 - the banner: a pack that imports `default_banner` and defines `Banner.text` replaces the banner you start with (`Help:banner`).
 
 ```c1f
@@ -154,6 +165,7 @@ A plain read holds nothing (`prop(x, 'k')`, a getter that peeks, an entity liter
 
 ## Habits that keep packs working
 
-- Load, then read `Pack:<name>.state`; fix `error` before anything else.
+- Load, then read the reply's first lines or `Pack:<name>.state`; fix `error` before anything else.
+- Extend a pack you wrote by importing it instead of writing a second independent pack on the same getter.
 - Give each class getter a reading of its real source, so reading the entity returns the world as it is now.
 - Keep one idea per getter; name a part of a computation as a getter or a local.

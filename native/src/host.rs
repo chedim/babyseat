@@ -496,6 +496,8 @@ impl Host {
         let any = !out.is_empty();
         let ts = self.stamp_ts();
         let reactions = self.reactions_of(&out);
+        // the packs whose `text` this batch wrote: the reply tells whether each loaded (#1143, the silent pack: see `pack_reactions`)
+        let packs_written: Vec<String> = out.iter().filter(|w| w["prop"] == "text").filter_map(|w| w["eid"].as_str()).filter_map(|e| e.strip_prefix(PACK_PREFIX)).filter(|n| !n.is_empty()).map(String::from).collect();
         for w in out {
             if let Some(cls) = w.get("born").and_then(|c| c.as_str()) {
                 let eid = w["eid"].as_str().unwrap_or("").to_string();
@@ -538,6 +540,7 @@ impl Host {
         if !dead.is_empty() { self.drain_apply(); }
         // THE REACTIONS of a model's write (docs/cliffvm.md, "The return entity"): each door write is a Request `mc_done` by the setter `mcp-write`; the derived
         // writes of the same round are what it caused. The list goes back on that Request as `reactions` (a derived write, never journalled; a replay drains the same way).
+        let reactions = self.pack_reactions(reactions, &packs_written);
         let any = any || !reactions.is_empty();
         for (req, list) in reactions { self.inject_write(ts, &req, "reactions", list, "reactions", &stamp_writer("reactions")); }
         if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); self.load_new_residents(); return true; }
@@ -586,6 +589,22 @@ impl Host {
                 Some(json!({"eid": eid, "prop": prop, "new": w["new"], "by": w["writer"].as_str().unwrap_or("").trim_start_matches("field:"), "why": why, "cls": cls}))
             }).collect();
         asked.into_iter().map(|r| (r, J::Array(list.clone()))).collect()
+    }
+
+    /// A model-written pack that does not load must not be silent in the write's reply (#1143, the delivery-route incident): for each pack whose `text` was written in
+    /// this batch, add the reaction `Pack:<name>.loaded` (new: whether it is active, `why`: the engine's error text, verbatim). The mirror of `loaded`/`error` (refresh_packs)
+    /// is a later round, so the reaction is made from the same state it reads. The door's reply words it (door_tools.c1f, `rx_pack`).
+    fn pack_reactions(&self, reactions: Vec<(String, J)>, written: &[String]) -> Vec<(String, J)> {
+        if written.is_empty() || reactions.is_empty() { return reactions; }
+        let extra: Vec<J> = { let g = self.eng();
+            let refusals = self.refusals.lock().unwrap_or_else(|e| e.into_inner());
+            let mut seen = std::collections::HashSet::new();
+            written.iter().filter(|n| seen.insert(n.as_str())).map(|name| {
+                let active = g.1.pack_active(name) && !refusals.contains_key(name.as_str());
+                let err = refusals.get(name.as_str()).cloned().or_else(|| g.1.pack_errors.get(name.as_str()).cloned());
+                json!({"eid": format!("{PACK_PREFIX}{name}"), "prop": "loaded", "new": active, "by": PACK_WRITER, "why": err.map(J::from).unwrap_or(J::Null), "cls": PACK_CLASS})
+            }).collect() };
+        reactions.into_iter().map(|(r, l)| { let mut v = l.as_array().cloned().unwrap_or_default(); v.extend(extra.iter().cloned()); (r, J::Array(v)) }).collect()
     }
 
     // ---- Pack entities -----------------------------------------------------------------------------------------------

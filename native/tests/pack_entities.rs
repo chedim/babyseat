@@ -171,3 +171,31 @@ fn the_tools_write_and_create_an_entity_of_a_class_the_model_pack_owns_directly(
     read_until_has(port, "Spy:s", "refused", "can't grant");
     assert_eq!(read(port, "Pack:thief", "privileged"), "Pack:thief has no privileged");
 }
+
+fn wtext(port: u16, spec: &str, prop: &str, v: J) -> String { let (t, e) = call(port, "entity_write", json!({"spec": spec, "prop": prop, "value": v})); assert!(!e, "{t}"); t }
+
+/// THE INCIDENT (#1143, 2026-11-14): a model-written pack that did not load was silent in the write's reply, and the model believed its banner carried the route.
+/// The reply now says on its first lines `pack <name> loaded` or `pack <name> did not load: <the engine's error, verbatim>`; the pack that blocks it is named by that text.
+#[test]
+fn the_reply_of_a_pack_write_says_whether_the_pack_loaded_and_why_not() {
+    let (_run, port) = start("packreply", None);
+    let first = wtext(port, "Pack:notes", "text", json!("PACK notes 1\nBanner.text getter: 'notes'\n"));
+    assert!(first.lines().any(|l| l == "pack notes loaded"), "{first}");
+    // the second pack defines the same getter and does NOT import the first
+    let second = wtext(port, "Pack:route", "text", json!("PACK route 1\nBanner.text getter: 'route'\nBanner.undone getter: 'x'\n"));
+    let err = read_until_has(port, "Pack:route", "error", "belongs to pack notes");
+    assert!(second.lines().nth(1).map_or(false, |l| l.starts_with("pack route did not load: ")), "{second}");
+    assert!(second.contains(&err), "the engine's error verbatim: {second} / {err}");
+    assert!(second.contains("add IMPORT notes 1"), "{second}");
+    assert!(second.contains("Pack:route.loaded") && second.contains(".error"), "{second}");
+    assert!(!second.contains("pack route loaded"), "{second}");
+    // the first still loaded
+    assert_eq!(read(port, "Pack:notes", "state"), "loaded");
+    // a third pack that imports the first loads
+    let third = wtext(port, "Pack:more", "text", json!("PACK more 1\nIMPORT notes 1\nBanner.text getter: 'more'\n"));
+    assert!(third.lines().any(|l| l == "pack more loaded"), "{third}");
+    // the same through a run_cliff block that writes a pack text
+    let (t, e) = call(port, "run_cliff", json!({"code": "Pack:blk.text = 'PACK blk 1\\nBanner.text getter: 1\\n'"}));
+    assert!(!e, "{t}");
+    assert!(t.contains("pack blk did not load: "), "{t}");
+}
