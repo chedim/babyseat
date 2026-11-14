@@ -4,6 +4,7 @@ Investigation, no code changed (#1143). Tree: `w29-parity` = `memo-hotfix-0753` 
 inventories written for the barest scope (`modes-inventory.md`, `keep-list-inventory.md`) for the release scope.
 Agreed order (operator): (1) server swap, (2) no-history chat backend behind the same routes, (3) UI rebuilt as view packs,
 (4) data migration and cutover. One "round" = one agent round of 20-45 min.
+Step 3 plan (VM growth, architecture, first slice, rollout, tests, decisions): `docs/ui-rebuild-plan.md`.
 
 Conventions. `PY` = `membrane/server.py` at HEAD; `PY53` = the same file at tag `v0.7.53` (the release users run: it still serves the
 decision routes that HEAD moved to the door); `LN` = `membrane/lanes.py` (the :11500 proxy and the field map); `UIS` = `membrane/ui_serve.py`;
