@@ -8,3 +8,9 @@ PACK entity 1
 -- entity's last write, stamped by the host in the same row and transaction as the write (the store's indexed `updated` column): no write of its own, no reaction, no
 -- getter recompute (a getter that reads it keeps what it read until something else it reads changes). A setter that writes it is refused; a stored property of that name is shadowed.
 Entity.summary getter: this.eid + ' (' + join(this.parents or [this.cls], ', ') + ')'
+-- `Error` is the class of a FAILED entity, owned by this pack (the name is reserved for every other pack; docs/c1f-error.md). It has ONE typed property, `failed`, a dict {property: reason}.
+-- The VM writes both: when a property of an entity fails (the value kind `Error`: a getter raised, the step budget, a failed cast, a Command timeout) it puts the class `Error` on top
+-- of the entity's `parents` and the reason into `failed[prop]` (derived writes, never journalled); when every failure clears, `Error` leaves `parents` and `failed` is empty.
+-- A read of a property listed in `failed` is the Error (`x is Error`, `why(x)`); the stored value stays null and the getter keeps recomputing, so a success takes the entry out.
+-- This getter only DECLARES the property (its own name reads the previous value, so it never changes it).
+Error.failed getter: this.failed or {}

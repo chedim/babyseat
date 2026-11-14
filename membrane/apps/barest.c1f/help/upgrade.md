@@ -49,27 +49,27 @@ that raised, a block over its step budget, a command that timed out, an entity k
 `WHEN` condition and every call over an Error give that same Error (the first one wins), a getter that reads an Error returns it unchanged, and a `WHEN` over an Error does
 NOT fall through to the next arm. So `or` never hides one: `x or 0` over an Error is the Error; write `0 if x is Error else x`. `x is not Error`, `x is Int` (kinds `Int Float Num
 Text Bool List Dict Error`; `Num` is an Int or a Float, so `x is (Int, Num)` holds for an Int, while `x is (Float, Text)` is a parse error: kinds that can never match together), `x is Task` (an entity of that class, by its `parents`, nearest first, ending at `Entity`) and `x is (Task, Place)` (all of them) read a value without
-spreading it. Stored, a derived Error is a plain null (the old routes see null; `entity_read` and `run_cliff` print `Error: <reason>`; `run_cliff` prints a null with a reason as `null: <reason>`, not an error); `json(text)` of text that is not JSON is an Error (`j = json(t)` then `{} if j is Error else j`); a setter that writes an Error is
+spreading it. Stored, a derived Error is a plain null (the old routes see null; the entity carries the class `Error` on top of its `parents` while any property fails, and the reason in its `failed` dict, `{property: reason}`: both stored, so a restart brings them back; the getter still recomputes under the overlay, and a success, a redefinition or a removed pack takes the entry out; `entity_query kind:Error` lists the failed entities, `x is (Task, Error)` holds for a failed Task; a property of your own named `failed` would collide; `entity_read` and `run_cliff` print `Error: <reason>`; `run_cliff` prints a null with a reason as `null: <reason>`, not an error); `json(text)` of text that is not JSON is an Error (`j = json(t)` then `{} if j is Error else j`); a setter that writes an Error is
 refused, so a failure is never stored as if it were a value. In a list or dict an Error is kept while one expression runs and is a plain null once stored.
 
 ```c1f
 -- given Box:a {"raw": "a"}
 -- reads Box:a.n = 0
--- reads Box:a.failed = true
+-- reads Box:a.broke = true
 -- reads Box:a.why = "not-a-type: int expected, got text"
 -- reads Box:a.is_null = false
 -- reads Box:a.after = true
 -- reads Box:a.kind = "text"
 Box.bad getter: Int(this.raw)
 Box.n getter: 0 if this.bad is Error else this.bad
-Box.failed getter: this.bad is Error
+Box.broke getter: this.bad is Error
 Box.why getter: why(this.bad)
 Box.is_null getter: this.bad == None
 Box.after getter: (this.bad + 1) is Error
 Box.kind getter: 'text' if this.raw is Text else 'other'
 ```
 
-`Error` is reserved: no class and no local may be called `Error`.
+`Error` is reserved: no class and no local may be called `Error` (the class is the root pack `entity`'s).
 
 ```c1f-error
 -- error: reserved

@@ -327,7 +327,8 @@ const IS_CHAIN: &str = "not allowed in an expression: `is` cannot chain with ano
 /// `Num` is the kind Int and Float extend: an Int is also a Num, a Float is also a Num.
 const VALUE_KINDS: &[&str] = &["Int", "Float", "Num", "Text", "Bool", "List", "Dict", "Error"];
 /// may these two value kinds both hold for one value? (the same kind, or Num with Int / Float)
-fn kinds_compatible(a: &str, b: &str) -> bool { a == b || (a == "Num" && matches!(b, "Int" | "Float")) || (b == "Num" && matches!(a, "Int" | "Float")) }
+/// `Error` is also a CLASS (the root pack's): an entity can be `(Command, Error)`, so it lists with a class name (not with another value kind).
+fn kinds_compatible(a: &str, b: &str) -> bool { a == b || (a == "Error" && !VALUE_KINDS.contains(&b)) || (b == "Error" && !VALUE_KINDS.contains(&a)) || (a == "Num" && matches!(b, "Int" | "Float")) || (b == "Num" && matches!(a, "Int" | "Float")) }
 
 /// Names a local may not take: the builtins and host functions, `this`/`x`/`clock`, the constants and the pronouns.
 /// (keep in step with `call`: a test reads its arms)
@@ -1179,6 +1180,7 @@ fn pronoun(name: &str, w: &dyn World) -> Result<V, Err> {
 fn is_kind(v: &V, name: &str, w: &dyn World) -> bool {
     match (name, v) {
         ("Num", V::Int(_) | V::Float(_)) | ("Error", V::Error(_)) | ("Int", V::Int(_)) | ("Float", V::Float(_)) | ("Text", V::Str(_)) | ("Bool", V::Bool(_)) | ("List", V::List(_)) | ("Dict", V::Dict(_)) => true,
+        ("Error", V::Ent(e)) => w.is_class(e, "Error"),   // the class a failed entity carries (the value kind above is for values)
         (n, _) if VALUE_KINDS.contains(&n) => false,
         (cls, V::Ent(e)) => w.is_class(e, cls),
         _ => false,

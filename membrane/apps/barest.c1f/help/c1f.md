@@ -76,7 +76,7 @@ Box.safe getter: (this.total or 0) + 1
 Box.source getter: None('no path named yet') if this.path == None else this.path
 ```
 
-Casts check a type and give an Error (a failure, not a null) otherwise: `Int(x)`, `Float(x)`, `Num(x)`, `Text(x)`, `Bool(x)`, `List(x)`, `Dict(x)`. `x is Error` tests a failure, `x is Int` (or `Float Text Bool List Dict`) a value's kind, `x is Num` an Int or a Float (an Int is also a Num: `x is (Int, Num)` holds for an Int; `Num` is reserved like `Error`), `json(text)` of text that is not JSON is an Error (`j = json(t)`, then `j if j is not Error else {}`), `x is Task` an entity's class; `or` never hides an Error (`Help:upgrade`, "Errors").
+Casts check a type and give an Error (a failure, not a null) otherwise: `Int(x)`, `Float(x)`, `Num(x)`, `Text(x)`, `Bool(x)`, `List(x)`, `Dict(x)`. `x is Error` tests a failure, `x is Int` (or `Float Text Bool List Dict`) a value's kind, `x is Num` an Int or a Float (an Int is also a Num: `x is (Int, Num)` holds for an Int; `Num` is reserved like `Error`), `json(text)` of text that is not JSON is an Error (`j = json(t)`, then `j if j is not Error else {}`), `x is Task` an entity's class (a failed entity also carries the class `Error`, with its reasons in `failed`: `x is Error` is true for it); `or` never hides an Error (`Help:upgrade`, "Errors").
 
 ## Operators and builtins
 

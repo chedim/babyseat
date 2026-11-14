@@ -89,7 +89,7 @@ A bare line `name = expr` (no dotted target; a write always has one, like `this.
   stays the default operator and never hides an Error (there is no `??`); `x is Error` is the test, `why(x)` reads its text. An Error PROPAGATES: arithmetic,
   `-x`, `x[i]`, `x.a`, comparisons (not `x == None`), `not`, `and`, `or`, an `if`/WHEN/comprehension condition and every call but `why` give that same Error
   (first one wins, an Error wins over a plain null); a WHEN over an Error does NOT fall through to the next arm. A getter reading an Error returns the same Error
-  unchanged (no "via" chain). Stored, a derived Error is a plain null with its kind in `Core.failed` beside the reason in `Core.why` (so every old route sees null;
+  unchanged (no "via" chain). Stored, a derived Error is a plain null with its reason in the entity's `failed` property and the class `Error` on top of its `parents` (a REAL class owned by `entity.c1f`: `x is Error` follows the class list for an entity, `entity_query kind:Error` lists the failed ones; the getter keeps recomputing under it and a success clears the entry; both persist; the VM writes them as derived writes); so every old route sees null;
   `entity_read` and `run_cliff` print `Error: <reason>`); a setter or constructor that writes an Error is refused with a `refused` receipt and the old value stays; an
   Error inside a list or dict is kept inside one evaluation and is a plain null across a store. Made by: a failed cast (`not-a-type: ...`), a bad entity-literal key,
   a getter body that raised, the step budget, a timed-out `Command` (`proc.c1f`), and a pack's own `Error('reason')`. Still null:
