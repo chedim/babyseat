@@ -145,7 +145,11 @@ LinkPeer.snap getter: (this.out_n or 0) - (this.ack or 0) >= this.window if this
 LinkPeer.dues getter:
   WHEN this.sid != None or this.mine == None: None
   ELSE WHEN this.hidden == True: []
-  ELSE: [{'key': s.eid, 'sig': s.sig, 'row': s.row} for s in this.mine if s.live == True and (s.due == True or this.snap == True)]
+  ELSE:
+    owed = [{'key': s.eid, 'sig': s.sig, 'row': s.row, 'size': s.size} for s in this.mine if s.live == True and (s.due == True or this.snap == True)]
+    owed if len(owed) * max(concat([1], [d['size'] for d in owed])) <= this.maxf else head(owed, max([1, len([i for i in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] if i * max(concat([1], [d['size'] for d in owed])) <= this.maxf])]))
+-- a reply is at most `link_max_frame` characters: what is owed goes out whole when (how many values) times (the biggest) fits, else in parts of as many values as the biggest allows (at least one; each value is at most `link_max_value`), the rest stays due for the next poll
+LinkPeer.maxf getter: ([b.lk_max_frame for b in instances('Boot')] or [262144])[0] if this.sid == None else None
 LinkPeer.lease getter: (([b.lk_lease_hidden for b in instances('Boot')] or [600])[0] if this.hidden == True else ([b.lk_lease for b in instances('Boot')] or [60])[0]) if this.sid == None else None
 LinkPeer.silent getter: clock - this.heard if this.sid == None and this.heard != None else None
 LinkPeer.gone getter: this.silent != None and this.silent >= this.lease

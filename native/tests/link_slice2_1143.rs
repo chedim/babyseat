@@ -361,3 +361,24 @@ fn a_page_the_seat_does_not_know_with_a_late_counter_is_told_to_resubscribe() {
     assert_ne!(r["reset"], json!(true), "{r}");
     assert_eq!(vals(&r).len(), 1);
 }
+
+#[test]
+fn a_reply_never_passes_the_frame_limit_the_rest_follows_in_the_next_replies() {
+    let run = start(&tmp("split"), &[]);
+    let ns = snap(run.port)["page"].as_str().unwrap().to_string();
+    for i in 0..6 { call(run.port, "entity_write", json!({"spec": format!("Setting:test.h{i}"), "prop": "value", "value": "z".repeat(60_000)})); }
+    let ids: Vec<String> = (0..6).map(|i| format!("membrane::Setting:test.h{i}")).collect();
+    let subs: Vec<(&str, &str)> = ids.iter().map(|i| (i.as_str(), "current")).collect();
+    let (_, r) = frame(run.port, &ns, 1, 0, &subs, &[], false);
+    let mut got = vals(&r).len();
+    assert!(r.to_string().len() <= 262_144, "the first reply is within the limit: {} bytes", r.to_string().len());
+    assert!(got > 0 && got < 6, "split by values: {got} of 6 in the first reply");
+    let (mut n, mut ack) = (2u64, r["n"].as_u64().unwrap());
+    for _ in 0..4 {
+        if got == 6 { break; }
+        let (_, r) = frame(run.port, &ns, n, ack, &[], &[], false);
+        assert!(r.to_string().len() <= 262_144, "every reply is within the limit");
+        got += vals(&r).len(); ack = r["n"].as_u64().unwrap(); n += 1;
+    }
+    assert_eq!(got, 6, "all six values arrived, none twice");
+}
