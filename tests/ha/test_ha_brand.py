@@ -3,7 +3,7 @@
 falls back to the icon), so the integration ships its icon from the logo (#368)."""
 from pathlib import Path
 
-BRAND = Path(__file__).resolve().parents[1] / "custom_components" / "membrane" / "brand"
+BRAND = Path(__file__).resolve().parents[2] / "custom_components" / "membrane" / "brand"
 
 
 def _png_size(p: Path):
