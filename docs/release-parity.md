@@ -148,6 +148,8 @@ Shape pointer = where the Python handler (request/response) is; "spec" = a JSON 
 
 ### 1.8 Home Assistant's own calls
 
+Scoping and design for migrating all of Home Assistant support to c1f (inventory, auth, platforms, slices, decisions): [hass-plan.md](hass-plan.md). It finds that HA never calls `:11500` (row 76's HA caller is the model server's `/api/tags`).
+
 | # | method path | caller | shape pointer | cliffvm | evidence |
 |---|---|---|---|---|---|
 | 75 | POST `/membrane/ha/token`, `/ha/states`, `/ha/catalog`, `/ha/mqtt`; GET `/membrane/ha/subscriptions` | `ha_access.py:201,394,346,384,307` | `PY:4850-4873`, `PY:4402`; `ha_bridge.py` (372 lines) | MISSING | dry run 404 |
