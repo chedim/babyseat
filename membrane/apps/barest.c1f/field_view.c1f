@@ -7,14 +7,17 @@ IMPORT fetch 1
 --   DomNode:mount:field   the page's own element the view's root sits in (the shell registers it: ui/chatmount.js `mountField`)
 --   Scene:field   the view: the window, the polls, the camera (the basis rx/ry/rz), the clock; the page's shell (ui/chatmount.js) births it {open: true} when the page asks for the pack view
 --   Dot:<eid>     one entity of the field: `raw` is the row of the seat's active window ({id, cls, updated, parent}), `p` its place in space; everything drawn is a getter of those
+--   Fetch:wire    the write STREAM `GET /ui/fieldvm/events` (Fetch with stream: true): one Chunk per `field.write` frame {type, eid, cls, prop, ts}; a frame draws, moves or removes a dot at once, no poll
 --   Fetch:map     the poll of `GET /ui/fieldvm/active?m=<window>` (the page's Fetch, fieldvm.js W2): the request is the effect, the receipt `request_result` comes back
+-- LIVE: the first answer of the poll gives the window and the hidden classes and prefixes; from then on the stream keeps it (a new entity is born next to its owner, a known one moves to the front, a
+-- retire removes it, and the window's size is held by dropping the least recently active); the poll is only the FALLBACK (it runs, and the stream is asked for again, while the stream is down).
 -- THE ACTIVE WINDOW. The seat answers the `window` entities written most recently (by `updated`, hidden classes left out: docs/field-view-plan.md) and this view keeps exactly those:
 -- an entity that falls out of the answer is retired here (its Dot and its DomNodes leave the page's engine and the page), so the view's memory follows the field's activity; on the
 -- seat the route reads columns only, so the entities it does not list stay unloaded. A new row is born next to its owner (the eid's colon prefix) and the layout grows around it.
 -- THE LAYOUT is a force layout (graph.js's idea) in 3D: every Dot repels every other, an owner pulls its children (the ownership edge), a weak pull to the centre keeps the cloud together.
 -- Each Dot is its own setter (`Dot.go`, one per clock tick) so the work of a step is bounded per evaluation; the layout cools (`heat`) and goes quiet, and a birth or a leave warms it again.
 -- MASS = the number of inbound edges (the owner's children), the radius. THE CAMERA turns on the vertical axis by a small constant rotation per tick (no trig: the basis is rotated
--- and re-normalised); the shell gives no pointer drag, so the camera is buttons (spin / pause, nearer, farther) and a click on a dot selects it.
+-- and re-normalised); the camera is a drag (the shell writes `pointer` on the SVG), the wheel, and buttons (spin / pause, nearer, farther); a click on a dot selects it.
 -- THE CONSTANTS are flagged in docs/field-view-plan.md "Field view 3D": `window` (the launch fact `field_window`; 150 is the value TRIED, not decided), the poll period (`field_poll_ms`, 2000 tried),
 -- and the layout and camera numbers in `Scene.open` (tuned by eye on a seat with a few hundred entities).
 
@@ -80,6 +83,12 @@ Scene.open on-setter field-draw:
     ('DomNode:f:side').tag = 'div'
     ('DomNode:f:side').class = 'fside'
     ('DomNode:f:side').hidden = True
+    ('DomNode:f:sidehead').parent = 'DomNode:f:side'
+    ('DomNode:f:sidehead').tag = 'div'
+    ('DomNode:f:sidehead').class = 'fsidehead'
+    ('DomNode:f:edges').parent = 'DomNode:f:side'
+    ('DomNode:f:edges').tag = 'ul'
+    ('DomNode:f:edges').class = 'fedges'
     ('DomNode:f:note').parent = 'DomNode:f:root'
     ('DomNode:f:note').tag = 'div'
     ('DomNode:f:note').class = 'fnote'
@@ -95,6 +104,8 @@ Scene.open on-setter field-draw:
     this.focal = 300.0
     this.turn_c = 0.99995
     this.turn_s = 0.01
+    this.drag = 0.01
+    this.wheel = 0.001
     this.heat = 1.0
     this.rep = 8000.0
     this.rest = 16.0
@@ -104,14 +115,19 @@ Scene.open on-setter field-draw:
     this.polling = True
     this.seq = 1
     ('Fetch:map').request = {'id': 'map-1', 'url': '/ui/fieldvm/active?m=' + str(this.window)}
+    this.wired = True
+    ('Fetch:wire').request = {'id': 'wire-1', 'url': '/ui/fieldvm/events', 'stream': True}
 
 -- ---- the poll: `poll_ms` after the last answer, one request at a time, not while the tab is hidden ----
+-- the poll is the FALLBACK: it runs only while the stream is down (and asks for the stream again)
 Scene.tick on-setter field-poll:
-  WHEN this.open and not this.polling and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= this.poll_ms / 1000:
+  WHEN this.open and not this.polling and not this.wired and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= this.poll_ms / 1000:
     n = (this.seq or 0) + 1
     this.seq = n
     this.polling = True
+    this.wired = True
     ('Fetch:map').request = {'id': 'map-' + str(n), 'url': '/ui/fieldvm/active?m=' + str(this.window)}
+    ('Fetch:wire').request = {'id': 'wire-' + str(n), 'url': '/ui/fieldvm/events', 'stream': True}
 
 -- the receipt, read once: ok = the call went and the seat said 2xx
 Fetch.mv getter:
@@ -119,11 +135,16 @@ Fetch.mv getter:
   bd = json(str(prop(rq, 'body') or ''))
   jb = {} if bd is Error else bd
   hs = prop(rq, 'http_status')
-  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'nodes': prop(jb, 'nodes'), 'total': prop(jb, 'n_total'), 'why': (str(prop(prop(jb, 'error'), 'message')) if prop(jb, 'error') else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'edge_eid': prop(jb, 'eid'), 'owner': prop(jb, 'owner'), 'children': prop(jb, 'children'), 'refs': prop(jb, 'refs'), 'nodes': prop(jb, 'nodes'), 'total': prop(jb, 'n_total'), 'hidden': prop(jb, 'hidden'), 'prefixes': prop(jb, 'hidden_prefixes'), 'why': (str(prop(prop(jb, 'error'), 'message')) if prop(jb, 'error') else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
 
 Fetch.mv on-setter field-answer:
   WHEN this.eid == 'Fetch:map':
     ('Scene:field').polling = False
+    ('Scene:field').last_poll = clock
+-- the receipt of the stream is its END (a drop, a refusal, the seat going away): the poll takes over and asks for the stream again
+Fetch.mv on-setter field-wire-ended:
+  WHEN this.eid == 'Fetch:wire':
+    ('Scene:field').wired = False
     ('Scene:field').last_poll = clock
 Fetch.mv on-setter field-rows:
   WHEN this.eid == 'Fetch:map' and prop(this.mv, 'ok') and prop(this.mv, 'nodes') != None:
@@ -131,20 +152,59 @@ Fetch.mv on-setter field-rows:
     ids = [str(prop(r, 'id')) for r in rows]
     ('Scene:field').note = ''
     ('Scene:field').total = prop(this.mv, 'total')
+    ('Scene:field').hidden = prop(this.mv, 'hidden') or []
+    ('Scene:field').hidden_prefixes = prop(this.mv, 'prefixes') or []
     gone = [d for d in instances('Dot') if not (d.rid in ids)]
     born = [r for r in rows if prop('Dot:' + str(prop(r, 'id')), 'raw') == None]
     FOR r IN rows:
       ('Dot:' + str(prop(r, 'id'))).born = True
       ('Dot:' + str(prop(r, 'id'))).raw = r
     FOR d IN gone:
-      ('DomNode:f:c:' + d.rid).retire = True
-      ('DomNode:f:l:' + d.rid).retire = True
-      ('DomNode:f:t:' + d.rid).retire = True
-      (d.eid).retire = True
+      (d.eid).leave = True
     ('Scene:field').heat = 1.0 if len(gone) + len(born) > 0 else prop('Scene:field', 'heat')
     ('Scene:field').left = len(gone)
   ELSE WHEN this.eid == 'Fetch:map':
     ('Scene:field').note = 'The seat did not give the active entities: ' + str(prop(this.mv, 'why')) + '. The view keeps what it has and asks again.'
+
+-- a Dot leaves: it and its three DomNodes are retired (the host removes them from the engine and the page)
+Dot.leave on-setter dot-leave:
+  WHEN this.leave:
+    ('DomNode:f:c:' + this.rid).retire = True
+    ('DomNode:f:l:' + this.rid).retire = True
+    ('DomNode:f:t:' + this.rid).retire = True
+    (this.eid).retire = True
+
+-- ---- the stream: one Chunk per frame; what it says is applied at once and the chunk is let go ----
+Chunk.fw getter: json(this.data) if this.fetch == 'Fetch:wire' and this.data != None and this.data != '' else None
+Chunk.fw on-setter field-frame-done:
+  WHEN this.fw != None:
+    (this.eid).retire = True
+-- what a frame means, worked out in a getter (a setter sees the getters as they were before its write, so the setters below act on THIS value): `what` is retire | skip | touch | new
+Chunk.act getter:
+  WHEN this.fw == None or not (this.fw is Dict) or prop('Scene:field', 'hidden') == None: None
+  ELSE:
+    sc = Scene:field
+    id = str(prop(this.fw, 'eid'))
+    have = prop('Dot:' + id, 'raw')
+    skip = (str(prop(this.fw, 'cls')) in sc.hidden) or len([x for x in sc.hidden_prefixes if startswith(id, x)]) > 0
+    {'what': 'retire' if prop(this.fw, 'prop') == 'retire' else ('skip' if skip else ('touch' if have != None else 'new')), 'id': id, 'cls': str(prop(this.fw, 'cls')), 'ts': num(prop(this.fw, 'ts') or 0), 'have': have != None, 'parent': prop(have, 'parent'), 'owner': ([prop(o, 'r') for o in sort_by([{'r': d.rid, 'n': len(d.rid)} for d in instances('Dot') if startswith(id, d.rid + ':')], 'n', True)] or [None])[0], 'kids': [{'eid': d.eid, 'rid': d.rid, 'cls': d.kind, 'updated': prop(d.raw, 'updated')} for d in instances('Dot') if startswith(d.rid, id + ':') and (d.parent_id == None or len(d.parent_id) < len(id))], 'out': [prop(x, 'e') for x in head(sort_by([{'e': d.eid, 'u': num(prop(d.raw, 'updated') or 0)} for d in instances('Dot')], 'u'), max(0, len(instances('Dot')) + 1 - sc.window))]}
+Chunk.act on-setter field-frame-retire:
+  WHEN prop(this.act, 'what') == 'retire' and prop(this.act, 'have'):
+    ('Dot:' + prop(this.act, 'id')).leave = True
+    ('Scene:field').total = max(0, (prop('Scene:field', 'total') or 0) - 1)
+Chunk.act on-setter field-frame-touch:
+  WHEN prop(this.act, 'what') == 'touch':
+    ('Dot:' + prop(this.act, 'id')).raw = {'id': prop(this.act, 'id'), 'cls': prop(this.act, 'cls'), 'updated': prop(this.act, 'ts'), 'parent': prop(this.act, 'parent')}
+Chunk.act on-setter field-frame-new:
+  WHEN prop(this.act, 'what') == 'new':
+    ('Dot:' + prop(this.act, 'id')).born = True
+    ('Dot:' + prop(this.act, 'id')).raw = {'id': prop(this.act, 'id'), 'cls': prop(this.act, 'cls'), 'updated': prop(this.act, 'ts'), 'parent': prop(this.act, 'owner')}
+    FOR k IN prop(this.act, 'kids'):
+      (prop(k, 'eid')).raw = {'id': prop(k, 'rid'), 'cls': prop(k, 'cls'), 'updated': prop(k, 'updated'), 'parent': prop(this.act, 'id')}
+    FOR e IN prop(this.act, 'out'):
+      (e).leave = True
+    ('Scene:field').total = (prop('Scene:field', 'total') or 0) + 1
+    ('Scene:field').heat = 1.0
 
 Scene.note on-setter field-note:
   ALWAYS:
@@ -290,6 +350,29 @@ Scene.tick on-setter field-turn:
     this.rx = nx
     this.rz = nz
 
+-- ---- the pointer (the shell writes `pointer` and `wheel` on the SVG's DomNode): a drag with a button held turns the camera, a wheel zooms ----
+-- a drag of d pixels turns by the angle a = d * drag (radians, small-angle: cos = 1 - a^2/2, sin = a, then the basis is re-normalised); a wheel of dy zooms by 1 - dy * wheel, between 0.25 and 8
+DomNode.pointer on-setter field-drag:
+  WHEN this.eid == 'DomNode:f:svg' and prop(this.pointer, 'type') == 'pointerdown':
+    ('Scene:field').grab = {'x': prop(this.pointer, 'x'), 'y': prop(this.pointer, 'y')}
+  ELSE WHEN this.eid == 'DomNode:f:svg' and prop(this.pointer, 'type') == 'pointermove' and prop('Scene:field', 'grab') != None:
+    sc = Scene:field
+    a = (prop(this.pointer, 'x') - prop(sc.grab, 'x')) * sc.drag
+    b = (prop(this.pointer, 'y') - prop(sc.grab, 'y')) * sc.drag
+    nx = unit(sc.rx * [1.0 - a * a / 2.0] + sc.rz * [a])
+    nz = unit(sc.rz * [1.0 - a * a / 2.0] - sc.rx * [a])
+    ny = unit(sc.ry * [1.0 - b * b / 2.0] - nz * [b])
+    mz = unit(nz * [1.0 - b * b / 2.0] + sc.ry * [b])
+    ('Scene:field').rx = nx
+    ('Scene:field').ry = ny
+    ('Scene:field').rz = mz
+    ('Scene:field').grab = {'x': prop(this.pointer, 'x'), 'y': prop(this.pointer, 'y')}
+  ELSE WHEN this.eid == 'DomNode:f:svg':
+    ('Scene:field').grab = None
+DomNode.wheel on-setter field-wheel:
+  WHEN this.eid == 'DomNode:f:svg':
+    ('Scene:field').zoom = max(0.25, min(8.0, prop('Scene:field', 'zoom') * (1.0 - prop(this.wheel, 'dy') * prop('Scene:field', 'wheel'))))
+
 -- ---- the controls and the selection ----
 DomNode.clicked on-setter field-click:
   WHEN this.eid == 'DomNode:f:spin':
@@ -302,6 +385,8 @@ DomNode.clicked on-setter field-click:
     ('Scene:field').window = max(5, num(before(str(prop('Scene:field', 'window') / 2), '.')))
   ELSE WHEN this.eid == 'DomNode:f:wmore':
     ('Scene:field').window = prop('Scene:field', 'window') * 2
+  ELSE WHEN startswith(this.eid, 'DomNode:f:e:') and this.target != None:
+    ('Scene:field').selected = this.target
   ELSE WHEN startswith(this.eid, 'DomNode:f:c:'):
     ('Scene:field').selected = None if prop('Scene:field', 'selected') == after(this.eid, 'DomNode:f:c:') else after(this.eid, 'DomNode:f:c:')
 Scene.spin on-setter field-spin-label:
@@ -318,9 +403,37 @@ Scene.count_text on-setter field-count:
   WHEN this.open:
     ('DomNode:f:count').text = this.count_text
 Scene.info getter:
-  d = ('Dot:' + str(this.selected)) if this.selected != None else None
-  prop(d, 'rid') + ' · ' + prop(d, 'kind') + ' · ' + str(prop(d, 'mass')) + ' under it · changed ' + before(str(prop(d, 'age')), '.') + ' s ago' if d != None and prop(d, 'rid') != None else None
+  WHEN this.selected == None: None
+  ELSE WHEN prop('Dot:' + str(this.selected), 'rid') != None: prop('Dot:' + str(this.selected), 'rid') + ' · ' + prop('Dot:' + str(this.selected), 'kind') + ' · ' + str(prop('Dot:' + str(this.selected), 'mass')) + ' under it · changed ' + before(str(prop('Dot:' + str(this.selected), 'age')), '.') + ' s ago'
+  ELSE: str(this.selected) + ' (not in view)'
 Scene.info on-setter field-info:
   ALWAYS:
     ('DomNode:f:side').hidden = this.info == None
-    ('DomNode:f:side').text = this.info or ''
+    ('DomNode:f:sidehead').text = this.info or ''
+
+-- ---- the EDGE LIST of the selected entity (operator 2026-11-14: it replaces the card's "near"): the owner, the children and what it points at by `$ref`, each with its kind, from `GET /ui/fieldvm/edges` ----
+-- a click on a row selects that entity (it may be out of the window: the panel still lists its edges), so the graph can be walked
+Scene.selected on-setter field-edges-ask:
+  WHEN this.selected != None:
+    n = (this.seq or 0) + 1
+    this.seq = n
+    ('Fetch:edges').request = {'id': 'edges-' + str(n), 'url': '/ui/fieldvm/edges?eid=' + replace(str(this.selected), ' ', '%20') + '&n=' + str(this.window)}
+Fetch.mv on-setter field-edges-answer:
+  WHEN this.eid == 'Fetch:edges' and prop(this.mv, 'ok'):
+    ('Scene:field').edges = {'eid': prop(this.mv, 'edge_eid'), 'owner': prop(this.mv, 'owner'), 'children': prop(this.mv, 'children'), 'refs': prop(this.mv, 'refs')}
+Scene.edges_here getter: this.edges if this.edges != None and this.selected != None and prop(this.edges, 'eid') == this.selected else None
+Scene.edge_rows getter:
+  WHEN this.edges_here == None: []
+  ELSE:
+    e = this.edges_here
+    all = concat(concat([{'key': 'owner:' + str(prop(prop(e, 'owner'), 'id')), 'id': prop(prop(e, 'owner'), 'id'), 'text': 'owner · ' + str(prop(prop(e, 'owner'), 'id'))}] if prop(e, 'owner') != None else [], [{'key': 'child:' + str(prop(c, 'id')), 'id': prop(c, 'id'), 'text': 'child · ' + str(prop(c, 'id'))} for c in (prop(e, 'children') or [])]), [{'key': 'ref:' + str(prop(r, 'id')), 'id': prop(r, 'id'), 'text': 'ref → ' + str(prop(r, 'id'))} for r in (prop(e, 'refs') or [])])
+    all if len(all) > 0 else [{'key': 'none', 'id': None, 'text': 'no owner, no children, no references'}]
+Scene.edge_rows on-setter field-edges-draw:
+  WHEN this.edge_rows != None:
+    FOR r IN this.edge_rows:
+      ('DomNode:f:e:' + prop(r, 'key')).parent = 'DomNode:f:edges'
+      ('DomNode:f:e:' + prop(r, 'key')).tag = 'li'
+      ('DomNode:f:e:' + prop(r, 'key')).text = prop(r, 'text')
+      ('DomNode:f:e:' + prop(r, 'key')).target = prop(r, 'id')
+    FOR x IN [x for x in instances('DomNode') if startswith(x.eid, 'DomNode:f:e:') and not (x.eid in ['DomNode:f:e:' + prop(r, 'key') for r in this.edge_rows])]:
+      (x.eid).retire = True

@@ -99,7 +99,7 @@ button.link { border: 0; padding: 0; background: none; color: var(--accent); fon
 .fhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .fcount { margin-right: auto; color: var(--mute); font-size: 12px; }
 .fbody { position: relative; flex: 1; min-height: 0; }
-.fsvg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; color: var(--ink); }
+.fsvg { touch-action: none; cursor: grab; position: absolute; inset: 0; width: 100%; height: 100%; display: block; color: var(--ink); }
 .fsvg line { stroke: var(--edge); stroke-width: .35; }
 .fsvg circle { cursor: pointer; }
 .fsvg text { font: 4px var(--mono); fill: var(--ink); pointer-events: none; }
@@ -108,6 +108,9 @@ button.link { border: 0; padding: 0; background: none; color: var(--accent); fon
 .flegend li { display: flex; align-items: center; gap: 6px; }
 .flegend .fdot { width: 10px; height: 10px; }
 .fside { position: absolute; top: 8px; right: 8px; max-width: min(340px, calc(100% - 16px)); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: 12px var(--mono); word-break: break-all; }
+.fedges { margin: 6px 0 0; padding: 0; list-style: none; }
+.fedges li { padding: 1px 0; cursor: pointer; color: var(--accent); }
+.fedges li:hover { text-decoration: underline; }
 .fnote { padding: 6px 10px; background: var(--note); color: var(--note-ink); font-size: 12px; }
 
 @media (max-width: 800px) {

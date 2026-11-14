@@ -9,7 +9,7 @@
 //   value, focused: a pack's write sets the element's value / focus (no echo; the user's caret is not clobbered)
 // Form tags and SVG (own namespace) are in the allow-list; style, event handlers and src are refused, and a refusal is
 // visible: the element carries `data-refused` and the DomNode's `refused` holds {name: reason}.
-// Events are written back: click -> `clicked` (time); input -> `value`; submit -> `submitted` (time); keydown ->
+// Events are written back: pointerdown/pointermove (button held)/pointerup -> `pointer` {type, x, y, w, h, buttons, time} (x, y in the element's box); wheel -> `wheel` {dy, x, y, w, h, time}; click -> `clicked` (time); input -> `value`; submit -> `submitted` (time); keydown ->
 // `key` {key, shift, ctrl, composing, time}; focus/blur -> `focused` (bool); scroll -> `scroll` {top, height, client}.
 // A pack writes `scroll` {top: n} or 'end' to scroll an element (applied after the round's other writes; the measured scroll is written back).
 // `before` (a sibling DomNode eid) puts a node above that sibling; writing it again moves the node. A round's DOM writes are applied together, in one frame.
@@ -60,7 +60,7 @@ const reason = (name, v) => {
   return null;
 };
 const NODE = 'DomNode:';
-const EVENTS = ['input', 'change', 'submit', 'keydown', 'focus', 'blur', 'scroll'];
+const EVENTS = ['input', 'change', 'submit', 'keydown', 'focus', 'blur', 'scroll', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'wheel'];
 const FETCH = 'Fetch:';
 const FETCH_VERBS = new Set(['GET', 'POST', 'PATCH', 'DELETE']);
 const FETCH_HEADERS = new Set(['content-type', 'accept']);
@@ -245,6 +245,13 @@ class Host {
     else if (ev.type === 'focus') put('focused', true);
     else if (ev.type === 'blur') put('focused', false);
     else if (ev.type === 'scroll') put('scroll', { top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight });
+    else if (ev.type === 'wheel') { ev.preventDefault(); const b = el.getBoundingClientRect(); this.write(eid, 'wheel', { dy: ev.deltaY, x: ev.clientX - b.left, y: ev.clientY - b.top, w: b.width, h: b.height, time: this.now() }); }
+    else if (ev.type.startsWith('pointer')) {                       // a press, a move WITH a button held, a release: a hover writes nothing (the field is not flooded)
+      if (ev.type === 'pointermove' && !ev.buttons) return;
+      if (ev.type === 'pointerdown' && el.setPointerCapture) { try { el.setPointerCapture(ev.pointerId); } catch {} }   // the drag goes on outside the element
+      const b = el.getBoundingClientRect();
+      this.write(eid, 'pointer', { type: ev.type, x: ev.clientX - b.left, y: ev.clientY - b.top, w: b.width, h: b.height, buttons: ev.buttons, time: this.now() });
+    }
   }
 
   /** A name or tag the allow-list refuses: the reason is written on the DomNode and marked on the element. */

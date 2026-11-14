@@ -673,15 +673,27 @@
       "Request.fa_hide_fact": "Any",
       "Request.fa_m": "Num?",
       "Request.fa_ok": "Bool",
+      "Request.fa_pre_fact": "Any",
+      "Request.fa_prefixes": "List(Text)",
       "Request.fa_rows": "Any",
       "Request.fa_total": "Any",
+      "Request.fe_answer": "Dict?",
+      "Request.fe_eid": "Text",
+      "Request.fe_kids": "Any",
+      "Request.fe_n": "Num?",
+      "Request.fe_ok": "Bool",
+      "Request.fe_owner": "Any",
+      "Request.fe_refs": "Any",
       "Request.fv_body": "Dict?",
+      "Request.fv_events": "Bool",
       "Request.fv_seat": "Entity(FieldVm)?",
       "Request.m_fieldvm": "List(Text)",
       "Request.o_fieldvm": "Bool",
-      "Request.r_fieldvm": "Dict?"
+      "Request.r_fieldvm": "Dict?",
+      "Request.wire_open": "Bool"
     },
     "writes": {
+      "*.send": "Dict",
       "FieldVm.born": "Num",
       "FvDir.opened": "Bool",
       "FvDir.path": "Any",
@@ -691,7 +703,8 @@
     "findings": [],
     "virtual": [
       "FvDir",
-      "FvFile"
+      "FvFile",
+      "Wire"
     ],
     "resident": [
       "FieldVm"

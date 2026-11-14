@@ -126,7 +126,17 @@ try {
   await put(seat, 'Zed:c:y');
   await b.until(`!!${Q('#fieldmount [data-key="DomNode:f:c:Zed:c:y"]')}`, 'the new entity is drawn');
   assert.ok(await b.ev(circles) >= before, 'the graph did not shrink');
-  assert.equal(await b.ev(`${Q('#fieldmount [data-key="DomNode:f:l:Zed:c:y"]')}.hasAttribute('hidden')`), false, 'its line to its owner shows');
+  await b.until(`${Q('#fieldmount [data-key="DomNode:f:l:Zed:c:y"]')}.hasAttribute('hidden') === false`, 'its line to its owner shows');
+
+  // 3b. LIVE: the write stream is up, so the poll has stopped: more writes appear with NO new call of the active window
+  const polls = `performance.getEntriesByType('resource').filter((e) => e.name.includes('/ui/fieldvm/active')).length`;
+  await sleep(1200);
+  const n0 = await b.ev(polls);
+  await put(seat, 'Zed:live'); await put(seat, 'Zed:live:child');
+  await b.until(`!!${Q('#fieldmount [data-key="DomNode:f:c:Zed:live:child"]')}`, 'the live write is drawn');
+  assert.equal(await b.ev(polls), n0, 'drawn with no poll: the active window was not asked for again');
+  await b.until(`${Q('#fieldmount [data-key="DomNode:f:l:Zed:live:child"]')}.hasAttribute('hidden') === false`, 'joined to its owner by the stream');
+  assert.equal(await b.ev(`window.MEMBRANE_FIELD_VIEW.get('Scene:field').wired`), true);
 
   // 4. the window follows the activity: write many more; the page keeps 8 dots, the oldest are gone from the page and the engine
   for (let i = 0; i < 12; i++) await put(seat, `Ant:${i}`);
@@ -136,9 +146,11 @@ try {
   assert.equal(await b.ev(`window.MEMBRANE_FIELD_VIEW.get('Dot:Zed:a')`), null, 'the dot left the page\'s engine');
   assert.equal(await b.ev(`window.MEMBRANE_FIELD_VIEW.get('DomNode:f:c:Zed:a')`), null, 'and its DomNode');
 
-  // 5. a click selects
+  // 5. a click selects, and the panel lists the entity's edges (owner, children, refs) with their kind
+  await put(seat, 'Ant:11:leg');
   await b.ev(`${Q('#fieldmount [data-key="DomNode:f:c:Ant:11"]')}.dispatchEvent(new MouseEvent('click', {bubbles: true}))`);
   await b.until(`/^Ant:11 /.test(document.querySelector('#fieldmount .fside').textContent) && !document.querySelector('#fieldmount .fside').hidden`, 'the selection words');
+  await b.until(`[...document.querySelectorAll('#fieldmount .fedges li')].some((li) => li.textContent === 'child · Ant:11:leg')`, 'the edge list of the selection (a child)');
   if (process.env.SHOT) {
     await b.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 620, deviceScaleFactor: 1, mobile: false }); await sleep(400);
     const shot = await b.send('Page.captureScreenshot', { format: 'png' }); writeFileSync(process.env.SHOT, Buffer.from(shot.result.data, 'base64'));

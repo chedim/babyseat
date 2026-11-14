@@ -38,13 +38,20 @@ function world(facts) {
   w.asked = () => (w.get('Fetch:map') || {}).request;
   w.reqs = () => w.log.filter((e) => e.eid === 'Fetch:map' && e.prop === 'request' && !e.born);
   w.reply = (status, body) => w.write('Fetch:map', 'request_result', { id: w.asked().id, status: 'ok', rc: 0, head: String(status), http_status: status, headers: {}, body: typeof body === 'string' ? body : JSON.stringify(body), started: w.t, finished: w.t, ms: 1 });
+  const reply0 = w.reply; w.reply = (st, b) => { const r = reply0(st, b); if (w.autoEnd && w.wireReq() && (w.get('Fetch:wire') || {}).request_result?.id !== w.wireReq().id) w.wireEnds(); return r; };
   w.fail = (why) => w.write('Fetch:map', 'request_result', { id: w.asked().id, status: 'error', rc: 1, head: why, started: w.t, finished: w.t, ms: 1 });
-  w.open = (facts) => { if (facts) w.feed('Boot:seat', 'Boot', facts); w.feed('Scene:field', 'Scene', { open: true }); };
+  // the write stream (`Fetch:wire`, a Fetch with stream: true): its frames arrive as Chunk entities, one per frame, and its receipt is the end of the stream. Most scenarios below are about the POLL
+  // (the fallback), so `open` lets the stream end at once; `open(facts, {wire: true})` keeps it.
+  w.wireReq = () => (w.get('Fetch:wire') || {}).request;
+  w.wireN = 0;
+  w.frame = (o) => { w.wireN++; w.feed('Chunk:Fetch:wire:' + w.wireN, 'Chunk', { fetch: 'Fetch:wire', id: w.wireReq().id, n: w.wireN, data: JSON.stringify({ type: 'field.write', prop: 'n', ts: w.t, ...o }), done: false }); };
+  w.wireEnds = (why) => w.write('Fetch:wire', 'request_result', { id: w.wireReq().id, status: why ? 'error' : 'ok', rc: why ? 1 : 0, head: why || '200 OK', started: w.t, finished: w.t, ms: 1 });
+  w.open = (facts, o = {}) => { if (facts) w.feed('Boot:seat', 'Boot', facts); w.feed('Scene:field', 'Scene', { open: true }); w.autoEnd = !o.wire; if (w.autoEnd) w.wireEnds(); };
   w.n = (k) => w.get('DomNode:f:' + k) || {};
   w.dot = (id) => w.get('Dot:' + id);
   return w;
 }
-const rows = (...r) => ({ nodes: r.map(([id, cls, updated, parent]) => ({ id, cls, updated, parent: parent ?? null })), n_total: 500, hidden: [], m: 150 });
+const rows = (...r) => ({ nodes: r.map(([id, cls, updated, parent]) => ({ id, cls, updated, parent: parent ?? null })), n_total: 500, hidden: ['Message', 'Span'], hidden_prefixes: ['Chat:message:'], m: 150 });
 const BASE = [['Chat:1', 'Chat', 100.1234], ['Chat:1:a', 'Chat', 101.2345, 'Chat:1'], ['Chat:1:b', 'Chat', 102.3456, 'Chat:1'], ['Goal:x', 'Goal', 103.4567], ['Help:cliff', 'Help', 104.5678]];
 const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
 const places = (w, ids) => ids.map((i) => w.dot(i).p);
@@ -158,19 +165,68 @@ scenario('the camera: it spins, pauses, zooms; a spin changes the picture and no
   assert.ok(w.get('DomNode:f:c:Chat:1').r < r1, 'farther: smaller');
 });
 
+scenario('the pointer: a drag turns the camera, a wheel zooms, a hover does nothing', () => {
+  const w = world(); w.open(); w.reply(200, rows(...BASE)); w.write('DomNode:f:spin', 'clicked', w.t); w.ticks(400);   // quiet layout, paused spin
+  const cx = () => w.get('DomNode:f:c:Chat:1:a').cx, cy = () => w.get('DomNode:f:c:Chat:1:a').cy;
+  const pt = (type, x, y, buttons = 1) => w.write('DomNode:f:svg', 'pointer', { type, x, y, w: 400, h: 400, buttons, time: w.t });
+  const x0 = cx(), y0 = cy();
+  pt('pointerdown', 100, 100); assert.equal(cx(), x0, 'a press alone moves nothing');
+  pt('pointermove', 140, 100); const x1 = cx();
+  assert.notEqual(x1, x0, 'a horizontal drag turns the camera');
+  pt('pointermove', 140, 130); assert.notEqual(cy(), y0, 'a vertical drag tilts it');
+  const b = w.get('Scene:field');
+  assert.ok([b.rx, b.ry, b.rz].every((v) => Math.abs(Math.hypot(...v) - 1) < 1e-6), 'the basis stays unit');
+  assert.ok(Math.abs(b.rx[0] * b.ry[0] + b.rx[1] * b.ry[1] + b.rx[2] * b.ry[2]) < 1e-2, 'and square');
+  pt('pointerup', 140, 130, 0);
+  const x2 = cx(); pt('pointermove', 300, 300); assert.equal(cx(), x2, 'after the release a move does nothing');
+  const r1 = w.get('DomNode:f:c:Chat:1').r;
+  w.write('DomNode:f:svg', 'wheel', { dy: -200, x: 10, y: 10, w: 400, h: 400, time: w.t });
+  assert.ok(w.get('DomNode:f:c:Chat:1').r > r1, 'wheel up: nearer');
+  w.write('DomNode:f:svg', 'wheel', { dy: 100000, x: 10, y: 10, w: 400, h: 400, time: w.t + 1 });
+  assert.equal(w.get('Scene:field').zoom, 0.25, 'the zoom stops at its floor');
+});
+
 scenario('a click on a dot selects it: its words show, its neighbours get a label; again deselects', () => {
   const w = world(); w.open(); w.reply(200, rows(...BASE)); w.ticks(2);
   assert.equal(w.n('side').hidden, true);
   assert.equal(w.get('DomNode:f:t:Chat:1:a').hidden, true);
   w.write('DomNode:f:c:Chat:1', 'clicked', w.t);
   assert.equal(w.get('Scene:field').selected, 'Chat:1');
-  assert.match(w.n('side').text, /^Chat:1 · Chat · 2 under it · changed \d+ s ago$/);
+  assert.match(w.n('sidehead').text, /^Chat:1 · Chat · 2 under it · changed \d+ s ago$/);
   assert.equal(w.n('side').hidden, false);
   assert.equal(w.get('DomNode:f:t:Chat:1').hidden, false); assert.equal(w.get('DomNode:f:t:Chat:1:a').hidden, false, 'the children are labelled');
   assert.equal(w.get('DomNode:f:t:Goal:x').hidden, true, 'a stranger is not');
   assert.equal(w.get('DomNode:f:c:Chat:1').stroke, 'currentColor');
   w.write('DomNode:f:c:Chat:1', 'clicked', w.t + 1);
   assert.ok(w.get('Scene:field').selected == null); assert.equal(w.n('side').hidden, true);
+});
+
+scenario('the click detail lists the EDGES of the selected entity (owner, children, refs), each with its kind, from the seat', () => {
+  const w = world(); w.open(); w.reply(200, rows(...BASE)); w.ticks(2);
+  const edgeReq = () => (w.get('Fetch:edges') || {}).request;
+  const answer = (b) => w.write('Fetch:edges', 'request_result', { id: edgeReq().id, status: 'ok', rc: 0, head: '200', http_status: 200, headers: {}, body: JSON.stringify(b), started: w.t, finished: w.t, ms: 1 });
+  const eRows = () => [...new Set(w.log.filter((e) => e.eid.startsWith('DomNode:f:e:')).map((e) => e.eid))].filter((e) => w.get(e)).map((e) => w.get(e).text);
+  assert.equal(edgeReq(), undefined, 'nothing is asked until something is selected');
+  w.write('DomNode:f:c:Chat:1:a', 'clicked', w.t);
+  assert.equal(edgeReq().url, '/ui/fieldvm/edges?eid=Chat:1:a&n=150', 'the selection asks for its edges (n = the window)');
+  answer({ eid: 'Chat:1:a', owner: { id: 'Chat:1', cls: 'Chat' }, children: [{ id: 'Chat:1:a:x', cls: 'Chat' }, { id: 'Chat:1:a:y', cls: 'Chat' }], refs: [{ id: 'Goal:x', cls: 'Goal' }] });
+  assert.deepEqual(eRows(), ['owner · Chat:1', 'child · Chat:1:a:x', 'child · Chat:1:a:y', 'ref → Goal:x'], 'a row per edge, the kind shown');
+  assert.equal(w.get('DomNode:f:e:ref:Goal:x').parent, 'DomNode:f:edges');
+  // a row is a way to move along the graph: a click selects that entity (and asks for ITS edges)
+  w.write('DomNode:f:e:owner:Chat:1', 'clicked', w.t + 1);
+  assert.equal(w.get('Scene:field').selected, 'Chat:1'); assert.equal(edgeReq().url, '/ui/fieldvm/edges?eid=Chat:1&n=150');
+  assert.match(w.n('sidehead').text, /^Chat:1 · Chat · 2 under it/, 'the header follows the selection');
+  // an answer for an entity that is no longer selected is not shown
+  answer({ eid: 'Chat:1:a', owner: null, children: [], refs: [{ id: 'Stale:1', cls: 'Stale' }] });
+  assert.ok(!eRows().includes('ref → Stale:1') || w.get('DomNode:f:e:ref:Stale:1') == null, 'a stale answer is dropped');
+  // the answer for the selection replaces the rows; none at all says so
+  w.write('Fetch:edges', 'request', { id: 'edges-x', url: edgeReq().url });
+  answer({ eid: 'Chat:1', owner: null, children: [], refs: [] });
+  assert.equal(w.get('DomNode:f:e:owner:Chat:1'), null, 'the old rows left the page');
+  assert.equal(w.get('DomNode:f:e:none').text, 'no owner, no children, no references');
+  // deselect: the list goes
+  w.write('DomNode:f:c:Chat:1', 'clicked', w.t + 2);
+  assert.equal(w.get('DomNode:f:e:none'), null);
 });
 
 scenario('the window buttons halve and double it, and the next call asks for the new size', () => {
@@ -216,6 +272,65 @@ scenario('speed: a hot step (layout + camera + draw) of 150 dots (the window tri
     console.log(`    one hot tick of ${N} dots: ${ms.toFixed(1)} ms`);
     if (N === 150) assert.ok(ms < 100, `a tick fits the 100 ms clock (${ms.toFixed(1)} ms)`);
   }
+});
+
+scenario('the write STREAM: open asks for it; a frame draws a dot next to its owner with no poll', () => {
+  const w = world(); w.open(null, { wire: true });
+  assert.equal(w.wireReq().url, '/ui/fieldvm/events'); assert.equal(w.wireReq().stream, true);
+  w.reply(200, rows(...BASE)); w.ticks(3);
+  const polls = w.reqs().length;
+  w.frame({ eid: 'Chat:1:c', cls: 'Chat', ts: 120.5 });
+  assert.ok(w.dot('Chat:1:c') && w.dot('Chat:1:c').p, 'the dot is there the moment the frame is');
+  assert.equal(w.dot('Chat:1:c').parent_id, 'Chat:1', 'next to its owner');
+  assert.ok(dist(w.dot('Chat:1:c').p, w.dot('Chat:1').p) < 12);
+  assert.equal(w.get('DomNode:f:c:Chat:1:c').tag, 'circle'); assert.equal(w.dot('Chat:1').mass, 3);
+  assert.equal(w.n('count').text, '6 of 501 entities in view (the 150 most recently active)', 'the total grew by one');
+  assert.equal(w.get('Scene:field').heat, 1, 'the layout is warmed');
+  w.ticks(60, 0.1); assert.equal(w.reqs().length, polls, 'no poll while the stream is open');
+  assert.equal(w.get('Chunk:Fetch:wire:1'), null, 'a frame is let go once read');
+});
+
+scenario('the stream: a frame of a known entity moves it to the front; hidden classes and prefixes are not drawn; a retire removes the dot', () => {
+  const w = world(); w.open(null, { wire: true }); w.reply(200, rows(...BASE)); w.ticks(2);
+  w.frame({ eid: 'Chat:1', cls: 'Chat', ts: 300.25 });
+  assert.equal(w.dot('Chat:1').raw.updated, 300.25, 'its `updated` is the frame\'s');
+  assert.equal(w.n('count').text, '5 of 500 entities in view (the 150 most recently active)', 'no new entity: the same count');
+  w.frame({ eid: 'Chat:message:9', cls: 'Chat', ts: 301 }); w.frame({ eid: 'Chat:message:9:body', cls: 'Chat', ts: 301 }); w.frame({ eid: 'Msg:1', cls: 'Message', ts: 301 });
+  assert.equal(w.dot('Chat:message:9'), null, 'a hidden eid prefix'); assert.equal(w.dot('Chat:message:9:body'), null); assert.equal(w.dot('Msg:1'), null, 'a hidden class');
+  w.frame({ eid: 'Goal:x', cls: 'Goal', prop: 'retire', ts: 302 });
+  assert.equal(w.dot('Goal:x'), null, 'a retired entity leaves the view'); assert.equal(w.get('DomNode:f:c:Goal:x'), null);
+  w.frame({ eid: 'Early:1', cls: 'Early', ts: 303 }); assert.ok(w.dot('Early:1'));
+});
+
+scenario('the stream: the window holds: a new entity pushes the least recently active one out', () => {
+  const w = world(); w.open({ field_window: 4 }, { wire: true });
+  w.reply(200, rows(['A:1', 'A', 100.5], ['B:1', 'B', 101.5], ['C:1', 'C', 102.5], ['D:1', 'D', 103.5]));
+  w.frame({ eid: 'A:1', cls: 'A', ts: 110.5 });                    // A is active again: B is now the oldest
+  w.frame({ eid: 'E:1', cls: 'E', ts: 111.5 });
+  const have = ['A:1', 'B:1', 'C:1', 'D:1', 'E:1'].filter((i) => w.dot(i));
+  assert.deepEqual(have, ['A:1', 'C:1', 'D:1', 'E:1'], 'B, the least recently active, left the view and the engine');
+  assert.equal(w.get('DomNode:f:c:B:1'), null);
+  w.frame({ eid: 'F:1', cls: 'F', ts: 112.5 });
+  assert.equal(['A:1', 'C:1', 'D:1', 'E:1', 'F:1'].filter((i) => w.dot(i)).length, 4);
+});
+
+scenario('the stream: a child that arrives before its owner is joined to it when the owner comes', () => {
+  const w = world(); w.open(null, { wire: true }); w.reply(200, rows(['Z:1:kid', 'Z', 100.5]));
+  assert.ok(w.dot('Z:1:kid').parent_id == null);
+  w.frame({ eid: 'Z:1', cls: 'Z', ts: 101.5 });
+  assert.equal(w.dot('Z:1:kid').parent_id, 'Z:1'); assert.equal(w.dot('Z:1').mass, 1);
+});
+
+scenario('the stream drops: the poll is the fallback, and the stream is asked for again', () => {
+  const w = world(); w.open(null, { wire: true }); w.reply(200, rows(...BASE)); w.ticks(30);
+  assert.equal(w.reqs().length, 1, 'no poll while the stream is up');
+  const first = w.wireReq().id;
+  w.wireEnds('connection reset');
+  w.ticks(25); assert.equal(w.reqs().length, 2, 'the stream is gone: the poll resumes');
+  assert.notEqual(w.wireReq().id, first, 'and a new stream is asked for'); assert.equal(w.wireReq().url, '/ui/fieldvm/events');
+  w.reply(200, rows(...BASE));
+  w.frame({ eid: 'New:1', cls: 'New', ts: 400.5 }); assert.ok(w.dot('New:1'), 'frames of the new stream count');
+  w.ticks(60); assert.equal(w.reqs().length, 2, 'up again: no more polls');
 });
 
 console.log(`field view: ${n} scenarios ok`);
