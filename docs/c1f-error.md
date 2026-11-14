@@ -118,7 +118,7 @@ touch; a pack that reads `is Error` is not a surface item.
 
 ## (e) The wasm VM and `fieldvm.js`
 
-The wasm build is the same Rust (`expr.rs`), so `V::Err`, `is` and the infer change come with it. `membrane/ui/fieldvm.js` exchanges values as
+The wasm build is the same Rust (`expr.rs`), so `V::Err`, `is` and the infer change come with it. `membrane/apps/barest.c1f/ui/fieldvm.js` exchanges values as
 JSON (`f.write(eid, k, JSON.stringify(v ?? null), ...)`, lines 54, 66, 235) and reads text/attrs where `v == null` means empty (`131-134`):
 an Error is a null there, so the page keeps working and hides the failure (consistent with the old-routes rule). Page-side change:
 none required; optional: the page's `Error`-bearing UI entities could show `why`. Needs the wasm package rebuilt, nothing in the JS file.
