@@ -1788,6 +1788,17 @@ fn the_login_is_an_opt_in_fact_the_key_is_then_not_handed_to_the_cli_and_no_key_
 }
 
 #[test]
+fn in_login_mode_the_credentials_that_would_win_over_the_login_are_removed_and_the_logins_own_token_stays() {
+    // the released rung (claude_agent.py v0.7.53 `credential_env`, login mode) blanked the key and OVERRIDING_ENV; CLAUDE_CODE_OAUTH_TOKEN is a LOGIN token, which the login legitimately uses
+    let env = [("ANTHROPIC_API_KEY", PLANTED), ("ANTHROPIC_AUTH_TOKEN", "t1"), ("CLAUDE_CODE_USE_BEDROCK", "1"), ("CLAUDE_CODE_USE_VERTEX", "1"), ("CLAUDE_CODE_USE_FOUNDRY", "1"), ("CLAUDE_CODE_OAUTH_TOKEN", "o1")];
+    let (mut run, port, dir) = fake_seat_cred("authloginwins", &["--fact", "chat_auth=login"], &[], FAKE, &env);
+    let id = send(port, "login wins");
+    assert_eq!(finish(port, &dir, &id, "login wins")["state"], "done");
+    assert_eq!(argv_record(&dir, "login wins")["cred_env"], json!(["CLAUDE_CODE_OAUTH_TOKEN"]), "nothing that outranks the stored login reaches the CLI; only the login's own token");
+    assert!(terminate(&mut run));
+}
+
+#[test]
 fn in_key_mode_the_credentials_that_would_win_over_the_key_or_stand_in_for_it_are_removed_from_the_cli() {
     let env = [("ANTHROPIC_API_KEY", PLANTED), ("ANTHROPIC_AUTH_TOKEN", "t1"), ("CLAUDE_CODE_USE_BEDROCK", "1"), ("CLAUDE_CODE_USE_VERTEX", "1"), ("CLAUDE_CODE_USE_FOUNDRY", "1"), ("CLAUDE_CODE_OAUTH_TOKEN", "o1")];
     let (mut run, port, dir) = fake_seat_cred("authwins", &[], &[], FAKE, &env);
