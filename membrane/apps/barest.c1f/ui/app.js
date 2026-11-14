@@ -3,6 +3,7 @@
 import { queryAll, readEntity } from './mcp.js';
 import { Graph, classColor } from './graph.js';
 import { startChat } from './chat.js';
+import { mountChat } from './chatmount.js';
 
 const $ = (id) => document.getElementById(id);
 const POLL_MS = 3000;
@@ -171,6 +172,8 @@ $('listbtn').addEventListener('click', () => {
   if (listOn) renderList(visible());
 });
 
-startChat({ log: $('log'), form: $('composer'), input: $('input'), send: $('send') });
+// the chat pane: the legacy chat.js is the default; the view pack chat_view.c1f only when the seat fact `ui_views` or `?ui=pack` says so (ui/chatmount.js)
+const chatParts = { log: $('log'), form: $('composer'), input: $('input'), send: $('send') };
+mountChat(chatParts, document.querySelector('.pane.chat'), () => startChat(chatParts));
 refresh().then(() => graph.fit());
 setTimeout(loop, POLL_MS);

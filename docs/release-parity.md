@@ -392,6 +392,15 @@ The page's send box: `submit()` in `membrane/apps/barest.c1f/ui/chat.js` now hol
 | `self_cpu_share_default` | 0.5 | the `self_cpu_share` option's default and `defaults` entry (kept, read by nothing here) |
 | `code_runs_keep_default` | 30 | the `code_runs_keep` option's default and `defaults` entry (kept, read by nothing here) |
 | `chat_auth` | `api_key` | `options.background.chat_auth` and how the claude turn authenticates: `api_key` (default, the release gate) or `login` (the released constant, now the explicit opt-in) |
+| `ui_views` | `{}` (every view `legacy`) | which renderer owns each view of the barest page: a JSON dict `{"chat": "pack"}`; `GET /ui/fieldvm` reports it as `views` (a view not named is `legacy`); `pack` mounts the chat view pack (`membrane/apps/barest.c1f/chat_view.c1f`); the page URL `?ui=pack` / `?ui=legacy` overrides it (development) |
+| `chat_page_size` | 20 | the chat view pack: turns asked on the first load and on each "Load older turns" (`chat.js` `PAGE`) |
+| `chat_poll_size` | 10 | the chat view pack: the newest turns read again at each poll (`chat.js` `POLL`) |
+| `chat_list_poll_ms` | 3000 | the chat view pack: ms after the last answer before the next poll once every turn is finished (`chat.js` `LIST_MS`) |
+| `chat_active_poll_ms` | 700 | the chat view pack: the same while a turn is not finished (no stream yet: the answer appears when a poll sees it), and the period at which the page ticks the clock the polls read (`chat.js` `ACTIVE_MS`) |
+| `chat_stick_px` | 80 | the chat view pack: the log is "at the bottom" within this many px of its end; kept as state (`View:chat.near`), the page has no scroll write yet to act on it (`chat.js` stick-to-bottom) |
+| `chat_tool_chars` | 90 | the chat view pack: a tool's input is shown cut to this many characters, with an ellipsis (`chat.js` `short()`) |
+
+The seven rows from `ui_views` are read by the browser VM's chat view (they ride in the `GET /ui/fieldvm` snapshot as `Boot:seat` and `views`), not by a seat pack: they are registered with `wired: false` (the launcher passes any `--fact`). Not carried over from `chat.js`: the 8000 ms auto-dismiss of the failed-send note (the pack keeps the note until the next attempt), and the paused polls of a hidden tab (a pack cannot read `document.hidden`).
 
 **Choices left to the operator (not made here):**
 - **A. Stats window: zeros or an honest 501?** Built as zeros (the window draws a full panel of 0s and "no Claude answers since the seat started"). That is a true count of what this seat counted (nothing) but reads like "no usage" on a seat that did chat. The 501 shows "the seat did not answer". Pick: zeros until a token counter exists. Also `midnight` is the local midnight to the minute (the `localtime` builtin has no seconds; the page does not read it).

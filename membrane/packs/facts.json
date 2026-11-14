@@ -184,6 +184,34 @@
   "code_runs_keep_default": {
    "wired": false,
    "why": "the `code_runs_keep` option's default (released 30); a `--fact` setting, default 30"
+  },
+  "ui_views": {
+   "wired": false,
+   "why": "which renderer owns each view of the page, a JSON dict `{\"chat\": \"legacy\" | \"pack\"}` (--fact; default legacy for every view): GET /ui/fieldvm reports it as `views`, the bare page mounts the chat view pack (apps/barest.c1f/chat_view.c1f) when it says pack; the page URL `?ui=pack` / `?ui=legacy` overrides it"
+  },
+  "chat_page_size": {
+   "wired": false,
+   "why": "the chat view's first load and each \"Load older turns\": how many turns the history route is asked for (default 20, the legacy chat.js PAGE)"
+  },
+  "chat_poll_size": {
+   "wired": false,
+   "why": "the chat view's polls: how many of the newest turns are read again (default 10, the legacy POLL)"
+  },
+  "chat_list_poll_ms": {
+   "wired": false,
+   "why": "the chat view's poll period once every turn is finished, ms after the last answer (default 3000, the legacy LIST_MS)"
+  },
+  "chat_active_poll_ms": {
+   "wired": false,
+   "why": "the chat view's poll period while a turn is not finished, ms; also the period the page ticks the clock (default 700, the legacy ACTIVE_MS)"
+  },
+  "chat_stick_px": {
+   "wired": false,
+   "why": "the chat view: the log counts as \"at the bottom\" within this many px (default 80, the legacy stick-to-bottom distance; kept as state, the page has no scroll write yet)"
+  },
+  "chat_tool_chars": {
+   "wired": false,
+   "why": "the chat view: a tool's input is shown cut to this many characters, with an ellipsis (default 90, the legacy short())"
   }
  }
 }

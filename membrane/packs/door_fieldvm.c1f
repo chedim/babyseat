@@ -10,7 +10,8 @@ VIRTUAL FvFile
 -- BUILT: `packs` = every pack FILE of the apps' folders whose text has the line `IMPORT dom ...` (the released seat sent every pack it loaded; the others
 -- are the seat's, not the page's), by file name without `.c1f`, the text whole. They are read ONCE at boot (`FieldVm:seat`, from `Boot:seat.app_dirs`:
 -- each folder is listed, each pack file read), so a request waits only for the first read; a file pack changed afterwards is not re-read (a restart does).
--- MISSING, and why: (1) `entities` is always `[]`: the released seat sent every entity of a class the view packs declare (About:seat, fed by about.py with the
+-- `entities` is one entity, `Boot:seat`, holding the chat view's settings (the snapshot getter below), and `views` is the per-view switch.
+-- MISSING, and why: (1) the released seat sent every entity of a class the view packs declare (About:seat, fed by about.py with the
 -- version, the git sha and the changelog); nothing here feeds those entities, and the engine's entities of those classes are not listed yet, so the About
 -- window has nothing to draw; (2) the page's follow-up stream, `field.write` / `field.pack` / `field.remove` frames, is not on `/ui/serve/event` (it carries the
 -- session events only), so the page's field never changes after the snapshot; (3) a Pack entity written by the model (`Pack:<name>.text`) is not in `packs`
@@ -45,10 +46,15 @@ FieldVm.files getter: [f for f in instances('FvFile')]
 FieldVm.done getter: this.listed and len([f for f in this.files if f.text == None]) == 0
 FieldVm.pairs getter: [[f.stem, f.text] for f in this.files if f.view]
 FieldVm.rows getter: sql("SELECT json_group_object(json_extract(value, '$[0]'), json_extract(value, '$[1]')) AS packs FROM json_each(?)", this.pairs) if this.done else None
+-- THE CHAT VIEW'S SETTINGS AND ITS SWITCH (the bare chat as a view pack, apps/barest.c1f/chat_view.c1f, docs/ui-rebuild-plan.md (d)): `views` says which renderer owns
+-- each view, `{"chat": "legacy" | "pack"}`, from the seat fact `ui_views` (a JSON dict: --fact 'ui_views={"chat":"pack"}'); a view the fact does not name, or no fact, is `legacy`.
+-- The legacy chat's constants ride as ONE entity, `Boot:seat`, holding the facts the view reads (chat_page_size ... chat_tool_chars; a fact not given is null: the pack's own
+-- default, the value chat.js had, stands). A seat that does not run the view pack is unaffected: the page asks for `views` only when the URL or a fact wants it.
 FieldVm.snapshot getter:
   WHEN this.rows != None and len(this.rows) > 0:
     pk = json(prop(this.rows[0], 'packs'))
-    {'packs': ({} if pk is Error else (pk or {})), 'entities': []}
+    bt = ([b for b in instances('Boot')] or [None])[0]
+    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars')}}], 'views': {'chat': prop(prop(bt, 'ui_views'), 'chat') or 'legacy'}}
   ELSE: None
 
 Request.o_fieldvm getter: this.route == '/ui/fieldvm'
