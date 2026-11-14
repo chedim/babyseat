@@ -336,3 +336,61 @@ fn the_home_allow_list_is_written_through_the_row_and_an_entry_left_out_is_retir
     assert!(refused(run.port, "home.allow").contains("name"), "{}", refused(run.port, "home.allow"));
     assert_eq!(cur(run.port, "home.allow").as_array().unwrap().len(), 1, "a refused list changes nothing");
 }
+
+/// The page's read feed (`GET /ui/settings`, #1143 the settings view): the browser VM cannot read entities by itself, so the seat answers every row with its descriptor and its
+/// `current` / `refused` / `applied` in the window's order. Hidden rows are flagged (the view leaves them out), a secret is never in it.
+#[test]
+fn the_view_feed_lists_every_row_in_group_and_order_with_its_current_value_and_no_secret() {
+    let dir = setup("feedview");
+    let run = start(&dir, true, &["cloud_models=[{\"name\":\"gpt\",\"backend\":\"openai\",\"base_url\":\"https://user:hunter2pw@example.test/v1\",\"api_key_env\":\"OTHER_PROVIDER_KEY\",\"api_key\":\"sk-feed-leak\"}]"]);
+    let own = owner_token(&dir);
+    let feed = |tok: &str| -> (u16, J) { let (st, b) = http(run.port, "GET", "/ui/settings", Some(tok), ""); (st, serde_json::from_str(&b).unwrap_or(J::Null)) };
+    let set = |id: &str, v: J| { rpc(run.port, Some(&own), "entity_write", json!({"spec": format!("Setting:{id}"), "prop": "set", "value": v})); };
+    let (st, j) = feed(&own);
+    assert_eq!(st, 200, "{j}");
+    let rows = j["settings"].as_array().expect("a `settings` list");
+    assert_eq!(rows.len(), ROWS.len(), "every row, hidden ones included (flagged)");
+    for (r, (id, kind, live)) in rows.iter().zip(ROWS) {
+        assert_eq!((r["id"].as_str(), r["kind"].as_str(), r["live"].as_str()), (Some(id), Some(kind), Some(live)), "group/order: {id}");
+        assert_eq!(r["group"], json!(id.split_once('.').unwrap().0));
+        for k in ["label", "help", "order", "hidden", "current", "refused"] { assert!(r.get(k).is_some(), "{id} has {k}"); }
+        assert_eq!(r["hidden"], json!(id.starts_with("map.")), "{id}: hidden is a bool");
+        assert_eq!(r["refused"], json!(""), "{id}: nothing refused yet");
+    }
+    let by = |id: &str| rows.iter().find(|r| r["id"] == json!(id)).unwrap().clone();
+    assert_eq!((by("chat.timeout")["current"].clone(), by("chat.timeout")["min"].clone(), by("chat.timeout")["max"].clone(), by("chat.timeout")["unit"].clone()), (json!(21600), json!(1), json!(604800), json!("seconds")));
+    assert_eq!(by("chat.max_steps")["whole"], json!(true));
+    assert_eq!(by("chat.max_steps")["default"], json!(2048));
+    assert!(by("limits.command_timeout_s")["how"].as_str().unwrap().contains("--fact command_timeout_s"), "a restart row carries its launch line");
+    assert_eq!(by("model.cloud")["current"][0]["api_key_env"], json!("OTHER_PROVIDER_KEY"));
+    // the answer is the owner's data and holds no secret: the key, the door secret, the owner key, the url's password, the provider's key
+    let (_, raw) = http(run.port, "GET", "/ui/settings", Some(&own), "");
+    let secret = std::fs::read_to_string(dir.0.join("door.secret")).unwrap();
+    for s in [KEY, secret.trim(), own.as_str(), "hunter2pw", "sk-feed-leak"] { assert!(!raw.contains(s), "the feed shows a secret ({}...)", &s[..6]); }
+    // a write shows in the next read: applied (current, applied time) or refused (the reason, the value unchanged)
+    set("chat.timeout", json!(0));
+    let r = by_id(&feed(&own).1, "chat.timeout");
+    assert!(r["refused"].as_str().unwrap().contains("at least"), "{r}");
+    assert_eq!(r["current"], json!(21600));
+    set("chat.timeout", json!(90));
+    let r = by_id(&feed(&own).1, "chat.timeout");
+    assert_eq!((r["current"].clone(), r["refused"].clone()), (json!(90), json!("")));
+    assert!(r["applied"].as_f64().is_some(), "{r}");
+    // a person who is not the owner reads it too (the write is the owner's door, not this one); no token at all is the door's own refusal
+    assert_eq!(feed(&person_token(&dir, "ann")).0, 200);
+    assert_eq!(http(run.port, "GET", "/ui/settings", None, "").0, 401);
+    assert_eq!(http(run.port, "POST", "/ui/settings", Some(&own), "{}").0, 405, "read only");
+}
+fn by_id(j: &J, id: &str) -> J { j["settings"].as_array().unwrap().iter().find(|r| r["id"] == json!(id)).unwrap().clone() }
+
+/// The chat model row carries the seat's model list as `choices` (the view shows a select when it is not empty, a text input when it is). The barest seat loads no router pack, so
+/// it knows no models: `choices` is the empty list there, the same as `model.list`'s `current`, and only the model row has the key.
+#[test]
+fn the_chat_model_row_carries_the_seats_model_list_as_choices_empty_on_the_barest_seat() {
+    let dir = setup("choices");
+    let run = start(&dir, false, &[]);
+    let j: J = serde_json::from_str(&http(run.port, "GET", "/ui/settings", None, "").1).unwrap();
+    assert_eq!(by_id(&j, "model.chat")["choices"], json!([]));
+    assert_eq!(by_id(&j, "model.list")["current"], json!([]), "the same list");
+    assert!(by_id(&j, "chat.timeout")["choices"].is_null(), "only the model row has choices");
+}

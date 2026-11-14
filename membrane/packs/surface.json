@@ -1045,13 +1045,15 @@
   },
   "settings": {
     "imports": [
-      "boot"
+      "boot",
+      "door"
     ],
     "classes": [
       "Boot",
+      "Request",
       "Setting"
     ],
-    "members": 7,
+    "members": 11,
     "writes": [
       "*.[]",
       "*.retire",
@@ -1059,7 +1061,9 @@
       "HaAllow:*.services",
       "Setting:*.[]"
     ],
-    "claims": [],
+    "claims": [
+      "/ui/settings"
+    ],
     "boot_facts": [],
     "resident": [
       "Setting"

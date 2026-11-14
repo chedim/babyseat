@@ -1,5 +1,6 @@
 PACK settings 1
 IMPORT boot 1
+IMPORT door 1
 RESIDENT Setting
 -- THE SETTINGS (#1143, docs/settings-groups.md, "Built: the server side"): one entity per setting, `Setting:<group>.<key>`, listed whole by a window that groups them by `group` and sorts by `order`.
 -- A row is DATA (written once at start, again only when this pack changes it): group, key, label, help, kind, live, order, and for a number `min`, `max`, `whole`, `unit`; `default`; `how` (what a launch-only row says
@@ -127,3 +128,14 @@ Boot.started on-setter settings-seed:
       pairs = concat([['group', g], ['key', tail(id, len(id) - len(g) - 1)]], [[k, prop(d, k)] for k in this.setting_keys if prop(d, k) != None])
       FOR kv IN [x for x in pairs if prop('Setting:' + id, x[0]) != x[1]]:
         ('Setting:' + id).[kv[0]] = kv[1]
+
+-- ---- the page's read feed: GET /ui/settings (#1143, the settings view apps/barest.c1f/settings_view.c1f) ------------------------------------------
+-- The browser VM cannot read entities by itself, so the seat tells it: `{settings: [row, ...]}`, every row in the window's order (`order` runs through the groups: Model, Chat, Map, Home, Import, Access, Limits), each
+-- row its descriptor (id, group, key, label, help, kind, live, order, default, min, max, whole, unit, how, hidden) and what is true now (`current`, `refused` as text, `applied` as a time). A row with `hidden` is listed so
+-- the view can say it leaves it out. `choices` (the chat model row only) is the seat's list of models, when it has one. Nothing here is a secret: a row's `current` is the owner's own value (the key rows hold only an
+-- environment variable's NAME). A person who is not the owner reads it too; a write is the owner's door (POST /mcp entity_write).
+Request.o_settings getter: this.route == '/ui/settings'
+Request.m_settings getter: ['GET']
+-- (the rows are built here, not as a getter of the row: a getter of a Setting would be one more property on every stored row)
+Request.st_rows getter: sort_by([{'id': replace(s.eid, 'Setting:', ''), 'group': s.group, 'key': s.key, 'label': s.label, 'help': s.help, 'kind': s.kind, 'live': s.live, 'order': s.order, 'default': s.default, 'min': s.min, 'max': s.max, 'whole': s.whole == True, 'unit': s.unit, 'how': s.how, 'hidden': s.hidden == True, 'current': s.current, 'refused': s.refused or '', 'applied': s.applied, 'choices': (prop('Setting:model.list', 'current') if s.eid == 'Setting:model.chat' else None)} for s in instances('Setting') if s.group != None], 'order')
+Request.r_settings getter: {'status': 200, 'body': {'settings': this.st_rows}}
