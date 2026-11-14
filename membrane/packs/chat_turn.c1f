@@ -96,8 +96,8 @@ ChatMessage.sys getter:
 -- is refused in the turn with the reason, the CLI never starts.
 ChatMessage.pick_default getter: (this.pick or '') in ['', 'membrane']
 ChatMessage.model_eff getter: this.seat_model if this.pick_default else this.pick
-ChatMessage.pick_ok getter: this.model_eff == this.seat_model or prop('Model:' + this.model_eff, 'backend') == 'claude-agent' or this.oai_cfg != None
-ChatMessage.sdk_model getter: tail(this.model_eff, len(this.model_eff) - len('claude-agent:')) if startswith(this.model_eff, 'claude-agent:') else ('' if this.model_eff == this.seat_model else this.model_eff)
+ChatMessage.pick_ok getter: this.model_eff == this.seat_base or prop('Model:' + this.model_eff, 'backend') == 'claude-agent' or this.oai_cfg != None
+ChatMessage.sdk_model getter: tail(this.model_eff, len(this.model_eff) - len('claude-agent:')) if startswith(this.model_eff, 'claude-agent:') else ('' if this.model_eff == this.seat_base else this.model_eff)
 ChatMessage.model_args getter: ['--model', this.sdk_model] if this.sdk_model != '' else []
 ChatMessage.argv getter:
   WHEN this.over: None

@@ -25,7 +25,9 @@ IMPORT semtext 1
 
 Chat.title getter: 'main'
 -- the model of the seat's own pick (the launcher's `minds.seat_default`; `claude` when it names none): a session or a message with no pick of its own runs on it
-Chat.seat_model getter: prop('Minds:seat', 'seat_default') or 'claude'
+Chat.seat_base getter: prop('Minds:seat', 'seat_default') or 'claude'
+-- the seat-wide pick (the page's "Which model?" form and the gear window post `loops`, packs/door_models.c1f: one runner, the chat's default too) wins over the launcher's
+Chat.seat_model getter: prop('Minds:seat', 'loops') or this.seat_base
 ChatMessage.mid getter: replace(this.eid, 'membrane::Chat:message:', '')
 ChatMessage.turn_eid getter: 'membrane::Chat:message:' + this.mid + ':turn'
 ChatMessage.tstate getter: prop(this.turn_eid, 'status')

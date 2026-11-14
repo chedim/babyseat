@@ -59,11 +59,11 @@ Request.e_mind getter: [None if this.skip_list[i + 3] else (this.e_name[i] or th
 Request.e_think getter: [('think: one of on|off|auto, not: ' + this.r_list[6]) if (this.v_list[6] != None and not (this.v_list[6] in ['on', 'off', 'auto'])) else None]
 Request.errs getter: [e for e in concat(concat(this.e_auth, this.e_mind), this.e_think) if e != None]
 Request.err getter: this.errs[0] if len(this.errs) > 0 else None
-Request.post_go getter: True if (this.o_models == True and this.m_minds and this.m_post and this.models_ready == True and this.mind_seat != None and this.err == None) else None
+Request.post_go getter: True if (this.o_models == True and this.owner == True and this.m_minds and this.m_post and this.models_ready == True and this.mind_seat != None and this.err == None) else None
 Request.m_minds getter: this.route == '/membrane/models'
 Request.m_opts getter: this.route == '/membrane/options'
 -- the options post: the same mind keys and checks as the models route (`errs`), the options' own checks first (op_err), and no Minds seat needed unless a mind key is sent
-Request.op_go getter: True if (this.o_models == True and this.m_opts and this.m_post and this.models_ready == True and this.op_err == None and this.err == None) else None
+Request.op_go getter: True if (this.o_models == True and this.owner == True and this.m_opts and this.m_post and this.models_ready == True and this.op_err == None and this.err == None) else None
 
 Request.post_go on-setter minds-loops:
   WHEN this.post_go == True and prop(this.jbody, 'loops') != None:
@@ -92,6 +92,7 @@ Request.post_go on-setter minds-applied:
 
 Request.minds_reply getter:
   WHEN this.mind_seat == None: {'status': 503, 'body': ''}
+  ELSE WHEN this.m_post and this.owner != True: this.forbidden
   ELSE WHEN not this.m_post: {'status': 200, 'body': this.mind_read}
   ELSE WHEN this.models_ready != True: None
   ELSE WHEN this.err != None: {'status': 400, 'body': {'error': this.err}}
@@ -180,6 +181,7 @@ Request.op_post_go on-setter opts-applied:
 Request.opts_reply getter:
   WHEN this.models_ready != True: None
   ELSE WHEN not this.m_post: {'status': 200, 'body': this.op_body}
+  ELSE WHEN this.owner != True: this.forbidden
   ELSE WHEN this.op_err != None: {'status': 400, 'body': {'error': this.op_err}}
   ELSE WHEN this.err != None: {'status': 400, 'body': {'error': this.err}}
   ELSE WHEN this.opts_applied != True: None

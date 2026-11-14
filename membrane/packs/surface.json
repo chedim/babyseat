@@ -114,7 +114,7 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 42,
+    "members": 43,
     "writes": [
       "membrane:*.mention",
       "membrane:*.queued",
