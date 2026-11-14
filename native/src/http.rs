@@ -147,6 +147,9 @@ pub fn listen(st: &Store, eid: &str, req: &J) -> J {
                                 props.insert("authed".into(), json!(true)); props.insert("sub".into(), claims["sub"].clone()); props.insert("claims".into(), claims); }
                             Err(why) => { props.insert("authed".into(), json!(false)); props.insert("auth_error".into(), json!(why)); }
                         }
+                        // the credentials were checked above and no pack reads them: they must not stay on the Request entity, which any verified person can read with `entity_read` while it is held
+                        // (the page's open event stream is held for as long as the page is open)
+                        if let Some(h) = props.get_mut("headers").and_then(|h| h.as_object_mut()) { for k in ["authorization", "cookie", "proxy-authorization"] { h.remove(k); } }
                         let conn = st3.hold_conn(s);
                         props.insert("conn".into(), json!(conn));
                         props.insert("http".into(), json!(eid3));

@@ -74,7 +74,7 @@ Request.m_session getter: ['POST'] if this.route == '/membrane/chat/message' els
 
 -- ---- POST: the message --------------------------------------------------------------------------------------------------------------
 Request.cm_text getter: strip(str(prop(this.jbody, 'text') or ''))
-Request.cm_go getter: this.method == 'POST' and this.route == '/membrane/chat/message' and this.cm_text != ''
+Request.cm_go getter: this.entrant and this.method == 'POST' and this.route == '/membrane/chat/message' and this.cm_text != ''
 Request.cm_go on-setter chat-stamp:
   WHEN this.cm_go:
     this.cm_at = clock
