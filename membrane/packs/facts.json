@@ -143,7 +143,7 @@
   },
   "sql_sources": {
    "wired": false,
-   "why": "second SQLite files to open as entities (membrane/packs/sql.c1f, native/src/sqldrv.rs): a LIST of {name, path, mode} (mode ro, the default, opens the file read-only and immutable; rw may write); each entry makes `SqlSource:<name>` as if it were written by hand; the seat's own store is refused; told by `--fact sql_sources='[{\"name\": \"lex\", \"path\": \"/data/words.sqlite\"}]'`"
+   "why": "second SQLite files to open as entities (membrane/packs/sql.c1f, native/src/sqldrv.rs): a LIST of {name, path, mode} (mode ro, the default, opens the file read-only and immutable; rw may write); each entry SEEDS `SqlSource:<name>` as if it were written by hand, and a source that already has a path is left alone; the seat's own store is refused; told by `--fact sql_sources='[{\"name\": \"lex\", \"path\": \"/data/words.sqlite\"}]'`"
   },
   "effect_workers": {
    "wired": false,

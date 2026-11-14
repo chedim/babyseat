@@ -429,3 +429,25 @@ fn a_long_query_does_not_hang_the_vm() {
     pump_until(&h, |h| h.get("SqlQuery:slow", "run_result")["id"] == json!("s"));
     assert_eq!(h.get("SqlQuery:slow", "rows"), json!([{"n": 12000000}]));
 }
+
+#[test]
+fn the_launch_fact_only_seeds_a_source_that_does_not_exist_a_model_write_wins_over_a_restart() {
+    // (#1143, the migration: the previous store is declared `legacy` by the launch fact; the model may point it elsewhere and a restart keeps its choice)
+    let d = tmp("seed");
+    make_db(&d.join("fact.db"));
+    make_db(&d.join("mine.db"));
+    let fact = |p: &str| props(json!({"sql_sources": [{"name": "legacy", "path": d.join(p).to_string_lossy(), "mode": "ro"}]}));
+    {
+        let h = host_at(&d);
+        membrane_vm::host::boot_started(&h, &fact("fact.db"), true);
+        h.pump();
+        assert_eq!(h.get("SqlSource:legacy", "path"), json!(d.join("fact.db").to_string_lossy()), "the fact seeds a source that is not there");
+        source(&h, "legacy", &d.join("mine.db"), None);                     // the model points it elsewhere
+        assert_eq!(h.get("SqlSource:legacy", "path"), json!(d.join("mine.db").to_string_lossy()));
+    }
+    let h = host_at(&d);                                                      // a restart with the same fact
+    membrane_vm::host::boot_started(&h, &fact("fact.db"), true);
+    h.pump();
+    assert_eq!(h.get("SqlSource:legacy", "path"), json!(d.join("mine.db").to_string_lossy()), "the model's choice survives the next launch");
+    assert_eq!(h.get("SqlSource:legacy", "mode_eff"), json!("ro"));
+}

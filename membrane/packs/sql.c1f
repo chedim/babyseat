@@ -49,16 +49,16 @@ SqlQuery.status getter:
   ELSE WHEN this.run_result == None or prop(this.run_result, 'finished') < prop(this.running, 'started'): 'running'
   ELSE: prop(this.run_result, 'status')
 
--- the launch fact `sql_sources` (a LIST of {name, path, mode}: c1f cannot list the keys of a dict, `keys()` is only a proposed builtin) births the same entities;
--- the fact and `started` arrive in no fixed order, so BOTH make them (the launch declares: the path it names wins over an earlier one; a source the model
--- wrote that the fact does not name is left alone)
+-- the launch fact `sql_sources` (a LIST of {name, path, mode}: c1f cannot list the keys of a dict, `keys()` is only a proposed builtin) SEEDS the same entities:
+-- a source that already has a path (a model wrote it, or an earlier run kept it) is left alone, so a restart never undoes the model's choice; the fact and
+-- `started` arrive in no fixed order, so BOTH seed (the second finds the path the first wrote and leaves it)
 Boot.started on-setter sql-sources:
   ALWAYS:
-    FOR s IN (this.sql_sources or []):
+    FOR s IN [x for x in (this.sql_sources or []) if prop('SqlSource:' + prop(x, 'name'), 'path') == None]:
       ('SqlSource:' + prop(s, 'name')).path = prop(s, 'path')
       ('SqlSource:' + prop(s, 'name')).mode = prop(s, 'mode') or 'ro'
 Boot.sql_sources on-setter sql-sources-told:
   WHEN this.sql_sources != None:
-    FOR s IN this.sql_sources:
+    FOR s IN [x for x in this.sql_sources if prop('SqlSource:' + prop(x, 'name'), 'path') == None]:
       ('SqlSource:' + prop(s, 'name')).path = prop(s, 'path')
       ('SqlSource:' + prop(s, 'name')).mode = prop(s, 'mode') or 'ro'
