@@ -1,5 +1,4 @@
-//! The page's boot-time routes on the full-set seat (#1143, swap step 3): every route the page calls when it boots, and the field views' empty
-//! answers, on the REAL shipped pack set started the way `scripts/seat-full` starts it (a door secret, so the strict door: each call carries the owner
+//! The page's boot-time routes on the release seat (#1143, swap step 3): every route the page calls when it boots, on the REAL shipped barest pack set started the way `scripts/seat` starts it (a door secret, so the strict door: each call carries the owner
 //! token the seat writes). The answers are compared in SHAPE with the recorded answers of the released Python seat (tests/golden/boot/*.json,
 //! scripts/golden_boot.py). Every wait has a timeout: a request that never answers FAILS the test instead of hanging it. NEVER a real `claude`.
 #![cfg(feature = "bin")]
@@ -21,17 +20,31 @@ fn tmp(tag: &str) -> std::path::PathBuf {
     d
 }
 
-/// scripts/seat-full on a fresh data folder, a free port, the fake claude `/usr/bin/true`; -> the seat and its owner token
+/// scripts/seat on a fresh data folder, a free port, the fake claude `/usr/bin/true`; -> the seat and its owner token
 fn seat(tag: &str) -> Run { let dir = tmp(tag); start_in(dir) }
 /// the same on the folder `dir` (a second start on it is a restart: the store, the secret and the page's cookie are kept)
 fn start_in(dir: std::path::PathBuf) -> Run { start_with(dir, &[]) }
 /// the same with `--fact name=value` settings on the launch line
-fn start_with(dir: std::path::PathBuf, facts: &[&str]) -> Run {
+fn start_with(dir: std::path::PathBuf, facts: &[&str]) -> Run { launch(dir, facts, false) }
+/// the routes of the packs the release seat's list (membrane/apps/barest.packs) does not carry (voice, self, decisions): the WHOLE pack folder, boot first, on the same strict door
+/// (what the removed second launcher started; the test starts it itself, no script)
+fn seat_full(tag: &str) -> Run { launch(tmp(tag), &[], true) }
+fn launch(dir: std::path::PathBuf, facts: &[&str], full: bool) -> Run {
     let _ = std::fs::remove_file(dir.join("d/owner.token"));
-    let script = format!("{}/../scripts/seat-full", env!("CARGO_MANIFEST_DIR"));
-    let mut child = Command::new("sh").arg(script).args(["--data-dir", dir.join("d").to_str().unwrap(), "--port", "0"])
-        .args(facts.iter().flat_map(|f| ["--fact", *f]))
-        .env("CLIFFVM", BIN).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let root = format!("{}/..", env!("CARGO_MANIFEST_DIR"));
+    let mut child = if full {
+        let d = dir.join("d");
+        std::fs::create_dir_all(&d).unwrap();
+        Command::new(BIN).current_dir(&root).args(["run", "membrane/packs/boot.c1f", "membrane/packs", "--store", d.join("seat.sqlite").to_str().unwrap(), "--port", "0", "--ui-dir", "membrane/ui",
+                "--fact", &format!("door_secret_file={}", d.join("door.secret").display()), "--fact", &format!("seat_data_dir={}", d.display()),
+                "--fact", r#"minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude","loops_auth":"chat","cortex_auth":"chat","workers_auth":"chat","think":"auto"}"#,
+                "--fact", "seat_backend=http://127.0.0.1:11434", "--fact", "router_on=false", "--fact", r#"cloud_models=[{"name":"claude","backend":"claude-agent"}]"#, "--fact", "chat_claude_bin=/usr/bin/true"])
+            .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap()
+    } else {
+        Command::new("sh").arg(format!("{root}/scripts/seat")).args(["--data-dir", dir.join("d").to_str().unwrap(), "--port", "0"])
+            .args(facts.iter().flat_map(|f| ["--fact", *f]))
+            .env("CLIFFVM", BIN).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap()
+    };
     let out = child.stdout.take().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
@@ -106,7 +119,7 @@ fn same_shape(name: &str, status: u16, body: &J) {
 // ---- voice: the state write on a fresh store ----------------------------------------------------------------------------------------------------
 #[test]
 fn the_voice_state_write_and_read_answer_on_a_fresh_store_in_the_released_shape() {
-    let run = seat("voice");
+    let run = seat_full("voice");
     // a store made by this seat has no Python tables: the read of a person with no voice entities used to wait for ever
     let (st, v) = api(&run, "POST", "/ui/serve/membrane/voice", json!({}));
     assert_eq!(st, 200, "{v}");
@@ -145,7 +158,7 @@ fn the_config_names_the_model_the_page_shows_and_the_provider_that_serves_it() {
     for path in ["/ui/serve/config", "/config"] {
         let (st, c) = api(&run, "GET", path, J::Null);
         assert_eq!(st, 200, "{c}");
-        // the page's `_loadModel` reads `model`; seat-full's default model is claude
+        // the page's `_loadModel` reads `model`; the launcher's default model is claude
         assert_eq!(c["model"], json!("membrane/claude"), "{c}");
         assert_eq!(c["small_model"], json!("membrane/claude"), "{c}");
         assert_eq!(c["$schema"], json!("https://opencode.ai/config.json"), "{c}");
@@ -236,55 +249,6 @@ fn the_quota_read_and_resume_answer_a_seat_with_nothing_paused_in_the_released_s
     assert_eq!(api(&run, "DELETE", "/ui/serve/membrane/quota", J::Null).0, 405);
 }
 
-// ---- the field map (the 2D panel and the 3D window): the released answer of a seat with an EMPTY field --------------------------------------------------
-// The map engine is the Python seat's (field3d.py, fieldmap.py: numpy over the entity states); until it is native these routes answer what the released
-// code answers for a field with no live entity, which draws "the field is empty" in both views (tests/js/field_empty.test.mjs runs the page's own code on it).
-fn err_of(e: &J) -> (String, String) { (e["error"]["message"].as_str().unwrap_or("").to_string(), e["error"]["type"].as_str().unwrap_or("").to_string()) }
-
-#[test]
-fn the_field_map_routes_answer_the_empty_field_in_the_released_shapes() {
-    let run = seat("map");
-    let (st, f) = api(&run, "GET", "/ui/serve/membrane/map/field?m=1200", J::Null);
-    same_shape("map_field", st, &f);
-    assert_eq!((f["nodes"].clone(), f["edges"].clone(), f["axes"].clone()), (json!([]), json!([]), json!([])), "{f}");
-    // the whole field in 3D: an empty projection, its root tile and the current
-    let (st, p) = api(&run, "GET", "/ui/serve/membrane/map/field3d?axes=pc1%2Cpc2%2Cpc3", J::Null);
-    same_shape("field3d", st, &p);
-    assert_eq!((p["n_total"].clone(), p["root"]["nodes"].clone(), p["root"]["more"].clone(), p["current"]["p"].clone(), p["current"]["tau_s"].clone()), (json!(0), json!([]), json!(false), J::Null, json!(180.0)), "{p}");
-    assert_eq!(p["root"]["pid"], p["pid"], "{p}");
-    let pid = p["pid"].as_str().unwrap().to_string();
-    // a tile of that projection is the empty tile; the projection of another pid has expired (410), like the released seat's
-    let (st, t) = api(&run, "GET", &format!("/ui/serve/membrane/map/tile?pid={pid}&l=0&x=0&y=0&z=0"), J::Null);
-    assert_eq!(st, 200, "{t}");
-    assert_eq!(t, json!({"pid": pid, "l": 0, "x": 0, "y": 0, "z": 0, "nodes": [], "edges": [], "more": false}));
-    let (st, t) = api(&run, "GET", "/ui/serve/membrane/map/tile?pid=gone&l=0&x=0&y=0&z=0", J::Null);
-    assert_eq!((st, err_of(&t)), (410, ("projection 'gone' expired: re-fetch /membrane/map/field3d".to_string(), "membrane_error".to_string())), "{t}");
-    let (st, t) = api(&run, "GET", &format!("/ui/serve/membrane/map/tile?pid={pid}&l=a&x=0&y=0&z=0"), J::Null);
-    assert_eq!((st, err_of(&t).0), (400, "l, x, y, z must be integers".to_string()), "{t}");
-    // locate: nothing is in the empty projection
-    let (st, t) = api(&run, "GET", &format!("/ui/serve/membrane/map/locate?pid={pid}&eid=f%3Aa.py"), J::Null);
-    assert_eq!(st, 404, "{t}");
-    assert!(err_of(&t).0.ends_with(" is not in this projection") && err_of(&t).0.starts_with('\''), "{t}");
-    let (st, _) = api(&run, "GET", "/ui/serve/membrane/map/locate?pid=gone&eid=x", J::Null);
-    assert_eq!(st, 410);
-    // search: no entity, no hit; the query comes back lowercased and stripped
-    let (st, s) = api(&run, "GET", "/ui/serve/membrane/map/search?limit=40&q=%20Foo+", J::Null);
-    same_shape("map_search", st, &s);
-    assert_eq!((s["q"].clone(), s["hits"].clone()), (json!("foo"), json!([])), "{s}");
-    // the card and the entity axis need a loaded field: the released 503 with its reason
-    for path in ["/ui/serve/membrane/map/distance?eid=x", "/ui/serve/membrane/field/entity?eid=x"] {
-        let (st, e) = api(&run, "GET", path, J::Null);
-        assert_eq!((st, err_of(&e)), (503, ("the field is not loaded".to_string(), "membrane_error".to_string())), "{path}: {e}");
-    }
-    // Blurp's overlay
-    let (st, b) = api(&run, "GET", "/ui/serve/membrane/map/blurp", J::Null);
-    same_shape("blurp", st, &b);
-    assert_eq!((b["firings"].clone(), b["triggers"].clone(), b["counts"].clone()), (json!([]), json!(0), json!({"shadow": 0, "proposal": 0, "suggest": 0})), "{b}");
-    // read only
-    assert_eq!(api(&run, "POST", "/ui/serve/membrane/map/field", json!({})).0, 405);
-    assert_eq!(api(&run, "GET", "/membrane/map/field", J::Null).0, 200, "the bare path too");
-}
-
 // ---- the browser VM's start: GET /ui/fieldvm -------------------------------------------------------------------------------------------------------------
 fn bare(run: &Run, method: &str, path: &str) -> u16 {
     let mut s = TcpStream::connect(("127.0.0.1", run.port)).unwrap();
@@ -303,32 +267,32 @@ fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_owner() {
     assert_eq!(st, 200, "{s}");
     // the packs that import `dom` (they run in the page; the page has `dom`), by name, with their text; none of the seat's own
     let packs = s["packs"].as_object().unwrap_or_else(|| panic!("{s}"));
-    let names: Vec<&String> = packs.keys().collect();
-    assert_eq!(names, ["about"], "only the packs that import dom: {names:?}");
-    let about = packs["about"].as_str().unwrap();
-    assert!(about.starts_with("PACK about 1") && about.contains("IMPORT dom 1"), "{about}");
-    assert_eq!(about, std::fs::read_to_string(format!("{}/../membrane/packs/about.c1f", env!("CARGO_MANIFEST_DIR"))).unwrap(), "the file's text, whole");
-    // no entity of a view class is mirrored yet; the one entity is `Boot:seat`, the chat view's settings (null: the pack's own default stands), and `views` is the per-view switch (default legacy)
+    let mut names: Vec<String> = packs.keys().cloned().collect();
+    names.sort();
+    let folder = format!("{}/../membrane/apps/barest.c1f", env!("CARGO_MANIFEST_DIR"));
+    let mut want: Vec<String> = std::fs::read_dir(&folder).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map(|x| x == "c1f").unwrap_or(false))
+        .filter(|p| std::fs::read_to_string(p).unwrap().lines().any(|l| l.starts_with("IMPORT dom "))).map(|p| p.file_stem().unwrap().to_string_lossy().to_string()).collect();
+    want.sort();
+    assert!(!want.is_empty() && names == want, "only the app folder's packs that import dom: {names:?} vs {want:?}");
+    let shell = packs["shell_view"].as_str().unwrap();
+    assert_eq!(shell, std::fs::read_to_string(format!("{folder}/shell_view.c1f")).unwrap(), "the file's text, whole");
+    // no entity of a view class is mirrored yet; the one entity is `Boot:seat`, the chat view's settings (null: the pack's own default stands)
     assert_eq!(s["entities"], json!([{"eid": "Boot:seat", "cls": "Boot", "props": {"chat_page_size": null, "chat_poll_size": null, "chat_list_poll_ms": null, "chat_active_poll_ms": null, "chat_stick_px": null, "chat_tool_chars": null, "field_window": 150, "field_poll_ms": 2000, "chat_poll_timeout_s": null, "shell_status_ms": null, "shell_panel_chars": null}}]), "{s}");
-    assert_eq!(s["views"], json!({"chat": "legacy", "field": "legacy"}), "no fact ui_views: every view is legacy");
+    assert!(s.get("views").is_none(), "no per-view switch any more: {s}");
     // the same through the page's prefix; read only
     let (st, s2) = api(&run, "GET", "/ui/serve/ui/fieldvm", J::Null);
-    assert_eq!((st, s2["packs"].as_object().map(|m| m.len())), (200, Some(1)), "{s2}");
+    assert_eq!((st, s2["packs"].as_object().map(|m| m.len())), (200, Some(want.len())), "{s2}");
     assert_eq!(api(&run, "POST", "/ui/fieldvm", json!({})).0, 405);
 }
 
 #[test]
-fn the_browser_vm_snapshot_reports_the_view_switch_and_the_chat_settings_from_the_facts() {
-    let run = start_with(tmp("fieldvm-facts"), &["ui_views={\"chat\":\"pack\",\"field\":\"pack\"}", "chat_page_size=5", "chat_active_poll_ms=100", "field_window=40", "field_poll_ms=800"]);
+fn the_browser_vm_snapshot_reports_the_chat_settings_from_the_facts() {
+    let run = start_with(tmp("fieldvm-facts"), &["chat_page_size=5", "chat_active_poll_ms=100", "field_window=40", "field_poll_ms=800"]);
     let (st, s) = api(&run, "GET", "/ui/fieldvm", J::Null);
     assert_eq!(st, 200, "{s}");
-    assert_eq!(s["views"], json!({"chat": "pack", "field": "pack"}), "the fact says which renderer owns the chat and the field");
     let p = &s["entities"][0]["props"];
     assert_eq!((p["chat_page_size"].clone(), p["chat_active_poll_ms"].clone(), p["chat_poll_size"].clone()), (json!(5), json!(100), J::Null), "a fact given rides as it is; one not given is null");
     assert_eq!((p["field_window"].clone(), p["field_poll_ms"].clone()), (json!(40), json!(800)), "the field view's settings ride the same way");
-    // a fact that is not a dict, or names another view, leaves the chat legacy
-    let run = start_with(tmp("fieldvm-facts-odd"), &["ui_views=chat=pack"]);
-    assert_eq!(api(&run, "GET", "/ui/fieldvm", J::Null).1["views"], json!({"chat": "legacy", "field": "legacy"}));
 }
 
 // ---- the session's side reads the chat view asks beside the messages (tolerated when absent; answered now) -----------------------------------------------
@@ -354,7 +318,7 @@ fn the_sessions_voice_and_predict_reads_are_the_empty_lists_of_a_seat_with_neith
 // ---- the work graph's drawer: history and item chat on a store with no Python tables -------------------------------------------------------------------------
 #[test]
 fn the_history_and_item_chat_reads_answer_on_a_fresh_store_instead_of_waiting_for_python_tables() {
-    let run = seat("history");
+    let run = seat_full("history");
     // the store this seat made has no `c_entity_deltas` / `c_relations` (the Python seat's tables): the reads used to wait for ever
     let (st, h) = api(&run, "GET", "/ui/serve/membrane/entity-history?spec=Goal%3Anone", J::Null);
     assert_eq!((st, h), (200, json!({"ok": false, "error": "no entity matches 'Goal:none'"})));
@@ -399,14 +363,14 @@ fn the_minds_read_is_the_released_empty_orb_lists() {
 // ---- w46: the 👶 panel's feed and the item card's say ------------------------------------------------------------------------------------------------------
 #[test]
 fn the_self_record_feed_is_the_empty_list_of_a_seat_with_no_record() {
-    let run = seat("selfrecent");
+    let run = seat_full("selfrecent");
     let (st, r) = api(&run, "GET", "/ui/serve/membrane/self/recent?n=15", J::Null);
     assert_eq!((st, r), (200, json!({"lines": []})), "the released answer with no self record (server.py:4577)");
 }
 
 #[test]
 fn the_item_card_say_is_a_stated_not_built_and_writes_nothing() {
-    let run = seat("itemsay");
+    let run = seat_full("itemsay");
     let (st, r) = api(&run, "POST", "/ui/serve/membrane/item-chat/say", json!({"spec": "Goal:none", "text": "hi"}));
     assert_eq!(st, 501, "{r}");
     assert!(r["error"].as_str().unwrap().starts_with("not ported yet"), "{r}");
@@ -421,15 +385,13 @@ fn the_released_constants_are_launch_facts_and_keep_the_released_values_without_
     let run = seat("facts-default");
     let (_, q) = api(&run, "GET", "/ui/serve/membrane/quota", J::Null);
     let (_, o) = api(&run, "GET", "/ui/serve/membrane/options", J::Null);
-    let (_, f) = api(&run, "GET", "/ui/serve/membrane/map/field3d", J::Null);
-    assert_eq!((q["probe_s"].clone(), f["tile_k"].clone(), f["current"]["tau_s"].clone()), (json!(600), json!(150), json!(180.0)), "{q} {f}");
+    assert_eq!(q["probe_s"], json!(600), "{q}");
     assert_eq!((o["defaults"].clone(), o["current_tau_s"].clone(), o["background"]["chat_auth"].clone()), (json!({"self_cpu_share": 0.5, "code_runs_keep": 30}), json!(180.0), json!("api_key")), "{o}");
     let dir = tmp("facts-set");
-    let run = start_with(dir, &["quota_probe_s=900", "map_tile_k=64", "field_tau_s=90.0", "self_cpu_share_default=0.25", "code_runs_keep_default=10", "chat_auth=login"]);
+    let run = start_with(dir, &["quota_probe_s=900", "field_tau_s=90.0", "self_cpu_share_default=0.25", "code_runs_keep_default=10", "chat_auth=login"]);
     let (_, q) = api(&run, "GET", "/ui/serve/membrane/quota", J::Null);
     let (_, o) = api(&run, "GET", "/ui/serve/membrane/options", J::Null);
-    let (_, f) = api(&run, "GET", "/ui/serve/membrane/map/field3d", J::Null);
-    assert_eq!((q["probe_s"].clone(), f["tile_k"].clone(), f["current"]["tau_s"].clone()), (json!(900), json!(64), json!(90.0)), "{q} {f}");
+    assert_eq!(q["probe_s"], json!(900), "{q}");
     assert_eq!((o["defaults"].clone(), o["current_tau_s"].clone(), o["background"]["chat_auth"].clone()), (json!({"self_cpu_share": 0.25, "code_runs_keep": 10}), json!(90.0), json!("login")), "{o}");
     assert_eq!((o["self_cpu_share"].clone(), o["code_runs_keep"].clone()), (json!(0.25), json!(10)), "an unset option reads its default: {o}");
 }

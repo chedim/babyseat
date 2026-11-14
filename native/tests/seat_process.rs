@@ -231,10 +231,13 @@ fn with_no_claude_named_the_answer_is_a_plain_instruction() {
 }
 
 #[test]
-fn the_barest_seat_loads_only_its_own_packs_and_seeds_no_command_or_ledger_file() {
+fn the_release_seat_loads_only_its_own_packs_and_seeds_no_command_or_ledger_file() {
     let names = barest_packs();
-    for gone in ["decisions", "dev", "door_self", "door_models", "door_voice", "router", "door_state", "door_decisions"] {
+    for gone in ["decisions", "dev", "door_self", "door_voice", "door_decisions", "door_map"] {
         assert!(!names.iter().any(|n| n.ends_with(&format!("/{gone}.c1f"))), "{gone} is not a barest pack");
+    }
+    for here in ["door_auth", "router", "door_state", "door_models", "ha"] {
+        assert!(names.iter().any(|n| n.ends_with(&format!("/{here}.c1f"))), "{here} is a release pack (the house, the models, the strict door's cookie)");
     }
     let (mut run, port) = seat("fresh", true);
     let (none, _) = call(port, "entity_query", json!({"q": "name~:Command:", "k": 100}));
@@ -516,14 +519,19 @@ fn the_seat_script_forwards_each_fact_to_cliffvm_run() {
     assert!(st.success());
     let args: Vec<String> = std::fs::read_to_string(&out).unwrap().lines().map(String::from).collect();
     let facts: Vec<&str> = args.windows(2).filter(|w| w[0] == "--fact").map(|w| w[1].as_str()).collect();
-    assert_eq!(facts, ["request_keep_s=0", "chat_max_turns=5", "chat_claude_bin=/bin/echo"], "{args:?}");
+    // the launcher's own facts (the strict door's secret and data folder, claude the only model) come first; the operator's after them (so they win), then the claude CLI's
+    let own = facts.iter().position(|f| *f == "request_keep_s=0").expect("the operator's fact is passed on");
+    assert_eq!(&facts[own..], ["request_keep_s=0", "chat_max_turns=5", "chat_claude_bin=/bin/echo"], "{args:?}");
+    let data = dir.clone();
+    assert!(facts[..own].iter().any(|f| *f == format!("door_secret_file={}/door.secret", data.display())), "the strict door's secret is in the data folder (the store's folder): {facts:?}");
+    assert!(facts[..own].iter().any(|f| *f == format!("seat_data_dir={}", data.display())), "{facts:?}");
     assert_eq!(args[0], "run");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn the_launch_scripts_switch_the_login_on_only_when_asked_and_otherwise_leave_the_api_key_default() {
-    for script in ["scripts/seat", "scripts/seat-full"] {
+    for script in ["scripts/seat"] {
         let dir = tmp("scripts-auth");
         let fake = dir.join("fake-cliffvm");
         std::fs::write(&fake, "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done > \"$ARGS_OUT\"\n").unwrap();
@@ -531,7 +539,7 @@ fn the_launch_scripts_switch_the_login_on_only_when_asked_and_otherwise_leave_th
         let out = dir.join("args");
         let go = |login: bool| -> Vec<String> {
             let mut c = Command::new(repo().join(script));
-            if script.ends_with("full") { c.args(["--data-dir", dir.join("data").to_str().unwrap(), "--port", "0"]); } else { c.args(["--store", dir.join("s.sqlite").to_str().unwrap(), "--port", "0"]); }
+            c.args(["--data-dir", dir.join("data").to_str().unwrap(), "--port", "0"]);
             c.env("CLIFFVM", &fake).env("CLAUDE_BIN", "/bin/echo").env("ARGS_OUT", &out).env_remove("CLAUDE_AUTH").env_remove("ANTHROPIC_API_KEY");
             if login { c.env("CLAUDE_AUTH", "login"); }
             assert!(c.stdout(Stdio::null()).stderr(Stdio::null()).status().unwrap().success(), "{script}");

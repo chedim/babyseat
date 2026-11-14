@@ -4,9 +4,11 @@ boot
 entity
 stats
 door
+door_auth
 fs
 proc
 fetch
+router
 sql
 store
 door_tools
@@ -17,4 +19,7 @@ chat_turn
 door_session
 legacy_import
 door_fieldvm
+door_state
+door_models
+ha
 settings

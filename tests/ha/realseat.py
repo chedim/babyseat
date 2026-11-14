@@ -67,7 +67,7 @@ class RealSeat:
             [str(self.bin), "run", str(packs / "boot.c1f"), str(packs), "--store", str(d / "field.sqlite3"), "--port", "0", "--ui-dir", str(d),
              "--fact", f"chat_claude_bin={claude}", "--fact", "seat_cwd=/srv/seat", "--fact", "seat_project=membrane", "--fact", "seat_version=1.0",
              "--fact", f"door_secret_file={d / 'door.secret'}", "--fact", f"seat_data_dir={d}",
-             # a launcher's seat that answers through the claude CLI only (scripts/seat-full's defaults): the models the seat-model select lists
+             # a launcher's seat that answers through the claude CLI only (scripts/seat's defaults): the models the seat-model select lists
              "--fact", 'cloud_models=[{"name":"claude","backend":"claude-agent"},{"name":"claude-agent:sonnet","backend":"claude-agent"}]',
              "--fact", "router_on=false", "--fact", "seat_backend=http://127.0.0.1:1",
              "--fact", 'minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude"}'],

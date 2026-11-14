@@ -3,17 +3,17 @@ IMPORT dom 1
 IMPORT fetch 1
 IMPORT shell_view 1
 -- THE FIELD AS A 3D GRAPH, A VIEW PACK (#1143, operator 2026-11-14: "the field as a 3D graph, the graph growing around it, the cap following the field's activity").
--- It runs in the PAGE's field engine (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f, and does not run it), the way chat_view.c1f does, and draws
+-- This app folder (apps/field.c1f) is an EXTRA app: the default launch (scripts/seat) does not load it; it runs in the PAGE's field engine when a seat is started with it (it imports `dom`; the seat sends it with `GET /ui/fieldvm`, door_fieldvm.c1f, and does not run it), the way chat_view.c1f does, and draws
 -- the field's entities as an SVG scene with a 3D layout that it computes itself: no JavaScript logic, only the shell's DOM mount (ui/fieldvm.js).
 --   DomNode:shell:slot:field   the shell's slot the view's root sits in (shell_view.c1f: the view registers `Nav:field` when the shell opens, draws when `Nav:field` first becomes active, and does no periodic work while it is not active)
---   Scene:field   the view: the window, the polls, the camera (the basis rx/ry/rz), the clock; the page's shell (ui/chatmount.js) births it {open: true} when the page asks for the pack view
+--   Scene:field   the view: the window, the polls, the camera (the basis rx/ry/rz), the clock; the shell's boot (ui/boot.js) births it {open: true}
 --   Dot:<eid>     one entity of the field: `raw` is the row of the seat's active window ({id, cls, updated, parent}), `p` its place in space; everything drawn is a getter of those
---   Fetch:map     the poll of `GET /ui/fieldvm/active?m=<window>` (the page's Fetch, fieldvm.js W2): the request is the effect, the receipt `request_result` comes back
+--   Fetch:map     the poll of `GET /ui/fieldvm/active?m=<window>` (the page's Fetch, ui/fieldvm.js): the request is the effect, the receipt `request_result` comes back
 -- THE POLL: the answer of `GET /ui/fieldvm/active?m=<window>` gives the window, the hidden classes and prefixes; the view asks again `poll_ms` after each answer (no write stream: operator 2026-11-14 removed the host's write feed).
 -- THE ACTIVE WINDOW. The seat answers the `window` entities written most recently (by `updated`, hidden classes left out: docs/field-view-plan.md) and this view keeps exactly those:
 -- an entity that falls out of the answer is retired here (its Dot and its DomNodes leave the page's engine and the page), so the view's memory follows the field's activity; on the
 -- seat the route reads columns only, so the entities it does not list stay unloaded. A new row is born next to its owner (the eid's colon prefix) and the layout grows around it.
--- THE LAYOUT is a force layout (graph.js's idea) in 3D: every Dot repels every other, an owner pulls its children (the ownership edge), a weak pull to the centre keeps the cloud together.
+-- THE LAYOUT is a force layout (a classic force layout) in 3D: every Dot repels every other, an owner pulls its children (the ownership edge), a weak pull to the centre keeps the cloud together.
 -- Each Dot is its own setter (`Dot.go`, one per clock tick) so the work of a step is bounded per evaluation; the layout cools (`heat`) and goes quiet, and a birth or a leave warms it again.
 -- MASS = the number of inbound edges (the owner's children), the radius. THE CAMERA turns only by the user's drag (no trig: the basis is rotated
 -- and re-normalised); the camera is a drag (the shell writes `pointer` on the SVG), the wheel, and buttons (nearer, farther); NOTHING turns by itself (the operator: no automatic rotation), so a settled scene writes nothing per tick; a click on a dot selects it.

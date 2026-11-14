@@ -270,7 +270,7 @@
       "Http",
       "Request"
     ],
-    "members": 89,
+    "members": 90,
     "writes": [
       "Http:door.listen"
     ],
@@ -412,30 +412,6 @@
     ],
     "resident": [
       "FieldVm"
-    ]
-  },
-  "door_map": {
-    "imports": [
-      "door"
-    ],
-    "classes": [
-      "Request"
-    ],
-    "members": 18,
-    "writes": [],
-    "claims": [
-      "/membrane/field/entity",
-      "/membrane/map/blurp",
-      "/membrane/map/distance",
-      "/membrane/map/field",
-      "/membrane/map/field3d",
-      "/membrane/map/locate",
-      "/membrane/map/search",
-      "/membrane/map/tile"
-    ],
-    "boot_facts": [
-      "field_tau_s",
-      "map_tile_k"
     ]
   },
   "door_models": {

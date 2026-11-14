@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 // door packs that are NOT route families: they IMPORT door 1 and define helper getters of the gate (door_auth: the page's token)
 const DOOR_HELPERS: [&str; 1] = ["auth"];
-const FAMILIES: [&str; 9] = ["models", "decisions", "state", "voice", "session", "self", "tools", "map", "fieldvm"];
+const FAMILIES: [&str; 8] = ["models", "decisions", "state", "voice", "session", "self", "tools", "fieldvm"];
 
 fn root() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("..") }
 fn packs() -> Vec<(String, String)> {                                   // (file stem, text), shipped membrane packs only

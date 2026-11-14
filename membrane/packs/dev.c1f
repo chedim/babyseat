@@ -5,7 +5,7 @@ IMPORT proc 1
 -- nodes. On a no-bash seat there is no shell: a worker that wanted git first had to define a Command for it, and the
 -- definitions split into a task tree seven levels deep. The seat writes Boot:seat.started once, after the field engine
 -- is up; this setter answers with the Commands (a write to `<Class>:<key>` of an imported class creates it).
--- Run one with a write: Command:git.run = {id, args: ['-C', '<dir>', 'status']}; see help('stdlib').
+-- Run one with a write: Command:git.run = {id, args: ['-C', '<dir>', 'status']}; see the Help:stdlib topic if the seat has one (the release seat's list does not).
 
 Boot.started on-setter dev-commands:
   ALWAYS:

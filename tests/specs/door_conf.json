@@ -20,7 +20,8 @@
      "seat_stt": "http://127.0.0.1:8080",
      "seat_voice_out": true,
      "seat_language": "en",
-     "seat_blurp": false
+     "seat_blurp": false,
+     "door_secret_file": "/data/door.secret"
     }
    },
    {
@@ -111,6 +112,131 @@
     "eid": "Request:1",
     "prop": "reply.body.auth",
     "equals": "jwt"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.who.sub",
+    "equals": "owner"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.who.name",
+    "equals": "Owner"
+   }
+  ]
+ },
+ {
+  "name": "a door with no secret reports its auth mode as none",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "build_id": "b123",
+     "seat_name": "Nebo",
+     "seat_named": true,
+     "seat_aliases": [
+      "neb"
+     ],
+     "seat_stt": "http://127.0.0.1:8080",
+     "seat_voice_out": true,
+     "seat_language": "en",
+     "seat_blurp": false
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/ui/conf",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "192.168.1.20:5000",
+     "authed": true,
+     "auth_error": null,
+     "sub": "owner",
+     "claims": {
+      "sub": "owner",
+      "name": "Owner"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.serve_ok",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.serve_url",
+    "equals": "standalone"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.standalone",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.build",
+    "equals": "b123"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.name",
+    "equals": "Nebo"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.named",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.aliases",
+    "equals": [
+     "neb"
+    ]
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.stt",
+    "equals": "server"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.voice_out",
+    "equals": true
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.language",
+    "equals": "en"
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.blurp",
+    "equals": false
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.auth",
+    "equals": "none"
    },
    {
     "eid": "Request:1",

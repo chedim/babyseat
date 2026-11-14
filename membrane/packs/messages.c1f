@@ -1,4 +1,4 @@
 PACK messages 1
 -- (retired 2026-11-12: this pack declared Message.body and so OWNED the class Message; any pack declaring on Message without
 -- IMPORT messages was refused -- Memo's continuity-monitor was. A shipped pack must not claim a class other packs already
--- use. The recipe for reading a message's words from a getter is in help('map'): a sql() over the store's discourse rows.)
+-- use. The recipe for reading a message's words from a getter is in the Python seat's help('map') topic (the release seat has no such Help topic): a sql() over the store's discourse rows.)
