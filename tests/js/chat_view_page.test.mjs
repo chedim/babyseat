@@ -116,6 +116,8 @@ try {
   assert.equal(await b.ev(`document.getElementById('log').hidden`), true, 'the legacy log is hidden');
   assert.equal(await b.ev(`document.getElementById('composer').hidden`), true, 'the legacy box is hidden');
   assert.equal(await b.ev(`document.querySelector('#chatmount [data-key="DomNode:chat:send"]').textContent`), 'Send');
+  assert.equal(await b.ev(`window.MEMBRANE_CHAT_VIEW.clockId !== null`), true, 'the mount runs the clock (run_clock)');
+  assert.equal(await b.ev(`window.MEMBRANE_CHAT_VIEW.get('Conn:page').hidden`), false, 'the page says it is visible');
   b.hold = true;
   await b.type('hello e2e');
   await b.until(`${Q('[data-key="DomNode:chat:input"]')}.value === 'hello e2e'`, 'the typed text');

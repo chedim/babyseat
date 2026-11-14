@@ -10,8 +10,10 @@
 // Form tags and SVG (own namespace) are in the allow-list; style, event handlers and src are refused, and a refusal is
 // visible: the element carries `data-refused` and the DomNode's `refused` holds {name: reason}.
 // Events are written back: click -> `clicked` (time); input -> `value`; submit -> `submitted` (time); keydown ->
-// `key` {key, shift, ctrl, time}; focus/blur -> `focused` (bool); scroll -> `scroll` {top, height, client}.
-// A round's DOM writes are applied together, in one frame.
+// `key` {key, shift, ctrl, composing, time}; focus/blur -> `focused` (bool); scroll -> `scroll` {top, height, client}.
+// A pack writes `scroll` {top: n} or 'end' to scroll an element (applied after the round's other writes; the measured scroll is written back).
+// `before` (a sibling DomNode eid) puts a node above that sibling; writing it again moves the node. A round's DOM writes are applied together, in one frame.
+// Explicit drivers, called by the mount: `run_clock(ms)` / `stop_clock()` tick the field; `track_hidden()` keeps `Conn:page.hidden` (bool).
 //
 // The page's own DOM links in too (`link`): each element of the page (open shadow roots included) is a
 // `DomNode:page:#<id>` entity (`DomNode:page:<n>` without an id) with page=true and its tag, parent, id, direct text
@@ -83,6 +85,27 @@ class Host {
     this.els = new WeakMap();             // element -> its entity (the page's and the packs')
     this.page = new Map();                // the page's own elements: entity -> element
     this.schedule = (fn) => requestAnimationFrame(fn);           // one batch per frame (a test may use a timer)
+    this.timers = { set: (fn, ms) => setInterval(fn, ms), clear: (id) => clearInterval(id) };   // the clock's timer (a test may fake it)
+    this.clockId = null;
+  }
+
+  /** The clock driver: ONE explicit timer that ticks the field every `ms` (the pack's `clock` rules own the periods). A second start replaces it. */
+  run_clock(ms) {
+    this.stop_clock();
+    this.clockId = this.timers.set(() => { this.f.tick(this.now()); this.flush(); }, ms);
+  }
+
+  stop_clock() {
+    if (this.clockId !== null) this.timers.clear(this.clockId);
+    this.clockId = null;
+  }
+
+  /** The page's visibility as a fact: `Conn:page.hidden` (bool), written now and on every `visibilitychange`. Returns the function that stops it. */
+  track_hidden(doc = document) {
+    const put = () => { const h = !!doc.hidden; if ((this.get('Conn:page') || {}).hidden !== h) this.feed('Conn:page', 'Conn', { hidden: h }, true); };
+    put();
+    doc.addEventListener('visibilitychange', put);
+    return () => doc.removeEventListener('visibilitychange', put);
   }
 
   now() { return Date.now() / 1000; }
@@ -133,11 +156,27 @@ class Host {
       if (!touched.has(w.eid)) touched.set(w.eid, {});
       if (!w.born) touched.get(w.eid)[w.prop] = w.new;
     }
+    this.made = new Set();
     for (const eid of touched.keys()) this.node(eid);
+    const scrolls = [];
     for (const [eid, props] of touched) {
       const el = this.node(eid);
-      for (const [k, v] of Object.entries(props)) this.set(el, eid, k, v);
+      for (const [k, v] of Object.entries(props)) {
+        if (k === 'scroll') scrolls.push([el, eid, v]);          // after the round's other writes: the children it scrolls over are there
+        else this.set(el, eid, k, v);
+      }
     }
+    for (const [el, eid, v] of scrolls) this.scroll(el, eid, v);
+    this.made = null;
+  }
+
+  /** A pack's scroll write: `{top: n}` or `'end'`. The measured scroll is written back (as the scroll event would), so the field holds what is true. */
+  scroll(el, eid, v) {
+    const top = v === 'end' ? el.scrollHeight : (v && typeof v === 'object' && typeof v.top === 'number' ? v.top : null);
+    if (top === null) return;                                     // an event's own write ({top, height, client}) lands here too: it is not a command
+    if (v && typeof v === 'object' && 'height' in v) return;
+    el.scrollTop = top;
+    this.event(eid, { type: 'scroll', target: el }, el);
   }
 
   node(eid) {
@@ -163,7 +202,8 @@ class Host {
       this.els.set(el, eid);
       this.listen(el, eid);
       this.nodes.set(eid, el);
-      this.attach(el, e.parent);
+      if (this.made) this.made.add(eid);
+      this.attach(el, e.parent, e.before);
     }
     return el;
   }
@@ -184,7 +224,7 @@ class Host {
     else if (ev.type === 'submit') { ev.preventDefault(); this.write(eid, 'submitted', this.now()); }
     else if (ev.type === 'keydown') {
       if (ev.key === 'Enter' && !ev.shiftKey && el.tagName === 'TEXTAREA') ev.preventDefault();   // Enter sends; Shift+Enter is a newline
-      this.write(eid, 'key', { key: ev.key, shift: ev.shiftKey, ctrl: ev.ctrlKey, time: this.now() });
+      this.write(eid, 'key', { key: ev.key, shift: ev.shiftKey, ctrl: ev.ctrlKey, composing: !!ev.isComposing, time: this.now() });
     }
     else if (ev.type === 'focus') put('focused', true);
     else if (ev.type === 'blur') put('focused', false);
@@ -202,7 +242,8 @@ class Host {
 
   set(el, eid, prop, v) {
     if (prop === 'text') el.textContent = v == null ? '' : String(v);
-    else if (prop === 'parent') this.attach(el, v);
+    else if (prop === 'parent') this.attach(el, v, (this.get(eid) || {}).before);
+    else if (prop === 'before') { if (!(this.made && this.made.has(eid))) this.attach(el, (this.get(eid) || {}).parent, v, true); }   // a node made this round is already in place
     else if (prop === 'focused') {                                // a pack's focus(): the event that follows is no write (same value)
       if (v && document.activeElement !== el) el.focus(); else if (!v && document.activeElement === el) el.blur();
     }
@@ -218,9 +259,14 @@ class Host {
     }
   }
 
-  attach(el, parent) {
+  /** Put `el` under `parent` (the mount's root when empty). `before` (a sibling DomNode eid) orders it: above that sibling. A node already in
+   *  place moves only when `move` (its `before` was written), so a later write of another property never reorders the list. */
+  attach(el, parent, before, move = false) {
     const p = typeof parent === 'string' && parent.startsWith(NODE) ? this.node(parent) : this.root;
-    if (el.parentNode !== p) p.appendChild(el);
+    const sib = typeof before === 'string' && before.startsWith(NODE) && before !== this.els.get(el) ? this.node(before) : null;
+    const there = sib && sib.parentNode === p;
+    if (el.parentNode !== p) { if (there) p.insertBefore(el, sib); else p.appendChild(el); }
+    else if (move && there && el.nextSibling !== sib) p.insertBefore(el, sib);
   }
 
   // ---- W2: the page's `Fetch` entity (#1143). A pack writes `Fetch:<x>.request = {id, url, method?, headers?, body?, timeout_s?}`; this

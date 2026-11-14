@@ -45,7 +45,7 @@ const MSGS = [
   { id: '1003-4', text: 'later', state: 'queued', response: null, turn: null, tools: [], tool_calls: [] },
 ];
 const page = (messages, more = false, next = null) => ({ messages, more, next });
-const row = (w, id, k = '', gen = 0) => w.get(`DomNode:chat:row:${gen}:${id}${k}`) || {};
+const row = (w, id, k = '') => w.get(`DomNode:chat:row:${id}${k}`) || {};
 let n = 0;
 const scenario = (name, fn) => { fn(); n++; console.log('  ok', name); };
 
@@ -69,7 +69,7 @@ scenario('a page of turns is drawn as the legacy chat draws it', () => {
   const w = world(); w.open(); w.reply('history', 200, page(MSGS));
   const [a, b, c, d] = ['1000-1', '1001-2', '1002-3', '1003-4'];
   assert.equal(row(w, a).tag, 'li'); assert.equal(row(w, a).class, 'msg'); assert.equal(row(w, a)['data-state'], 'done');
-  assert.equal(row(w, a).parent, 'DomNode:chat:list:0');
+  assert.equal(row(w, a).parent, 'DomNode:chat:list');
   assert.equal(row(w, a, ':me').text, 'hello'); assert.equal(row(w, a, ':me').class, 'bubble me');
   assert.equal(row(w, a, ':who').text, 'seat · 5 s'); assert.equal(row(w, a, ':who').class, 'who');
   assert.equal(row(w, a, ':ans').text, 'hi there'); assert.equal(row(w, a, ':ans').class, 'bubble seat'); assert.ok(!row(w, a, ':ans').hidden);
@@ -88,7 +88,7 @@ scenario('a page of turns is drawn as the legacy chat draws it', () => {
   assert.equal(row(w, b, ':tools').hidden, true, 'a running turn lists no finished tools (tool_calls is [])');
   assert.equal(w.n('older').hidden, true, 'no more turns');
   // the order of the rows in the list is the order of the page (oldest first)
-  const order = w.log.filter((e) => e.prop === 'parent' && e.new === 'DomNode:chat:list:0').map((e) => e.eid.split(':').pop());
+  const order = w.log.filter((e) => e.prop === 'parent' && e.new === 'DomNode:chat:list').map((e) => e.eid.split(':').pop());
   assert.deepEqual(order, ['1000-1', '1001-2', '1002-3', '1003-4']);
 });
 
@@ -194,13 +194,14 @@ scenario('Load older turns uses before and puts the older turns above', () => {
   w.reply('older', 200, page([MSGS[0], MSGS[1]], false, null));
   assert.equal(w.n('older').hidden, true, 'no older turns left');
   assert.equal(w.n('older:btn').disabled, false);
-  // the visible list holds the four turns, oldest first
-  const gen = w.get('View:chat').gen;
-  const visible = w.log.filter((e) => e.prop === 'parent' && e.new === `DomNode:chat:list:${gen}`).map((e) => e.eid.split(':').pop());
-  assert.deepEqual(visible, ['1000-1', '1001-2', '1002-3', '1003-4'], 'older above newer');
-  assert.notEqual(w.n('list:' + gen).hidden, true);
-  if (gen > 0) assert.equal(w.n('list:0').hidden, true, 'the list it replaced is hidden');
-  assert.equal(row(w, '1000-1', ':me', gen).text, 'hello');
+  // ONE list, no generations: each older row sits above the oldest row that was there (`before`), so the DOM order is oldest first
+  assert.equal(w.get('View:chat').gen, undefined, 'no list generation');
+  assert.equal(w.get('DomNode:chat:list:1'), null);
+  assert.equal(row(w, '1000-1').parent, 'DomNode:chat:list'); assert.equal(row(w, '1000-1').before, 'DomNode:chat:row:1002-3');
+  assert.equal(row(w, '1001-2').parent, 'DomNode:chat:list'); assert.equal(row(w, '1001-2').before, 'DomNode:chat:row:1002-3');
+  assert.equal(row(w, '1002-3').before, undefined, 'the rows that were there are not moved');
+  assert.equal(row(w, '1000-1', ':me').text, 'hello');
+  assert.notEqual(w.n('list').hidden, true);
   // a failure of the older fetch says so on the button, and it can be tried again
   const v = world(); v.open(); v.reply('history', 200, page([MSGS[3]], true, '1003-4'));
   v.write('DomNode:chat:older:btn', 'clicked', 1); v.fail('older', 'Failed to fetch');
@@ -226,6 +227,39 @@ scenario('the carried-over constants are Boot facts', () => {
   assert.equal(w.get('View:chat').near, true);
   w.write('DomNode:chat:log', 'scroll', { top: 0, height: 500, client: 360 });
   assert.equal(w.get('View:chat').near, false);
+});
+
+// 7b. the log is kept at the bottom: a scroll write 'end' after the rows are drawn, unless the person scrolled up (near false)
+scenario('stick to the bottom: the pack writes scroll end unless the person scrolled away', () => {
+  const w = world(); w.open();
+  const ends = () => w.log.filter((e) => e.eid === 'DomNode:chat:log' && e.prop === 'scroll' && e.new === 'end').length;
+  w.reply('history', 200, page([MSGS[0]]));
+  assert.ok(ends() >= 1, 'the first load puts the log at the bottom');
+  w.write('DomNode:chat:log', 'scroll', { top: 0, height: 500, client: 360 });      // the person scrolled up
+  const n = ends();
+  w.tick(3.1); w.reply('history', 200, page([MSGS[0], MSGS[3]]));
+  assert.equal(ends(), n, 'a new row while the person reads up does not move the log');
+  w.write('DomNode:chat:log', 'scroll', { top: 140, height: 500, client: 360 });    // back near the bottom
+  w.tick(3.1); w.reply('history', 200, page([MSGS[0], MSGS[3], { ...MSGS[2], id: '1004-5' }]));
+  assert.ok(ends() > n, 'near the bottom: the log follows');
+});
+
+// 7c. a hidden tab pauses the polls (Conn:page.hidden, written by the shell)
+scenario('polls pause while the page is hidden', () => {
+  const w = world(); w.open();
+  w.reply('history', 200, page([MSGS[0]]));
+  w.feed('Conn:page', 'Conn', { hidden: true });
+  w.tick(10); assert.equal(w.reqs('history').length, 1, 'hidden: no poll, however late');
+  w.feed('Conn:page', 'Conn', { hidden: false });
+  w.tick(0.1); assert.equal(w.reqs('history').length, 2, 'visible again: the poll that was due goes');
+});
+
+// 7d. two identical tool calls are two lines (each call has an id from the history route)
+scenario('tool rows are keyed by the call id', () => {
+  const w = world(); w.open();
+  const call = (id) => ({ id, name: 'Bash', input: 'ls' });
+  w.reply('history', 200, page([{ ...MSGS[0], tools: ['Bash', 'Bash'], tool_calls: [call('t:1'), call('t:2')] }]));
+  assert.equal(new Set(w.log.filter((e) => e.prop === 'parent' && e.new === 'DomNode:chat:row:1000-1:tools:list').map((e) => e.eid)).size, 2, 'two calls, two lines');
 });
 
 // 8. the pack on the seat does nothing: no View entity, no request

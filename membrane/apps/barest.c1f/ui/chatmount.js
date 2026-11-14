@@ -2,7 +2,7 @@
 // field engine. The choice, in this order: the page's `?ui=pack` / `?ui=legacy` (development), else the seat fact `ui_views` ({"chat": "pack"}) as
 // `GET /ui/fieldvm` reports it in `views`, else legacy. A seat that cannot say (no door_fieldvm, an error) gets the legacy chat: the pack view never
 // replaces it on a guess. The pack path loads the packs of that same snapshot into the page's VM (fieldvm.js `start`), feeds its entities (the Boot facts
-// the view reads), and births `View:chat` {open: true}: the pack draws everything else. The shell only ticks the clock the polls read.
+// the view reads), and births `View:chat` {open: true}: the pack draws everything else. The shell only runs the clock the polls read (`run_clock`) and says whether the tab is hidden (`track_hidden`).
 export function chooseChat(search, views) {
   const q = new URLSearchParams(search).get('ui');
   if (q === 'pack' || q === 'legacy') return q;
@@ -33,10 +33,11 @@ export async function mountChat(parts, section, startLegacy, search = location.s
     for (const e of snap.entities || []) host.feed(e.eid, e.cls, e.props, true);
     parts.log.hidden = true; parts.form.hidden = true;
     section.append(root);
+    host.track_hidden();                    // Conn:page.hidden: the polls pause in a hidden tab
     host.feed('View:chat', 'View', { open: true }, true);
     const v = host.get('View:chat') || {};
     window.MEMBRANE_CHAT_VIEW = host;
-    setInterval(() => { host.f.tick(host.now()); host.flush(); }, v.tick_ms);
+    host.run_clock(v.tick_ms);
     return 'pack';
   } catch (e) {
     console.warn('chat view pack:', e);

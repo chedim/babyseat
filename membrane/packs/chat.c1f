@@ -45,10 +45,11 @@ ChatMessage.tool_keys getter:
   WHEN this.tool_ids != None: [this.turn_eid + ':tool:' + i for i in words(this.tool_ids)]
   ELSE WHEN this.tstate in ['done', 'error']: [prop(r, 'k') for r in (sql('SELECT k FROM c_field WHERE k LIKE ? ORDER BY updated, k', this.turn_eid + ':tool:%') or [])]
   ELSE: []
-ChatMessage.tool_rows getter: [{'name': replace(str(prop(k, 'name')), 'mcp__membrane__', ''), 'input': prop(k, 'input'), 'result': prop(k, 'result')} for k in this.tool_keys]
+-- `id` is the call's own entity key (distinct per call), so a page keys its rows by it: two identical calls are two lines
+ChatMessage.tool_rows getter: [{'id': k, 'name': replace(str(prop(k, 'name')), 'mcp__membrane__', ''), 'input': prop(k, 'input'), 'result': prop(k, 'result')} for k in this.tool_keys]
 ChatMessage.history_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': this.tool_rows}
--- THE PAGE'S VIEW: history_view with each tool as {name, input} only (the page shows no result; a result can be megabytes). The route sends this one; `history_view` keeps the whole result for other adapters.
-ChatMessage.page_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': [{'name': t['name'], 'input': t['input']} for t in this.tool_rows]}
+-- THE PAGE'S VIEW: history_view with each tool as {id, name, input} only (the page shows no result; a result can be megabytes). The route sends this one; `history_view` keeps the whole result for other adapters.
+ChatMessage.page_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': [{'id': t['id'], 'name': t['name'], 'input': t['input']} for t in this.tool_rows]}
 ChatResponse.kind getter: 'response'
 -- a response's summary is its whole text (nearer class than the root `Entity.summary`, packs/entity.c1f): the banner's error line shows it.
 ChatResponse.summary getter: str(this.text or '')
