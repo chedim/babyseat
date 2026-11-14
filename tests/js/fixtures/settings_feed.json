@@ -285,27 +285,6 @@
    "choices": null
   },
   {
-   "id": "map.tile",
-   "group": "map",
-   "key": "tile",
-   "label": "Tile size",
-   "help": "The size of a tile of the map.",
-   "kind": "readonly",
-   "live": "restart",
-   "order": 13,
-   "default": 150,
-   "min": null,
-   "max": null,
-   "whole": false,
-   "unit": null,
-   "how": "start the seat with --fact map_tile_k=<number>",
-   "hidden": true,
-   "current": 150,
-   "refused": "",
-   "applied": null,
-   "choices": null
-  },
-  {
    "id": "map.fade_s",
    "group": "map",
    "key": "fade_s",

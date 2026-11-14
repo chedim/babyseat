@@ -32,7 +32,7 @@ const port = 24000 + Math.floor(Math.random() * 900);
 const fake = path.join(dir, 'fake-claude');
 writeFileSync(fake, FAKE); chmodSync(fake, 0o755);
 const cloud = JSON.stringify([{ name: 'gpt', backend: 'openai', base_url: 'https://user:hunter2pw@example.test/v1', api_key_env: 'OTHER_PROVIDER_KEY' }]);
-const child = spawn(bin, ['run', ...packs, 'membrane/apps/barest.c1f', '--store', path.join(dir, 'field.sqlite3'), '--port', String(port), '--ui-dir', 'membrane/ui',
+const child = spawn(bin, ['run', ...packs, 'membrane/apps/barest.c1f', '--store', path.join(dir, 'field.sqlite3'), '--port', String(port),
   '--fact', `chat_claude_bin=${fake}`, '--fact', `cloud_models=${cloud}`],
   { cwd: repo, stdio: 'ignore', env: { ...process.env, ANTHROPIC_API_KEY: KEY } });
 const url = `http://127.0.0.1:${port}`;
