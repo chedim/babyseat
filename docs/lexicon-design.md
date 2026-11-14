@@ -142,6 +142,36 @@ a write through `lexsql` refused); the build is reproducible (same fixture, same
 | L7 | Throwy's pack rewritten over it (same flags as today on its Keep corpus), delete `wnq.sh` | 1 |
 About **7-9 rounds**; L1-L3 carry the risk (the native piece, the changed lemma ids).
 
+## The paraphrase ladder (designed in now; rungs 1-3 are this note, 4-7 later)
+Each rung is a layer over the SemText layers (words, sentences) and adds one kind of "these two phrasings mean the same", cheapest first. A rung never
+rewrites a lower one: `related` reads them as separate edge kinds with their own weight, so a rung can be switched off or replaced.
+1. **Lemma** (morphology rules as data, `lex_base`; fixes the live `houses` -> `hous`). Exact, deterministic.
+2. **Sense and synonym:** same synset = synonym; hypernym/hyponym = broader/narrower, weaker. The `Synset` virtual class and `Word` getters of (b).
+3. **Phrase / idiom** over the sentence layer: the window match of (d); a phrase lemma and its synset siblings (`kick_the_bucket` ~ `pass_away`).
+4. **Weighting by rarity and link type:** extends `related`: today each shared entity counts 1/(entries of its `mentioned_in`); a hop adds a link weight
+   (same synset > broader/narrower) times that rarity. Only numbers change; the edge reads stay one `lexsql` plus cached `edge_rows`.
+5. **Roles** (predicate-argument per sentence, so "A bought B" matches "B was sold by A"). No layer gives a parse today: the tokenizer stops at spans, WordNet
+   has verb frames but no syntax. It would need either a native piece (a small deterministic parser compiled into a core pack, like `spans`, English only, with
+   a size and an accuracy we would have to measure on held-out sentences), or the MODEL writing the roles as entities per sentence (`Role:<text>:<n>` with
+   predicate, agent, patient, passive flag), as a leg in its own pack. The converse pair (`buy`/`sell`) is a lexicon row, a decision of its own.
+6. **Learned edges:** when the model notices two phrasings mean the same it writes an entity of an explicit class owned by a pack, `Paraphrase:<a>:<b>`
+   (RESIDENT only if listed whole, else lazy), props `a`, `b` (Word or phrase entities, never copied text), `evidence` (`$ref`s to the two sentences that
+   showed it), `by` (writer), `state` (`proposed | kept | retired`). `related` reads kept edges next to the lexicon's, with the weight of a separate kind
+   (a decision), through one `instances`-free lookup by the word's `paraphrases` getter. Corrected or retired by a write of `state` (never a delete, the
+   evidence stays); a person can retire any. Cost: one stored row per edge (~300 bytes), read at ask time only for the text's own entities. DRIFT RISK: a model-authored
+   edge is memory that can be wrong and then reinforces itself (a bad edge widens `related`, which feeds the next evidence). Checks that catch it: an edge counts
+   only with evidence in two different texts; the edge is verified on demand against the lexicon (an edge between two words with NO shared synset or common
+   hypernym is marked `unsupported`, shown, not hidden); a replay test over the evidence sentences (does the edge still make them `related`); and the
+   operator-visible list of `proposed` edges with their evidence.
+7. **Embeddings (optional derived layer):** sentence vectors from a local model. Not deterministic across machines or model builds (a replay on another machine
+   would differ), so they are stored values with the model name and a hash, never recomputed in a getter. Cost seen in the legacy store: 57 MB of vectors.
+   An option behind a dial, not a requirement; rungs 1-6 must work without it.
+
+**Known limits.** Word-sense ambiguity (`bank`: all senses are linked until rung 5/7 or the model chooses one; precision falls on common words, which rung 4's
+weighting softens); negation and scope ("did not buy" matches "bought" at every rung up to 4); world knowledge (nothing here knows a boat is a ship in a
+given port); **non-English text:** WordNet is English, and its rules and `*.exc` lists are too; a Russian (or any other) lexicon is a separate source with its
+own licence, build and morphology, loaded as another named read-only source, never mixed into the English file.
+
 ## Decisions for the operator (I chose none; "reco" is my reading)
 1. Data: WordNet 3.0 (on disk, no download; reco) or 3.1 (a download, URL and size above, unverified)? Wiktionary idioms: no for now (reco), or later as a separate CC BY-SA file?
 2. The file holds only `@ @i & #m #p %m %p` and no glosses (20.3 MB, reco) or all kinds and glosses (48 MB)? Which kinds count as "synonym", "broader", "narrower"?
@@ -154,3 +184,9 @@ About **7-9 rounds**; L1-L3 carry the risk (the native piece, the changed lemma 
 9. Synonym edges are computed at ask time and never stored in `mentioned_in` (reco), or written at mention time (cost: a common word's list grows by its synonyms)?
 10. Licence handling: ship `lexicon.LICENSE` with the file, a `Lexicon:notice` row, the Fellbaum citation: yes?
 11. Throwy's interim `wnq.sh` + `~/.membrane/wordnet`: stays until L7, then removed.
+12. Roles (rung 5): a native deterministic parser in a core pack (English only), the model writing `Role` entities per sentence, or neither for now? Also converse verb pairs (`buy`/`sell`) as lexicon rows: yes/no.
+13. Learned edges (rung 6): the class name and owner pack, the `state` values, the evidence minimum (two texts), the weight of kept edges next to lexicon edges, and which drift checks run (evidence count, lexicon support mark, replay test).
+14. Who may retire a learned edge: the writer, any person, or both.
+15. Embeddings (rung 7): offered at all? If yes: the dial, stored with model name and hash, and the byte budget (57 MB seen in the legacy store).
+16. Non-English: a separate source per language (a Russian lexicon is its own licence, build and morphology), or English only for now.
+17. Word-sense ambiguity: link all senses (as in this note) or let the model pick one per word (a write) before edges count.
