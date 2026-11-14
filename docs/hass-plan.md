@@ -1,6 +1,6 @@
 # Home Assistant on cliffvm: scoping and design (#1143)
 
-*Docs only; nothing built, run or installed. Operator, 2026-11-14: "we need to migrate hass support to c1f". Baseline: tag `v0.7.53` (RP D12). `RP` = docs/release-parity.md, `PP` = docs/packaging-plan.md, `PY` = `membrane/server.py` at the tag. Every number, port, default and platform below is a DECISION (section 10); I chose none, picks in brackets are recommendations.*
+*STATUS (2026-11-14, w71-hass1): SLICE 1 BUILT per the operator's decisions of the day: Assist, the connect-only config flow, token auth with reauth, component 0.7.60; `requirements: []`, no supervisor (inside mode and the `babyseat` wheel are not part of slice 1), the old panels, relay, zoo, STT, sensors and `ha_access` removed from the shipped component (git history keeps them), the seat acts on HA through a pull queue = slice 2, NOT built. Where this note says otherwise (R4 supervisor, inside mode, wheel pins) the status line wins. See docs/home-assistant.md.* *Original text: docs only; nothing built, run or installed. Operator, 2026-11-14: "we need to migrate hass support to c1f". Baseline: tag `v0.7.53` (RP D12). `RP` = docs/release-parity.md, `PP` = docs/packaging-plan.md, `PY` = `membrane/server.py` at the tag. Every number, port, default and platform below is a DECISION (section 10); I chose none, picks in brackets are recommendations.*
 
 ## Important first
 

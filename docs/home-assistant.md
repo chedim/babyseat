@@ -1,199 +1,58 @@
 # babyseat in Home Assistant
 
-The **babyseat (membrane)** integration (HACS; babyseat was called membrane
-before 0.7) installs the babyseat package into Home Assistant, runs the seat as Home Assistant's own child process, and makes
-membrane home the face of Home Assistant — the way it runs on the boat it was
-built on.
+*Slice 1 of the move to cliffvm (#1143, plan: [hass-plan.md](hass-plan.md)), component version 0.7.60. This page describes the component as it ships now.*
+
+The **babyseat (membrane)** integration (HACS; the domain is `membrane`) is a **thin client of a seat you already run**. Today it gives Home Assistant one thing: the seat as an **Assist conversation agent**. It connects to the seat's address with a token. It does **not** start a seat inside Home Assistant and it installs no package (its manifest has `requirements: []`).
+
+## What works, and what does not yet
+
+| | now |
+|---|---|
+| Assist: the seat answers Home Assistant's conversations (one seat session per HA conversation, the speaker's name sent as a first line `[HA user: <name>]`) | works |
+| Setup form: seat URL + token; a health check at setup | works |
+| A token that ran out: Home Assistant asks for a new one (reauth) | works |
+| The seat as Home Assistant's child process ("Inside Home Assistant") | gone: run the seat yourself (below); existing "inside" entries ask for a seat address and token once |
+| The seat acting on Home Assistant (states, calling services, MQTT) | later (slice 2) |
+| Sensors (`sensor.membrane_*`, `binary_sensor`), the select of several seats | later; the old entities show as unavailable: delete them in *Settings -> Entities* |
+| The sidebar panels, membrane home as landing page, the chat and field map inside HA, speech input | later (slice 3, after the page rebuild) |
 
 ## Install
 
-1. HACS → ⋮ → *Custom repositories* → `https://github.com/chedim/membrane`,
-   category *Integration*. Install **babyseat (membrane)** and restart Home Assistant.
-2. *Settings → Devices & services → Add integration → babyseat (membrane)*:
-   - **Inside Home Assistant** — Home Assistant runs the seat. If it already has the
-     Ollama integration, that server is used (its agent's model offered first);
-     otherwise give Ollama's address. Pick a chat model and an embedding model.
-   - **Connect to a seat running elsewhere** — a seat on another machine
-     (`membrane serve` there): its URL (a user and password only if a reverse proxy
-     in front of it asks for them).
+1. HACS -> the three dots -> *Custom repositories* -> `https://github.com/chedim/membrane`, category *Integration*. Install **babyseat (membrane)** and restart Home Assistant.
+2. Run a seat (next section) and mint a token for Home Assistant.
+3. *Settings -> Devices & services -> Add integration -> babyseat (membrane)*: the seat's URL and the token.
+4. *Settings -> Voice assistants*: pick the **Membrane seat** conversation agent for an assistant.
 
-Needs: an Ollama server with a chat model and an embedding model, and 1–3 GB of
-free RAM for the seat.
+## Run a seat
 
-## Connect mode = your own detached seat
+The seat is `cliffvm` (docs/cliffvm.md): `scripts/seat-full` starts the whole set of packs from a checkout (`scripts/seat-full --data-dir <dir> --port 4096`, once `cd native && cargo build --release --no-default-features --features bin` has built the binary). The turn is answered through the `claude` CLI with an Anthropic API key in the seat's environment (`ANTHROPIC_API_KEY`; docs/auth.md, "The claude turn's credential").
 
-"Connect to a seat running elsewhere" is the mode when **you** own the seat:
-you run it on a machine you like (a Mac, a Linux box, even unrooted Android via
-Termux) with `membrane serve`, or in a container from the public image
-(`chedim/babyseat`, [docker.md](docker.md); its :4096 is the URL to give), the
-integration only introduces itself over the network. Nothing is spawned inside Home Assistant, and **a restart of Home
-Assistant never restarts the seat** — its field and sessions keep running.
+**The seat listens on 127.0.0.1 by default.** Home Assistant on the same machine reaches it as it is. A seat on another machine must be started with `cliffvm run ... --bind <address>` (for example `--bind 0.0.0.0` on a network you trust: every route needs a token, but the port is then open to the network); `scripts/seat-full` has no `--bind` option yet.
 
-What the integration still does for such a seat:
+## Mint a token, paste it
 
-- **Panels, chat and Assist** ride the seat through a proxy: your Home Assistant
-  login is the only credential the browser needs; the seat itself has no login
-  (a proxy's, if you put one in front, stays server-side). Sessions created from Home Assistant
-  are owned by the HA user who made them.
-- **Let the seat use Home Assistant** (on by default) works in this mode too, in
-  two halves:
-  - the seat's HA access is **delivered instead of inherited**: at every Home
-    Assistant start the integration mints a fresh token for its hidden user and
-    POSTs it to the seat; the seat files it in `~/.config/membrane/hass.env`
-    (0600) and reads it on its next turn — so an HA restart reaches the seat
-    without a seat restart. Set **HA's address as the seat sees it** in the
-    options to name it outright; empty = Home Assistant's own answer, picked
-    by where the seat's URL points: a seat on HA's host keeps the local URL, a
-    seat on HA's LAN gets HA's internal address (`internal_url`, else its LAN
-    IP — not when HA binds only 127.0.0.1 behind a proxy), a seat outside the
-    LAN gets HA's external address. A seat elsewhere never gets a loopback
-    URL: with no usable address the token is not sent and HA's log warns,
-    naming this option.
-  - **State push** is the mirror of the inside mode: entities the seat marks
-    `ha_entity` are pushed to it (in batches) on every change, watches fire
-    without polling.
-- **Restarts are announced to a detached seat**: the integration posts
-  `ha-start` when Home Assistant is up and `ha-stop` on the way down
-  (`restarts.py` notices); the seat never reads an HA restart as the world
-  going quiet.
+Every route of a seat with a door secret needs a token, Home Assistant's calls too (docs/auth.md). On the seat's machine:
 
-Keeping the seat current is the seat's owner's job — on a machine where the
-code is a git clone of this repo, that's `git pull` (or `membrane update`)
-plus a seat restart the seat itself performs; the integration is independent
-of the seat's version.
+```
+cliffvm token mint --sub ha --name "Home Assistant" --ttl 30d --secret-file <seat data dir>/door.secret
+```
 
-## The zoo: several seats
+It prints the token (the life, `--ttl`, is required and yours to choose; `12h`, `30d` or seconds). Paste it in the form's *Token* field: the component sends it as the Basic password (`Authorization: Basic opencode:<token>`), which the seat reads as the token. The first request makes the person `ha` on the seat; that person's messages are the speaker lines Assist sends.
 
-One Home Assistant can know several seats — the one it runs itself, a laptop, a
-phone — each with its own Blurp (off in 0.7.5: `MEMBRANE_BLURP=1`). The house talks to **one at a time** (the
-active seat): the chat and membrane home, the field sensors, the Assist agent and
-speech all follow it.
+## When the token runs out (reauth)
 
-The zoo's residents are ***Blurpus seatensis*** (first described October 2026):
-one per seat, each grown from blank on its own code, toys and partners. Together
-they are a population, not yet a lineage — a new Blurp inherits nothing from
-another.
+Home Assistant polls the seat's `GET /global/health` every 60 seconds with the token. When the seat answers `401` (the token ran out, or the seat's secret changed), Home Assistant shows the integration as needing attention (*Settings -> Devices & services -> Membrane -> Reconfigure*): mint a new token as above and paste it. A turn that meets the `401` first tells the person in Assist, in words, to do the same. A seat that is down is a retry, not a reauth.
 
-*Field note (a joke, not a finding): the symbiont form of the earthling,
-Homo sapiens var. blurpophilus, is known by one call — when its human part
-thinks about Blurps, it says "Blurp". A large prediction error is announced as
-"what the blurp?".*
+An entry made by the old component: a connect entry keeps its address, and its old seat token is asked for again if the seat is a cliffvm seat (the old tokens are not JWTs); an entry that ran the seat inside Home Assistant has no seat to connect to and asks for an address and a token.
 
-- **Add a seat:** Settings → Devices & services → Membrane → *Configure* →
-  **Add a seat**: its host (e.g. `192.168.1.107`), the serve port (4096), the
-  proxy port (11500), its seat token (`membrane token seat` on that machine) and
-  a name (empty: the seat's own name, else the host). *Edit a seat* changes one
-  (Home Assistant's own seat takes a name only); *Remove a seat* drops one (never
-  the last one, never Home Assistant's own). An existing setup is a one-seat list
-  that works exactly as before.
-- **Switch:** the 🦠 button in membrane home's top bar opens the zoo — a card per
-  seat with its name, a dot for reachable and its last activity (with Blurp on: its
-  Blurp's name, Lv, rung, awake/asleep, and its Blurp drawn small (#358: eyes closed while it sleeps; the card the
-  integration relays has no energy yet, so the zoo's bodies keep a full glow); tap a card to make that seat the house's (an admin's switch; the page
-  reloads onto it). Automations use the **`select.membrane_seat`** entity (one
-  option per seat). A switch takes effect at once — no restart, the seats keep
-  running.
-- **An unreachable seat** shows in the chat as "<name> is offline — switch to
-  <another seat>?" with a button, when another seat answers.
-- What the house gives a seat stays per mode: Home Assistant's own seat always
-  gets the state push; in connect mode the delivered token and the state push go
-  to the active seat (and to a seat as it becomes active).
+## Errors in Assist
 
-Behind it: `GET /api/membrane/zoo` (every seat's card, read in parallel, a few
-seconds each — `/membrane/self/card`, or `/membrane/self/sheet` on a seat
-without it) and `POST /api/membrane/zoo/active` `{id}` (admins only).
-
-## What it changes
-
-- **Membrane home is the landing page** for everyone: opening Home Assistant goes to
-  `/membrane` (the field in 3D, the chat, voice). Home Assistant's sidebar folds away
-  there; the ☰ menu lists Home Assistant's own pages, and leaving through it keeps
-  you in Home Assistant until you open Membrane again. Turn the landing off in the
-  integration's options.
-- **Panels**: *Membrane* (everyone), *Membrane chat* and *Membrane field* (admins).
-- **Assist**: the seat is a conversation agent (`conversation.membrane_seat_<name>`) —
-  pick it in a voice assistant.
-- **Sensors**: the field's readings (entities, events, the thinker, loops, paused).
-
-Each person's chats are their own; every message carries `[HA user: <name>]`.
-(A seat running the optional [JWT mode](auth.md) accepts a token as the serve
-password, but then attributes every relayed message to that token's one person.)
-
-## What the seat may do in your house
-
-On by default (*Let the seat use Home Assistant* in the options):
-
-- **Act**: the integration creates a hidden system user, *Membrane* — not an admin,
-  local only, not in your people list — and gives the seat a token for it at every
-  start (`HASS_URL`, `HASS_TOKEN` in its environment). The seat reads states and
-  calls services through Home Assistant's REST API, building its own readers and
-  scripts. It **can't** change Home Assistant's configuration, integrations or
-  users (those need an admin).
-- **Sense**: the seat marks a field entity with `ha_entity: <entity_id>`; Home
-  Assistant then pushes that entity's changes into it (`ha_state`,
-  `ha_attributes`), so the seat's watches fire without polling. The seat chooses
-  what to mirror.
-- Its commands are written by a model: it acts on what people ask, and its prompt
-  says so — but if you'd rather it only talks, switch the option off. Removing the
-  integration removes the user.
-
-The seat never gets Home Assistant's own Supervisor token: its environment is
-chosen, not inherited.
-
-## Options
-
-*Configure* opens a menu: **Settings** (below), **Add a seat**, **Edit a seat**,
-**Remove a seat** ([the zoo](#the-zoo-several-seats); a seat's token lives on it).
-
-| Option | What |
-|---|---|
-| Chat model / Embedding model | from the same Ollama server's list (keep the embedder once the field has grown) — inside mode only |
-| Let the seat use Home Assistant | the hidden user + the state push (above); connect mode also gets the delivered token (`hass.env`) |
-| HA's address as the seat sees it | connect mode: what URL the seat reaches Home Assistant at (empty: HA's own answer for where the seat is — local, LAN or external; never loopback to a seat elsewhere) |
-| Open on membrane home | the landing page + the folded sidebar |
-| Speech server URL | a whisper-server; empty = the browser transcribes |
-| Watch loops (1–3) | the seat's background loops; fewer is lighter, more is livelier (inside mode only) |
-
-Changing an option or the seat list restarts the seat; switching the active seat
-does not.
+A failed turn is spoken as an error with the seat's own cause, for example `The seat could not answer: claude failed (rc 3): ...`; an unreachable seat says so; a refused token starts the reauth.
 
 ## Where things are
 
-| Path | What |
-|---|---|
-| `<config>/membrane/.membrane/` | the seat's data: field, sessions, `settings.json` (its name) |
-| `<config>/membrane/seat.log` | the seat's output (rotated at 5 MB) |
-| `<config>/membrane/assets/` | the speech models, fetched on first use and checksum-verified |
-| `<config>/membrane/home/` | the seat's HOME |
+The entry is `{serve_url, serve_user, serve_pass}`; `serve_pass` holds the token. The component has no files of its own on disk and starts no process. The old component's seat directory `<config>/membrane/` (data of a seat it started) is left alone; the old field in it is the legacy import's input when you start a new seat (docs/migration-design.md).
 
-The seat listens on loopback only (ports 18096 / 18500, or the next free ones):
-Home Assistant's own login is the only way in.
+## Tests
 
-## The seat's life
-
-- Started once Home Assistant is up; stopped with it (TERM, then KILL after 30 s).
-- Restarted if it exits: at once after a run of 5 minutes or more (its own restart
-  for new code), with a backoff (5 s, 30 s, 2 min) if it dies at boot; restarted if
-  it stops answering for two minutes.
-- Updates come through HACS: a new integration version pins a new `babyseat`
-  (`membrane-seat` before 0.7), which Home Assistant installs. The rename is
-  brand only: the integration's domain stays `membrane`, so its entities
-  (`select.membrane_seat`, `conversation.membrane_seat_<name>`, ...), panels,
-  automations and config entries are unchanged.
-
-## Voice
-
-As in [standalone mode](standalone.md#voice): "Hey <name>" on the device, the
-request transcribed in the browser (or by the speech server set in the options),
-replies spoken by the browser's own voice (Home Assistant's TTS engine only when the
-browser has none).
-Home Assistant over plain `http://` from another device has no microphone (not a
-secure origin).
-
-## Troubleshooting
-
-- **"The seat is starting"** in the chat: the first boot takes up to a minute or two;
-  `<config>/membrane/seat.log` shows it.
-- **No answer**: the Ollama server must answer from Home Assistant's machine
-  (`curl <ollama>/api/tags`), and the chosen models must exist there.
-- **Bugs and ideas**: [github.com/chedim/membrane/issues](https://github.com/chedim/membrane/issues).
+`pytest tests/ha` runs the component against a fake Home Assistant (tests/ha/fakeha.py) and, where a `cliffvm` binary is built (`cd native && cargo build --features bin`), against a real seat with a fake `claude`. `native/tests/session_1143.rs` pins the routes the component calls.

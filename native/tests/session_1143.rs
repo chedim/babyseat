@@ -580,6 +580,57 @@ fn on_a_seat_with_a_secret_the_session_routes_and_streams_need_the_owner_token_a
 }
 
 
+// ---- Home Assistant's calls (#1143, docs/hass-plan.md slice 1): Basic `<user>:<token>`, the session, the message with a synthetic speaker part -------
+fn b64(b: &[u8]) -> String {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut o = String::new();
+    for c in b.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 { if i <= c.len() { o.push(A[(n >> (18 - 6 * i) & 63) as usize] as char); } else { o.push('='); } }
+    }
+    o
+}
+fn http_basic(port: u16, method: &str, path: &str, pass: &str, body: &str) -> (u16, String) {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
+    let auth = format!("Authorization: Basic {}\r\n", b64(format!("opencode:{pass}").as_bytes()));
+    s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{auth}\r\n{body}", body.len()).as_bytes()).unwrap();
+    let mut out = vec![];
+    let _ = s.read_to_end(&mut out);
+    let i = out.windows(4).position(|w| w == b"\r\n\r\n").expect("an HTTP answer");
+    (String::from_utf8_lossy(&out[..i]).split_whitespace().nth(1).unwrap().parse().unwrap(), String::from_utf8_lossy(&out[i + 4..]).to_string())
+}
+
+#[test]
+fn the_home_assistant_component_s_calls_work_with_a_token_as_the_basic_password_and_the_speaker_part_reaches_the_model_as_written() {
+    let (_run, port, dir) = seat_with("ses-ha", QUICK, true);
+    let token = wait("the owner token file", || std::fs::read_to_string(dir.join("owner.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
+    // the health the component polls and the setup form checks: the token is the password, any user name; no token and a wrong one are the door's 401
+    let (st, b) = http_basic(port, "GET", "/global/health", &token, "");
+    assert_eq!(st, 200, "{b}");
+    assert_eq!(serde_json::from_str::<J>(&b).unwrap()["healthy"], true);
+    for bad in ["", "not-a-token"] {
+        let (st, b) = http_basic(port, "GET", "/global/health", bad, "");
+        assert_eq!(st, 401, "{b}");
+        assert!(b.contains("missing or invalid token"), "{b}");
+    }
+    // one session per HA conversation, then the message the component sends: the speaker line as a first SYNTHETIC text part, then the text.
+    // The oracle (Python seat, in a mode with no JWT) left a client's `[HA user: X]` line in the text the model gets (membrane/speakers.py:29,
+    // server.py:4060); here the parts are joined by a newline (`sm_text`, door_session.c1f) and the model's prompt is that text, as written.
+    let (st, b) = http_basic(port, "POST", "/session", &token, "{\"title\":\"hass-conv-1\"}");
+    assert_eq!(st, 200, "{b}");
+    let sid = serde_json::from_str::<J>(&b).unwrap()["id"].as_str().unwrap().to_string();
+    let msg = json!({"agent": "build", "parts": [{"type": "text", "text": "[HA user: Dima]", "synthetic": true}, {"type": "text", "text": "what lights are on?"}]});
+    let (st, b) = http_basic(port, "POST", &format!("/session/{sid}/message"), &token, &msg.to_string());
+    assert_eq!(st, 200, "{b}");
+    let r: J = serde_json::from_str(&b).unwrap();
+    assert_eq!(r["parts"].as_array().unwrap().iter().find(|p| p["type"] == "text").unwrap()["text"], "Done: [HA user: Dima]\nwhat lights are on?", "{r}");
+    // the user row keeps both lines in the text the page shows
+    let (st, b) = http_basic(port, "GET", &format!("/session/{sid}/message"), &token, "");
+    assert_eq!(st, 200, "{b}");
+    assert_eq!(serde_json::from_str::<J>(&b).unwrap()[0]["parts"][0]["text"], "[HA user: Dima]\nwhat lights are on?");
+}
+
 // ---- the model: the list the picker reads, the pick a session holds, the pick the turn runs on (#1143, step 2) ---------------------------------
 /// the launcher's facts of a seat that answers through the claude CLI only: two claude rungs (the CLI's own default, and `sonnet` the way the Python seat
 /// names a rung: `claude-agent:<model>`), no router, a backend nobody listens on (a refused connection is an empty tag list), `claude` the seat default
