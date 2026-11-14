@@ -1,3 +1,0 @@
-# the operator's private seat data -- a read-only copy, never committed
-record.copy.jsonl
-*.jsonl
