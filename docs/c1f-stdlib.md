@@ -223,6 +223,8 @@ given an argument of the wrong kind (`len(3)`), a wrong argument count, `<` betw
 getter cycle. Nothing fails on them yet. `membrane/packs/types.json` is the snapshot of every shipped pack (`pack -> getters,
 writes, findings`); `native/tests/contracts.rs` compares it and `TYPES_UPDATE=1 cargo test --test contracts types` regenerates it.
 
+An append write for lists (several producers adding to one list in a round) is a design note, not built: `docs/append-write.md`.
+
 ## Order of work
 1. This document and the Request contract's shared getters with specs (`tests/specs/door_std.json`): `facts`, `jbody`, `qpairs`,
    `person`, and the declarative method gate `m_<f>`.
