@@ -69,12 +69,14 @@ ChatMessage.banner_slot getter:
 ChatMessage.sys getter:
   WHEN this.over: None
   ELSE: join([this.note, this.banner_slot], '\n\n')
--- THE MODEL (#1143): the message's `pick` (the session's pick, packs/door_session.c1f; none on the bare chat) names a model of the seat's list. The seat's own default (or no pick,
--- or the Python seat's `membrane`) runs the CLI on ITS default, no flag; a claude-agent rung runs with `--model <the rung's name without the `claude-agent:` namespace the Python seat
--- gave its rungs: the CLI knows the bare alias>`; any other pick (a local model, an unknown name) is refused in the turn with the reason, the CLI never starts.
-ChatMessage.pick_default getter: (this.pick or '') in ['', 'membrane', this.seat_model]
-ChatMessage.pick_ok getter: this.pick_default or prop('Model:' + this.pick, 'backend') == 'claude-agent'
-ChatMessage.sdk_model getter: '' if this.pick_default else (tail(this.pick, len(this.pick) - len('claude-agent:')) if startswith(this.pick, 'claude-agent:') else this.pick)
+-- THE MODEL (#1143): the model that answers is the message's `pick` (the session's pick, packs/door_session.c1f; none on the bare chat), else the seat's default (`seat_model`). A name in the
+-- `claude-agent:` namespace the Python seat gave its rungs runs the CLI with `--model <the bare alias>` (the CLI knows `sonnet`, not `claude-agent:sonnet`); the seat's own default
+-- under any other name (`claude`: the CLI's own default) runs with no flag; another claude-agent rung runs under its own name; any other pick (a local model, an unknown name)
+-- is refused in the turn with the reason, the CLI never starts.
+ChatMessage.pick_default getter: (this.pick or '') in ['', 'membrane']
+ChatMessage.model_eff getter: this.seat_model if this.pick_default else this.pick
+ChatMessage.pick_ok getter: this.model_eff == this.seat_model or prop('Model:' + this.model_eff, 'backend') == 'claude-agent'
+ChatMessage.sdk_model getter: tail(this.model_eff, len(this.model_eff) - len('claude-agent:')) if startswith(this.model_eff, 'claude-agent:') else ('' if this.model_eff == this.seat_model else this.model_eff)
 ChatMessage.model_args getter: ['--model', this.sdk_model] if this.sdk_model != '' else []
 ChatMessage.argv getter:
   WHEN this.over: None

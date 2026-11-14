@@ -689,3 +689,30 @@ fn a_streamed_partial_transcript_is_answered_204_and_starts_no_turn_the_final_on
     assert_eq!(api(port, "POST", &format!("/session/{sid}/prompt_async"), json!({"stream": "u3", "parts": [{"type": "text", "text": "quick plain"}]})).0, 204);
     assert_eq!(finished(port, &sid, 4).len(), 4);
 }
+
+#[test]
+fn abort_with_nothing_running_answers_true_and_leaves_the_session_idle_and_usable() {
+    let (_run, port, _dir) = seat_facts("ses-abort-idle", STEPS, false, &CLAUDE_FACTS);
+    let sid = new_session(port, "A");
+    let (st, b) = api(port, "POST", &format!("/session/{sid}/abort"), json!({}));
+    same_shape("abort", st, &b);
+    assert_eq!(b, json!(true));
+    assert_eq!(api(port, "GET", "/session/status", J::Null).1[&sid], json!({"type": "idle"}));
+    assert_eq!(say(port, &sid, "quick after the stop"), 204);
+    assert_eq!(finished(port, &sid, 2)[1]["info"]["error"], J::Null, "a stop with nothing to stop does not cut the next turn");
+    assert_eq!(api(port, "POST", "/session/ses_000000000000000000000000/abort", json!({})).0, 404);
+}
+
+#[test]
+fn a_seat_default_that_is_a_namespaced_rung_runs_the_cli_on_it_when_no_pick_is_made() {
+    let facts = [r#"cloud_models=[{"name":"claude-agent:opus","backend":"claude-agent"}]"#, "router_on=false", "seat_backend=http://127.0.0.1:1",
+                 r#"minds={"loops":"claude-agent:opus","cortex":"claude-agent:opus","workers":"claude-agent:opus","seat_default":"claude-agent:opus"}"#];
+    let (_run, port, dir) = seat_facts("ses-default-rung", STEPS, false, &facts);
+    let sid = new_session(port, "D");
+    assert_eq!(api(port, "GET", &format!("/session/{sid}"), J::Null).1["model"]["id"], "claude-agent:opus", "the session shows the seat's default");
+    assert_eq!(say(port, &sid, "quick default"), 204);
+    finished(port, &sid, 2);
+    let a = argv_of(&dir, "quick default").unwrap();
+    let i = a.iter().position(|x| x == "--model").unwrap_or_else(|| panic!("--model in {a:?}"));
+    assert_eq!(a[i + 1], "opus", "{a:?}");
+}
