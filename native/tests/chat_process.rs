@@ -1819,3 +1819,85 @@ fn an_unknown_chat_auth_is_refused_with_the_two_values_and_runs_nothing() {
     assert!(!dir.join(format!("argv.{}.json", tag_of("bad auth"))).exists());
     assert!(terminate(&mut run));
 }
+
+// ---- the size of an entity_write reply, design B2 of docs/reply-size.md (#1143, operator 2026-11-14) ---------------------------------------
+// The byte bounds below are TEST-ONLY generous bounds from the measured B2 numbers of the doc (Keep with 10 running turns about 1.2 KB, mention about 2.3-2.7 KB);
+// they are not a budget the product enforces.
+const KEEP_PACK: &str = "PACK mine 1\nIMPORT default_banner 1\nKeep.summary getter: 'keep: ' + head(str(this.line), 40)\nKeep.chars getter: len(str(this.line))\nBanner.keeps getter: [prop('Keep:x', 'line')]\nBanner.text getter: 'keeps: ' + str(prop('Keep:x', 'line'))\nBanner.alert getter: None('no alert for ' + head(str(prop('Keep:x', 'line')), 6))\n";
+
+/// the reply of one write on the lines it has: -> (reactions array, the `other changes` line, the whole text)
+fn rx_lines(t: &str) -> (Vec<J>, Option<String>) {
+    let rs: Vec<J> = serde_json::from_str(t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap_or_else(|| panic!("{t}"))).unwrap();
+    (rs, t.lines().find_map(|l| l.strip_prefix("other changes: ")).map(String::from))
+}
+
+#[test]
+fn a_keep_write_with_running_turns_answers_small_the_written_in_full_the_rest_as_counts() {
+    let (mut run, port, dir) = fake_seat_with("b2keep", &[], &[("mine.c1f", KEEP_PACK)]);
+    put(port, "Keep:x", "line", json!("first"));
+    let prompts: Vec<String> = (0..10).map(|i| format!("running question {i}")).collect();
+    for p in &prompts { send(port, p); }
+    std::thread::sleep(Duration::from_millis(1500));   // the turns are running (the fakes wait for their go file)
+    let long = "a keep line of some length. ".repeat(100);   // 2.8 KB, as the banner text carries it
+    let (t, e) = put(port, "Keep:x", "line", json!(long));
+    assert!(!e, "{t}");
+    eprintln!("B2 keep write with 10 running turns: {} bytes", t.len());
+    assert!(t.len() < 4096, "test-only bound 4 KB (measured B2 ~1.2 KB, was 264 KB): {} bytes: {}", t.len(), &t[..t.len().min(1500)]);
+    assert!(t.starts_with("wrote Keep:x.line\n"), "{t}");
+    let (rs, other) = rx_lines(&t);
+    let own = |p: &str| rs.iter().find(|r| r["eid"] == "Keep:x" && r["prop"] == p).cloned().unwrap_or_else(|| panic!("the written entity's {p} in full: {t}"));
+    assert_eq!(own("chars")["new"], json!(long.len()), "{t}");
+    assert!(own("summary")["new"].as_str().unwrap().starts_with("keep: a keep line"), "{t}");
+    assert_eq!(own("summary")["cls"], "Keep", "the host's class field: {t}");
+    let other = other.unwrap_or_else(|| panic!("the rest as counts: {t}"));
+    assert!(other.contains("Banner.text x1") && other.contains("Chat.argv x"), "grouped as <Class>.<prop> xN: {other}");
+    assert!(!rs.iter().any(|r| r["eid"].as_str().unwrap().contains("Chat:message")), "no Chat value is listed: {t}");
+    // a reasoned null on an entity that was not written still surfaces its reason
+    assert!(t.contains("no alert for a keep"), "the reason of a null on another entity stays: {t}");
+    for p in &prompts { std::fs::write(dir.join(format!("go.{}", tag_of(p))), "").unwrap(); }
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_mention_write_answers_small_the_words_and_spans_as_counts() {
+    let (mut run, port) = start("b2mention", &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f"], &[]);
+    // earlier texts that hold the same words: the shared Word entities' lists have grown
+    for i in 0..6 {
+        let (t, e) = cliff(port, &format!("Note:body:o{i} = SemText(text: 'The dogs chase the cats near the old barn number {i}. The rain falls on the house.')\nNote:body:o{i}.mention = True"));
+        assert!(!e, "{t}");
+    }
+    let (t, e) = cliff(port, "Note:body:n2 = SemText(text: 'The dogs chase the cats near the barn. The old rain falls on the house and the cats run home. Dogs bark at the rain.')");
+    assert!(!e, "{t}");
+    let (t, e) = put(port, "Note:body:n2", "mention", json!(true));
+    assert!(!e, "{t}");
+    eprintln!("B2 mention write: {} bytes", t.len());
+    assert!(t.len() < 8192, "test-only bound 8 KB (measured B2 ~2.3-2.7 KB, was 62-97 KB): {} bytes: {}", t.len(), &t[..t.len().min(1500)]);
+    assert!(t.starts_with("wrote Note:body:n2.mention\n"), "{t}");
+    let (rs, other) = rx_lines(&t);
+    assert!(rs.iter().all(|r| { let e = r["eid"].as_str().unwrap(); e == "Note:body:n2" || e.starts_with("Note:body:n2:") || !r["why"].is_null() }), "only the written entity, its children and reasoned ones in full: {t}");
+    assert!(rs.iter().any(|r| r["eid"] == "Note:body:n2"), "the written entity's own props: {t}");
+    assert!(other.unwrap_or_else(|| panic!("{t}")).contains("Word."), "the words as counts: {t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_command_run_a_pack_text_and_a_lone_write_keep_their_small_replies_and_errors_surface() {
+    let (mut run, port) = start("b2small", MCP_PACKS, &[]);
+    let (t, e) = put_wait(port, "Command:x", "run", json!({"id": "e1", "cmd": ["echo", "hi"]}), 20.0);
+    assert!(!e && t.len() < 4096 && t.contains("receipt: ") && t.contains("hi"), "test-only bound 4 KB (measured 1.5 KB): {} {t}", t.len());
+    let (rs, _) = rx_lines(&t);
+    assert!(rs.iter().all(|r| r["eid"] == "Command:x" || !r["why"].is_null()), "{t}");
+    let (t, _) = put(port, "Pack:b2p", "text", json!("PACK b2p 1\nBoxz.double getter: this.n * 2\n"));
+    assert!(t.len() < 200 && t.starts_with("wrote Pack:b2p.text"), "{t}");
+    let (t, _) = put(port, "Scratch:lone", "n", json!(1));
+    assert!(t.len() < 400, "{t}");
+    // a null with a reason and an Error, on an entity that was NOT written, still say why
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:b2p", "prop": "state"})).0 == "loaded").then_some(()));
+    let pack = "PACK b2e 1\nSrc.go on-setter fan:\n  ALWAYS:\n    Other:o.n = this.go\nOther.nothing getter: None('nothing for ' + str(this.n))\nOther.boom getter: Error('boom ' + str(this.n))\n";
+    put(port, "Pack:b2e", "text", json!(pack));
+    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:b2e", "prop": "state"})).0 == "loaded").then_some(()));
+    let (t, e) = put(port, "Src:s", "go", json!(7));
+    assert!(!e, "{t}");
+    assert!(t.contains("nothing for 7") && t.contains("boom 7"), "reasons of a null and an Error on another entity: {t}");
+    assert!(terminate(&mut run));
+}

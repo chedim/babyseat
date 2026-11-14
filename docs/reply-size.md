@@ -1,5 +1,7 @@
 # The size of an `entity_write` reply (#1143)
 
+**Built (2026-11-14): design B2, operator-approved; see `docs/cliffvm.md`, "The return entity" (`door_tools.c1f` `rx_*`, `host.rs` `reactions_of` adds the `cls` field).** The text below is the measurement and the options that led to it.
+
 **Important first.** The reply of an `entity_write` is almost all fan-out on the two writes that hurt (99.9 % for the Keep write with running turns), and a model needs under 1 KB of it. Measured on a copy of Throwy's store (private seat, fake `claude`, packs of `memo-hotfix-0753` at `242948c1`): a Keep write is **12.6 KB** on an idle seat and **264 KB with 10 running turns** (4 getters recomputed on every running Chat message, ~25 KB per message); a `mention` write is **62-97 KB** (the Word entities' growing `edge_rows` / `mentioned_in` lists are 66-84 % of it, not the Spans). Every other write measured is under 1.5 KB. The reply format is built in ONE place, `Request.mc_w_text` (`door_tools.c1f`), so a cut is pack code plus, for the exact class, one host field; the released JSON routes and `tests/specs` are not touched (the `reactions` list reaches the reply only as the MCP text of `entity_write` / `run_cliff`). Every number below (budget, N, value cap) is an operator decision; none is chosen here.
 
 ## 1. Measured replies (bytes of the whole tool text)

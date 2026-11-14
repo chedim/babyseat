@@ -1017,6 +1017,11 @@
       "Request.mc_write": "Dict?",
       "Request.o_tools": "Bool",
       "Request.r_tools": "Dict?",
+      "Request.rx_full": "List(Any)",
+      "Request.rx_groups": "List(Text)",
+      "Request.rx_lines": "List(Text)",
+      "Request.rx_marked": "List(Dict)",
+      "Request.rx_rest": "List(Dict)",
       "Return.kind": "Text",
       "Return.receipt": "Any",
       "Return.state": "Text"

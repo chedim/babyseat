@@ -569,7 +569,9 @@ impl Host {
                 let (eid, prop) = (w["eid"].as_str().unwrap_or(""), w["prop"].as_str().unwrap_or(""));
                 let why = if w["new"].is_null() { g.1.why_chain(&g.0, eid, prop).first().and_then(|c| c.get("reason").cloned()).unwrap_or(J::Null) } else { J::Null };
                 if w["new"].is_null() && why.is_null() && w["writer"] == "field:rebuild" { return None; }
-                Some(json!({"eid": eid, "prop": prop, "new": w["new"], "by": w["writer"].as_str().unwrap_or("").trim_start_matches("field:"), "why": why}))
+                // `cls`: the entity's class as `this.cls` reads it (the first of its class list that is not Error; the eid class if it is not listed): exact, not the eid prefix, which is only the birth default (#1143, docs/reply-size.md B2)
+                let cls = g.0.docs.get(eid).map(|e| match e.class_names().into_iter().find(|c| !c.eq_ignore_ascii_case(crate::vm::ERROR_CLASS)) { Some(c) if !c.eq_ignore_ascii_case(&e.cls) => c, _ => e.cls.clone() }).unwrap_or_else(|| eid.split(':').next().unwrap_or("").to_string());
+                Some(json!({"eid": eid, "prop": prop, "new": w["new"], "by": w["writer"].as_str().unwrap_or("").trim_start_matches("field:"), "why": why, "cls": cls}))
             }).collect();
         asked.into_iter().map(|r| (r, J::Array(list.clone()))).collect()
     }
