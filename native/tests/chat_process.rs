@@ -855,8 +855,8 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
     let (t, e) = cliff(port, "[e.n for e in instances('Note') if e.n > 0 and len([1 for f in instances('Note')]) > 0]");
     assert!(e && t.contains("budget exceeded"), "{t}");
     assert_eq!(call(port, "entity_read", json!({"spec": "Note:r3", "prop": "n"})).0, "3", "the seat is up");
-    // scratch entities and packs do not accumulate (the three Pack entities are the boot's grants: door_tools, unload and settings): the same count after 20 calls of every shape
-    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "3 entity(ies)").then_some(()));
+    // scratch entities and packs do not accumulate (the two Pack entities are the boot's grants: door_tools and settings): the same count after 20 calls of every shape
+    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "2 entity(ies)").then_some(()));
     cliff(port, "Note:acc.n = 0");
     wait("settled", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)").then_some(()));
     let before = count_all(port);
@@ -867,10 +867,10 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
     let (mut a, mut b, mut c) = (String::new(), String::new(), String::new());
     while t0.elapsed() < Duration::from_secs(30) {
         (a, b, c) = (count_all(port), call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0, call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0);
-        if a == before && b == "0 entity(ies)" && c == "3 entity(ies)" { break; }
+        if a == before && b == "0 entity(ies)" && c == "2 entity(ies)" { break; }
         std::thread::sleep(Duration::from_millis(300));
     }
-    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "3 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
+    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "2 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
     assert!(terminate(&mut run));
 }
 
@@ -918,7 +918,7 @@ fn a_clifflet_reads_eid_cls_and_parents_and_lists_the_same_packs_as_entity_query
     put(port, "Pack:boxes", "text", json!(BOXES));
     wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:boxes", "prop": "state"})).0 == "loaded").then_some(()));
     put(port, "Box:1", "n", json!(4));
-    put(port, "Box:1", "parents", json!(["cls:box", "cls:thing"]));
+    cliff(port, "Box:1.parents = ['cls:box', 'cls:thing']");   // (entity_write refuses it: classes are set at birth; a clifflet is code, like a pack)
     // eid, cls and parents are readable on any entity (parents is the entity's class list when it has one)
     let (t, e) = cliff(port, "b = instances('Box')[0]\n[b.eid, b.cls, b.parents]");
     assert!(!e, "{t}");
@@ -1885,4 +1885,44 @@ fn the_history_route_does_work_for_the_page_only_not_for_the_whole_store() {
     assert_eq!((texts(&h3), h3["more"].clone(), h3["next"].clone()), ((0..5).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), json!(false), J::Null), "{h3}");
     assert_eq!(http(port, "GET", "/membrane/chat/messages?before=nope", "").0, 404);
     assert!(terminate(&mut run2));
+}
+
+// ---- the class list is not the model's property (operator 2026-11-14): the model has `is`, packs keep `parents` ----------------------------------------------------------
+const RECLASS: &str = "PACK reclass 1\nIMPORT boxes 1\nBox.reclass on-setter reclass-box:\n  ALWAYS:\n    this.parents = ['cls:thing', 'cls:box']\n";
+
+#[test]
+fn the_model_tools_never_list_parents_and_a_write_of_it_is_refused_and_is_answers_the_class_test() {
+    let (mut run, port) = start("noparents", MCP_PACKS, &[]);
+    for (n, t) in [("boxes", BOXES), ("reclass", RECLASS)] {
+        put(port, &format!("Pack:{n}"), "text", json!(t));
+        wait("the pack", || (call(port, "entity_read", json!({"spec": format!("Pack:{n}"), "prop": "state"})).0 == "loaded").then_some(()));
+    }
+    // born with a class list by a constructor, as a pack says it
+    let (t, e) = cliff(port, "Box:2 = Box(n: 7, parents: ['cls:thing'])");
+    assert!(!e, "{t}");
+    let (r, _) = call(port, "entity_read", json!({"spec": "Box:2"}));
+    assert!(r.starts_with("Box:2 (Box) ") && r.contains("\"n\":7") && !r.contains("parents"), "the header keeps the class, the list is not a property: {r}");
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:Box", "full": true}));
+    assert!(q.contains("Box:2 (Box)") && !q.contains("parents"), "{q}");
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:Thing"}));
+    assert!(q.contains("Box:2"), "the kind query still follows the class list: {q}");
+    let (r, _) = call(port, "entity_read", json!({"spec": "Box:2", "prop": "parents"}));
+    assert!(r.contains("has no parents"), "reading it by name finds nothing: {r}");
+    // `is` follows the list
+    let (t, e) = cliff(port, "[Box:2 is Thing, Box:2 is Box, Box:2 is Task]");
+    assert!(!e && t.replace(' ', "") == "[true,true,false]", "{t}");
+    // a write of it through the tool is refused with the reason, and changes nothing
+    let (t, _) = put(port, "Box:2", "parents", json!(["cls:task"]));
+    assert!(t.contains("refused") && t.contains("classes are set at birth with a constructor"), "{t}");
+    let (t, _) = cliff(port, "Box:2 is Task");
+    assert_eq!(t.to_lowercase(), "false", "the class list did not move");
+    // a pack that writes it still can, and the reply's reactions do not list the property
+    let (t, e) = put(port, "Box:2", "reclass", json!(1));
+    assert!(!e && !t.contains("parents"), "reactions leave the list out: {t}");
+    let (t, _) = cliff(port, "Box:2 is Thing");
+    assert_eq!(t.to_lowercase(), "true", "the pack's write took effect");
+    // a clifflet's own reply does not list it either
+    let (t, e) = cliff(port, "Box:2.n = 8");
+    assert!(!e && !t.contains("parents"), "{t}");
+    assert!(terminate(&mut run));
 }

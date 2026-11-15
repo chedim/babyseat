@@ -308,8 +308,6 @@ pub struct Fields {
     pub out: Vec<J>,
     /// entities a write of `retire = true` asked to remove (any writer): the host removes each (the engine's entity, its stored row) after it drains `out`
     pub retired: Vec<String>,
-    /// entities a write of `unload = true` asked to take out of the engine (any writer): the host checks each against its pins and unloads it (`Host::unload_entity`)
-    pub unload_asked: Vec<String>,
     /// the host takes the door's requests itself (to journal them, then `arrive`): a round leaves them in the store
     pub inbound_by_host: bool,
     /// getters declared in cliffhanger, their levels, and their inputs: (eid, field) read -> instances (eid, getter)
@@ -390,7 +388,7 @@ impl Fields {
     /// The class table the engine's core reads too (`Core::storage`): one shared map, written by `compose`.
     pub fn storage_handle(&self) -> crate::vm::StorageMap { self.storage.clone() }
     pub fn goalgraph() -> Self {
-        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], unload_asked: vec![], inbound_by_host: false,
+        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
             known: Default::default(), primed: false, fresh: vec![], late: vec![], flips: Default::default(), class_deferred: Default::default(), recon: Default::default(), in_run: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
@@ -1647,12 +1645,6 @@ impl Fields {
     fn driver_effect(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, now: f64, seq: &mut i64) {
         // `retire = true` on any entity asks the host to remove it (docs/cliffvm.md, "Retiring an entity")
         if w.prop == "retire" && w.new == json!(true) && !self.retired.contains(&w.eid) { self.retired.push(w.eid.clone()); }
-        // `unload = true` on any entity asks the host to take it out of the engine, its row kept (docs/cliffvm.md, "Unload"). The slot is consumed like a verb's, and the
-        // host never stores it, so the entity is the same after a reload
-        if w.prop == "unload" && w.new == json!(true) && !self.unload_asked.contains(&w.eid) {
-            self.unload_asked.push(w.eid.clone());
-            self.emit_unchecked(core, work, &w.eid, "unload", J::Null, "direct:consumed", seq, now);
-        }
         #[cfg(feature = "store")]
         {
             if w.new.is_null() || w.new == json!("") { return; }

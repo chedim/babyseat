@@ -90,8 +90,7 @@
     "members": 4,
     "writes": [
       "Pack:door_tools.privileged",
-      "Pack:settings.privileged",
-      "Pack:unload.privileged"
+      "Pack:settings.privileged"
     ],
     "claims": [],
     "boot_facts": [
@@ -813,7 +812,6 @@
       "*.reason",
       "*.rows",
       "*.state",
-      "*.unload",
       "SqlQuery:legacy:msgs.run",
       "SqlQuery:legacy:msgs.source",
       "SqlQuery:legacy:msgs.sql",
