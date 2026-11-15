@@ -8,7 +8,7 @@ Anything in progress says so on its page and names its branch. The README at the
 | page | what it is |
 |---|---|
 | [../README.md](../README.md) | what it is, install, the quick start, the claude credential, Home Assistant, upgrading from the Python seat |
-| [home-assistant.md](home-assistant.md) | the HACS integration: Assist, entities, services, the seat's use of the house, the token, reauth, the add-on's discovery, upgrading from 0.7.53 |
+| [home-assistant.md](home-assistant.md) | the HACS integration: the seat run inside Home Assistant (download, checks, process, provider), connecting to a seat, Assist, entities, services, the seat's use of the house, the token, reauth, upgrading from 0.7.53 |
 
 ## If you run a seat (operator)
 
