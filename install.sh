@@ -12,7 +12,7 @@
 #   ~/.local/bin/babyseat                     (a link to the launcher)
 # Never uses sudo; nothing outside those two folders is touched. A failed run leaves the previous install as it was. Run it again to upgrade.
 #
-#   --version <X.Y.Z>   the release to install (default: the latest GitHub release)
+#   --version <X.Y.Z>   the release to install (default: the newest GitHub release, a pre-release included)
 #   --base-url <url>    where babyseat-<version>-<target>.tar.gz and its .sha256 are (default: the GitHub release of the version; file:// works)
 #   --prefix <dir>      the install folder (default ~/.local/share/membrane-app, apart from the seat's data folder; env MEMBRANE_INSTALL_DIR)
 #   --bin-dir <dir>     where the babyseat link goes (default ~/.local/bin; env MEMBRANE_BIN_DIR)
@@ -75,9 +75,15 @@ command -v curl >/dev/null 2>&1 || die "curl is needed to download the release"
 if command -v sha256sum >/dev/null 2>&1; then sha() { sha256sum "$1" | cut -d' ' -f1; }; else sha() { shasum -a 256 "$1" | cut -d' ' -f1; }; fi
 
 if [ -z "$version" ]; then
-  # the redirect of /releases/latest names the tag: v0.7.60
-  tag=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") || die "could not ask GitHub for the latest release: name one with --version"
-  version=${tag##*/v}
+  # the newest release, a pre-release included: the API lists releases newest first (a pre-release is not what /releases/latest names, and the last stable release may carry no binary for the version a pre-release ships first)
+  url=${MEMBRANE_RELEASES_URL:-https://api.github.com/repos/$REPO/releases?per_page=1}
+  tag=$(curl -fsSL "$url" 2>/dev/null | sed -n 's/.*"tag_name"[^"]*"\([^"]*\)".*/\1/p' | head -n 1)
+  if [ -z "$tag" ]; then
+    # the API said nothing (a rate limit, no network): the redirect of /releases/latest names the stable tag: v0.7.60
+    tag=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") || die "could not ask GitHub for the latest release: name one with --version"
+  fi
+  version=${tag##*/}
+  version=${version#v}
   case "$version" in ''|*[!0-9.]*) die "could not read a version from $tag: name one with --version" ;; esac
 fi
 version=${version#v}

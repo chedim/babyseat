@@ -163,3 +163,16 @@ def test_build_sh_archive_has_the_sha256_sidecar_install_sh_checks(tmp_path):
     r = subprocess.run(["sh", str(INSTALL), "--version", ver, "--base-url", f"file://{tmp_path}", "--target", TARGET], capture_output=True, text=True, env={"PATH": os.environ["PATH"], "HOME": str(home)})
     assert r.returncode == 0, r.stderr
     assert (home / ".local" / "share" / "membrane-app" / ver / "packs" / "boot.c1f").is_file()
+
+
+def test_without_a_version_the_newest_release_is_installed_even_when_it_is_a_pre_release(tmp_path):
+    # the API lists releases newest first and includes pre-releases; /releases/latest never names one (it would name the last stable release, which may carry no binary for this version)
+    rel = release(tmp_path)
+    api = tmp_path / "releases.json"
+    api.write_text('[{"tag_name": "v%s", "name": "v%s", "prerelease": true, "draft": false}]' % (VER, VER))
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    e = {"PATH": os.environ["PATH"], "HOME": str(home), "MEMBRANE_RELEASES_URL": f"file://{api}"}
+    r = subprocess.run(["sh", str(INSTALL), "--base-url", f"file://{rel}", "--target", TARGET], capture_output=True, text=True, env=e)
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert (home / ".local" / "share" / "membrane-app" / VER / "VERSION").read_text().strip() == VER

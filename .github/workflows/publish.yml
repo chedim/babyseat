@@ -7,6 +7,8 @@ name: publish
 #   2. only after PyPI: when `github_release` is ticked, the GitHub release of the tag (notes from membrane/CHANGELOG.md) with the release tarballs and their .sha256 files (what install.sh downloads and checks).
 # The Docker image is a separate dispatch (docker.yml). No credentials live in this file: PYPI_TOKEN is the repo secret the operator set (read only by the one upload step).
 #   gh workflow run publish.yml --ref v0.7.60 -f tag=v0.7.60 -f confirm="publish v0.7.60" [-f github_release=true]
+#   A pre-release (`-f github_release=true -f prerelease=true`) is not GitHub's "latest" release: HACS (which offers the latest release) and /releases/latest keep naming the stable one,
+#   while install.sh (newest release, a pre-release included) and docker.yml (by tag) can use it.
 
 on:
   workflow_dispatch:
@@ -19,6 +21,10 @@ on:
         required: true
       github_release:
         description: "after PyPI, also create the GitHub release of the tag with the release tarballs"
+        type: boolean
+        default: false
+      prerelease:
+        description: "make the GitHub release a pre-release: it is not the latest release, so HACS and install.sh's stable channel keep naming the stable one (only with github_release)"
         type: boolean
         default: false
 
@@ -159,4 +165,4 @@ jobs:
       - name: the release with its tarballs
         run: |
           ls -l tarballs
-          gh release create "$TAG" tarballs/* --verify-tag --title "$(cat title.txt)" --notes-file notes.md
+          gh release create "$TAG" tarballs/* --verify-tag --title "$(cat title.txt)" --notes-file notes.md ${{ inputs.prerelease && '--prerelease' || '' }}

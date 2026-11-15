@@ -126,3 +126,10 @@ def test_no_secret_is_in_the_packaging_files():
     for f in WF.glob("*.yml"):
         for m in re.findall(r"secrets\.([A-Z_]+)", f.read_text()):
             assert m in ("PYPI_TOKEN", "DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"), (f, m)
+
+
+def test_publish_can_make_the_github_release_a_pre_release_so_the_stable_channel_does_not_move():
+    # a pre-release is not the "latest" release: HACS and /releases/latest keep naming the stable one (0.7.60 ships to PyPI and as a pre-release first)
+    t = wf("publish.yml")
+    assert re.search(r"(?ms)^      prerelease:\n        description: .*?\n        type: boolean\n        default: false", t)
+    assert "inputs.prerelease" in t and "--prerelease" in t
