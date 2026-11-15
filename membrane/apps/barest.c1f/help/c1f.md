@@ -158,7 +158,7 @@ V.spread getter: fold([], [concat(acc, [x]) for x in this.xs if len([k for k in 
 ```
 
 Builtins: `len abs min max lower strip replace startswith lines words spans join head tail sort_by before after pluck distinct group_by concat fold json str num plain
-unspeak dot norm distance unit vsum near fit clip ago epoch localtime prop why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
+unspeak dot norm distance unit vsum near log fit clip ago epoch localtime prop why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
 refused when the pack loads:
 
 ```c1f-error

@@ -2007,6 +2007,29 @@
       "Tool"
     ]
   },
+  "movelog": {
+    "getters": {
+      "Identifier.ml_rows": "Text",
+      "MoveLog.kind": "Text",
+      "Path.ml_rows": "Text",
+      "SemText.ml_cues": "List(Dict)?",
+      "SemText.ml_depth": "Int",
+      "SemText.ml_link": "Dict?",
+      "SemText.ml_prev": "Dict?",
+      "SemText.ml_prev_msg": "Any",
+      "SemText.ml_scores": "List(Dict)?",
+      "SemText.ml_weight": "Int",
+      "SemText.movelog_votes": "List(Dict)?",
+      "Word.ml_rows": "Text"
+    },
+    "writes": {
+      "*.ml_held_by": "Any",
+      "*.ml_next": "Any",
+      "MoveLog.n": "Num?",
+      "SemText.ml_linked": "Bool"
+    },
+    "findings": []
+  },
   "peer": {
     "getters": {
       "Peer.sent": "Bool?"

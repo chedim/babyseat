@@ -1173,6 +1173,29 @@
       "Tool"
     ]
   },
+  "movelog": {
+    "imports": [
+      "semtext",
+      "mentions",
+      "field"
+    ],
+    "classes": [
+      "Identifier",
+      "MoveLog",
+      "Path",
+      "SemText",
+      "Word"
+    ],
+    "members": 13,
+    "writes": [
+      "*.ml_held_by",
+      "*.ml_next",
+      "MoveLog:all.n",
+      "MoveLog:all=MoveLog()"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
   "peer": {
     "imports": [
       "boot"

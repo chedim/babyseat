@@ -22,6 +22,7 @@ vector
 embed
 field
 entityrecall
+movelog
 door_session
 legacy_import
 legacy_cutover
