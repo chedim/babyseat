@@ -244,8 +244,9 @@ fn the_texts_that_moved_the_nearest_entities_rank_by_similarity_times_their_move
     let h = seat();
     // al_x: seed e3; its first text moves it far (toward e1), its second less (toward a sentence near the state it reached); m3 moves nothing near
     let v = |t: &str| -> Vec<f64> { match t { "Run al_x now." => vec![1.0, 0.2, 0.0], "Go al_x on." => vec![1.0, 0.25, 0.05], "Put al_x by." => vec![0.0, 0.0, 1.0], "Hm al_x." => vec![1.0, 0.1, 0.3], _ => model(t) } };
-    // one text at a time: two texts that land while the same seed is out both walk from the seed (a field.c1f bug, reported; not this pack's)
-    for (id, t) in [("m1", "Set al_x up."), ("m2", "It is so. Run al_x now."), ("m3", "So it is."), ("m4", "Go al_x on. Put al_x by.")] { say(&h, id, t); drain(&h, &v); }
+    // all four said, then one drain: texts that land while the seed is out wait on the entity and are walked once, in order, when it lands (field.c1f)
+    for (id, t) in [("m1", "Set al_x up."), ("m2", "It is so. Run al_x now."), ("m3", "So it is."), ("m4", "Go al_x on. Put al_x by.")] { say(&h, id, t); }
+    drain(&h, &v);
     // the ask is a chat body that mentions al_x too: it moves the field, and it is never a row
     say(&h, "m9", "Hm al_x.");
     drain(&h, &v);

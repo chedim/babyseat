@@ -1383,6 +1383,8 @@
       "FieldStep.ready": "Bool",
       "FieldStep.rows": "List(Any)?",
       "FieldStep.xv": "List(Float)?",
+      "FieldTerm.field_land": "List(Never)?",
+      "FieldTerm.field_rows": "List(Dict)?",
       "FieldTerm.vec_todo": "List(Dict)",
       "SemText.field_done": "Dict?",
       "SemText.field_ep_max": "Int",

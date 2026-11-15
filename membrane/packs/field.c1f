@@ -56,17 +56,19 @@ SemText.field_rows getter:
   ELSE:
     rows = [{'e': str(m), 'w': startswith(str(m), 'Word:'), 't': str(prop(m, 'lemma') or prop(m, 'name') or prop(m, 'path')), 'L': [x['sentence'] for x in (prop(m, 'mentioned_in') or []) if x['text'] == this.eid and x['sentence'] >= this.field_from and x['sentence'] < this.field_upto]} for m in this.mentions]
     [r for r in rows if len(r['L']) > 0 and not (r['w'] and len(r['t']) < this.field_word_min)]
--- the mode of each: live (it has a state), mat (it gets one now: a specific kind, or a word whose waiting mentions reach field_k_mat), wait (a word in the nursery).
--- `pend` leaves out this text's own entries (the plan writes them in the same round: read back, they would count twice)
+-- the mode of each: live (it has a state), mat (it gets one now: a specific kind, or a word whose waiting mentions reach field_k_mat, AND its seed is there),
+-- wait (it waits in `field_pend`: a word in the nursery, or an entity whose seed is still being fetched). A text never waits for a seed: its mentions wait on the
+-- entity, in landing order, and the seed's own landing applies them (FieldTerm below), so two texts that land before the seed walk from it once, in order.
+-- `pend` leaves out this landing's own entries (the plan writes them in the same round: read back, they would count twice); an earlier landing of the same text stays
 SemText.field_modes getter:
   WHEN this.field_rows == None: None
   ELSE:
-    rows = [{'e': r['e'], 'w': r['w'], 't': r['t'], 'L': r['L'], 'live': prop('FieldState:' + r['e'], 'v') is List, 'pend': [p for p in (prop(r['e'], 'field_pend') or []) if p['t'] != this.eid] if r['w'] else []} for r in this.field_rows]
-    [{'e': r['e'], 'w': r['w'], 't': r['t'], 'L': r['L'], 'pend': r['pend'], 'mode': 'live' if r['live'] else ('mat' if (not r['w']) or len(r['pend']) + len(r['L']) >= this.field_k_mat else 'wait')} for r in rows]
--- the seeds still missing for the entities that materialise now
+    rows = [{'e': r['e'], 'w': r['w'], 't': r['t'], 'L': r['L'], 'live': prop('FieldState:' + r['e'], 'v') is List, 'seed': prop('FieldSeed:' + r['e'], 'v') is List, 'pend': [p for p in (prop(r['e'], 'field_pend') or []) if not (p['t'] == this.eid and p['s'] >= this.field_from)]} for r in this.field_rows]
+    [{'e': r['e'], 'w': r['w'], 't': r['t'], 'L': r['L'], 'pend': r['pend'], 'due': (not r['live']) and ((not r['w']) or len(r['pend']) + len(r['L']) >= this.field_k_mat), 'mode': 'live' if r['live'] else ('mat' if r['seed'] and ((not r['w']) or len(r['pend']) + len(r['L']) >= this.field_k_mat) else 'wait')} for r in rows]
+-- the seeds still missing for the entities that are due to materialise
 SemText.field_need getter:
   WHEN this.field_modes == None: None
-  ELSE: [{'e': r['e'], 't': r['t']} for r in this.field_modes if r['mode'] == 'mat' and not (prop('FieldSeed:' + r['e'], 'v') is List)]
+  ELSE: [{'e': r['e'], 't': r['t']} for r in this.field_modes if r['due'] and r['mode'] == 'wait']
 SemText.field_need on-setter field-seed-ask:
   WHEN this.field_need != None and len(this.field_need) > 0:
     FOR r IN this.field_need:
@@ -75,12 +77,17 @@ SemText.field_need on-setter field-seed-ask:
 
 -- ---- THE SEED's text: one "sentence", the whole term, written to FieldSeed (not Vector) by the embed queue ---------------------------------------------------------
 FieldTerm.vec_todo getter: [{'eid': this.eid, 'skey': this.skey, 'start': 0, 'text': this.text, 'veid': 'FieldSeed:' + this.term, 'o': 0}] if (this.emb_n or 0) == 0 else []
+-- THE SEED'S LANDING applies what waited for it: the term's text "lands" (`emb_n` 1) with no sentence of its own, and its one row is the entity with no new mention
+-- (`L` empty): when the entity is due (it has no state and its waiting mentions reach the bar), the plan walks the seed through `field_pend` in order, the moves go to the
+-- texts that made them and `field_n` 1 marks it done (the same steps and the same apply as a text's landing).
+FieldTerm.field_land getter: [] if (this.emb_n or 0) >= 1 and (this.field_n or 0) < 1 else None
+FieldTerm.field_rows getter:
+  WHEN this.field_land == None or prop('FieldState:' + this.term, 'v') is List or len(prop(this.term, 'field_pend') or []) == 0: None
+  ELSE: [{'e': this.term, 'w': startswith(this.term, 'Word:'), 't': this.text, 'L': []}]
 
 -- ---- the plan: the steps of this landing (waits until every seed it needs is there) ---------------------------------------------------------------------------------
 SemText.field_vid getter: FOR s IN (this.field_land or []): 'Vector:of:' + this.skey + ':s:' + str(s['start'])
-SemText.field_plan getter:
-  WHEN this.field_need == None or len(this.field_need) > 0: None
-  ELSE: this.field_modes
+SemText.field_plan getter: this.field_modes
 SemText.field_plan on-setter field-steps:
   WHEN this.field_plan != None:
     vid = this.field_vid
@@ -96,7 +103,7 @@ SemText.field_plan on-setter field-steps:
     FOR s IN (this.field_land or []):
       o = len([y for y in this.field_land if y['start'] < s['start']])
       ('FieldStep:' + this.skey + ':bg:' + str(o)) = FieldStep(of: this.eid, e: 'FieldBg:all', x: vid[o], o: o, prev: ('FieldStep:' + this.skey + ':bg:' + str(o - 1)) if o > 0 else None, src: 'FieldBg:all' if prop('FieldBg:all', 'v') is List else None, n0: prop('FieldBg:all', 'n') or 0, mean: True)
-    this.field_steps = concat([('FieldStep:' + this.skey + ':' + r['e'] + ':' + str(len(r['pend'] if r['mode'] == 'mat' else []) + len(r['L']) - 1)) for r in this.field_plan if r['mode'] != 'wait'], ['FieldStep:' + this.skey + ':bg:' + str(len(this.field_land) - 1)])
+    this.field_steps = concat([('FieldStep:' + this.skey + ':' + r['e'] + ':' + str(len(r['pend'] if r['mode'] == 'mat' else []) + len(r['L']) - 1)) for r in this.field_plan if r['mode'] != 'wait'], ['FieldStep:' + this.skey + ':bg:' + str(len(this.field_land) - 1)] if len(this.field_land) > 0 else [])
     this.field_go = this.field_upto
 
 -- ---- ONE STEP: an entity's walk through one mention (`after` = the state after it; `move` = how far it moved) -------------------------------------------------------
@@ -161,7 +168,7 @@ SemText.field_done on-setter field-apply:
       (st).n = d['n']
       (st).run_k = d['kout']
       (st).run_acc = d['aout']
-      FOR p IN ([1] if d['mat'] == True and startswith(d['e'], 'Word:') else []):
+      FOR p IN ([1] if d['mat'] == True and len(prop(d['e'], 'field_pend') or []) > 0 else []):
         (d['e']).field_pend = []
       closed = [r for r in d['rows'] if r['closes'] == True]
       seq0 = prop(st, 'ep_seq') or 0

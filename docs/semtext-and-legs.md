@@ -154,7 +154,8 @@ sentence number, the move); `field_n` on the text counts the sentences applied.
   texts that made them; a word of 1-3 letters never gets a state or a move.
 - **Seeds**: the bare term's own embedding, `FieldSeed:<entity eid>`, asked once per entity when it materialises: a `FieldTerm:<entity eid>` SemText (the term as its text) is asked through the
   embed queue like any text, and its one vector is written to `FieldSeed` (declared by the vector pack, because the embed queue writes it), never to `Vector`, so the cosine lane never returns a seed.
-  A text whose entities need a seed waits (its moves apply when the seed lands; the seed asks go before the backlog).
+  A text never waits for a seed: the mentions of an entity whose seed is still out wait on the entity (`field_pend`, in landing order, identifiers and paths too), and the seed's own
+  landing walks the seed through them once, in order, writing each move on its text; so several texts that land before the seed give the same state, `n` and moves as one at a time.
 - **Background**: `FieldBg:all.v`, the running mean of every sentence vector of a mentioned text (`n` counts them).
 - **Episodes** (identifiers and paths, from the 40th mention on): every 5 mentions the open run (`run_k`, `run_acc` on the state) closes as `FieldEpisode:<entity eid>:<i>` (its centroid, `n`); the
   list is `eps` on the state; past 48 the two most alike neighbours merge (one merge per landing).

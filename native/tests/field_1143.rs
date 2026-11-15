@@ -191,6 +191,28 @@ fn a_waiting_moves_written_later_joins_the_moves_the_text_already_has() {
 }
 
 #[test]
+fn texts_that_land_while_the_seed_is_out_walk_from_the_seed_once_in_text_order() {
+    // the two texts land before the seed of al_x: their mentions must be applied once each, in text order, exactly as if each had been drained alone
+    let x = "Identifier:name:al_x";
+    let v = |t: &str| -> Vec<f64> { match t { "al_x" => vec![1.0, 0.0, 0.0], "Set al_x up." => vec![0.0, 1.0, 0.0], "Run al_x now." => vec![0.0, 0.0, 1.0], "Go al_x on." => vec![1.0, 1.0, 0.0], _ => vec![0.3, 0.3, 1.0] } };
+    let h = seat();
+    say(&h, "m1", "Set al_x up.");
+    say(&h, "m2", "It is so. Run al_x now.");
+    drain(&h, &v);
+    say(&h, "m3", "Go al_x on.");
+    drain(&h, &v);
+    let (s1, m1) = step(&unit(&v("al_x")), &v("Set al_x up."));
+    let (s2, m2) = step(&s1, &v("Run al_x now."));
+    let (s3, m3) = step(&s2, &v("Go al_x on."));
+    assert_eq!(h.get(&format!("FieldState:{x}"), "n"), json!(3), "each mention once");
+    close(&nums(&back(&h, &[&format!("FieldState:{x}")])[0]), &s3, "seed -> m1 -> m2 -> m3");
+    assert!((move_of(&h, &body("m1"), x, 0) - m1).abs() < 2e-3, "m1: {m1}");
+    assert!((move_of(&h, &body("m2"), x, 1) - m2).abs() < 2e-3, "m2 moves from where m1 left it: {m2}, {:?}", moves(&h, &body("m2")));
+    assert!((move_of(&h, &body("m3"), x, 0) - m3).abs() < 2e-3, "m3: {m3}");
+    for id in ["m1", "m2"] { assert_eq!(moves(&h, &body(id)).iter().filter(|r| r["e"] == json!(x)).count(), 1, "{id}: one move, not two: {:?}", moves(&h, &body(id))); }
+}
+
+#[test]
 fn a_word_of_one_to_three_letters_never_gets_a_state_or_a_move() {
     let h = seat();
     for (i, t) in ["The cat sat.", "A cat ran.", "One cat hid."].iter().enumerate() { say(&h, &format!("m{i}"), t); drain(&h, &model); }

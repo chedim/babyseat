@@ -751,7 +751,7 @@
       "FieldTerm",
       "SemText"
     ],
-    "members": 38,
+    "members": 40,
     "writes": [
       "*.ep_seq",
       "*.eps",
