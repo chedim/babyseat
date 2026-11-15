@@ -1,6 +1,6 @@
 //! The barest seat's banner (#1143, operator 2026-11-13): the banner is FULLY the model's. `Banner:admin:main` is born once by the app's
 //! `default_banner` pack, whose `text` is a live getter (header, the previous turn's error); the model REPLACES it by loading a pack that
-//! imports `default_banner` and defines `Banner.text` (the upper layer's arm wins). The seat never segments, orders or joins what the model puts there.
+//! imports `default_banner` and defines `Banner.text` (the upper layer's arm wins). The seat never edits what the model puts there; it only shows every `Banner:*` instance together (the last tests).
 use membrane_vm::host::{self, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
@@ -82,4 +82,41 @@ fn reassigning_parents_to_a_class_with_its_own_text_getter_replaces_the_default_
     let h = seat(); h.write(B, "parents", json!(["cls:ownbanner"]), "person"); h.pump();
     h.load_pack("own", own).unwrap(); h.rebuild(); h.pump();
     assert_eq!(text(&h), "own text");
+}
+
+// ---- several banners, one banner (operator 2026-11-14) -------------------------------------------------------------------
+// Every `Banner:*` instance joins into the one banner a turn shows, oldest update first so unchanged text stays in front (prompt cache).
+// An instance with its own `words` shows those; the main banner (no `words`) shows its computed text. Empty ones show nothing.
+fn queued_message(h: &Host, n: u32) -> String {
+    let mut p = Map::new(); p.insert("text".into(), json!(format!("question {n}"))); p.insert("parents".into(), json!(["cls:chatmessage"]));
+    h.born(&format!("membrane::Chat:message:{n}"), "Chat", p, "person");
+    let mut t = Map::new(); t.insert("parents".into(), json!(["cls:chatturn"]));
+    h.born(&format!("membrane::Chat:message:{n}:turn"), "Chat", t, "person");
+    h.pump();
+    h.get(&format!("membrane::Chat:message:{n}"), "banner_text").as_str().unwrap_or_else(|| panic!("banner_text is a string")).to_string()
+}
+fn extra(h: &Host, name: &str, words: &str) {
+    let mut p = Map::new(); p.insert("words".into(), json!(words));
+    h.born(&format!("membrane::Banner:{name}"), "Banner", p, "person"); h.pump();
+}
+
+#[test]
+fn another_banner_instance_with_words_joins_the_main_banner_after_it() {
+    let h = seat();
+    let main_only = queued_message(&h, 1);
+    extra(&h, "history", "earlier chat is in Chat:main");
+    let joined = queued_message(&h, 2);
+    assert!(joined.starts_with(&main_only), "the main banner first: {joined}");
+    assert!(joined.ends_with("\nearlier chat is in Chat:main"), "{joined}");
+}
+
+#[test]
+fn banners_join_oldest_update_first_and_an_emptied_one_shows_nothing() {
+    let h = seat();
+    extra(&h, "a", "first words"); extra(&h, "b", "second words");
+    assert!(queued_message(&h, 1).ends_with("first words\nsecond words"));
+    h.write("membrane::Banner:a", "words", json!("first, edited"), "person"); h.pump();
+    assert!(queued_message(&h, 2).ends_with("second words\nfirst, edited"), "an edited banner moves to the end, the unchanged one stays in front");
+    h.write("membrane::Banner:b", "words", json!(""), "person"); h.pump();
+    assert!(queued_message(&h, 3).ends_with("\nfirst, edited") && !queued_message(&h, 4).contains("second words"));
 }

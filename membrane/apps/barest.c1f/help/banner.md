@@ -44,6 +44,12 @@ Banner.upnext getter: [p.next for p in instances('Plan')]
 Banner.text getter: join(['doing: ' + str((this.doing or [''])[0]), 'next: ' + str((this.upnext or [''])[0])], '\n')
 ```
 
+## More than one banner
+
+A feature, a script or you can add a line to the banner without touching your main banner: write `words` on an entity of your own,
+`Banner:<name>` (for example `Banner:history`). A turn shows your main banner first, then every other banner's `words`, the oldest update first, so what
+has not changed stays in front. Edit `words` to change a line, write `""` to take it away.
+
 ## Habits
 
 - Keep the banner short and current: the plan, what is open, what you decided.

@@ -2,7 +2,7 @@ PACK default_banner 1
 IMPORT boot 1
 RESIDENT Banner
 -- THE DEFAULT BANNER OF THE BAREST SEAT (#1143, operator 2026-11-13). `membrane::Banner:admin:main` is the entity `chat_turn.c1f` reads into
--- every turn's system text, and it is FULLY the model's: the seat never segments, orders or joins what the model puts there. This pack is
+-- every turn's system text, and it is FULLY the model's: the seat never edits what the model puts there; it only shows every `Banner:*` instance together (below). This pack is
 -- only the banner the seat is born with, the barest seat's cut of Memo's recall banner (membrane/packs/banner.c1f, RecallBanner), which stays
 -- as the Python era wrote it. `Banner.text` is a getter (cached, recomputed when what it reads changes), so the banner is live by nature.
 -- KEPT from RecallBanner: the header (NOW, the conversation) and the paused/error line (here: the previous turn's error, read from the
@@ -23,7 +23,11 @@ Banner.last_turn getter: prop('membrane::Chat:' + str(this.chat or 'main'), 'las
 Banner.previous getter: [{'eid': this.last_turn, 'state': prop(this.last_turn, 'state')}] if this.last_turn != None else []
 Banner.error_ids getter: [prop(p, 'eid') + ':response' for p in this.previous if prop(p, 'state') == 'error']
 Banner.error_lines getter: [this.error_label + ': ' + e + ' - ' + str(prop(e, 'summary') or '') for e in this.error_ids]
-Banner.text getter: join(concat([this.now_line, this.conv_header], this.error_lines), '\n')
+-- ANOTHER BANNER (operator 2026-11-14): a `Banner:<name>` instance with its own `words` shows exactly those; the main banner has none and shows the computed lines.
+-- chat_turn.c1f joins every banner into the one a turn shows.
+Banner.text getter:
+  WHEN this.words != None: this.words
+  ELSE: join(concat([this.now_line, this.conv_header], this.error_lines), '\n')
 
 Boot.started on-setter seed-banner:
   WHEN prop('membrane::Banner:admin:main', 'seeded') != True:
