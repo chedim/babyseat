@@ -201,7 +201,7 @@ fn an_outside_write_is_journalled_compact_and_a_replay_restores_the_same_f16_val
     let v: Vec<f64> = (0..1024).map(|_| rng(&mut s)).collect();
     vec_born(&h, "a");
     h.write("Vector:a", "v", json!(v), "test");
-    let lines = h.journal();
+    let lines = h.journal_stored().unwrap();   // the stored copy is whole (the RAM copy names the size of a vector line instead)
     let line = lines.iter().find_map(|l| match l { Line::Write { eid, prop, new, .. } if eid == "Vector:a" && prop == "v" => Some(new.clone()), _ => None }).expect("a journal line");
     let b64 = line["$f16"].as_str().expect("compact form {\"$f16\": base64}");
     assert_eq!(b64.len(), 2732, "1024 f16 values = 2048 bytes = 2732 base64 characters");
@@ -303,7 +303,7 @@ fn what_a_virtual_trigger_writes_to_v_is_an_outside_write_journalled_compact() {
     h.born("Req:1", "Req", props(json!({"nums": [0.5, 0.25, 1.0, 2.0]})), "test");
     h.write("Req:1", "go", json!(1), "test");
     assert_eq!(h.get("Vector:d", "v"), json!("[4 numbers, f16]"));
-    let line = h.journal().into_iter().find_map(|l| match l { Line::Write { eid, prop, new, .. } if eid == "Vector:d" && prop == "v" => Some(new), _ => None }).expect("journalled: the trigger is not");
+    let line = h.journal_stored().unwrap().into_iter().find_map(|l| match l { Line::Write { eid, prop, new, .. } if eid == "Vector:d" && prop == "v" => Some(new), _ => None }).expect("journalled: the trigger is not");
     assert!(line["$f16"].is_string(), "compact: {line}");
 }
 
@@ -344,6 +344,47 @@ fn measure_near_over_twenty_thousand_vectors() {
         best = best.min(d);
     }
     eprintln!("MEASURE best {best:?}; top = {}", h.get("Probe:p", "top").to_string().chars().take(120).collect::<String>());
-    let j = h.journal().into_iter().find_map(|l| match l { Line::Write { eid, prop, new, .. } if eid == "Vector:00000" && prop == "v" => Some(new.to_string().len()), _ => None });
+    let j = h.journal_stored().unwrap().into_iter().find_map(|l| match l { Line::Write { eid, prop, new, .. } if eid == "Vector:00000" && prop == "v" => Some(new.to_string().len()), _ => None });
     eprintln!("MEASURE journal bytes of a vector line (new only): {j:?}");
+}
+
+#[test]
+fn the_ram_copy_of_the_journal_names_a_vector_lines_size_and_the_stored_copy_is_whole() {
+    let h = host_with(None);
+    put(&h, "a", &[1.0, 2.0, 3.0, 4.0]);
+    let ram = h.journal().into_iter().find_map(|l| match l { Line::Write { eid, prop, new, .. } if eid == "Vector:a" && prop == "v" => Some(new), _ => None }).expect("a RAM line");
+    assert!(ram["elided_bytes"].as_u64().is_some() && ram.get("$f16").is_none(), "the RAM copy holds no vector bytes: {ram}");
+    let stored = h.journal_stored().unwrap().into_iter().find_map(|l| match l { Line::Write { eid, prop, new, .. } if eid == "Vector:a" && prop == "v" => Some(new), _ => None }).unwrap();
+    assert!(stored["$f16"].is_string(), "the stored line is complete: {stored}");
+}
+
+#[test]
+fn a_class_whose_last_vector_leaves_forgets_its_dimension_before_and_after_a_restart() {
+    let file = tmpfile("emptied");
+    {
+        let h = host_with(Some(&file));
+        put(&h, "a", &[1.0, 2.0, 3.0, 4.0]);
+        put(&h, "b", &[1.0, 0.0, 0.0, 0.0]);
+        h.write("Vector:a", "retire", json!(true), "test");
+        put(&h, "c", &[1.0, 2.0]);
+        assert!(h.get("Vector:c", "refused").as_str().unwrap_or("").contains("4"), "b is still there, so the dimension stands");
+    }
+    let _ = std::fs::remove_file(&file);
+    for clear in [false, true] {
+        let file = tmpfile("emptied2");
+        let step = |h: &Host| {
+            put(h, "a", &[1.0, 2.0, 3.0, 4.0]);
+            if clear { h.write("Vector:a", "v", J::Null, "test"); } else { h.write("Vector:a", "retire", json!(true), "test"); }
+            put(h, "b", &[1.0, 2.0]);
+            assert_eq!(h.get("Vector:b", "v"), json!("[2 numbers, f16]"), "a different dimension is accepted at once (clear={clear})");
+            assert_eq!(h.get("Vector:b", "refused"), J::Null);
+        };
+        { let h = host_with(Some(&file)); step(&h); h.write("Vector:b", "retire", json!(true), "test"); }
+        // after a restart the class is empty: the same
+        let h = open(Some(&file));
+        h.load_pack("vector", &vector_pack()).unwrap();
+        h.load_stored_entities();
+        put(&h, "z", &[1.0, 2.0, 3.0]);
+        assert_eq!(h.get("Vector:z", "v"), json!("[3 numbers, f16]"), "after a restart (clear={clear})");
+    }
 }

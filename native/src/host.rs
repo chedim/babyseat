@@ -1128,7 +1128,9 @@ impl Host {
         self.exec(&db, &format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", self.journal_next.fetch_add(1, Ordering::SeqCst)), body]);
         // THE IN-MEMORY COPY keeps no huge value: the stored line (c_journal, what a replay reads) is whole, the copy in RAM names its size instead. A query receipt of the history import
         // carries a page of rows (megabytes) and every page was kept here for the life of the process (measured 2026-11-14: ~100 MB of RSS a page). A flagged threshold (JOURNAL_RAM_MAX_BYTES).
-        if body.len() > JOURNAL_RAM_MAX_BYTES {
+        // a compact vector line (an outside write of a MAPPED `v`, ~2.7 KB) is kept out of the copy the same way: only the stored line is whole (nothing reads the copy for it: a replay reads the store)
+        let vector_line = matches!(&l, Line::Write { prop, new, .. } if prop == crate::vm::VECTOR_PROP && new.get(crate::vecstore::COMPACT_KEY).is_some());
+        if body.len() > JOURNAL_RAM_MAX_BYTES || vector_line {
             if let Line::Write { ts, writer, eid, prop, .. } = &l { j.push(Line::Write { ts: *ts, writer: writer.clone(), eid: eid.clone(), prop: prop.clone(), new: json!({"elided_bytes": body.len()}) }); return; }
         }
         j.push(l);
