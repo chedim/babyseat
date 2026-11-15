@@ -19,6 +19,7 @@ impl Host for H {
 fn db() -> (std::path::PathBuf, rusqlite::Connection) {
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!("store-write-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
+    let _ = std::fs::remove_dir_all(&dir);   // a repeated process id must not find an old store
     std::fs::create_dir_all(dir.join("store")).unwrap();
     let p = dir.join("store").join("field.sqlite3");
     let c = rusqlite::Connection::open(&p).unwrap();
