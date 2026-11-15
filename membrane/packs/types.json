@@ -1467,7 +1467,6 @@
       "*.reason": "Text?",
       "*.rows": "Any",
       "*.state": "Text",
-      "*.unload": "Bool",
       "Legacy.cur": "None",
       "Legacy.queue": "List(Never)",
       "Legacy.running": "Bool",

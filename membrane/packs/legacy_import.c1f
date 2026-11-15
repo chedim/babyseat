@@ -148,11 +148,6 @@ LegacySeat.pg on-setter legacy-page:
         membrane::Chat:session[this.cur]:message[id]:turn:response:body = SemText(text: body)
       FOR t IN json(prop(r, 'tools') or '[]'):
         membrane::Chat:session[this.cur]:message[id]:turn:tool[str(prop(t, 'callID') or prop(t, 'id'))] = ChatTool(name: prop(t, 'tool'), input: prop(prop(t, 'state'), 'input'), result: str(prop(prop(t, 'state'), 'output') or prop(prop(t, 'state'), 'error') or ''))
-        (m0 + ':turn:tool:' + str(prop(t, 'callID') or prop(t, 'id'))).unload = True
-      -- WHAT WAS WRITTEN LEAVES THE ENGINE AT ONCE (docs/cliffvm.md "Unload": the row is kept, a reference loads it back): the import is a long background job and a message's bodies are large, so the
-      -- memory stays a few batches whatever the store size. The host writes the rows first, then unloads (one `unload = true` per entity, the one primitive).
-      FOR x IN concat([m0, m0 + ':body', m0 + ':turn', m0 + ':turn:response', 'membrane::Chat:main:time:' + id + ':session:' + this.cur], ([m0 + ':turn:response:body'] if (body != '' and not bad and answered) else [])):
-        (x).unload = True
     (led).rows = (prop(led, 'rows') or 0) + ((this.pgrows[0]['page_used'] if len(this.pgrows) > 0 else 0))
     (led).dropped_parts = (prop(led, 'dropped_parts') or 0) + ((this.pgrows[0]['page_dropped'] if len(this.pgrows) > 0 else 0))
     (led).cursor = this.pgrows[-1]['n'] if len(this.pgrows) > 0 else (prop(led, 'cursor') or 0)

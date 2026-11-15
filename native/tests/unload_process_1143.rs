@@ -1,5 +1,5 @@
-//! The unload policy in the real binary (#1143): the shipped packs and the barest app on a store of synthetic entities, the memory budget and the fractions as boot facts, the
-//! resident size read from the test's own file (`MEMBRANE_TEST_RSS`: the path of a file holding the size in bytes, consulted only by the sensor). No real `claude`; ephemeral port.
+//! The VM's own eviction policy in the real binary (no pack, no write) (#1143): the shipped packs and the barest app on a store of synthetic entities, the memory budget and the fractions as boot facts, the
+//! resident size read from the test's own file (`MEMBRANE_TEST_RSS`: the path of a file holding the size in bytes, consulted only by the policy). No real `claude`; ephemeral port.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -57,8 +57,6 @@ fn a_seat_over_its_memory_budget_unloads_its_coldest_and_a_reference_loads_one_b
     let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap();
     let loaded = |port| clifflet(port, "len(instances('Note'))").trim().parse::<usize>().unwrap();
     wait("the warm boot loads every Note", || (loaded(port) == 300).then_some(()));
-    wait("the sensor reports", || (clifflet(port, "Mem:host.level") == "ok").then_some(()));
-    assert_eq!(clifflet(port, "Mem:host.rss"), (40 * MB).to_string(), "the sensor reads the test's file");
     std::thread::sleep(Duration::from_millis(2500));
     assert_eq!(loaded(port), 300);
     // pressure: 95 MB of 100 (hard from 90): one batch of 50 a tick until it is under the soft line, which the reading never says: it unloads on
@@ -66,11 +64,10 @@ fn a_seat_over_its_memory_budget_unloads_its_coldest_and_a_reference_loads_one_b
     wait("some Notes are unloaded", || (loaded(port) < 300).then_some(()));
     // the reading drops under the soft line: the passes stop
     std::fs::write(&rss_file, (30 * MB).to_string()).unwrap();
-    wait("the level is ok again", || (clifflet(port, "Mem:host.level") == "ok").then_some(()));
     std::thread::sleep(Duration::from_millis(1500));
     let n = loaded(port);
     std::thread::sleep(Duration::from_millis(2500));
-    assert_eq!(loaded(port), n, "no pass runs while the level is ok");
+    assert_eq!(loaded(port), n, "no pass runs while the reading is under the lines");
     assert!(n < 300, "{n} Notes loaded");
     // a reference loads one back, with its value
     let cold: usize = (0..300).find(|i| clifflet(port, &format!("len([x for x in instances('Note') if x.eid == 'Note:{i}'])")) == "0").expect("one is unloaded");

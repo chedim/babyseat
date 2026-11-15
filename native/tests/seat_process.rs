@@ -466,7 +466,7 @@ fn an_entity_carries_two_extra_classes_getters_setters_queries_and_a_restart() {
     w(port, "cls:alpha", "name", json!("Alpha"));          // the ISA parent entities a kind's setter needs
     w(port, "cls:beta", "name", json!("Beta"));
     w(port, "Thing:x", "n", json!(3));
-    w(port, "Thing:x", "parents", json!(["cls:alpha", "cls:beta"]));      // the two kinds, by the one list
+    clifflet(port, "Thing:x.parents = ['cls:alpha', 'cls:beta']");      // the two kinds, by the one list (entity_write refuses it: classes are set at birth; a clifflet is code, like a pack)
     wait("both getters apply", || (read(port, "Thing:x", "sa") == "alpha:3" && read(port, "Thing:x", "sb") == "beta:3").then_some(()));
     w(port, "Thing:x", "go_a", json!(true));
     w(port, "Thing:x", "go_b", json!(true));

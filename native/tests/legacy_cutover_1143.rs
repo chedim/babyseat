@@ -330,7 +330,11 @@ fn the_import_leaves_what_it_wrote_out_of_memory_so_the_loaded_entities_stay_a_f
     std::fs::create_dir_all(old.parent().unwrap()).unwrap();
     make_big_legacy(&old, 120, 40);   // 160 questions in 41 sessions
     let batch = 5;
+    // the VM's own policy bounds it (no pack, no write): the budget is a boot fact, the reading is the test's (the process is over its budget the whole import), the batch is
+    // what one drain may evict; the import writes rows nobody reads back, so the coldest are always the ones it wrote first
     let h = host_with(&d, &[("legacy_batch", json!(batch))]);
+    h.set_memory(membrane_vm::host::MemoryConfig { budget_mb: Some(100), soft: None, hard: Some(0.9), batch: Some(64) });
+    h.set_rss_reading(Box::new(|| Some(95 << 20)));
     let mut peak = 0usize;
     pump_until(&h, "the end", |h| { peak = peak.max(loaded_message_entities(h)); ended(h) });
     assert_eq!(cut(&h, "state"), json!("done"), "{}", cut(&h, "reason"));
@@ -340,7 +344,8 @@ fn the_import_leaves_what_it_wrote_out_of_memory_so_the_loaded_entities_stay_a_f
     assert!(peak <= bound, "peak loaded message entities {peak} > {bound} ({imported_questions} questions imported)");
     assert!(imported_questions * 5 > 4 * bound, "the store is big enough for the bound to mean something");
     assert!(h.unloaded_count() > imported_questions * 4, "the imported entities left the engine ({} unloaded)", h.unloaded_count());
-    // and they are all still there: a read loads one back
+    // and they are all still there: a read loads one back (the pressure is over: a reading under the lines)
+    h.set_rss_reading(Box::new(|| Some(1 << 20)));
     assert_eq!(h.get("membrane::Chat:session:ses_big:message:1790000000000-00000001", "text"), json!("a question"));
     assert_eq!(h.get("membrane::Legacy:session:ses_big", "rows"), json!(240));
 }

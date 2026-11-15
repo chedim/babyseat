@@ -34,10 +34,6 @@ independent packs on `Banner.text`: a second pack that defines it without import
 Facts the person gives you (a route, a name, a time) are saved as entities of a class you choose, and the banner keeps a short index line saying they exist and where. When a search by name finds nothing,
 search by class: `entity_query {q: "kind:<Class>"}`.
 
-A second way: give a class of your own the `text` getter and make it the banner's nearest class by writing the list of classes:
-`entity_write {spec: "Banner:admin:main", prop: "parents", value: ["cls:mybanner"]}`. The entity's classes are the list in `parents`, so
-the starting `Banner` class is then no longer one of them: its `text` stops, and what only it computed goes away. Write `["cls:banner"]` to go back.
-
 A banner of several parts is one getter that joins them, in the order you choose:
 
 ```c1f

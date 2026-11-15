@@ -154,6 +154,15 @@ Tally.biggest getter: max([b.w for b in instances('Box')])
 Tally.count getter: len(instances('Box'))
 ```
 
+`x is Class` tests an entity's class (`b is Box`; `b is (Box, Fixture)` needs all of them): it follows the entity's classes, nearest first, so a test never needs the list itself:
+
+```c1f
+-- given Box:a {}
+-- given Tally:t {}
+-- reads Tally:t.is_box = true
+Tally.is_box getter: Box:a is Box
+```
+
 An entity written without quotes is an entity: `Goal:board`, `app::Config:voice:in`. A quoted name works the same way:
 `('Goal:' + slug).status = 'open'`. `[key]` after an entity literal appends a segment: `Book:copy[slug]` is `Book:copy:<slug>`.
 

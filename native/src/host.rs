@@ -58,13 +58,6 @@ pub fn class_of_eid(eid: &str) -> String {
     tail.split(':').next().unwrap_or("").to_string()
 }
 
-/// The writer of the memory sensor's writes (`Host::sense_memory`): an outside writer by its `host:` stamp, but a reading of THIS process is not history, so
-/// the sensor's writes are not journalled (a replay never sees them, and never repeats an unload they caused).
-pub const SENSOR_WRITER: &str = "host:sensor:mem";
-pub const MEM_ENTITY: &str = "Mem:host";
-/// The sensor writes the resident size again only when it moved by this much (1 MiB), so an idle seat is not rewriting a row every second (a threshold, flagged).
-pub const MEM_STEP_BYTES: u64 = 1 << 20;
-
 /// How many lazy rows the warm boot loads in the background by default (the boot fact `warm_rows`; a threshold, flagged for the operator).
 pub const DEFAULT_WARM_ROWS: usize = 1000;
 /// One slice of the warm boot loads at most this many rows and stops after this long (flagged for the operator: the loop must answer the door between slices).
@@ -179,14 +172,14 @@ pub struct Host {
     /// the warm boot: how many lazy rows to load in the background (newest `updated` first) and the ones still waiting (docs/cliffvm.md)
     warm_rows: std::sync::atomic::AtomicUsize,
     warm: Mutex<std::collections::VecDeque<String>>,
-    /// the memory sensor (`sense_memory`): its config (the boot facts), the injected reading (tests), the last values written
+    /// the memory policy (`evict_under_pressure`): its config (the boot facts) and the injected reading (tests)
     memory: Mutex<MemoryConfig>,
     rss_reading: Mutex<Option<RssReading>>,
 }
 
-/// The memory sensor's configuration: the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard` (none of them has a default number).
+/// The memory policy's configuration: the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard`, `unload_batch` (none of them has a default number).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MemoryConfig { pub budget_mb: Option<u64>, pub soft: Option<f64>, pub hard: Option<f64> }
+pub struct MemoryConfig { pub budget_mb: Option<u64>, pub soft: Option<f64>, pub hard: Option<f64>, pub batch: Option<u64> }
 /// A resident-size reading in bytes (None: unreadable): the real one is `process_rss`; a test injects its own.
 pub type RssReading = Box<dyn Fn() -> Option<u64> + Send + Sync>;
 
@@ -201,7 +194,6 @@ pub struct Txn<'a> { h: &'a Host }
 impl Drop for Txn<'_> { fn drop(&mut self) { self.h.end_txn(); } }
 
 fn dbe(e: rusqlite::Error) -> String { e.to_string() }
-fn props_of(v: J) -> Map<String, J> { v.as_object().cloned().unwrap_or_default() }
 
 /// The ids a live VIRTUAL entity holds as `{"$ref": id}` values (anywhere in its properties).
 fn held_by_virtual(core: &Core, f: &Fields) -> std::collections::HashSet<String> {
@@ -456,7 +448,6 @@ impl Host {
 
     /// The clock input: armed waits come due.
     pub fn tick(&self) {
-        self.sense_memory();
         {
             let _t = self.txn();
             let now = self.now();
@@ -543,10 +534,9 @@ impl Host {
             self.exec(&db, &format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
         }
         let any = any || !retired.is_empty();
-        // `unload = true` (any writer): the entity leaves the engine, its row kept; a pinned one is refused with a receipt. Not journalled, changes no value.
-        let asked = std::mem::take(&mut self.eng().1.unload_asked);
-        let any = any || !asked.is_empty();
-        if !asked.is_empty() { self.unload_entities(&asked, ts); }
+        // THE MEMORY POLICY (docs/cliffvm.md, "Unload"): over the memory budget, the coldest loaded entities leave the engine, their rows kept. The VM's own: nothing a pack or
+        // the model writes names an entity to evict. Not journalled, changes no value.
+        self.evict_under_pressure();
         // THE COLLECTOR (docs/cliffvm.md, "Garbage collection"): the virtual entities nothing holds any more leave the engine at the end of the round. Removing them
         // is a round of its own (what read them recalculates), which drains again.
         let dead = { let g = self.eng(); g.0.gc_dead() };
@@ -563,24 +553,33 @@ impl Host {
         any
     }
 
-    /// Take the asked entities out of the engine, or answer each pinned one with `unload_result` = {status: refused, reason}. Pins: the core's (`Core::pinned_reason`:
-    /// virtual or resident class, a running effect) and what a live VIRTUAL entity holds by `$ref` (a Request that is still being answered holds what it points at). The
-    /// rows are written first: the store is written through, but a reload in this very transaction must read the row as it is.
-    fn unload_entities(&self, asked: &[String], ts: f64) {
+    /// THE MEMORY POLICY (docs/cliffvm.md, "Unload"), run at the end of every drain (so within a long cascade too, like an import) while a memory budget AND a batch are
+    /// set (the boot facts; with either unset nothing is ever evicted). Pressure = the resident size (`process_rss`, or a test's injected reading) at or over `unload_hard` x
+    /// budget (the budget itself when unset), or over `unload_soft` x budget (no soft line when unset). Under pressure ONE pass: the `unload_batch` coldest loaded entities
+    /// leave, coldest = the smallest touch clock (`Ent::touched`: bumped by every read, write and load), so the least recently used or written. Candidates are only stored
+    /// entities that may leave: never a RESIDENT or VIRTUAL class, never one with a running effect, never one a live virtual entity holds by `$ref` (`Core::pinned_reason`
+    /// and `held_by_virtual`). The rows are written first (the store is written through, but a reload in this very transaction must read the row as it is), then the whole
+    /// batch goes with ONE pass over the field's bookkeeping (`Fields::unload_many`: the entity and what the field remembers of it). -> whether any left.
+    fn evict_under_pressure(&self) -> bool {
+        let cfg = self.memory.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let (Some(mb), Some(batch)) = (cfg.budget_mb, cfg.batch) else { return false };
+        if batch == 0 { return false; }
+        let rss = match &*self.rss_reading.lock().unwrap_or_else(|e| e.into_inner()) { Some(f) => f(), None => process_rss() };
+        let Some(rss) = rss else { return false };
+        let b = (mb << 20) as f64;
+        if !(rss as f64 >= b * cfg.hard.unwrap_or(1.0) || cfg.soft.map_or(false, |s| rss as f64 >= b * s)) { return false; }
+        let go: Vec<String> = {
+            let g = self.eng(); let (core, f, _) = &*g;
+            let held = held_by_virtual(core, f);
+            let mut cold: Vec<(u64, &String)> = core.docs.iter().filter(|(k, _)| !held.contains(*k) && core.pinned_reason(k).is_none()).map(|(k, e)| (e.touched.get(), k)).collect();
+            let n = (batch as usize).min(cold.len());
+            if n == 0 { return false; }
+            if n < cold.len() { cold.select_nth_unstable(n - 1); cold.truncate(n); }
+            cold.into_iter().map(|(_, k)| k.clone()).collect()
+        };
         { let db = self.db.lock().unwrap_or_else(|e| e.into_inner()); self.flush(&db); }
-        let held: std::collections::HashSet<String> = { let g = self.eng(); let (core, f, _) = &*g; held_by_virtual(core, f) };
-        let mut go: Vec<String> = vec![];
-        for eid in asked {
-            let reason = { let g = self.eng(); let (core, _, _) = &*g;
-                if !core.docs.contains_key(eid) { continue; }
-                core.pinned_reason(eid).or_else(|| held.contains(eid).then(|| "pinned: held by a live virtual entity's $ref".to_string())) };
-            match reason {
-                None => go.push(eid.clone()),
-                Some(r) => self.inject_write(ts, eid, "unload_result", json!({"status": "refused", "reason": r}), "unload", &stamp_writer("unload")),
-            }
-        }
-        // one pass over the field's bookkeeping for the whole batch (Fields::unload_many)
-        if !go.is_empty() { let mut g = self.eng(); let (core, f, _) = &mut *g; f.unload_many(core, &go); }
+        { let mut g = self.eng(); let (core, f, _) = &mut *g; f.unload_many(core, &go); }
+        true
     }
 
     /// For every `mc_done` the door's `mcp-write` setter wrote in this batch: (the Request, the list of what else the engine wrote in the batch: setters' and
@@ -594,7 +593,8 @@ impl Host {
         let derived = |w: &J| w["writer"].as_str().map_or(false, |x| x.starts_with("field:") && x != "field:mcp-write" && x != "field:cliff-run"
             && !x.ends_with("consumed"));
         let list: Vec<J> = out.iter().enumerate()
-            .filter(|(_, w)| derived(w) && w.get("prop").is_some() && w["eid"].as_str().map_or(false, |e| !e.starts_with("Request:") && !e.starts_with("Return:") && !e.starts_with(PACK_PREFIX)))
+            .filter(|(_, w)| derived(w) && w.get("prop").is_some() && w["prop"] != "parents" &&   // the class list is the engine's, not a property the model sees (operator 2026-11-14)
+                w["eid"].as_str().map_or(false, |e| !e.starts_with("Request:") && !e.starts_with("Return:") && !e.starts_with(PACK_PREFIX)))
             .filter(|(i, w)| !out[i + 1..].iter().any(|x| derived(x) && x["eid"] == w["eid"] && x["prop"] == w["prop"]))   // the last value of each property in the round
             .filter_map(|(_, w)| {
                 let (eid, prop) = (w["eid"].as_str().unwrap_or(""), w["prop"].as_str().unwrap_or(""));
@@ -767,39 +767,10 @@ impl Host {
     /// The host holds this entity itself (the collector never takes it): the boot's own state, `Boot:seat`, and the boot plan's steps. Call it BEFORE the entity is born.
     pub fn hold(&self, eid: &str) { self.eng().0.host_held.insert(eid.to_string()); }
 
-    /// The memory sensor's configuration (the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard`; none has a default number).
+    /// The memory policy's configuration (the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard`, `unload_batch`; none has a default number).
     pub fn set_memory(&self, c: MemoryConfig) { *self.memory.lock().unwrap_or_else(|e| e.into_inner()) = c; }
-    /// A test's own resident-size reading, consulted by the sensor in place of the process's (`cli.rs` reads it from the env var `MEMBRANE_TEST_RSS`).
+    /// A test's own resident-size reading, consulted by the policy in place of the process's (`cli.rs` reads it from the env var `MEMBRANE_TEST_RSS`).
     pub fn set_rss_reading(&self, r: RssReading) { *self.rss_reading.lock().unwrap_or_else(|e| e.into_inner()) = Some(r); }
-
-    /// THE MEMORY SENSOR (docs/cliffvm.md, "Unload"): at every tick the resident size is read and written on `Mem:host` (born once): `rss` (bytes; written again only
-    /// when it moved by `MEM_STEP_BYTES`), `budget` (bytes, only when `memory_budget_mb` is set) and `level`. The level is `ok` with no budget; else `hard` at or over
-    /// `unload_hard` x budget (the budget itself when unset), `soft` at or over `unload_soft` x budget (no soft level when unset), else `ok`. `level` is written on a change
-    /// AND at every tick while it is not `ok`, so the policy (a setter on it, c1f) gets one pass per tick for as long as the pressure lasts. An outside write like the clock's
-    /// tick, stamped `host:sensor:mem` and never journalled. It runs only when a pack declares the class `Mem` (the barest app's `unload.c1f`).
-    pub fn sense_memory(&self) {
-        if !self.eng().1.owns_class("Mem") { return; }   // no pack declares the class: nothing listens, and a quiet host writes nothing
-        let cfg = self.memory.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let rss = match &*self.rss_reading.lock().unwrap_or_else(|e| e.into_inner()) { Some(f) => f(), None => process_rss() };
-        let Some(rss) = rss else { return };
-        let budget = cfg.budget_mb.map(|m| m << 20);
-        let level = match budget {
-            None => "ok",
-            Some(b) => {
-                let b = b as f64;
-                if rss as f64 >= b * cfg.hard.unwrap_or(1.0) { "hard" } else if cfg.soft.map_or(false, |s| rss as f64 >= b * s) { "soft" } else { "ok" }
-            }
-        };
-        let ts = self.now();
-        let known = self.eng().0.docs.contains_key(MEM_ENTITY);
-        if !known { self.inject_born(ts, MEM_ENTITY, "Mem", props_of(json!({"name": "this process's memory"})), SENSOR_WRITER, SENSOR_WRITER); }
-        let was_rss = self.eng().0.docs.get(MEM_ENTITY).and_then(|e| e.props.get("rss").and_then(|v| v.as_u64()));
-        let was_level = self.eng().0.docs.get(MEM_ENTITY).and_then(|e| e.props.get("level").and_then(|v| v.as_str().map(String::from)));
-        let was_budget = self.eng().0.docs.get(MEM_ENTITY).and_then(|e| e.props.get("budget").and_then(|v| v.as_u64()));
-        if was_rss.map_or(true, |w| w.abs_diff(rss) >= MEM_STEP_BYTES) { self.inject_write(ts, MEM_ENTITY, "rss", json!(rss), SENSOR_WRITER, SENSOR_WRITER); }
-        if let Some(b) = budget { if was_budget != Some(b) { self.inject_write(ts, MEM_ENTITY, "budget", json!(b), SENSOR_WRITER, SENSOR_WRITER); } }
-        if was_level.as_deref() != Some(level) || level != "ok" { self.inject_write(ts, MEM_ENTITY, "level", json!(level), SENSOR_WRITER, SENSOR_WRITER); }
-    }
 
     /// The boot fact `warm_rows`: how many lazy rows load in the background after start (newest `updated` first). Set before `load_stored_entities`.
     pub fn set_warm_rows(&self, n: usize) { self.warm_rows.store(n, Ordering::SeqCst); }
@@ -974,7 +945,6 @@ impl Host {
     /// One property of a row, with the writer that wrote it; a `null` removes it (as a getter's none leaves it absent). A write that changes
     /// nothing (the same value, the same writer or another derived one) leaves the store alone.
     fn store_prop(&self, eid: &str, cls: Option<&str>, prop: &str, new: &J, stamp: &str) {
-        if prop == "unload" { return; }   // the primitive is a request, never a property: the row (and `updated`) stay as they were, so a reload is equal
         let _t = self.txn();
         let known = self.eng().0.docs.get(eid).map(|e| e.cls.clone());
         let ts = self.stamp_ts();
