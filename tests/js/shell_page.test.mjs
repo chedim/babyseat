@@ -157,7 +157,7 @@ try {
   await b.type('boom now'); await b.enter();
   await b.until(`${answers}.length === 3 && !/^(Waiting for a turn…|Working on it…)$/.test(${answers}[2]) && ${answers}[2].length > 0`, 'the errored turn leaves the waiting state');
   assert.match(await b.ev(`${answers}[2]`), /boom/, 'the error text names the failure');
-  assert.equal(await b.ev(`${Q('[data-key$=":ans"]:last-of-type')} && [...document.querySelectorAll('[data-key$=":ans"]')].pop().className`), 'bubble note');
+  assert.equal(await b.ev(`[...document.querySelectorAll('[data-key$=":ans"]')].pop().className`), 'bubble note');   // (no :last-of-type: a row also has the small `:by` and `:cut` marks, divs after the answer)
   await b.until(`/^connected · idle$/.test(${status})`, 'idle after an error');
 
   // 5. the stream dropping / a read that never answers cannot wedge the view
