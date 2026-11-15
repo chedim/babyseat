@@ -10,7 +10,7 @@ use std::path::PathBuf;
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
-const MAKER: &str = "PACK recallmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nBox.go on-setter make:\n  ALWAYS:\n    membrane::Chat:main:message[this.k] = ChatMessage(text: this.t, at: this.at)\n    membrane::Chat:main:message[this.k]:body = SemText(text: this.t)\n    membrane::Chat:main:message[this.k]:body.mention = True\n    membrane::Chat:main:message[this.k]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.k, queued_at: this.at)\n";
+const MAKER: &str = "PACK recallmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nBox.go on-setter make:\n  ALWAYS:\n    membrane::Chat:main:message[this.k] = ChatMessage(text: this.t, at: this.at)\n    membrane::Chat:main:message[this.k]:body = SemText(text: this.t)\n    membrane::Chat:main:message[this.k]:body.mention = True\n    membrane::Chat:main:message[this.k]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.k, queued_at: this.at)\n    FOR a IN ([1] if this.q == True else []):\n      membrane::Chat:main:message[this.k].queued = True\n";
 
 fn seat() -> Host { seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login"}))) }
 fn seat_with(facts: &Map<String, J>) -> Host { seat_opts(facts, false) }
@@ -46,6 +46,11 @@ fn said(h: &Host, id: &str, text: &str, at: f64) {
 fn ask(h: &Host, id: &str, text: &str, at: f64) {
     said(h, id, text, at);
     h.write(&format!("{M}{id}"), "queued", json!(true), "person"); h.pump();
+}
+/// a message POSTED as the chat posts it: the message, its body and `queued` in ONE cascade (chat.c1f), so nothing runs between the body's birth and the queueing
+fn post(h: &Host, id: &str, text: &str, at: f64) {
+    h.born(&format!("Box:{id}"), "Box", props(json!({"k": id, "t": text, "at": at, "q": true})), "person"); h.pump();
+    h.write(&format!("Box:{id}"), "go", json!(true), "person"); h.pump();
 }
 fn words(h: &Host) -> String { h.get(R, "words").as_str().unwrap_or("").to_string() }
 /// the stubbed receipt of the ask's one embedding call (what Ollama's /api/embed answers), for the message the ask is (the call names the ask's body: the recall is the body's, packs/mentions.c1f)
@@ -182,8 +187,8 @@ fn a_text_that_is_not_the_persons_is_shown_with_its_origin_as_not_the_persons_wo
 }
 
 
-/// a loopback stand-in for Ollama's /api/embed: answers every request with a fixed vector and hands back the ASK's requests it read (an ask's `input` is one text; the
-/// sentence-vector queue's requests, `input` a list, are answered and not handed back: every SemText is embedded by that queue too, packs/embed.c1f)
+/// a loopback stand-in for Ollama's /api/embed: answers every request with a fixed vector per input and hands back every request it read (the ask's own call and the
+/// sentence-vector queue's requests alike: both send a list of sentences, packs/mentions.c1f `ask_input` and packs/embed.c1f)
 fn fake_ollama() -> (String, std::sync::mpsc::Receiver<String>) { fake_ollama_slow(0, 1) }
 /// the same, answering after `delay_ms` (each request on its own thread, so a slow answer never queues another); `_n` is kept for the callers' reading
 fn fake_ollama_slow(delay_ms: u64, _n: usize) -> (String, std::sync::mpsc::Receiver<String>) {
@@ -205,10 +210,10 @@ fn fake_ollama_slow(delay_ms: u64, _n: usize) -> (String, std::sync::mpsc::Recei
             if k == 0 { break; }
         }
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-        let body = r#"{"model":"mxbai-embed-large","embeddings":[[0.5,0.25]]}"#;
+        let n = text.split("\r\n\r\n").nth(1).and_then(|b| serde_json::from_str::<J>(b).ok()).map_or(1, |b| b["input"].as_array().map_or(1, |a| a.len()));
+        let body = json!({"model": "mxbai-embed-large", "embeddings": vec![json!([0.5, 0.25]); n]}).to_string();
         let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
-        let ask = text.split("\r\n\r\n").nth(1).and_then(|b| serde_json::from_str::<J>(b).ok()).map_or(false, |b| b["input"].is_string());
-        if ask { let _ = tx.send(text); }
+        let _ = tx.send(text);
         });
     } });
     (url, rx)
@@ -225,7 +230,7 @@ fn with_a_model_backend_the_ask_is_embedded_by_one_call_and_without_one_no_call_
     let req = rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the embedding call reached the backend");
     assert!(req.starts_with("POST /api/embed "), "{req}");
     let body: J = serde_json::from_str(req.split("\r\n\r\n").nth(1).unwrap()).unwrap();
-    assert_eq!(body, json!({"model": "mxbai-embed-large", "input": "quokka facts"}));
+    assert_eq!(body, json!({"model": "mxbai-embed-large", "input": ["quokka facts"]}), "a chat ask embeds its sentences");
     for _ in 0..200 { h.pump(); if ask_vec(&h, "m1") != J::Null { break; } std::thread::sleep(std::time::Duration::from_millis(50)); }
     assert_eq!(ask_vec(&h, "m1"), json!([[0.5, 0.25]]), "the receipt is this ask's vector");
 }
@@ -335,14 +340,48 @@ fn a_missing_recall_part_never_blocks_a_turn() {
 fn two_messages_queued_quickly_each_wait_for_their_own_ask_in_order() {
     let (url, rx) = fake_ollama_slow(600, 2);
     let h = turn_seat(Some(&url));
-    ask(&h, "m1", "first question", 1.0);
-    ask(&h, "m2", "second question", 2.0);
+    post(&h, "m1", "first question", 1.0);
+    post(&h, "m2", "second question", 2.0);
     assert!(state(&h, "m1") == "queued" && state(&h, "m2") == "queued");
     until(&h, "m1 starts", |h| started(h, "m1"));
     assert_eq!(state(&h, "m2"), "queued", "the second still waits for its own embedding");
     until(&h, "m2 starts", |h| started(h, "m2"));
-    let a = rx.recv().unwrap(); let b = rx.recv().unwrap();
-    assert!(a.contains("first question") && b.contains("second question"), "one call per ask, in order");
+    let mut got = vec![];
+    while let Ok(r) = rx.recv_timeout(std::time::Duration::from_millis(1500)) { got.push(r); }
+    for q in ["first question", "second question"] { assert_eq!(got.iter().filter(|r| r.contains(q)).count(), 1, "{q} is embedded once: {got:?}"); }
+}
+
+/// a chat ask's own call embeds the message's SENTENCES and writes their vectors (operator 2026-11-15): the queue settles the body and never embeds it again
+#[test]
+fn a_chat_asks_own_call_writes_the_sentence_vectors_of_its_message() {
+    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
+    post(&h, "m1", "Quokkas eat grass. They sleep at noon.", 1.0);
+    let b = format!("{M}m1:body");
+    let job = h.get(&b, "ask_job");
+    assert_eq!(job["input"], json!(["Quokkas eat grass.", "They sleep at noon."]), "{job}");
+    assert_ne!(h.get("membrane::Embed:queue", "inflight")["eid"], json!(b.clone()), "the queue does not embed a text whose own call is out");
+    h.write("Fetch:recall:ask", "request_result", json!({"id": job["id"], "status": "ok", "rc": 0, "http_status": 200, "body": json!({"embeddings": [[1.0, 0.0], [0.0, 1.0]]}).to_string()}), "person");
+    h.pump();
+    let k = b.replace("::", "/");
+    assert_eq!(h.get(&format!("Vector:of:{k}:s:0"), "v"), json!("[2 numbers, f16]"));
+    assert_eq!(h.get(&format!("Vector:of:{k}:s:19"), "v"), json!("[2 numbers, f16]"));
+    assert_eq!(h.get(&b, "embedded"), json!(true), "the queue sees the message as embedded");
+    assert_ne!(h.get("membrane::Embed:queue", "inflight")["eid"], json!(b), "and never sent it");
+    assert_eq!(h.get(&b, "in_flight"), json!(false));
+}
+
+/// end to end against the stand-in model server: one message, one embedding request for it
+#[test]
+fn a_chat_message_is_embedded_once() {
+    let (url, rx) = fake_ollama();
+    let h = seat_with_effects(&props(json!({"seat_backend": url})));
+    post(&h, "m1", "Quokkas eat grass. They sleep at noon.", 1.0);
+    let b = format!("{M}m1:body");
+    for _ in 0..200 { h.pump(); if h.get(&b, "embedded") == json!(true) { break; } std::thread::sleep(std::time::Duration::from_millis(50)); }
+    assert_eq!(h.get(&b, "embedded"), json!(true));
+    let mut got = vec![];
+    while let Ok(r) = rx.recv_timeout(std::time::Duration::from_millis(1500)) { h.pump(); got.push(r); }
+    assert_eq!(got.iter().filter(|r| r.contains("Quokkas eat grass.")).count(), 1, "{got:?}");
 }
 
 #[test]
