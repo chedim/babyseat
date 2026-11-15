@@ -179,6 +179,9 @@ pub const UPDATED: &str = "updated";
 /// The VM-provided, read-only property of every entity: the eid of the CAUSE of its birth (the entity whose setter was running; for a door write, the Request of the call). A constant:
 /// set once at the birth, stored with the row (`StoredRow::born_by`), never written, so a getter that reads it is never invalidated by it. An entity with no cause reads as the plain "absent" null.
 pub const BORN_BY: &str = "born_by";
+/// The VM rule that charges births: when the entity whose setter creates an entity has a property `births_to` holding an entity id, the created entity's `born_by` is that id
+/// (a door call charges what it creates to the chat message it belongs to); with none, the cause is the setter's own entity. An ordinary property, read when the birth happens.
+pub const BIRTHS_TO: &str = "births_to";
 /// The VM-provided, read-only property of every loaded entity: its place in the TOUCH CLOCK (a counter the core bumps at every read, write and load; RAM only,
 /// never stored). The smaller it is, the colder the entity. Reading it (or `updated`, `eid`, `cls`, `pinned`) is no touch. EXCEPTION: an entity that STORES a property
 /// named `touched` (the Python-era `Turn.touched`) reads its own: the clock does not shadow a stored value.

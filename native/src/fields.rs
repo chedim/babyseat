@@ -377,6 +377,10 @@ impl Fields {
     }
     /// The `out` entry of a birth by a setter (the entity is in `core` already).
     /// `by` is the cause: the entity whose setter runs (the writer label that travels with `this`), kept for the entity (`Core::born_by`) and carried in the entry for the store and the journal.
+    /// Who a birth is charged to when the setter of `eid` makes an entity (the VM rule `births_to`): the entity id in the setter entity's own `births_to` property when it holds one, else `eid` itself.
+    fn cause_of(core: &Core, eid: &str) -> String {
+        match core.docs.get(eid).and_then(|e| e.props.get(crate::vm::BIRTHS_TO)) { Some(J::String(s)) if !s.is_empty() => s.clone(), _ => eid.to_string() }
+    }
     fn born_entry(&self, core: &Core, eid: &str, cls: &str, by: &str) -> J {
         let mut o = json!({"eid": eid, "born": cls, "by": by});
         if self.from_virtual(core, eid) { o["virt"] = json!(true); }
@@ -1570,8 +1574,9 @@ impl Fields {
                     }
                 }
                 core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
-                core.born_by.insert(tgt.clone(), eid.to_string());
-                self.out.push(self.born_entry(core, &tgt, cls, eid));
+                let by = Self::cause_of(core, eid);
+                core.born_by.insert(tgt.clone(), by.clone());
+                self.out.push(self.born_entry(core, &tgt, cls, &by));
                 self.birth(core, &tgt, now, seq);
             }
             if let Err(why) = self.may_write_ent(core, pack, &tgt) {
@@ -1642,8 +1647,9 @@ impl Fields {
             // the birth default of the class list: the eid's class first, then the constructor's class when it differs (the stamp), then any `parents` argument
             if own != cls && !args.iter().any(|(k, _)| k == "parents") { args.push(("parents".into(), json!([format!("cls:{}", cls.to_lowercase())]))); }
             core.load(tgt.clone(), own.clone(), Default::default(), None, now);
-            core.born_by.insert(tgt.clone(), eid.to_string());
-            self.out.push(self.born_entry(core, &tgt, &own, eid));
+            let by = Self::cause_of(core, eid);
+            core.born_by.insert(tgt.clone(), by.clone());
+            self.out.push(self.born_entry(core, &tgt, &own, &by));
             self.birth(core, &tgt, now, seq);
         } else {
             if let Err(why) = self.may_write_ent(core, pack, &tgt) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }

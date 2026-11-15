@@ -150,7 +150,7 @@ VIRTUAL Command
 Every entity also has `updated`, read-only and provided by the VM: the time of its last write (seconds since 1970), stamped with the write; reading it causes no recompute, writing it is refused:
 `Note:a.updated`.
 
-Every entity also remembers what birthed it: `born_by`, read-only and provided by the VM, is the id of the CAUSE of its birth, the entity whose setter was running when it was made, or, for a thing a tool call made, the request of that call. It is fixed at the birth and never changes, and writing it is refused. An entity that was loaded, or born by the seat itself, has no cause: it reads as an absent null. A request names the chat message its call belongs to (`mc_message`), so the chain is plain reads: the thing, its `born_by`, that request's `mc_message`; but a request is collected once its reply is sent ("How long a virtual entity lives"), so the chain can be followed while the call is open:
+Every entity also remembers what birthed it: `born_by`, read-only and provided by the VM, is the id of the CAUSE of its birth, the entity whose setter was running when it was made. It is fixed at the birth and never changes, and writing it is refused. An entity that was loaded, or born by the seat itself, has no cause: it reads as an absent null. A setter's entity may say where its births are charged: when it has a `births_to` holding an id, what its setter makes says that id in `born_by` instead. A tool call does this with the chat message it belongs to, so what a call made says the message, for good, and which things a message made is a plain query over `born_by`; a call that names no message is the cause itself (its request).
 
 ```c1f
 PACK maker 1
@@ -165,7 +165,7 @@ Box.made getter: [x.eid for x in instances('Thing') if x.born_by == this.eid]
 -- reads Box:a.made = ["Thing:t1"]
 ```
 
-`Box.made` is how to ask which things one cause made.
+`Box.made` is how to ask which things one cause made. With `-- given Box:a {"births_to": "Note:m"}` the thing would say `Note:m`.
 
 ### How long a virtual entity lives
 

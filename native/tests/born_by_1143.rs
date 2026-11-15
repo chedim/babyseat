@@ -139,3 +139,33 @@ fn a_replay_gives_the_same_causes_engine_births_recomputed_and_outside_lines_by_
     assert!(matches!(old, Line::Born { by: None, .. }));
     assert!(old.to_json().get("by").is_none(), "and writes no key when there is none");
 }
+
+#[test]
+fn a_setter_entity_that_names_where_its_births_are_charged_is_not_the_cause_that_entity_is() {
+    // the VM rule: when the entity whose setter runs has a `births_to` holding an entity id, what the setter creates says THAT entity in `born_by`; else the setter's own entity
+    let f = tmpfile("chargeto");
+    let a = seat(Some(&f));
+    a.hold("Gone:g");
+    a.born("Box:a", "Box", props(json!({"births_to": "Msg:1"})), "person");
+    a.write("Box:a", "go", json!(1), "person");
+    a.born("Gone:g", "Gone", props(json!({"births_to": "Msg:2"})), "person");
+    a.write("Gone:g", "go", json!(1), "person");
+    a.born("Box:b", "Box", props(json!({})), "person");
+    a.write("Box:b", "go", json!(1), "person");   // no births_to: the old rule (Thing:t1 exists already, so b creates nothing new; the cascade's Other:o1 too)
+    assert_eq!(a.born_by("Thing:t1"), Some("Msg:1".into()));
+    assert_eq!(a.born_by("Other:o1"), Some("Thing:t1".into()), "the next step's setter entity has no births_to: itself");
+    assert_eq!(a.born_by("Thing:v1"), Some("Msg:2".into()), "a virtual trigger's birth too");
+    let line = a.journal().into_iter().find(|l| matches!(l, Line::Born { eid, .. } if eid == "Thing:v1")).unwrap();
+    assert!(matches!(&line, Line::Born { by: Some(b), .. } if b == "Msg:2"), "{line:?}");
+    // a replay gives the same causes
+    let b = seat(None);
+    b.replay(&a.journal());
+    b.pump();
+    for e in ["Thing:t1", "Other:o1", "Thing:v1"] { assert_eq!(b.born_by(e), a.born_by(e), "{e}"); }
+    drop(a);
+    // and a restart keeps them
+    let r = seat(Some(&f));
+    r.load_stored_entities();
+    assert_eq!(r.born_by("Thing:t1"), Some("Msg:1".into()));
+    assert_eq!(r.born_by("Thing:v1"), Some("Msg:2".into()), "a virtual trigger's birth is a stored row: kept too");
+}

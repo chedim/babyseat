@@ -1048,6 +1048,7 @@
   "door_tools": {
     "getters": {
       "Pack.state": "Text",
+      "Request.births_to": "Any",
       "Request.cl_bad": "Text?",
       "Request.cl_code": "Text",
       "Request.cl_ge": "Text",
@@ -1146,6 +1147,7 @@
     },
     "writes": {
       "*.[prop(this.mc_write, 'prop')]": "Any",
+      "*.births_to": "Any",
       "*.go": "Bool",
       "*.privileged": "Bool",
       "*.retire": "Bool",

@@ -103,27 +103,37 @@ fn rpc_x(port: u16, turn: Option<&str>, tool: &str, args: J) -> String {
 fn read(port: u16, spec: &str, prop: &str) -> String { rpc_x(port, None, "entity_read", json!({"spec": spec, "prop": prop})) }
 const MSG: &str = "membrane::Chat:main:message:t1";
 
+fn cause_of(port: u16, e: &str) -> String { wait("the entity names its cause", || { let r = read(port, e, "born_by"); (!r.contains("has no born_by")).then_some(r) }) }
+
 #[test]
-fn what_a_tool_call_creates_walks_back_by_plain_reads_to_the_message_of_the_turn() {
+fn what_a_call_creates_says_the_message_of_the_turn_and_keeps_saying_it_after_the_request_is_collected() {
     let dir = setup("bornchain");
     let run = start(&dir, false, &[]);
     let port = run.port;
     rpc_x(port, None, "entity_write", json!({"spec": MSG, "prop": "text", "value": "hello"}));
-    // the call is still going (a command it started, held for its receipt): its Request is alive, so the chain can be walked
-    let t = std::thread::spawn(move || rpc_x(port, Some(MSG), "entity_write", json!({"spec": "Command:slow", "prop": "run", "value": {"id": "r1", "cmd": "sleep 3"}, "wait": 30})));
-    let req = wait("the entity names its cause", || { let r = read(port, "Command:slow", "born_by"); r.starts_with("Request:").then_some(r) });
-    assert_eq!(read(port, &req, "mc_turn"), MSG, "the header");
-    assert_eq!(read(port, &req, "mc_message"), MSG, "and the Request names the message of the turn");
+    // (a) an entity_write with the turn's header
+    let t = std::thread::spawn(move || rpc_x(port, Some(MSG), "entity_write", json!({"spec": "Command:slow", "prop": "run", "value": {"id": "r1", "cmd": "sleep 1"}, "wait": 30})));
+    assert_eq!(cause_of(port, "Command:slow"), MSG, "the message is the cause");
+    let reqs = rpc_x(port, None, "run_cliff", json!({"code": "join([r.eid for r in instances('Request') if r.mc_turn == '".to_string() + MSG + "' and r.mc_tool == 'entity_write'], ' ')"}));
+    let req = reqs.trim().to_string();
+    assert!(req.starts_with("Request:"), "the call's Request is alive while the call is open: {reqs}");
     let _ = t.join();
-    // a call with no turn: its entity still says its Request, which names no message
-    let t2 = std::thread::spawn(move || rpc_x(port, None, "entity_write", json!({"spec": "Command:slow2", "prop": "run", "value": {"id": "r2", "cmd": "sleep 3"}, "wait": 30})));
-    let r2 = wait("the entity names its cause", || { let r = read(port, "Command:slow2", "born_by"); r.starts_with("Request:").then_some(r) });
-    assert!(r2 != req, "{r2}");
-    let m2 = read(port, &r2, "mc_message");
-    assert!(!m2.starts_with("membrane::"), "no header, no message: {m2}");
-    let _ = t2.join();
-    // the cause never changes: a later write to the entity does not re-birth it; and the message itself, written by an earlier call, names that call's Request
-    rpc_x(port, None, "entity_write", json!({"spec": "Command:slow", "prop": "note", "value": 1}));
-    assert_eq!(read(port, "Command:slow", "born_by"), req);
-    assert!(read(port, MSG, "born_by").starts_with("Request:"));
+    wait("the call's Request is collected", || (read(port, "Command:slow", "born_by") == MSG && read(port, &req, "mc_turn").contains("collected")).then_some(()));
+    assert_eq!(read(port, "Command:slow", "born_by"), MSG, "after the Request is gone the chain still ends at the message");
+    // (b) a run_cliff block creating an entity
+    rpc_x(port, Some(MSG), "run_cliff", json!({"code": "Box:9.n = 1"}));
+    assert_eq!(cause_of(port, "Box:9"), MSG, "the block's creations are charged to the message, not to the scratch entity that runs it");
+    // (c) a call without the header: the Request, as before
+    rpc_x(port, None, "entity_write", json!({"spec": "Box:2", "prop": "n", "value": 1}));
+    let r2 = cause_of(port, "Box:2");
+    assert!(r2.starts_with("Request:"), "{r2}");
+    rpc_x(port, None, "run_cliff", json!({"code": "Box:8.n = 1"}));
+    let r3 = cause_of(port, "Box:8");
+    assert!(r3.starts_with("Request:") && r3 != r2, "{r3}");
+    // a header that names no chat message is no message
+    rpc_x(port, Some("membrane::Box:1"), "entity_write", json!({"spec": "Box:3", "prop": "n", "value": 1}));
+    assert!(cause_of(port, "Box:3").starts_with("Request:"));
+    // which entities did the message create: a plain query over born_by
+    let q = rpc_x(port, None, "run_cliff", json!({"code": "join([x.eid for x in instances('Box') if x.born_by == '" .to_string() + MSG + "'], ' ')"}));
+    assert_eq!(q.trim(), "Box:9", "{q}");
 }
