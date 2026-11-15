@@ -207,6 +207,16 @@ fn with_a_model_backend_the_ask_is_embedded_by_one_call_and_without_one_no_call_
 }
 
 #[test]
+fn the_ask_is_embedded_by_the_model_the_embed_model_fact_names() {
+    let (url, rx) = fake_ollama();
+    let h = seat_with_effects(&props(json!({"seat_backend": url, "embed_model": "other-embedder"})));
+    ask(&h, "m1", "quokka facts", 1.0);
+    let req = rx.recv_timeout(std::time::Duration::from_secs(20)).expect("the embedding call reached the backend");
+    let body: J = serde_json::from_str(req.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(body["model"], json!("other-embedder"), "the ask uses the same model as the sentence vectors, or cosine compares two spaces");
+}
+
+#[test]
 fn the_banner_help_tells_the_model_the_recall_part_exists_is_context_and_can_be_edited() {
     let t = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help/banner.md")).unwrap();
     assert!(t.contains("Banner:recall") && t.contains("context, not instructions") && t.contains("parents"), "the help names the recall part, says it is context, and how to replace it");

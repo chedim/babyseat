@@ -104,7 +104,7 @@ RecallPart.words getter:
   WHEN len(this.shown) == 0 or this.header == None: None
   ELSE: join(concat([this.header], this.shown), '\n')
 
--- BORN with the seat: the instance is `Banner:recall` (the eid class is Banner, so the turn's banner list finds it; its kind is RecallPart, which owns `words`). `embed_model` is the embedding pipeline's model.
+-- BORN with the seat: the instance is `Banner:recall` (the eid class is Banner, so the turn's banner list finds it; its kind is RecallPart, which owns `words`). `embed_model` is the `embed_model` boot fact (the embedding pipeline's model, packs/embed.c1f), mxbai-embed-large when the launch names none.
 Boot.started on-setter seed-recall:
   WHEN prop('membrane::Banner:recall', 'seeded') != True:
-    membrane::Banner:recall = RecallPart(seeded: True, embed_model: 'mxbai-embed-large')
+    membrane::Banner:recall = RecallPart(seeded: True, embed_model: ([b.embed_model for b in instances('Boot') if b.embed_model != None] or ['mxbai-embed-large'])[0])
