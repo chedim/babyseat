@@ -115,7 +115,7 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 67,
+    "members": 69,
     "writes": [
       "Doorbell:chat.at",
       "membrane:*.mention",
@@ -140,7 +140,8 @@
     "imports": [
       "chat",
       "chat_turn",
-      "fetch"
+      "fetch",
+      "semtext"
     ],
     "classes": [
       "Chat",
@@ -149,7 +150,7 @@
       "ChatRound",
       "Chunk"
     ],
-    "members": 64,
+    "members": 66,
     "writes": [
       "*.request",
       "*.text",
@@ -193,7 +194,7 @@
       "Chunk",
       "Request"
     ],
-    "members": 64,
+    "members": 65,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",

@@ -119,8 +119,12 @@ ChatRow.who getter:
   t0 = prop(tn, 'started')
   t1 = prop(tn, 'ended')
   'queued' if this.state == 'queued' else ('working' if this.state == 'running' else 'seat' + ((' · ' + before(str(max(0, t1 - t0 + 0.5)), '.') + ' s') if t0 != None and t1 != None else ''))
+-- a turn that ended in an error after the model had said something (packs/chat.c1f `page_view`: `interrupted` = the error's reason, `kept` = the words): the words are the answer shown,
+-- and a small muted mark under them says it was interrupted and why, so an incomplete message is never read as a complete one
+ChatRow.cut getter: prop(this.raw, 'interrupted') if prop(this.raw, 'kept') else None
 ChatRow.ans_text getter:
-  WHEN prop(this.raw, 'response'): str(prop(this.raw, 'response'))
+  WHEN this.cut != None: str(prop(this.raw, 'kept'))
+  ELSE WHEN prop(this.raw, 'response'): str(prop(this.raw, 'response'))
   ELSE WHEN not this.done: 'Waiting for a turn…' if this.state == 'queued' else 'Working on it…'
   ELSE: ''
 -- the finished tools (a page row carries `tool_calls`, [] while the turn runs: as the legacy chat, that wins) else the names
@@ -128,12 +132,12 @@ ChatRow.tool_list getter: prop(this.raw, 'tool_calls') if prop(this.raw, 'tool_c
 -- a tool's input is shortened to `tool_chars` with an ellipsis; a tool is keyed by its call id (the history route's `id`; a name-only list has none, so its key is the name)
 ChatRow.tool_rows getter: [{'k': str(prop(x, 'id') or ((prop(x, 'name') or prop(x, 'eid') or '') + '|' + ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else ''))), 'name': str(prop(x, 'name') or prop(x, 'eid') or ''), 'in': ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else '')} for x in this.tool_list]
 -- what the answer bubble holds: the answer is MARKDOWN (markdown.c1f draws it into `ans:md`); the pending line is plain text (`ans:ph`) and is there only while there is no answer
-ChatRow.ans_src getter: str(prop(this.raw, 'response') or '')
+ChatRow.ans_src getter: str(prop(this.raw, 'kept')) if this.cut != None else str(prop(this.raw, 'response') or '')
 ChatRow.ph getter: '' if this.ans_src != '' else this.ans_text
 -- a turn the person stopped (the seat ends it with this line, packs/chat_turn.c1f) is a neutral note, not an error
 ChatRow.stopped getter: tail(this.ans_src, 23) == '(stopped from the page)'
 ChatRow.ans_class getter: ('bubble seat stopped' if this.stopped else ('bubble note' if this.state == 'error' else 'bubble seat')) if prop(this.raw, 'response') else 'bubble seat pending'
-ChatRow.view getter: {'id': this.rid, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_src': this.ans_src, 'ph': this.ph, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'by': 'sent by the seat' if prop(this.raw, 'sent_by') == 'seat' else '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows} if this.raw != None else None
+ChatRow.view getter: {'id': this.rid, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_src': this.ans_src, 'ph': this.ph, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'by': 'sent by the seat' if prop(this.raw, 'sent_by') == 'seat' else '', 'cut': ('interrupted: ' + str(this.cut)) if this.cut != None else '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows} if this.raw != None else None
 
 ChatRow.view on-setter chat-draw-row:
   WHEN this.view != None:
@@ -174,6 +178,12 @@ ChatRow.view on-setter chat-draw-row:
     (base + ':ans:md').class = 'md'
     ('Md:' + prop(this.view, 'id') + ':ans').into = base + ':ans:md'
     ('Md:' + prop(this.view, 'id') + ':ans').src = prop(this.view, 'ans_src')
+    -- the interrupted mark, in the same muted line as `who` (hidden unless the turn was interrupted)
+    (base + ':cut').parent = base
+    (base + ':cut').tag = 'div'
+    (base + ':cut').class = 'who'
+    (base + ':cut').hidden = prop(this.view, 'cut') == ''
+    (base + ':cut').text = prop(this.view, 'cut')
     (base + ':tools').parent = base
     (base + ':tools').tag = 'details'
     (base + ':tools').class = 'tools-run'
