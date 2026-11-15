@@ -140,12 +140,14 @@ fn under_pressure_the_coldest_leave_until_rss_is_under_the_soft_line_and_the_hot
     assert!(left < 20 && left >= 5, "unloaded in batches until under the soft line (60 MB): {left} loaded");
     for i in 0..5 { assert!(h.snapshot().contains_key(&format!("Box:{i}")), "the hot Box:{i} stays"); }
     assert_eq!(h.rows().keys().filter(|k| k.starts_with("Box:")).count(), 50, "every row is kept");
-    assert_eq!(h.unloaded_count(), 50 - left, "the unloaded are noted for a reload");
+    // the unloaded boxes are noted for a reload; at most one more entity left beside them: `recall:dials`, the policy entity every host loads at open (cold, like a box nobody reads)
+    assert!(h.unloaded_count() >= 50 - left && h.unloaded_count() - (50 - left) <= 1, "the unloaded are noted for a reload: {} noted, {} boxes unloaded", h.unloaded_count(), 50 - left);
     let n = loaded_boxes(&h);
     for _ in 0..3 { set_rss(&h, &rss); h.tick(); h.pump(); }
     assert_eq!(loaded_boxes(&h), n, "nothing more is unloaded once under the line");
     // lazy reload: every value reads back, the getters too
     for i in 5..50 { assert_eq!(h.get(&format!("Box:{i}"), "text"), json!(format!("box {i}")), "Box:{i}"); assert_eq!(h.get(&format!("Box:{i}"), "double"), json!(i * 2)); }
+    let _ = h.get("recall:dials", "banner_n");   // the policy entity every host loads at open may have left too: reading it loads it back
     assert_eq!(h.unloaded_count(), 0, "all loaded back by the reads");
 }
 
