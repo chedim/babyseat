@@ -280,8 +280,18 @@ fn a_near_that_fails_is_a_missing_lane_not_an_error() {
 
 // ---- the turn waits for its own ask's embedding (operator 2026-11-14) ------------------------------------------------------------------------
 /// a seat that can start a chat turn in process: the claude binary named, the login mode, a door port (the turn's MCP config needs one)
+/// a fake claude that keeps the turn RUNNING for a second: it reads its stdin, waits, and ends without a result line (what /usr/bin/true does at once). The tests read the prompt the model got (the
+/// message's `stdin` getter, none once the turn is over) while the turn is in flight; with an instant CLI that window is one pump wide and a slower machine misses it.
+fn slow_claude() -> String {
+    use std::os::unix::fs::PermissionsExt;
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let p = std::env::temp_dir().join(format!("fake-claude-{}-{}.sh", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
+    std::fs::write(&p, "#!/bin/sh\ncat >/dev/null\nsleep 1\nexit 0\n").unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    p.to_string_lossy().to_string()
+}
 fn turn_seat(backend: Option<&str>) -> Host {
-    let mut f = props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login"}));
+    let mut f = props(json!({"chat_claude_bin": slow_claude(), "chat_auth": "login"}));
     if let Some(b) = backend { f.insert("seat_backend".into(), json!(b)); }
     let h = seat_opts(&f, true);
     h.hold("Http:fake");
