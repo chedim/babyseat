@@ -1305,23 +1305,39 @@ impl Fields {
     /// An entity leaves (a page element taken out of the DOM): it is gone from the mirror, and what read it or
     /// referenced it recalculates, live, as after a write of each of its fields to nothing.
     pub fn remove(&mut self, core: &mut Core, host: &dyn Host, eid: &str, now: f64, seq: &mut i64) {
-        let Some(old) = core.docs.get(eid).map(|e| e.props.clone()) else { return };
+        self.remove_many(core, host, &[eid.to_string()], now, seq);
+    }
+
+    /// Remove many entities in ONE round with ONE pass over each bookkeeping table (the same forgetting as `remove`, per entity; the way `unload_many` does it). `remove`
+    /// retained over the whole of `dirty`, `reads` and `deps` and ran a round for each entity: a batch of N cost N passes and N rounds (measured 2026-11-15 on a seat whose
+    /// collector took ~670 entities at once: the removes were all of the profile and the seat did not answer). Here the passes are one, whatever N; what read any of them
+    /// recalculates once, after all have left (a getter reads the end state, as it did after the last of the separate rounds).
+    pub fn remove_many(&mut self, core: &mut Core, host: &dyn Host, eids: &[String], now: f64, seq: &mut i64) {
         crate::span!("remove");
         crate::gauge!("deps", self.deps.len());
         crate::gauge!("reads", self.reads.len());
         crate::gauge!("dirty", self.dirty.len());
-        if let Some(c) = core.docs.get(eid).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c.clone())); self.mark_key(&(crate::vm::VECTORS_READ.to_string(), c)); }
-        *seq += 1;
-        core.hear(Write { eid: eid.into(), prop: String::new(), new: J::Null, old: J::Null, writer: "remove".into(),
-                          chain: json!({}), seq: *seq }, None, now);
-        self.known.remove(eid);
-        self.dirty.retain(|(_, e, _)| e != eid);
+        let mut gone: Vec<(&str, serde_json::Map<String, J>)> = vec![];
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for eid in eids {
+            if !seen.insert(eid.as_str()) { continue; }
+            let Some(old) = core.docs.get(eid.as_str()).map(|e| e.props.clone()) else { continue };
+            if let Some(c) = core.docs.get(eid.as_str()).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c.clone())); self.mark_key(&(crate::vm::VECTORS_READ.to_string(), c)); }
+            *seq += 1;
+            core.hear(Write { eid: eid.as_str().into(), prop: String::new(), new: J::Null, old: J::Null, writer: "remove".into(),
+                              chain: json!({}), seq: *seq }, None, now);
+            self.known.remove(eid.as_str());
+            gone.push((eid.as_str(), old));
+        }
+        if gone.is_empty() { return; }
+        let names: std::collections::HashSet<&str> = gone.iter().map(|(e, _)| *e).collect();
+        self.dirty.retain(|(_, e, _)| !names.contains(e.as_str()));
         // what its getters read is forgotten with it: a reload under another class must not run the old class's getters
-        self.reads.retain(|(e, _), _| e != eid);
-        for set in self.deps.values_mut() { set.retain(|(e, _)| e != eid); }
+        self.reads.retain(|(e, _), _| !names.contains(e.as_str()));
+        for set in self.deps.values_mut() { set.retain(|(e, _)| !names.contains(e.as_str())); }
         self.link.dirty = true;
-        for (p, v) in &old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); }
-        self.dirty.retain(|(_, e, _)| e != eid);
+        for (eid, old) in &gone { for (p, v) in old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); } }
+        self.dirty.retain(|(_, e, _)| !names.contains(e.as_str()));
         self.new_round();
         self.run(core, host, VecDeque::new(), now, seq);
     }

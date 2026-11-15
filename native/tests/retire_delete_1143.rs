@@ -40,3 +40,16 @@ fn retiring_a_parent_takes_its_children_and_not_its_lookalikes() {
     left.sort();
     assert_eq!(left, ["A", "A:10", "A:10:x", "A:2"], "A:1 takes A:1:x and A:1:x:y with it, never A:10");
 }
+
+#[test]
+fn many_retired_at_once_leave_what_read_them_right() {
+    let mut o = Options::new(Some(tmpfile("many"))); o.effects = false;
+    let h = Host::open(o).unwrap();
+    h.load_pack("t", "PACK t 1\nRESIDENT Count\nCount.n getter: len(instances('Box'))\n").unwrap();
+    h.rebuild();
+    h.born("Count:c", "Count", props(json!({})), "person");
+    for i in 0..60 { h.born(&format!("Box:{i}"), "Box", props(json!({"v": i})), "person"); h.born(&format!("Box:{i}:kid"), "Box", props(json!({"v": 1})), "person"); }
+    assert_eq!(h.get("Count:c", "n"), json!(120));
+    for i in 10..60 { h.write(&format!("Box:{i}"), "retire", json!(true), "person"); }
+    assert_eq!(h.get("Count:c", "n"), json!(20), "the fifty parents took their fifty children with them");
+}
