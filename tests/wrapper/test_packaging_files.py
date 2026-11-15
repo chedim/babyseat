@@ -133,3 +133,12 @@ def test_publish_can_make_the_github_release_a_pre_release_so_the_stable_channel
     t = wf("publish.yml")
     assert re.search(r"(?ms)^      prerelease:\n        description: .*?\n        type: boolean\n        default: false", t)
     assert "inputs.prerelease" in t and "--prerelease" in t
+
+
+def test_the_image_lane_moves_latest_and_the_minor_tag_only_for_a_stable_release():
+    # existing pulls of chedim/babyseat and chedim/membrane follow `latest` and X.Y: a pre-release (0.7.60 ships as one) must not move them; only X.Y.Z is pushed unless the dispatch says `stable`
+    t = wf("docker.yml")
+    assert re.search(r"(?ms)^      stable:\n        description: .*?\n        type: boolean\n        default: false", t)
+    assert "type=raw,value=latest,enable=${{ inputs.stable == true }}" in t
+    assert "pattern={{major}}.{{minor}},value=${{ steps.ver.outputs.version }},enable=${{ inputs.stable == true }}" in t
+    assert "pattern={{version}},value=${{ steps.ver.outputs.version }}\n" in t
