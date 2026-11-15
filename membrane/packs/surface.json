@@ -658,7 +658,7 @@
       "Fetch",
       "SemText"
     ],
-    "members": 44,
+    "members": 45,
     "writes": [
       "*.cache",
       "*.emb_n",
@@ -1069,9 +1069,10 @@
       "Span",
       "Word"
     ],
-    "members": 63,
+    "members": 69,
     "writes": [
       "*.request",
+      "*.retire",
       "Identifier:*.mentioned_in",
       "Identifier:*=Identifier()",
       "Path:*.mentioned_in",

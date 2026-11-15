@@ -75,7 +75,8 @@ EmbedQueue.page_rows getter: sql("SELECT k, sk, row_number() OVER (ORDER BY sk D
 EmbedQueue.page getter: this.page_rows if this.page_rows is List and this.model != None and this.backend != None else []
 EmbedQueue.texts getter: distinct(concat(head(this.asks, 64), [prop(r, 'k') for r in this.page]))
 -- a stored text that is not loaded yet reads `vec_todo` as none: that is `not known`, never `nothing to do` (the first text not known yet makes the queue wait for it, so the order holds)
-EmbedQueue.open getter: [t for t in this.texts if not (prop(t, 'vec_todo') is List) or len(prop(t, 'vec_todo')) > 0]
+-- (a text whose own recall call is out, packs/mentions.c1f `in_flight`, waits: that call may make its vectors, `embed-ask-vectors` below)
+EmbedQueue.open getter: [t for t in this.texts if prop(t, 'in_flight') != True and (not (prop(t, 'vec_todo') is List) or len(prop(t, 'vec_todo')) > 0)]
 EmbedQueue.cur getter: this.open[0] if len(this.open) > 0 and prop(this.open[0], 'vec_todo') is List else None
 EmbedQueue.todo getter: prop(this.cur, 'vec_todo') if this.cur != None else []
 
@@ -172,3 +173,12 @@ Fetch.em_ok on-setter embed-landed:
       (q).pass_n = 0 if (prop(q, 'pass_n') or 0) + this.em_job['n'] >= 256 else (prop(q, 'pass_n') or 0) + this.em_job['n']
       (q).landed = prop(this.em_job, 'id')
       (q).fail = None
+
+-- ---- a recall ask's own call that embedded the text's SENTENCES (packs/mentions.c1f `ask_input` a list: a Memory note) is this pipeline's request for them -----------------------
+-- (operator 2026-11-15): its vectors are written as the sentence vectors and `emb_n` counts them, so the queue settles the text (`embedded`, its ask retired) and never sends it again.
+SemText.ask_vecs on-setter embed-ask-vectors:
+  WHEN this.ask_vecs != None and prop(prop(this.ask_rr, 'id'), 'starts') != None:
+    sts = prop(prop(this.ask_rr, 'id'), 'starts')
+    FOR it IN [{'start': st, 'v': this.ask_vecs[len([y for y in sts if y < st])]} for st in sts]:
+      ('Vector:of:' + this.skey + ':s:' + str(it['start'])) = Vector(of: this.eid, start: it['start'], v: it['v'])
+    this.emb_n = max(this.emb_n or 0, len(sts))

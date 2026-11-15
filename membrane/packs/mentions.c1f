@@ -168,9 +168,9 @@ SemText.related getter:
 --     WEIGHTS: the k-th text back counts `r_ratio`^k (`r_weights`; the ask 1, then 1/2, 1/4, ...): the ratio is a getter a layer overrides, and the length of `r_weights` is the window's (6 texts).
 --   EDGES   the sentences that mention the Word / Identifier / Path entities of the window's texts: a shared entity adds (the weight of the window text that mentions it) x 1 / (the number
 --           of sentences that mention it) (`edge_rows`, above), at most `entity_pool_max` (a dial).
---   COSINE  the sentences whose vectors are nearest the ask's vector, at most `pool` (a dial): `near(ask_vec, 'Vector', pool)`; absent while there is no vector.
---           THE QUERY IS THE ASK'S OWN VECTOR (one embedding call of the ask's text, below). The design's query, the weighted sum of the window's sentence vectors, needs a sum over a
---           list of vectors that c1f cannot write (`+` adds two; there is no fold): it waits for a vector-sum builtin (operator decision).
+--   COSINE  the sentences whose vectors are nearest the QUERY, at most `pool` (a dial): `near(r_query, 'Vector', pool)`; absent while there is no vector. The query is the weighted sum
+--           (`r_weights`) of the window's texts' vectors, each the unit of the sum of the text's sentence vectors; the ask's own come from its own embedding call (below) until its sentence
+--           vectors are made.
 --   FUSION by reciprocal rank (`rrf_k`), ties by key; RERANK of the first `rerank_top` rows by the fitted weights `weights.rerank` over sim (the cosine score), inv_rank (1 / the fused place)
 --           and overlap (the share of the ask's own entities the sentence mentions); the features this seat does not have are 0, as the old seat scored a row the models had not scored.
 --   THE ASK ITSELF is never a hit; nothing else is left out (recent chat texts are hits: the model gets no chat history).
@@ -216,20 +216,25 @@ SemText.r_edge_rows getter:
   n = len(this.mentions or [])
   [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'rank': len(before(ej, '|' + x['key'] + '|')) - len(replace(before(ej, '|' + x['key'] + '|'), '|', '')) + 1, 'sim': 0, 'ov': x['d'] / n if n > 0 else 0} for x in this.r_edge_keyed]
 
--- THE ASK'S OWN VECTOR: one embedding call of the ask's text to the local model server (the boot facts `seat_backend` and `embed_model`, the embedding pipeline's model, packs/embed.c1f), with
--- its own 10 s limit (operator 2026-11-14: a hung server holds a reader for at most that long). The call is the Fetch entity `ask_fetch` (the chat's asks share `Fetch:recall:ask`; a Memory's is
--- `Fetch:recall:note`); a receipt that names another text is not this one's. `in_flight` is true ONLY while this text's call is out (no backend, no model, no text, a refused or failed call: not).
+-- THE ASK'S OWN CALL: one embedding call to the local model server (the boot facts `seat_backend` and `embed_model`, the embedding pipeline's model, packs/embed.c1f), with its own
+-- 10 s limit (operator 2026-11-14: a hung server holds a reader for at most that long). What it embeds is `ask_input`: the ask's text as ONE input (a chat ask: one vector), or a list of
+-- its first sentences (a Memory note, below: then the call is the embedding pipeline's request for those sentences and writes their `Vector`s, packs/embed.c1f `embed-ask-vectors`).
+-- The call is the Fetch entity `ask_fetch` (the chat's asks share `Fetch:recall:ask`; each Memory note has its own, `Fetch:recall:note:<key>`); a receipt that names another text is
+-- not this one's. `in_flight` is true ONLY while this text's call is out (no backend, no model, no text, a refused or failed call: not; for a note, not once its vectors are made).
 SemText.ask_fetch getter: 'Fetch:recall:ask'
+SemText.ask_input getter: str(this.text or '')
 SemText.ask_job getter:
   WHEN this.recall_on != True: None
   ELSE:
-    be = ([b.seat_backend for b in instances('Boot') if b.seat_backend != None] or [''])[0]
+    be =([b.seat_backend for b in instances('Boot') if b.seat_backend != None] or [''])[0]
     root = head(be, len(be) - 1) if tail(be, 1) == '/' else be
     md = ([b.embed_model for b in instances('Boot') if b.embed_model != None] or [None])[0]
-    {'ask': this.eid, 'text': str(this.text or ''), 'url': root + '/api/embed', 'model': md} if root != '' and md != None and strip(str(this.text or '')) != '' else None
+    inp = this.ask_input
+    sts = [s['start'] for s in head(this.sentences or [], len(inp))] if inp is List else None
+    {'id': {'ask': this.eid} if sts == None else {'ask': this.eid, 'starts': sts}, 'input': inp, 'url': root + '/api/embed', 'model': md} if root != '' and md != None and strip(str(this.text or '')) != '' and len(inp) > 0 else None
 SemText.ask_job on-setter recall-ask-embed:
   WHEN this.ask_job != None:
-    (this.ask_fetch).request = {'id': {'ask': this.eid}, 'url': this.ask_job['url'], 'method': 'POST', 'timeout_s': 10, 'headers': {'Content-Type': 'application/json'}, 'body': {'model': this.ask_job['model'], 'input': this.ask_job['text']}}
+    (this.ask_fetch).request = {'id': this.ask_job['id'], 'url': this.ask_job['url'], 'method': 'POST', 'timeout_s': 10, 'headers': {'Content-Type': 'application/json'}, 'body': {'model': this.ask_job['model'], 'input': this.ask_job['input']}}
 -- (a call not made yet is a plain null: no reason that a write's reply would list)
 SemText.ask_rr getter:
   WHEN this.recall_on != True: None
@@ -237,14 +242,29 @@ SemText.ask_rr getter:
     rr = prop(this.ask_fetch, 'request_result')
     None if rr == None else rr
 SemText.in_flight getter: this.ask_job != None and prop(prop(this.ask_rr, 'id'), 'ask') != this.eid
-SemText.ask_vec getter:
+-- the vectors the call gave, one per input (a receipt with another count is no answer)
+SemText.ask_vecs getter:
   WHEN this.ask_rr == None or prop(this.ask_rr, 'rc') != 0 or prop(this.ask_rr, 'http_status') != 200 or prop(prop(this.ask_rr, 'id'), 'ask') != this.eid: None
   ELSE:
     j = json(str(prop(this.ask_rr, 'body') or ''))
-    None if j is Error else (prop(j, 'embeddings') or [None])[0]
+    e = None if j is Error else prop(j, 'embeddings')
+    n = len(prop(prop(this.ask_rr, 'id'), 'starts') or [1])
+    e if e is List and len(e) == n and len([v for v in e if not (v is List) or len(v) == 0]) == 0 else None
+
+-- THE QUERY of the cosine lane (#1143, operator 2026-11-15): the window's texts' vectors, summed with the window's weights (`r_weights`, by `vsum`); a text's vector is the unit of the sum of
+-- its sentence vectors (`Vector:of:<key>:s:<start>`, the embedding pipeline's). The ask's own are its call's vectors while that receipt is there (a chat ask's call embeds its whole text:
+-- one vector; a note's, its sentences), else its sentence vectors. A window text with no vector yet is left out; with none at all there is no query and no cosine lane.
+SemText.r_qrows getter:
+  WHEN this.r_win == None: None
+  ELSE: [{'w': x['w'], 'vs': this.ask_vecs if x['t'] == this.eid and this.ask_vecs != None else [v for v in [prop('Vector:of:' + replace(x['t'], '::', '/') + ':s:' + str(s['start']), 'v') for s in (prop(x['t'], 'sentences') or [])] if v != None]} for x in this.r_win]
+SemText.r_query getter:
+  WHEN this.r_qrows == None: None
+  ELSE:
+    ok = [r for r in this.r_qrows if len(r['vs']) > 0]
+    vsum([unit(vsum(r['vs'])) for r in ok], [r['w'] for r in ok]) if len(ok) > 0 else None
 
 -- THE COSINE LANE: `near` answers a reasoned null (no vectors yet) or an Error (a wrong dimension) or a list; a missing lane is an empty one, never an error
-SemText.r_cos_raw getter: near(this.ask_vec, 'Vector', prop('recall:dials', 'pool')) if this.ask_vec != None and prop('recall:dials', 'pool') != None else []
+SemText.r_cos_raw getter: near(this.r_query, 'Vector', prop('recall:dials', 'pool')) if this.r_query != None and prop('recall:dials', 'pool') != None else []
 SemText.r_cos_keyed getter: [{'key': prop(h['eid'], 'of') + '#' + str(prop(h['eid'], 'start')), 'of': prop(h['eid'], 'of'), 'start': prop(h['eid'], 'start'), 'sim': h['score']} for h in ([] if (this.r_cos_raw is Error or this.r_cos_raw == None) else this.r_cos_raw) if prop(h['eid'], 'of') != this.eid]
 SemText.r_cos_rows getter:
   cj = '|' + join([x['key'] for x in this.r_cos_keyed], '|') + '|'
@@ -298,8 +318,10 @@ SemText.recall getter:
 -- `Memory:<id>.text = "..."` (entity_write, or a pack's `Memory:<id> = Memory(text: ...)`) makes a SemText that is mentioned at once and whose write answers with
 -- WHAT IT REMINDS OF: `associations`, ONE short text (a header that says it is context, not instructions, then a line per association), read by the reply
 -- of the write (door_tools.c1f `rx_lines`) in place of the reactions of the round (a note's reactions are the spans of its words: noise).
---   * A Memory differs from a SemText in one thing: its recall is always on (`recall_on`). Its sentences get vectors like every SemText's (packs/embed.c1f), and its own embedding
---     call (`Fetch:recall:note`, above) gives the cosine lane its query; the write's reply waits for that call (door_tools.c1f `mc_w_ready`): at most its 10 s limit, then the edge lane alone.
+--   * A Memory differs from a SemText in that its recall is always on (`recall_on`) and its own embedding call (above; its own entity `Fetch:recall:note:<key>`, so two notes written
+--     close together never share one) embeds its SENTENCES (`ask_input`, at most the queue's batch of 64): the call writes the note's sentence `Vector`s (packs/embed.c1f
+--     `embed-ask-vectors`), so the note is embedded once, and the call entity is let go when they are made. The vectors give the cosine lane its query; the write's reply waits for that
+--     call (door_tools.c1f `mc_w_ready`): at most its 10 s limit, then the edge lane alone (and the queue embeds the note later, as any SemText).
 --   * `SemText.assoc_source` is the ONE place the associations come from: the shared recall (`recall`, above). A source row has `semtext` and `text`.
 --   * HOW MANY and HOW LONG: the dials `assoc_n` and `assoc_clip` of `recall:dials` (one set of dials for the banner and Memory).
 --   * A line: `- "<the sentence, clipped>" (<the text's id: where it came from> - <when it last changed> - shares: <the entities both texts mention>)`.
@@ -312,7 +334,14 @@ Memory.mention_cap on-setter remember-mention:
   WHEN this.mention_cap != None and this.text != None:
     this.mention = this.text
 Memory.recall_on getter: True
-Memory.ask_fetch getter: 'Fetch:recall:note'
+Memory.ask_fetch getter: 'Fetch:recall:note:' + this.skey
+Memory.ask_input getter: [s['text'] for s in head(this.sentences or [], 64)]
+-- the note's call entity holds the request and its receipt (the vectors as text): once every sentence has its vector it is not needed, so it is let go; the note's call is no longer
+-- out then (its receipt went with the entity)
+Memory.in_flight getter: this.ask_job != None and prop(prop(this.ask_rr, 'id'), 'ask') != this.eid and (this.emb_n or 0) < len(this.sentences or [])
+Memory.emb_n on-setter note-call-done:
+  WHEN this.emb_n != None and this.emb_n >= len(this.sentences or []) and prop(this.ask_fetch, 'request') != None:
+    (this.ask_fetch).retire = True
 Memory.assoc_n getter: prop('recall:dials', 'assoc_n')
 Memory.assoc_clip getter: prop('recall:dials', 'assoc_clip')
 Memory.assoc_line getter: FOR r IN head(this.assoc_source or [], this.assoc_n or 0): '- "' + clip(r['text'], this.assoc_clip or 1) + '" (' + r['semtext'] + ' - ' + ago(prop(r['semtext'], 'updated'), clock) + ' - shares: ' + join([replace(replace(replace(str(m), 'Word:lemma:', ''), 'Identifier:name:', ''), 'Path:path:', '') for m in this.mentions if m in (prop(r['semtext'], 'mentions') or [])], ', ') + ')'
