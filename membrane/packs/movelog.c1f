@@ -53,7 +53,8 @@ SemText.field_ready on-setter movelog-post:
       old = prop(g['key'], 'ml_held_by') or []
       by = group_by(g['rows'], 't')
       (g['key']).ml_held_by = concat([x for x in old if len([b for b in by if b['key'] == x['t']]) == 0], [{'t': b['key'], 'h': max(concat([x['h'] for x in old if x['t'] == b['key']], pluck(b['rows'], 'm')))} for b in by])
-    FOR f IN ([1] if this.field_from == 0 else []):
+    -- a seed text (`FieldTerm`, field.c1f: the term of one entity) is not an event: it is not counted in N
+    FOR f IN ([1] if this.field_from == 0 and this.term == None else []):
       MoveLog:all = MoveLog(of: 'all')
       MoveLog:all.n = (prop('MoveLog:all', 'n') or 0) + 1
     FOR x IN ([pv] if pv != None else []):
