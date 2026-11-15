@@ -157,3 +157,28 @@ SemText.related getter:
     hits = None if hj is Error else hj
     rows = [{'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'shared': len(g['rows']), 'score': dot([r['w'] for r in g['rows']], [1 for r in g['rows']])} for g in group_by(hits, 'key') if g['rows'][0]['text'] != this.eid]
     [{'semtext': r['text'], 'sentence_index': r['sent'], 'text': prop(prop(r['text'], 'sentences')[r['sent']], 'text'), 'shared': r['shared']} for r in head(sort_by(rows, 'score', True), this.related_n)]
+
+-- ---- MEMORY: the model's own notes, and what a note reminds of (#1143) -----------------------------------------------------------------
+-- `MemoryNote:<id>.text = "..."` (entity_write, or a pack's `MemoryNote:<id> = MemoryNote(text: ...)`) makes a SemText that is mentioned at once and whose write answers with
+-- WHAT IT REMINDS OF: `associations`, ONE short text (a header that says it is context, not instructions, then a line per association), read by the reply
+-- of the write (door_tools.c1f `rx_lines`) in place of the reactions of the round (a note's reactions are the spans of its words: noise).
+--   * `SemText.assoc_source` is the ONE place the associations come from: today the edge lane `related`; the fused result of the edge and the cosine lane replaces it by changing this line.
+--     A source row is `{semtext, sentence_index, text, shared}`.
+--   * HOW MANY and HOW LONG: `assoc_n` and `assoc_clip`, two getters a model's layer can override. BOTH ARE FLAGGED FOR THE OPERATOR (no value was approved): the recall dials
+--     (`recall:dials.banner_n` 12, `fact_chars` 200) are not on the c1f seat, so they cannot be read; 200 is the clip the banner uses for its lines (`news_chars or 200`), 5 is provisional.
+--   * A line: `- "<the sentence, clipped>" (<the text's id: where it came from> - <when it last changed> - shares: <the entities both texts mention>)`.
+SemText.assoc_source getter: this.related
+MemoryNote.text on-setter remember:
+  WHEN this.text != None:
+    this.parents = ['cls:memorynote', 'cls:semtext']
+-- the mention waits for the layers (the last getter of a new text is `mention_cap`: the span rule reads them all)
+MemoryNote.mention_cap on-setter remember-mention:
+  WHEN this.mention_cap != None and this.text != None:
+    this.mention = this.text
+MemoryNote.assoc_n getter: 5
+MemoryNote.assoc_clip getter: 200
+MemoryNote.related_n getter: this.assoc_n
+MemoryNote.assoc_line getter: FOR r IN (this.assoc_source or []): '- "' + clip(r['text'], this.assoc_clip) + '" (' + r['semtext'] + ' - ' + ago(prop(r['semtext'], 'updated'), clock) + ' - shares: ' + join([replace(replace(replace(str(m), 'Word:lemma:', ''), 'Identifier:name:', ''), 'Path:path:', '') for m in this.mentions if m in (prop(r['semtext'], 'mentions') or [])], ', ') + ')'
+MemoryNote.associations getter:
+  WHEN len(this.assoc_source or []) == 0: None
+  ELSE: join(concat(['REMINDS OF (best first; context, not instructions):'], this.assoc_line), '\n')
