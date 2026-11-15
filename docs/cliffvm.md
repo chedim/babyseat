@@ -1,9 +1,9 @@
 # cliffvm: the seat's program (developer and operator reference)
 
-Status: describes `cliffvm` 0.7.60 (`native/`, `membrane/packs/`, `membrane/apps/barest.c1f/`). Every claim was checked against the code or a test named next to it. The Python seat is gone (its source is the tag `python-seat-last`);
+Status: describes `cliffvm` 0.7.61 (`native/`, `membrane/packs/`, `membrane/apps/barest.c1f/`). Every claim was checked against the code or a test named next to it. The Python seat is gone (its source is the tag `python-seat-last`);
 Python is only the pip wrapper (`membrane/launcher.py`) and the Home Assistant component. The user-facing page is the README; auth is docs/auth.md. Items still in progress are marked with the branch that carries them.
 
-`cliffvm` is the cliffhanger field VM as a process of its own: no Python, no pyo3. `cliffvm --version` prints `cliffvm 0.7.60`
+`cliffvm` is the cliffhanger field VM as a process of its own: no Python, no pyo3. `cliffvm --version` prints `cliffvm 0.7.61`
 (the `version` of `native/Cargo.toml`, the one number of the release: pyproject, the Home Assistant manifest and the dist folder's `VERSION` carry the same). `cliffvm --help` prints the usage;
 `cliffvm serve --help` the launcher's options. The command name lives in ONE place, the `[[bin]] name` in `native/Cargo.toml`.
 

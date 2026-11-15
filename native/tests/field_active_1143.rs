@@ -150,7 +150,7 @@ fn chat_messages_and_their_bodies_are_hidden_by_the_eid_prefix_on_the_k_column()
     let n = a["n_total"].as_i64().unwrap();
     let (_, b) = active(run.port, "?m=1");
     assert_eq!(b["n_total"].as_i64().unwrap(), n);
-    // reading the active view loads no chat message, body or session header; the main chat's own header `membrane::Chat:main` may be loaded (the banner reads its last turn, and a namespaced id takes its own class since 0.7.60)
+    // reading the active view loads no chat message, body or session header; the main chat's own header `membrane::Chat:main` may be loaded (the banner reads its last turn, and a namespaced id takes its own class since 0.7.61)
     assert_eq!(call(run.port, "run_cliff", json!({"code": "len([x for x in instances('Chat') if x.eid != 'membrane::Chat:main'])"})), "0", "still nothing else loaded");
 }
 

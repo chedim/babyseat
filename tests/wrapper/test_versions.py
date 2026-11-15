@@ -23,7 +23,7 @@ def _pyproject_version():
 class TestTheVersionIsOneVersion(unittest.TestCase):
     def test_the_ha_manifest_is_a_connect_only_client_at_this_version_or_ahead(self):
         # #1143: the component installs no package (it connects to a seat the user runs), so nothing pins babyseat; its version is the
-        # release's (0.7.60), which pyproject reaches at the release bump: never behind it
+        # release's (0.7.61), which pyproject reaches at the release bump: never behind it
         man = json.loads((ROOT / "custom_components" / "membrane" / "manifest.json").read_text())
         self.assertEqual(man["requirements"], [])
         ver = lambda v: tuple(int(x) for x in v.split("."))

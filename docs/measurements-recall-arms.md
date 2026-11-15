@@ -1,6 +1,6 @@
 # Recall arms, full-detail comparison (internal)
 
-Internal numbers: no public LoCoMo claim comes from this page. Prepared for 0.7.60 (#1143); no measurement has been run with it yet.
+Internal numbers: no public LoCoMo claim comes from this page. Prepared for 0.7.61 (#1143); no measurement has been run with it yet.
 
 ## The one command
 

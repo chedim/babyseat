@@ -15,7 +15,7 @@ files written in **c1f**, the field's own language, so the model can read, chang
 > is its memory layer, so the `membrane` command alias, the `membrane/` source folder, the `.membrane` folders and the Home Assistant domain keep that
 > name. **cliffvm** is the program. **cliffhanger** is the reactive graph language it runs ([chedim/cliffhanger](https://github.com/chedim/cliffhanger)).
 
-Version **0.7.60**. This is a rebuild: the 0.7 Python seat is retired (see [Upgrading](#upgrading-from-the-python-seat-07x)).
+Version **0.7.61**. This is a rebuild: the 0.7 Python seat is retired (see [Upgrading](#upgrading-from-the-python-seat-07x)).
 
 ## What you get
 
@@ -40,10 +40,10 @@ macOS and Linux (x86_64 and arm64); there is no Windows build. The macOS binarie
 
 | How | Command | State |
 |---|---|---|
-| pip | `pip install babyseat`, then `babyseat` (`--port N`, `--data-dir <dir>`) | at the 0.7.60 release |
-| installer | `curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh \| sh` (installs `~/.local/share/membrane-app/<version>` and a `~/.local/bin/babyseat` link; `--version X.Y.Z` picks one) | at the 0.7.60 release |
-| Docker | `docker run -p 127.0.0.1:4096:4096 -v babyseat-data:/data -e ANTHROPIC_API_KEY -v /path/to/linux/claude:/opt/claude:ro -e CLAUDE_BIN=/opt/claude chedim/babyseat` (the image has no `claude`; the admin token: `docker exec <container> cat /data/admin.token`) | at the 0.7.60 release |
-| binary | the GitHub release's `babyseat-0.7.60-<target>.tar.gz` and its `.sha256` (targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`): check the sha256, unpack, run `bin/cliffvm serve` | at the 0.7.60 release |
+| pip | `pip install babyseat`, then `babyseat` (`--port N`, `--data-dir <dir>`) | at the 0.7.61 release |
+| installer | `curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh \| sh` (installs `~/.local/share/membrane-app/<version>` and a `~/.local/bin/babyseat` link; `--version X.Y.Z` picks one) | at the 0.7.61 release |
+| Docker | `docker run -p 127.0.0.1:4096:4096 -v babyseat-data:/data -e ANTHROPIC_API_KEY -v /path/to/linux/claude:/opt/claude:ro -e CLAUDE_BIN=/opt/claude chedim/babyseat` (the image has no `claude`; the admin token: `docker exec <container> cat /data/admin.token`) | at the 0.7.61 release |
+| binary | the GitHub release's `babyseat-0.7.61-<target>.tar.gz` and its `.sha256` (targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`): check the sha256, unpack, run `bin/cliffvm serve` | at the 0.7.61 release |
 | Home Assistant add-on | Home Assistant OS / Supervised: add the repository `https://github.com/chedim/membrane` in the add-on store, install **babyseat**; it announces itself to the integration ([addon/DOCS.md](addon/DOCS.md)) | at the next release |
 | from source | the next section | works today |
 
@@ -53,9 +53,9 @@ macOS and Linux (x86_64 and arm64); there is no Windows build. The macOS binarie
 
 ```
 git clone https://github.com/chedim/membrane && cd membrane
-scripts/dist/build.sh --out ./dist/0.7.60          # builds native/ (about a minute warm) and assembles the dist folder
+scripts/dist/build.sh --out ./dist/0.7.61          # builds native/ (about a minute warm) and assembles the dist folder
 export ANTHROPIC_API_KEY=sk-ant-...                # the claude turn's key (see "Which credential" below)
-./dist/0.7.60/bin/cliffvm serve
+./dist/0.7.61/bin/cliffvm serve
 ```
 
 With no `ANTHROPIC_API_KEY` it first warns that the chat will refuse a message until you set one. It prints, in this order:
@@ -83,10 +83,6 @@ The key is handed to the CLI child and is never written to a property, a row, th
 `--fact host_names=seat.local` lets the page hand out its cookie for a name you reach it by; from another machine the page itself needs a token (the Home Assistant component carries one).
 
 ## Connect Home Assistant
-
-> **0.7.60 is a pre-release for Home Assistant.** HACS offers the latest release, so HACS users stay on the 0.7.53 component (and its seat inside Home Assistant) for now; do not upgrade the `babyseat` package inside
-> Home Assistant's environment. The connect-only component below, and an add-on for Home Assistant OS and Supervised, come in the next release. Home Assistant Container and Core installs that run their own seat
-> can try it now: copy `custom_components/membrane` by hand, or turn on *Show beta versions* for the repository in HACS.
 
 1. HACS, three dots, *Custom repositories*, `https://github.com/chedim/membrane`, category *Integration*; install **babyseat (membrane)** and restart Home Assistant.
 2. On Home Assistant OS or Supervised, the babyseat add-on runs the seat and Home Assistant discovers it (*Settings, Devices & services*, *Discovered*). Elsewhere, run `cliffvm serve` and add it by hand:
@@ -125,7 +121,7 @@ Layout: `native/` (the VM and the host: Rust), `membrane/packs/` (the seat's pac
 
 ## Status
 
-A working lab used every day to build itself. Version **0.7.60**; the API and flag surfaces may still move. Licensing: **MIT** (see [LICENSE](LICENSE)); releases up to 0.7.2 stay under PolyForm Noncommercial 1.0.0.
+A working lab used every day to build itself. Version **0.7.61**; the API and flag surfaces may still move. Licensing: **MIT** (see [LICENSE](LICENSE)); releases up to 0.7.2 stay under PolyForm Noncommercial 1.0.0.
 
 ## Cite
 

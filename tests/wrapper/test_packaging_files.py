@@ -129,14 +129,14 @@ def test_no_secret_is_in_the_packaging_files():
 
 
 def test_publish_can_make_the_github_release_a_pre_release_so_the_stable_channel_does_not_move():
-    # a pre-release is not the "latest" release: HACS and /releases/latest keep naming the stable one (0.7.60 ships to PyPI and as a pre-release first)
+    # a pre-release is not the "latest" release: HACS and /releases/latest keep naming the stable one (a pre-release is an option of the publish line)
     t = wf("publish.yml")
     assert re.search(r"(?ms)^      prerelease:\n        description: .*?\n        type: boolean\n        default: false", t)
     assert "inputs.prerelease" in t and "--prerelease" in t
 
 
 def test_the_image_lane_moves_latest_and_the_minor_tag_only_for_a_stable_release():
-    # existing pulls of chedim/babyseat and chedim/membrane follow `latest` and X.Y: a pre-release (0.7.60 ships as one) must not move them; only X.Y.Z is pushed unless the dispatch says `stable`
+    # existing pulls of chedim/babyseat and chedim/membrane follow `latest` and X.Y: a pre-release (a pre-release, for example) must not move them; only X.Y.Z is pushed unless the dispatch says `stable`
     t = wf("docker.yml")
     assert re.search(r"(?ms)^      stable:\n        description: .*?\n        type: boolean\n        default: false", t)
     assert "type=raw,value=latest,enable=${{ inputs.stable == true }}" in t

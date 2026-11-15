@@ -28,7 +28,7 @@ def _fields(form):
 def test_the_manifest_needs_no_pip_requirement_and_is_the_release_version():
     man = json.loads((CC / "manifest.json").read_text())
     assert man["requirements"] == []
-    assert man["version"] == "0.7.60"
+    assert man["version"] == "0.7.61"
     assert man["domain"] == "membrane"
     assert "http" not in man["dependencies"] and "frontend" not in man["dependencies"]   # no panels in slice 1
 

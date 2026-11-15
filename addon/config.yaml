@@ -1,7 +1,7 @@
 # The babyseat add-on (#1143): the seat `cliffvm serve` run by the Supervisor on Home Assistant OS and Supervised installs. The keys are those of
 # https://contributors.home-assistant.io/apps/reference/configuration/ (the Supervisor IGNORES an unknown key: tests/wrapper/test_ha_addon.py refuses one).
 name: "babyseat"
-version: "0.7.60"
+version: "0.7.61"
 slug: "babyseat"
 description: "The babyseat AI seat (a memory graph the model programs), announced to the babyseat (membrane) integration"
 url: "https://github.com/chedim/membrane/tree/main/addon"

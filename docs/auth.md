@@ -1,6 +1,6 @@
 # Auth: who may talk to the seat
 
-Status: describes `cliffvm serve` at 0.7.60 (`membrane/packs/door.c1f`, `door_auth.c1f`, `native/src/{jwt,admin,http}.rs`). Pinned by `native/tests/door_auth_1143.rs` and `release_verify_1143.rs` (real processes; see docs/release-verification.md for the checklist).
+Status: describes `cliffvm serve` at 0.7.61 (`membrane/packs/door.c1f`, `door_auth.c1f`, `native/src/{jwt,admin,http}.rs`). Pinned by `native/tests/door_auth_1143.rs` and `release_verify_1143.rs` (real processes; see docs/release-verification.md for the checklist).
 
 ## No users: every valid token is the admin
 

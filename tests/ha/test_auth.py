@@ -132,7 +132,7 @@ def test_the_reauth_of_an_entry_with_no_address_asks_for_the_address_too(ha, run
     assert e.data["serve_url"] == seat.url and e.data["serve_pass"] == "tok-1"
 
 
-# ---- the texts of the two reauths (0.7.60: the seat no longer runs inside Home Assistant; the new seat's tokens are new) ----------
+# ---- the texts of the two reauths (0.7.61: the seat no longer runs inside Home Assistant; the new seat's tokens are new) ----------
 
 DOCS = "https://github.com/chedim/membrane/blob/main/docs/home-assistant.md"
 
