@@ -48,6 +48,8 @@ Home Assistant hands it to the component's `async_step_hassio` (`config_flow.py`
 - **when the entry of this seat exists** (the same unique id, an entry typed by hand with the same address, or an entry that ran the seat inside Home Assistant and has no address yet): stores the announced address and token and sets the entry up again, with no step of yours. The add-on announces at every start, so a token the seat refused is repaired the next time the add-on starts; an announcement that changes nothing does nothing;
 - **when the entry names another seat**: leaves it alone (one entry per Home Assistant).
 
+**The Ollama hint.** When Home Assistant has its own Ollama integration, the discovery's confirmation and the manual form say which server and model it uses (`ha_ollama` in `config_flow.py`: the first `ollama` entry with a `url`; the model of its conversation subentry, else the entry's `model`). This tells you how to make the seat use the same server: set the add-on's Ollama URL and model options to them, or start `cliffvm serve` with `--fact seat_backend=<url>` and pick the model in the seat's model select. It is only a hint: the component reads Home Assistant's entries, makes no network call, configures nothing and writes nothing to the seat. Without an Ollama entry the forms are the plain ones (the hint has its own step ids, `hassio_confirm_ollama` and `user_ollama`).
+
 An announcement without a host or a token aborts (*invalid_discovery*). How the add-on runs the seat is the add-on's own page; this is its whole contract with the component.
 
 ## The token

@@ -26,6 +26,30 @@ def clean_url(url: str) -> str:
     return u if p.scheme in ("http", "https") and p.netloc else ""
 
 
+def ha_ollama(hass) -> tuple[str, str] | None:
+    """Home Assistant's own Ollama integration, when it has one: (its server URL, the model its conversation agent uses; "" when none is
+    set). Read-only, no network call: a hint for the seat's own setup (the 0.7.53 component's, kept). An entry without a URL is skipped."""
+    for e in hass.config_entries.async_entries("ollama"):
+        url = str((e.data or {}).get("url") or "").strip()
+        if not url:
+            continue
+        model = str((e.data or {}).get("model") or (e.options or {}).get("model") or "")
+        for sub in (getattr(e, "subentries", None) or {}).values():
+            if getattr(sub, "subentry_type", "") == "conversation" and (getattr(sub, "data", None) or {}).get("model"):
+                model = str(sub.data["model"])
+                break
+        return url.rstrip("/"), model
+    return None
+
+
+def ollama_hint(hass, step_id: str, placeholders: dict) -> tuple[str, dict]:
+    """The form with the Ollama hint (its own step id `<step>_ollama` and text) when Home Assistant has an Ollama server, else the plain one."""
+    found = ha_ollama(hass)
+    if found is None:
+        return step_id, placeholders
+    return f"{step_id}_ollama", {**placeholders, "ollama_url": found[0], "ollama_model": found[1] or "(none set)"}
+
+
 class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
     MINOR_VERSION = 4               # connect-only: the entry is {serve_url, serve_user, serve_pass}; 1.4: the old sensors and select are gone (async_migrate_entry)
@@ -72,9 +96,12 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_hassio_confirm(self, user_input=None):
         d = self._discovered
         if user_input is None:                    # a form with no fields is a confirmation (HA's _set_confirm_only is a deprecated no-op)
-            return self.async_show_form(step_id="hassio_confirm", description_placeholders={"addon": d["addon"]})
+            step_id, placeholders = ollama_hint(self.hass, "hassio_confirm", {"addon": d["addon"]})
+            return self.async_show_form(step_id=step_id, description_placeholders=placeholders)
         return self.async_create_entry(title="Membrane", data={
             CONF_SERVE_URL: d["url"], CONF_SERVE_USER: DEFAULT_SERVE_USER, CONF_SERVE_PASS: d["token"]})
+
+    async_step_hassio_confirm_ollama = async_step_hassio_confirm     # the same confirmation, shown with the Ollama hint
 
     async def async_step_user(self, user_input=None):
         await self.async_set_unique_id(DOMAIN)          # one entry per Home Assistant (the add-on's discovery keys its entry by host:port)
@@ -92,9 +119,12 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return self.async_create_entry(title="Membrane", data={
                         CONF_SERVE_URL: url, CONF_SERVE_USER: DEFAULT_SERVE_USER, CONF_SERVE_PASS: user_input[CONF_SERVE_PASS]})
                 errors["base"] = err
-        return self.async_show_form(step_id="user", errors=errors, data_schema=vol.Schema({
+        step_id, placeholders = ollama_hint(self.hass, "user", {})
+        return self.async_show_form(step_id=step_id, errors=errors, description_placeholders=placeholders, data_schema=vol.Schema({
             vol.Required(CONF_SERVE_URL, default=(user_input or {}).get(CONF_SERVE_URL, "")): str,
             vol.Required(CONF_SERVE_PASS): str}))
+
+    async_step_user_ollama = async_step_user                         # the same form, shown with the Ollama hint
 
     async def async_step_reauth(self, entry_data):
         """An entry with a seat address whose token was refused: a new token. An entry with none (it ran the seat inside Home Assistant,
