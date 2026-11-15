@@ -275,6 +275,12 @@ The contract between the engine (this section) and the link owner/transport (`/u
 
 **Open for the owner side (not engine):** per-node revision counters, coalescing, the allow-list, `max_value`, caps, rates: in c1f (w117-linkseat). The engine imposes no limit on replicas or subscriptions.
 
+### Slice 2: engine, status (2026-11-14)
+
+BUILT and tested (`native/tests/link_engine_1143.rs`, 13 tests; full cargo suite green; the wasm in `membrane/apps/barest.c1f/ui/` is rebuilt, deterministic across two builds): everything in 15b, in `native/src/link.rs`, `vm.rs` (`set_ns`, `is_foreign`, `foreign_read`, replicas, `Vm` namespace hold in `held`/`gc_dead`), `fields.rs` (`apply_val`, `link_round`, `link_drain`, `link_reset`, inert replicas in `getters_of`/`chain`/`step`), `web.rs` (`set_ns`, `feed_val*`, `feed_gone`, `feed_refused`, `link_reset`, `replicas`, `drain` with `subs`/`unsubs`/`due`), `host.rs` (`SEAT_NS = "membrane"` set at open, `feed_val`, `link_notices`, `link_reset`, `replica_revs`, retire of `Vm:<ns>` takes `<ns>::`).
+
+NOT built: the seat route `/ui/link`, the owner side (revisions, coalescing, policy, `max_value`, caps) and the JS frame glue (w117-linkseat / the JS agent); forwarded writes (a local write onto a replica is not refused yet: slice 3); journalling of seat-side replicas (RAM only now); a `Vm` kind/retention policy for devices (D39); `Core::foreign_wanted` as a separate set (the read note `foreign_reads` plays that role). Not run: `tests/js` `chat_view` and `shell_page` fail, also with the old wasm (checked with the new `cliffvm` binary; not checked against a clean base binary). Tests were written after the code, never seen red.
+
 ## 15c. Slice 2: built (2026-11-14, #1143; the seat side `POST /ui/link`, the page glue, the first consumers)
 
 Tests: `native/tests/link_slice2_1143.rs` (a fake client posting frames to a private seat), `tests/specs/link_route.json` (the verdicts), `tests/js/link_client.test.mjs` (the glue on STUBBED hooks and a fake fetch), `tests/js/settings_view.test.mjs` and `chat_view.test.mjs` (the consumers, on a local replica and on the real engine hooks), `tests/js/link_page.test.mjs` (headless Chrome against a real seat, section 7 of the file). The engine side is 15b (w116).
