@@ -17,6 +17,7 @@ semtext
 mentions
 chat
 chat_turn
+chat_oai
 vector
 embed
 field

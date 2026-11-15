@@ -394,3 +394,11 @@ fn the_loop_stops_at_chat_max_turns_with_a_visible_cause() {
     assert_eq!(fake.calls(), 2, "the model was called twice and no more");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn the_packs_this_rung_runs_on_are_all_in_the_shipped_pack_list() {
+    // the release ships exactly the packs apps/barest.packs lists (scripts/dist/build.sh): a pack the openai-compatible turn needs that is not listed is a rung the release does not have
+    let list = std::fs::read_to_string(format!("{}/../membrane/apps/barest.packs", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let shipped: Vec<&str> = list.lines().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+    for n in PACKS { let stem = n.trim_end_matches(".c1f"); assert!(shipped.contains(&stem), "{stem} is not in apps/barest.packs, so the release has no openai-compatible rung"); }
+}
