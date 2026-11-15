@@ -22,7 +22,8 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 
 const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f"];
 
-fn start(tag: &str) -> (Run, u16) {
+fn start(tag: &str) -> (Run, u16) { start_with(tag, &[]) }
+fn start_with(tag: &str, facts: &[&str]) -> (Run, u16) {
     let dir = tmp(tag);
     let pd = dir.join("packs");
     std::fs::create_dir_all(&pd).unwrap();
@@ -30,6 +31,7 @@ fn start(tag: &str) -> (Run, u16) {
     for n in PACKS { std::fs::write(pd.join(n), std::fs::read_to_string(format!("{src}/{n}")).unwrap_or_else(|e| panic!("{n}: {e}"))).unwrap(); }
     let mut child = Command::new(BIN).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
+        .args(facts.iter().flat_map(|f| ["--fact", f]))
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
@@ -92,8 +94,8 @@ fn writing_a_memory_answers_with_what_it_reminds_of_in_a_small_reply() {
     let (_run, port) = start("memory-reply");
     wrote(port, "Memory:a", "Quokkas eat grass at dawn.");
     wrote(port, "Memory:c", "Rain fell over harbour boats.");
-    // the cost of a plain mention write on the same seat, for the record
-    let (plain, _) = lamp(port, "Quokkas eat grass at dawn.");
+    // the cost of a plain mention write on the same seat, for the record (a text of the same size that is not a near duplicate of Memory:a: two near duplicates are one hit)
+    let (plain, _) = lamp(port, "Wombats dig roots at dusk.");
     let t = wrote(port, "Memory:b", "Saw a quokka near some lake.");
     eprintln!("reply bytes: memory write {} / plain mention write {}", t.len(), plain.len());
     assert!(t.starts_with("wrote Memory:b.text"), "{t}");
@@ -144,4 +146,36 @@ fn the_associations_read_one_source_getter_a_layer_can_replace() {
     h.pump();
     let a = h.get("Memory:b", "associations");
     assert!(a.as_str().unwrap_or("").contains("\"from another lane\" (Memory:z"), "{a}");
+}
+
+/// a loopback stand-in for the model server's /api/embed that answers once, after `delay_ms`, with a fixed vector
+fn slow_embedder(delay_ms: u64) -> String {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let (mut s, _) = l.accept().unwrap();
+        let mut buf = vec![0u8; 8192];
+        let _ = s.read(&mut buf);
+        std::thread::sleep(Duration::from_millis(delay_ms));
+        let body = r#"{"embeddings":[[0.5,0.25]]}"#;
+        let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+    });
+    url
+}
+
+/// The note's own embedding is asked when it is written, and the write's reply waits for it (the cosine lane needs the note's vector); a model server that is not there
+/// does not hold it (a refused call is a receipt at once), and the reply then carries the edge lane alone.
+#[test]
+fn the_reply_of_a_memory_write_waits_for_the_notes_own_embedding_and_not_for_a_server_that_is_not_there() {
+    let url = slow_embedder(1500);
+    let (_run, port) = start_with("memory-wait", &[&format!("seat_backend={url}"), "embed_model=m"]);
+    let t0 = Instant::now();
+    let t = wrote(port, "Memory:a", "Quokkas eat grass at dawn.");
+    assert!(t0.elapsed() >= Duration::from_millis(1400), "the reply came before the note's embedding: {:?} {t}", t0.elapsed());
+    let (_run2, port2) = start_with("memory-down", &["seat_backend=http://127.0.0.1:1", "embed_model=m"]);
+    wrote(port2, "Memory:a", "Quokkas eat grass at dawn.");
+    let t0 = Instant::now();
+    let t = wrote(port2, "Memory:b", "Saw a quokka near some lake.");
+    assert!(t0.elapsed() < Duration::from_secs(8), "{:?}", t0.elapsed());
+    assert!(t.contains("Quokkas eat grass at dawn."), "the edge lane alone: {t}");
 }

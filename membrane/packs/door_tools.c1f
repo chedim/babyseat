@@ -94,6 +94,7 @@ Request.mc_w_rec getter: prop(this.mc_w_id, this.mc_w_rprop) if this.mc_done == 
 Request.mc_w_new getter: this.mc_w_rec if this.mc_w_rec != None and this.mc_w_rec != this.mc_w_old else None
 Request.mc_w_ready getter:
   WHEN this.mc_done != True or this.reactions == None: False
+  ELSE WHEN this.mc_w_cls == 'Memory' and prop(this.mc_w_id, 'in_flight') == True: False
   ELSE WHEN not this.mc_w_effect: True
   ELSE WHEN this.mc_w_new != None: True
   ELSE WHEN this.mc_w_wait <= 0: True
@@ -144,6 +145,7 @@ Request.rx_full getter: [m['r'] for m in this.rx_marked if m['full']]
 Request.rx_rest getter: [{'k': str(prop(m['r'], 'cls')) + '.' + str(prop(m['r'], 'prop'))} for m in this.rx_marked if not m['full']]
 Request.rx_groups getter: [str(g['key']) + ' x' + str(len(g['rows'])) for g in group_by(this.rx_rest, 'k')]
 -- A MEMORYNOTE WRITE answers with what the note reminds of (`Memory.associations`, mentions.c1f), not with the reactions of the round (the spans of its words): only a reaction with a reason stays.
+-- The reply waits while the note's own embedding call is out (`in_flight`, mentions.c1f: the call's own 10 s limit bounds it), so the cosine lane is in the answer.
 Request.rx_why getter: [m['r'] for m in this.rx_marked if prop(m['r'], 'why') != None or prop(m['r'], 'prop') == 'failed']
 Request.rx_lines getter:
   WHEN this.mc_tool == 'entity_write' and this.mc_w_cls == 'Memory': concat([a for a in [prop(this.mc_w_id, 'associations')] if a != None], ['reactions: ' + str(this.rx_why) for x in [1] if len(this.rx_why) > 0])

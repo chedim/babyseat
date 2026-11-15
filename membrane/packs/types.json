@@ -203,7 +203,6 @@
       "Request.r_session": "Dict?"
     },
     "writes": {
-      "Chat.embed": "Bool",
       "Chat.mention": "Bool",
       "Chat.queued": "Bool",
       "Doorbell.at": "Num",
@@ -366,7 +365,6 @@
       "Chat.calls": "Any",
       "Chat.cost": "Any",
       "Chat.duration": "Any",
-      "Chat.embed": "Bool",
       "Chat.ended": "Num",
       "Chat.error": "Any",
       "Chat.kept": "Any",
@@ -1758,11 +1756,12 @@
     "getters": {
       "Identifier.edge_rows": "Text",
       "Identifier.texts": "Int",
-      "Memory.assoc_clip": "Int",
+      "Memory.ask_fetch": "Text",
+      "Memory.assoc_clip": "Any",
       "Memory.assoc_line": "List(Text?)",
-      "Memory.assoc_n": "Int",
+      "Memory.assoc_n": "Any",
       "Memory.associations": "Text?",
-      "Memory.related_n": "Int",
+      "Memory.recall_on": "Bool",
       "Path.edge_rows": "Text",
       "Path.texts": "Int",
       "SemAllCaps.form": "Text",
@@ -1774,10 +1773,36 @@
       "SemPath.lemma": "Any",
       "SemPlural.form": "Text",
       "SemPlural.lemma": "Text",
+      "SemText.ask_fetch": "Text",
+      "SemText.ask_job": "Dict?",
+      "SemText.ask_rr": "Any",
+      "SemText.ask_vec": "Any",
       "SemText.assoc_source": "List(Dict)?",
+      "SemText.dup_share": "Float",
+      "SemText.in_flight": "Bool",
       "SemText.mention_cap": "Int",
       "SemText.mention_done": "List(Dict)",
       "SemText.mention_table": "List(Dict)?",
+      "SemText.r_chat": "Bool",
+      "SemText.r_cos_keyed": "List(Dict)",
+      "SemText.r_cos_raw": "Any",
+      "SemText.r_cos_rows": "List(Dict)",
+      "SemText.r_edge": "List(Dict)",
+      "SemText.r_edge_keyed": "List(Dict)",
+      "SemText.r_edge_rows": "List(Dict)",
+      "SemText.r_fused": "List(Dict)?",
+      "SemText.r_kept": "List(Dict)?",
+      "SemText.r_mine": "Text?",
+      "SemText.r_msg": "Text?",
+      "SemText.r_older": "Any",
+      "SemText.r_ranked": "List(Dict)?",
+      "SemText.r_ratio": "Float",
+      "SemText.r_rn": "Any",
+      "SemText.r_rw": "Any",
+      "SemText.r_weights": "List(Num)",
+      "SemText.r_win": "List(Dict)?",
+      "SemText.r_words": "List(Dict)?",
+      "SemText.recall": "List(Dict)?",
       "SemText.related": "List(Dict)?",
       "Span.f_allcaps": "Text?",
       "Span.f_capital": "Text?",
@@ -1791,6 +1816,7 @@
       "Word.texts": "Int"
     },
     "writes": {
+      "*.request": "Dict",
       "Identifier.mentioned_in": "List(Any)",
       "Memory.mention": "Any",
       "Memory.parents": "List(Text)",
@@ -1804,7 +1830,9 @@
       "Span.parents": "List(Text?)?",
       "Word.mentioned_in": "List(Any)"
     },
-    "findings": []
+    "findings": [
+      "SemText.r_kept: max: argument 1 is Num?, expected a list"
+    ]
   },
   "messages": {
     "getters": {},

@@ -25,6 +25,8 @@ fn seat_opts(facts: &Map<String, J>, effects: bool) -> Host {
     for (i, n) in list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).enumerate() {
         let l = h.load_app(&r.join(format!("membrane/packs/{n}.c1f")), i == 0).unwrap_or_else(|e| panic!("{n}: {e}")); if n == "chat_turn" { assert!(l.msgs.is_empty(), "chat_turn: {:?}", l.msgs); }
     }
+    // a seat with a model backend is a launched seat: the launcher's defaults (the embedding model among them, launcher.c1f) fill what the facts do not name
+    if facts.contains_key("seat_backend") { h.load_app(&r.join("membrane/packs/launcher.c1f"), false).unwrap(); }
     let l = h.load_app(&r.join("membrane/apps/barest.c1f"), false).unwrap();
     assert!(l.msgs.is_empty(), "the app loads clean: {:?}", l.msgs);
     h.load_pack("recallmaker", MAKER).unwrap();
@@ -46,12 +48,14 @@ fn ask(h: &Host, id: &str, text: &str, at: f64) {
     h.write(&format!("{M}{id}"), "queued", json!(true), "person"); h.pump();
 }
 fn words(h: &Host) -> String { h.get(R, "words").as_str().unwrap_or("").to_string() }
-/// the stubbed receipt of the ask's one embedding call (what Ollama's /api/embed answers), for the message the ask is
+/// the stubbed receipt of the ask's one embedding call (what Ollama's /api/embed answers), for the message the ask is (the call names the ask's body: the recall is the body's, packs/mentions.c1f)
 fn receipt(h: &Host, id: &str, v: J) {
     if !h.snapshot().contains_key("Fetch:recall:ask") { h.born("Fetch:recall:ask", "Fetch", Map::new(), "person"); }
-    h.write("Fetch:recall:ask", "request_result", json!({"id": {"ask": format!("{M}{id}")}, "status": "ok", "rc": 0, "http_status": 200, "head": "HTTP/1.1 200 OK", "body": json!({"embeddings": [v]}).to_string()}), "person");
+    h.write("Fetch:recall:ask", "request_result", json!({"id": {"ask": format!("{M}{id}:body")}, "status": "ok", "rc": 0, "http_status": 200, "head": "HTTP/1.1 200 OK", "body": json!({"embeddings": [v]}).to_string()}), "person");
     h.pump();
 }
+/// the ask's vector, as the recall of its body reads it
+fn ask_vec(h: &Host, id: &str) -> J { h.get(&format!("{M}{id}:body"), "ask_vec") }
 fn lines(h: &Host) -> Vec<String> { words(h).lines().skip(1).map(str::to_string).collect() }
 
 #[test]
@@ -80,16 +84,31 @@ fn the_edge_lane_alone_shows_earlier_sentences_that_share_words_with_the_ask_und
     assert!(more.as_array().unwrap().iter().any(|x| x.as_str().unwrap_or("").starts_with("RECALL (")), "{more}");
 }
 
+/// the part is a thin consumer of the ONE recall on SemText (`<ask body>.recall`, packs/mentions.c1f): no lane of its own, its lines are the head of that list
+#[test]
+fn the_part_shows_the_head_of_the_ask_bodys_own_recall_and_has_no_lanes_of_its_own() {
+    let h = seat();
+    said(&h, "m1", "Quokkas eat grass. Rain falls on Perth.", 1_700_000_000.0);
+    said(&h, "m2", "A quokka in the rain.", 1_700_000_100.0);
+    ask(&h, "m3", "I saw a quokka.", 1_700_000_200.0);
+    let rows = h.get(&format!("{M}m3:body"), "recall");
+    let rows = rows.as_array().unwrap_or_else(|| panic!("the ask body has its recall: {rows}"));
+    let l = lines(&h);
+    assert_eq!(l.len(), rows.len().min(12), "{l:?} {rows:?}");
+    for (line, row) in l.iter().zip(rows) { assert!(line.contains(row["text"].as_str().unwrap()), "{line} / {row}"); }
+    for p in ["edge_rows", "cos_raw", "fused", "ranked", "ask_vec", "rrf_k", "pool"] { assert_eq!(h.get(R, p), J::Null, "no `{p}` on the part"); }
+}
+
 #[test]
 fn a_lane_that_is_not_there_is_no_error_and_no_stall() {
     let h = seat();
     said(&h, "m1", "Quokkas eat grass.", 1_700_000_000.0);
     ask(&h, "m2", "quokka facts", 1_700_000_100.0);
     assert!(words(&h).contains("Quokkas eat grass."), "the edge lane shows with no vectors at all");
-    assert_eq!(h.get("membrane::Banner:recall", "ask_vec"), J::Null, "no backend, no receipt: no vector");
+    assert_eq!(ask_vec(&h, "m2"), J::Null, "no backend, no receipt: no vector");
     // a failed embedding call is the same: the lane is absent
     h.born("Fetch:recall:ask", "Fetch", Map::new(), "person");
-    h.write("Fetch:recall:ask", "request_result", json!({"id": {"ask": format!("{M}m2")}, "status": "error", "rc": 1, "head": "connect: refused"}), "person"); h.pump();
+    h.write("Fetch:recall:ask", "request_result", json!({"id": {"ask": format!("{M}m2:body")}, "status": "error", "rc": 1, "head": "connect: refused"}), "person"); h.pump();
     assert!(words(&h).contains("Quokkas eat grass.") && !words(&h).to_lowercase().contains("error"), "{}", words(&h));
 }
 
@@ -100,9 +119,9 @@ fn a_receipt_that_belongs_to_an_older_ask_is_not_this_asks_vector() {
     ask(&h, "m2", "second", 2.0);
     // both are queued: the ask is the OLDEST, m1; a receipt for m2 is not its vector
     receipt(&h, "m2", json!([1.0, 0.0]));
-    assert_eq!(h.get(R, "ask_vec"), J::Null, "the receipt names m2, the ask is m1");
+    assert_eq!(ask_vec(&h, "m1"), J::Null, "the receipt names m2, the ask is m1");
     receipt(&h, "m1", json!([0.0, 1.0]));
-    assert_eq!(h.get(R, "ask_vec"), json!([0.0, 1.0]));
+    assert_eq!(ask_vec(&h, "m1"), json!([0.0, 1.0]));
 }
 
 /// a hand-made sentence vector, as the embedding pipeline names it: `Vector:of:<key>:s:<start>` with `of`, `start` and `v`
@@ -163,16 +182,19 @@ fn a_text_that_is_not_the_persons_is_shown_with_its_origin_as_not_the_persons_wo
 }
 
 
-/// a loopback stand-in for Ollama's /api/embed: answers one request with a fixed vector and hands the request it read back
+/// a loopback stand-in for Ollama's /api/embed: answers every request with a fixed vector and hands back the ASK's requests it read (an ask's `input` is one text; the
+/// sentence-vector queue's requests, `input` a list, are answered and not handed back: every SemText is embedded by that queue too, packs/embed.c1f)
 fn fake_ollama() -> (String, std::sync::mpsc::Receiver<String>) { fake_ollama_slow(0, 1) }
-/// the same, answering after `delay_ms`, and serving `n` requests in a row
-fn fake_ollama_slow(delay_ms: u64, n: usize) -> (String, std::sync::mpsc::Receiver<String>) {
+/// the same, answering after `delay_ms` (each request on its own thread, so a slow answer never queues another); `_n` is kept for the callers' reading
+fn fake_ollama_slow(delay_ms: u64, _n: usize) -> (String, std::sync::mpsc::Receiver<String>) {
     use std::io::{Read, Write};
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", l.local_addr().unwrap());
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || { for _ in 0..n {
-        let (mut s, _) = l.accept().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || { for c in l.incoming() {
+        let Ok(mut s) = c else { break };
+        let tx = tx.clone();
+        std::thread::spawn(move || {
         let mut buf = vec![0u8; 8192]; let mut n = 0; let mut text = String::new();
         loop {
             let k = s.read(&mut buf[n..]).unwrap(); n += k; text = String::from_utf8_lossy(&buf[..n]).to_string();
@@ -185,7 +207,9 @@ fn fake_ollama_slow(delay_ms: u64, n: usize) -> (String, std::sync::mpsc::Receiv
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         let body = r#"{"model":"mxbai-embed-large","embeddings":[[0.5,0.25]]}"#;
         let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
-        let _ = tx.send(text);
+        let ask = text.split("\r\n\r\n").nth(1).and_then(|b| serde_json::from_str::<J>(b).ok()).map_or(false, |b| b["input"].is_string());
+        if ask { let _ = tx.send(text); }
+        });
     } });
     (url, rx)
 }
@@ -202,8 +226,8 @@ fn with_a_model_backend_the_ask_is_embedded_by_one_call_and_without_one_no_call_
     assert!(req.starts_with("POST /api/embed "), "{req}");
     let body: J = serde_json::from_str(req.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(body, json!({"model": "mxbai-embed-large", "input": "quokka facts"}));
-    for _ in 0..200 { h.pump(); if h.get(R, "ask_vec") != J::Null { break; } std::thread::sleep(std::time::Duration::from_millis(50)); }
-    assert_eq!(h.get(R, "ask_vec"), json!([0.5, 0.25]), "the receipt is this ask's vector");
+    for _ in 0..200 { h.pump(); if ask_vec(&h, "m1") != J::Null { break; } std::thread::sleep(std::time::Duration::from_millis(50)); }
+    assert_eq!(ask_vec(&h, "m1"), json!([0.5, 0.25]), "the receipt is this ask's vector");
 }
 
 #[test]
@@ -228,7 +252,8 @@ fn the_dials_are_the_entity_recall_dials_born_with_the_seat_and_the_part_reads_t
     assert_eq!(h.get("recall:dials", "rrf_k"), json!(60));
     assert_eq!(h.get("recall:dials", "banner_n"), json!(12));
     assert_eq!(h.get(R, "banner_n"), json!(12), "the part reads the dial");
-    assert_eq!(h.get(R, "rerank_n"), json!(20));
+    ask(&h, "m1", "quokka", 1.0);
+    assert_eq!(h.get(&format!("{M}m1:body"), "r_rn"), json!(20), "the shared recall reads the rerank dial");
     // the guard of the dials still holds: a bad value is put back
     h.write("recall:dials", "banner_n", json!(-3), "person"); h.pump();
     assert_eq!(h.get("recall:dials", "banner_n"), json!(12), "a write that fails its guard is put back");

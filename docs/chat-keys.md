@@ -31,7 +31,7 @@ new mechanism (one extra tiny entity per message); it is the cheapest one that k
 
 ## Who builds, parses or matches a message eid
 
-- packs/chat.c1f: the constructors (`cm_at` setters; each also makes the message's `:body` SemText and writes `mention` and `embed` on it, docs/semtext-and-legs.md), `cp` / `mid` / `sid` getters (`cp` = the key below `membrane::Chat:`, `mid` = the id, `sid` read from the key and never stored), the one-message GET (`/membrane/chat/message/<id>[?sid=<sid>]`: the id is inside its chat), the history (`hs_*`).
+- packs/chat.c1f: the constructors (`cm_at` setters; each also makes the message's `:body` SemText and writes `mention` on it (its sentence vectors are asked by the SemText itself, packs/embed.c1f), docs/semtext-and-legs.md), `cp` / `mid` / `sid` getters (`cp` = the key below `membrane::Chat:`, `mid` = the id, `sid` read from the key and never stored), the one-message GET (`/membrane/chat/message/<id>[?sid=<sid>]`: the id is inside its chat), the history (`hs_*`).
 - packs/chat_turn.c1f, chat_oai.c1f: every write below a message is `membrane::Chat[this.cp]:turn...`; `Command:chat:<cp>`, `Fetch:oai:<cp>:...` are named by `cp`. `Boot.interrupted` reads the turn keys.
 - packs/door_session.c1f: the session list, create, delete, status (the sid is cut out of the running turns' KEYS), the message POST, `GET /session/<sid>/message` (`ml_*`), the one row, abort, the event producers.
 - packs/legacy_import.c1f: writes `membrane::Chat:session[this.cur]:message[id]` directly (the sid needs no filter) and the time row.

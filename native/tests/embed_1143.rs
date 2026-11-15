@@ -1,5 +1,5 @@
-//! Sentence vectors (#1143, stage 1 of the semantic field; membrane/packs/embed.c1f): every sentence of a SemText that is ASKED (`embed = true`, written by the chat on a message
-//! body and on an answer's body) or found in the store (the backlog: the bodies of the imported history) gets a vector, made by the local model server through the Fetch driver
+//! Sentence vectors (#1143, stage 1 of the semantic field; membrane/packs/embed.c1f): every sentence of EVERY SemText (asked when its text is written, no flag: the `ask` of the scratch pack below writes
+//! the old `embed` flag, which nothing reads now) or found in the store (the backlog: the bodies of the imported history) gets a vector, made by the local model server through the Fetch driver
 //! (`POST <seat_backend>/api/embed {model, input}`), stored as `Vector:of:<key>:s:<start>`, by a gentle one-request-at-a-time queue that waits while a chat turn runs.
 //! There is NEVER a real model server here: the receipts are written by the test (the Fetch driver's own writes), or, in the two end-to-end tests, a tiny HTTP server in this file answers.
 use membrane_vm::host::{boot_started, Host, Options};
@@ -20,10 +20,12 @@ Box.ask on-setter ask:\n  WHEN this.ask != None:\n    membrane::Chat:main:messag
 Box.sturn on-setter sturn:\n  WHEN this.sturn != None:\n    membrane::Chat:session[\'s1\']:message[this.sturn]:turn = ChatTurn(message: 1, queued_at: 1)\n\
 Box.turn on-setter turn:\n  WHEN this.turn != None:\n    membrane::Chat:main:message[this.turn]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.turn, queued_at: 1)\n";
 
-fn load(h: &Host, extra: &str) {
+fn load(h: &Host, extra: &str) { load_skip(h, extra, &[]) }
+/// the seat's packs but those named (`embed`: a store from before the sentence vectors, whose texts no ask ever named)
+fn load_skip(h: &Host, extra: &str, skip: &[&str]) {
     let r = repo();
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
-    let names: Vec<String> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(String::from).collect();
+    let names: Vec<String> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#') && !skip.contains(l)).map(String::from).collect();
     for (i, n) in names.iter().enumerate() { h.load_app(&r.join(format!("membrane/packs/{n}.c1f")), i == 0).unwrap_or_else(|e| panic!("{n}: {e}")); }
     h.load_app(&r.join("membrane/packs/launcher.c1f"), false).unwrap();
     h.load_app(&r.join("membrane/apps/barest.c1f"), false).unwrap();
@@ -366,9 +368,9 @@ fn the_backlog_of_the_store_is_embedded_newest_first_once_the_seat_starts() {
     let dir = tmp("backlog");
     let file = dir.join("seat.sqlite");
     {
-        // an earlier run (the imported history): bodies nobody asked for
+        // an earlier run (the imported history, a store from before the sentence vectors): bodies nobody asked for
         let h = open(Some(file.to_str().unwrap()), false);
-        load(&h, "");
+        load_skip(&h, "", &["embed"]);
         start(&h, &[]);
         box_(&h);
         say(&h, "1000-00000001", "Oldest message.", false);

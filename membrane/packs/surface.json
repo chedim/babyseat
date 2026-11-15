@@ -118,7 +118,6 @@
     "members": 67,
     "writes": [
       "Doorbell:chat.at",
-      "membrane:*.embed",
       "membrane:*.mention",
       "membrane:*.queued",
       "membrane:*=ChatLine()",
@@ -202,7 +201,6 @@
       "membrane:*.calls",
       "membrane:*.cost",
       "membrane:*.duration",
-      "membrane:*.embed",
       "membrane:*.ended",
       "membrane:*.error",
       "membrane:*.kept",
@@ -660,7 +658,7 @@
       "Fetch",
       "SemText"
     ],
-    "members": 43,
+    "members": 44,
     "writes": [
       "*.cache",
       "*.emb_n",
@@ -1054,7 +1052,8 @@
   },
   "mentions": {
     "imports": [
-      "semtext"
+      "semtext",
+      "fetch"
     ],
     "classes": [
       "Identifier",
@@ -1070,8 +1069,9 @@
       "Span",
       "Word"
     ],
-    "members": 36,
+    "members": 63,
     "writes": [
+      "*.request",
       "Identifier:*.mentioned_in",
       "Identifier:*=Identifier()",
       "Path:*.mentioned_in",
@@ -1082,7 +1082,10 @@
       "Word:*=Word()"
     ],
     "claims": [],
-    "boot_facts": []
+    "boot_facts": [
+      "embed_model",
+      "seat_backend"
+    ]
   },
   "messages": {
     "imports": [],

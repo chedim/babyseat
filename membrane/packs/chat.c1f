@@ -100,7 +100,6 @@ Request.cm_at on-setter chat-message-sid:
     membrane::Chat:session[this.cm_sid]:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
     membrane::Chat:session[this.cm_sid]:message[id]:body = SemText(text: this.cm_text)
     membrane::Chat:session[this.cm_sid]:message[id]:body.mention = True
-    membrane::Chat:session[this.cm_sid]:message[id]:body.embed = True
     membrane::Chat:session[this.cm_sid]:message[id]:turn = ChatTurn(message: 'membrane::Chat:session:' + this.cm_sid + ':message:' + id, queued_at: this.cm_at)
     membrane::Chat:main:time[id]:session[this.cm_sid] = ChatLine(chat: 'session:' + this.cm_sid)
     membrane::Chat:session[this.cm_sid]:message[id].queued = True
@@ -112,7 +111,6 @@ Request.cm_at on-setter chat-message:
     membrane::Chat:main:message[id] = ChatMessage(text: this.cm_text, at: this.cm_at)
     membrane::Chat:main:message[id]:body = SemText(text: this.cm_text)
     membrane::Chat:main:message[id]:body.mention = True
-    membrane::Chat:main:message[id]:body.embed = True
     membrane::Chat:main:message[id]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + id, queued_at: this.cm_at)
     membrane::Chat:main:time[id]:main = ChatLine(chat: 'main')
     membrane::Chat:main:message[id].queued = True
