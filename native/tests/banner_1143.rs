@@ -120,3 +120,23 @@ fn banners_join_oldest_update_first_and_an_emptied_one_shows_nothing() {
     h.write("membrane::Banner:b", "words", json!(""), "person"); h.pump();
     assert!(queued_message(&h, 3).ends_with("\nfirst, edited") && !queued_message(&h, 4).contains("second words"));
 }
+
+// ---- the doctrine's name (operator 2026-11-14) -----------------------------------------------------------------------------------------------
+// "Your name is <name>." opens the doctrine; the seat's default name is Bob, and while it is Bob the doctrine also tells the model to work with the
+// person to pick a name and how to save it (the settings door); once it is anything else it is just "Your name is <name>.".
+fn sys_of(h: &Host, n: u32) -> String {
+    queued_message(h, n);
+    h.get(&format!("membrane::Chat:message:{n}"), "sys").as_str().unwrap_or_else(|| panic!("sys is a string")).to_string()
+}
+
+#[test]
+fn the_doctrine_opens_with_the_name_and_while_it_is_bob_it_says_how_to_change_it() {
+    let h = seat();
+    let s = sys_of(&h, 1);
+    assert!(s.starts_with("Your name is Bob."), "{s}");
+    assert!(s.contains("work with the user") && s.contains("Setting:chat.name"), "the default name asks to be changed, and how: {s}");
+    h.write("Setting:chat.name", "set", json!("Ada"), "person"); h.pump();
+    let s = sys_of(&h, 2);
+    assert!(s.starts_with("Your name is Ada."), "{s}");
+    assert!(!s.contains("work with the user") && !s.contains("Setting:chat.name"), "a named seat gets no naming advice: {s}");
+}

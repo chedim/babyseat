@@ -234,11 +234,12 @@ fn the_help_is_positive_and_domain_neutral() {
 const DOCTRINE: &str = "Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them. Your whole chat history is on the graph as ChatMessage entities: the user\\'s words are in text, your answers in response.";
 
 #[test]
-fn the_doctrine_in_the_chat_turn_is_the_operators_four_sentences_and_the_help_tells_where_it_lives() {
+fn the_doctrine_in_the_chat_turn_is_the_name_the_graph_and_the_operators_sentences_and_the_help_tells_where_it_lives() {
     let t = std::fs::read_to_string(repo().join("membrane/packs/chat_turn.c1f")).unwrap();
     let at = t.lines().position(|l| l.starts_with("ChatMessage.note getter:")).unwrap();
-    let note = t.lines().nth(at + 2).unwrap();   // the second line: `WHEN this.over: None` guards it (a finished message holds no prompt props), then the sentences
-    assert_eq!(note, format!("  ELSE: '{DOCTRINE}'"), "the note is exactly the four sentences");
+    let note = t.lines().nth(at + 2).unwrap();   // the second line: `WHEN this.over: None` guards it (a finished message holds no prompt props), then the name, the graph sentence, the operator's sentences and the naming advice
+    assert!(note.starts_with("  ELSE: 'Your name is ' + this.seat_name + '. This graph is you:"), "the doctrine opens with the name: {note}");
+    assert!(note.contains(DOCTRINE), "the note holds the operator's sentences exactly");
     assert!(!note.contains("YOUR BANNER IS") && !note.contains("Good luck"), "the old long doctrine is gone: {note}");
     // the static instructions live in the help: where Help is, and how the banner is replaced
     let c = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help/c1f.md")).unwrap();

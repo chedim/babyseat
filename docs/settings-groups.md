@@ -21,7 +21,7 @@ over the one place the value lives, so nothing drifts. `kind` is `text | number 
 |---|---|---|---|
 | Model | `model.chat` (the model that answers) | `Minds:seat.loops` | live |
 | | `model.default`, `model.list`, `model.cloud` (fact `cloud_models`), `model.signin` (fact `chat_auth`: `api_key` or `login`), `model.cli` (fact `chat_claude_bin`) | the launch | read-only, restart |
-| Chat | `chat.max_steps` (fact `chat_max_turns`, default 2048, 1 to 100000), `chat.timeout` (fact `chat_turn_timeout_s`, default 21600 s, 1 to 604800) | the row's own `value` (journalled, survives a restart) | live |
+| Chat | `chat.name` (fact `seat_name`, default Bob: the doctrine's "Your name is ..."), `chat.max_steps` (fact `chat_max_turns`, default 2048, 1 to 100000), `chat.timeout` (fact `chat_turn_timeout_s`, default 21600 s, 1 to 604800) | the row's own `value` (journalled, survives a restart) | live |
 | Map | `map.hidden`, `map.hidden_prefix` (lists), `map.window` (default 150, 1 to 10000), `map.poll_ms` (default 2000, 200 to 600000); `map.fade_s` (read-only) | the row's own `value` | live; the Map rows are hidden in the window while the field view is disabled |
 | Home | `home.allow` (one `HaAllow:<name>` entry per name: `services`, `entities`; default deny) | `HaAllow:<name>` | live |
 | Import | `import.history` (fact `legacy_path`), `import.sources` (`SqlSource:<name>`: `ro` or `rw`) | the launch, `SqlSource` | read-only, restart |

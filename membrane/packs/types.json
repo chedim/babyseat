@@ -336,6 +336,7 @@
       "ChatMessage.rlines": "List(Text)",
       "ChatMessage.rr": "Any",
       "ChatMessage.sdk_model": "Any",
+      "ChatMessage.seat_name": "Text?",
       "ChatMessage.spent": "Bool",
       "ChatMessage.spoken": "Text",
       "ChatMessage.sys": "Text?",
