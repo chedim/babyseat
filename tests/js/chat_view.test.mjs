@@ -66,6 +66,20 @@ scenario('skeleton and first load', () => {
   assert.equal(q.method ?? 'GET', 'GET'); assert.equal(q.url, '/membrane/chat/messages?limit=20');
 });
 
+// 1b. the seat's own message and an interrupted answer carry their small marks (the name carry-over's `sent_by`, a failed turn's kept words)
+scenario('a message the seat sent and an interrupted answer are marked, and an ordinary row is not', () => {
+  const w = world(); w.open();
+  const sent = { id: '2000-1', text: 'The old store has this stored for your name: Memo.', state: 'done', response: 'Saved.', turn: { state: 'done', started: 1, ended: 2 }, tools: [], tool_calls: [], sent_by: 'seat' };
+  const cut = { id: '2001-2', text: 'where to?', state: 'error', response: 'claude failed (rc 1): boom', interrupted: 'claude failed (rc 1): boom', kept: 'Which port?', turn: { state: 'error', started: 3, ended: 4 }, tools: [], tool_calls: [] };
+  w.reply('history', 200, page([sent, cut, MSGS[0]]));
+  assert.equal(row(w, '2000-1', ':by').text, 'sent by the seat'); assert.equal(row(w, '2000-1', ':by').hidden, false);
+  assert.equal(row(w, '1000-1', ':by').hidden, true, 'an ordinary row has no seat mark');
+  assert.equal(w.text('DomNode:chat:row:2001-2:ans'), 'Which port?', 'the kept words are the answer shown');
+  assert.equal(row(w, '2001-2', ':cut').text, 'interrupted: claude failed (rc 1): boom'); assert.equal(row(w, '2001-2', ':cut').hidden, false);
+  assert.equal(row(w, '1000-1', ':cut').hidden, true, 'an ordinary row has no interrupted mark');
+  assert.equal(row(w, '2000-1', ':cut').hidden, true);
+});
+
 // 2. a page of turns: who / bubbles / pending / tools, as the legacy chat draws them
 scenario('a page of turns is drawn as the legacy chat draws it', () => {
   const w = world(); w.open(); w.reply('history', 200, page(MSGS));
