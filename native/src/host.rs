@@ -311,6 +311,7 @@ impl Host {
         let db = Arc::new(Mutex::new(db));
         let mut core = Core::new();
         for (k, cls, data) in stored_vectors { if let Ok(w) = crate::vecstore::bytes_to_words(&data) { let _ = core.vectors.put(&cls, &k, &w); } }
+        crate::recall::load_seed(&mut core);   // the recall policy's dials (`recall:dials`, native/packs/recall-policy.json): the recall part of the banner reads them
         core.set_ns(SEAT_NS);   // the graph link: ids under `membrane::` and bare ids are this VM's, any other `ns::` is foreign (docs/graph-link.md, 15b)
         core.queue_writes = false;   // a field host runs no trigger engine: the queue would only hold every write's values (vm.rs `queue_writes`)
         if o.store.is_some() { core.loader = Some(stored_loader(db.clone())); }   // a lazy entity a setter writes loads from the store
@@ -328,6 +329,7 @@ impl Host {
         core.mapped = fields.mapped_handle();
         core.storage = fields.storage_handle();   // the core reads the classes' modes too (`.pinned`)
         fields.inbound_by_host = true;
+        fields.recall = true;   // the guard of `recall:dials`: a write that fails its guard is put back (fields.rs `recall_on`)
         fields.calls_refused = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
         Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), journal_next: std::sync::atomic::AtomicU64::new(journal_next), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default(), memory: Default::default(), rss_reading: Default::default() })

@@ -338,6 +338,7 @@
       "ChatMessage.plan": "Dict?",
       "ChatMessage.port": "Any",
       "ChatMessage.rc": "Any",
+      "ChatMessage.recall_wait": "Bool",
       "ChatMessage.rlines": "List(Text)",
       "ChatMessage.rr": "Any",
       "ChatMessage.sdk_model": "Any",

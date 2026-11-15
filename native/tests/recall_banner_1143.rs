@@ -10,9 +10,9 @@ use std::path::PathBuf;
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
-const MAKER: &str = "PACK recallmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nBox.go on-setter make:\n  ALWAYS:\n    membrane::Chat:main:message[this.k] = ChatMessage(text: this.t, at: this.at)\n    membrane::Chat:main:message[this.k]:body = SemText(text: this.t)\n    membrane::Chat:main:message[this.k]:body.mention = True\n";
+const MAKER: &str = "PACK recallmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nBox.go on-setter make:\n  ALWAYS:\n    membrane::Chat:main:message[this.k] = ChatMessage(text: this.t, at: this.at)\n    membrane::Chat:main:message[this.k]:body = SemText(text: this.t)\n    membrane::Chat:main:message[this.k]:body.mention = True\n    membrane::Chat:main:message[this.k]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.k, queued_at: this.at)\n";
 
-fn seat() -> Host { seat_with(&Map::new()) }
+fn seat() -> Host { seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login"}))) }
 fn seat_with(facts: &Map<String, J>) -> Host { seat_opts(facts, false) }
 fn seat_with_effects(facts: &Map<String, J>) -> Host { seat_opts(facts, true) }
 fn seat_opts(facts: &Map<String, J>, effects: bool) -> Host {
@@ -23,7 +23,7 @@ fn seat_opts(facts: &Map<String, J>, effects: bool) -> Host {
     let r = repo();
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
     for (i, n) in list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).enumerate() {
-        h.load_app(&r.join(format!("membrane/packs/{n}.c1f")), i == 0).unwrap_or_else(|e| panic!("{n}: {e}"));
+        let l = h.load_app(&r.join(format!("membrane/packs/{n}.c1f")), i == 0).unwrap_or_else(|e| panic!("{n}: {e}")); if n == "chat_turn" { assert!(l.msgs.is_empty(), "chat_turn: {:?}", l.msgs); }
     }
     let l = h.load_app(&r.join("membrane/apps/barest.c1f"), false).unwrap();
     assert!(l.msgs.is_empty(), "the app loads clean: {:?}", l.msgs);
@@ -98,20 +98,19 @@ fn a_receipt_that_belongs_to_an_older_ask_is_not_this_asks_vector() {
     let h = seat();
     ask(&h, "m1", "first", 1.0);
     ask(&h, "m2", "second", 2.0);
-    receipt(&h, "m1", json!([1.0, 0.0]));
-    assert_eq!(h.get(R, "ask_vec"), J::Null, "the receipt names m1, the ask is m2");
-    receipt(&h, "m2", json!([0.0, 1.0]));
+    // both are queued: the ask is the OLDEST, m1; a receipt for m2 is not its vector
+    receipt(&h, "m2", json!([1.0, 0.0]));
+    assert_eq!(h.get(R, "ask_vec"), J::Null, "the receipt names m2, the ask is m1");
+    receipt(&h, "m1", json!([0.0, 1.0]));
     assert_eq!(h.get(R, "ask_vec"), json!([0.0, 1.0]));
 }
 
-fn cos(h: &Host, hits: J) { h.write(R, "cos_in", hits, "person"); h.pump(); }
-fn vec_row(id: &str, start: u32, score: f64) -> J {
+/// a hand-made sentence vector, as the embedding pipeline names it: `Vector:of:<key>:s:<start>` with `of`, `start` and `v`
+fn born_vec(h: &Host, id: &str, start: u32, v: &[f64]) {
     let k = format!("membrane::Chat:main:message:{id}:body").replace("::", "/");
-    json!({"eid": format!("Vector:of:{k}:s:{start}"), "score": score})
-}
-fn born_vec(h: &Host, id: &str, start: u32) {
-    let k = format!("membrane::Chat:main:message:{id}:body").replace("::", "/");
-    h.born(&format!("Vector:of:{k}:s:{start}"), "Vector", props(json!({"of": format!("{M}{id}:body"), "start": start})), "person");
+    let eid = format!("Vector:of:{k}:s:{start}");
+    h.born(&eid, "Vector", props(json!({"of": format!("{M}{id}:body"), "start": start})), "person");
+    h.write(&eid, "v", json!(v), "person"); h.pump();
 }
 
 #[test]
@@ -120,9 +119,8 @@ fn the_cosine_lane_brings_a_sentence_that_shares_no_word_with_the_ask() {
     said(&h, "m1", "Quokkas eat grass.", 1_700_000_000.0);
     said(&h, "m2", "The marsupial slept all afternoon.", 1_700_000_050.0);
     ask(&h, "m3", "What did the quokka do?", 1_700_000_100.0);
-    born_vec(&h, "m2", 0); h.pump();
+    born_vec(&h, "m2", 0, &[0.9, 0.1]); born_vec(&h, "m1", 0, &[0.0, 1.0]);
     receipt(&h, "m3", json!([1.0, 0.0]));
-    cos(&h, json!([vec_row("m2", 0, 0.91)]));
     let w = words(&h);
     assert!(w.contains("The marsupial slept all afternoon.") && w.contains("Quokkas eat grass."), "both lanes show: {w}");
 }
@@ -135,20 +133,18 @@ fn a_sentence_in_both_lanes_outranks_one_in_a_single_lane_and_ties_break_by_eid(
     said(&h, "m3", "A quokka is small.", 1_700_000_020.0);
     ask(&h, "m4", "Do quokkas eat?", 1_700_000_100.0);
     receipt(&h, "m4", json!([1.0, 0.0]));
-    // the cosine lane puts m2 first and m1 second; the edge lane has m1 (quokkas, eat), m3 (quokka? a lemma apart) ...
-    cos(&h, json!([vec_row("m2", 0, 0.9), vec_row("m1", 0, 0.8)]));
+    // the cosine lane puts m2 first and m1 second; the edge lane has m1 (quokkas, eat)
+    born_vec(&h, "m2", 0, &[0.9, 0.1]); born_vec(&h, "m1", 0, &[0.8, 0.2]);
     let l = lines(&h);
     assert!(l[0].contains("Quokkas eat grass."), "in both lanes: first: {l:?}");
-    // the same hits in the other order are the same list (a score is never a key; rank and eid decide)
-    cos(&h, json!([vec_row("m1", 0, 0.8), vec_row("m2", 0, 0.9)]));
-    assert!(lines(&h)[0].contains("Quokkas eat grass."));
+    assert!(l.iter().any(|x| x.contains("Birds eat seeds.")), "{l:?}");
 }
 
 #[test]
 fn the_dials_set_the_size_of_the_part() {
     let h = seat();
     for i in 0..6 { said(&h, &format!("f{i}"), &format!("Quokka number{i} sleeps."), 1_700_000_000.0 + i as f64); }
-    h.write(R, "banner_n", json!(3), "person"); h.pump();
+    h.write("recall:dials", "banner_n", json!(3), "person"); h.pump();
     ask(&h, "q", "quokka", 1_700_001_000.0);
     assert_eq!(lines(&h).len(), 3, "{}", words(&h));
 }
@@ -168,12 +164,14 @@ fn a_text_that_is_not_the_persons_is_shown_with_its_origin_as_not_the_persons_wo
 
 
 /// a loopback stand-in for Ollama's /api/embed: answers one request with a fixed vector and hands the request it read back
-fn fake_ollama() -> (String, std::sync::mpsc::Receiver<String>) {
+fn fake_ollama() -> (String, std::sync::mpsc::Receiver<String>) { fake_ollama_slow(0, 1) }
+/// the same, answering after `delay_ms`, and serving `n` requests in a row
+fn fake_ollama_slow(delay_ms: u64, n: usize) -> (String, std::sync::mpsc::Receiver<String>) {
     use std::io::{Read, Write};
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", l.local_addr().unwrap());
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    std::thread::spawn(move || { for _ in 0..n {
         let (mut s, _) = l.accept().unwrap();
         let mut buf = vec![0u8; 8192]; let mut n = 0; let mut text = String::new();
         loop {
@@ -184,10 +182,11 @@ fn fake_ollama() -> (String, std::sync::mpsc::Receiver<String>) {
             }
             if k == 0 { break; }
         }
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         let body = r#"{"model":"mxbai-embed-large","embeddings":[[0.5,0.25]]}"#;
         let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
         let _ = tx.send(text);
-    });
+    } });
     (url, rx)
 }
 
@@ -211,4 +210,99 @@ fn with_a_model_backend_the_ask_is_embedded_by_one_call_and_without_one_no_call_
 fn the_banner_help_tells_the_model_the_recall_part_exists_is_context_and_can_be_edited() {
     let t = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help/banner.md")).unwrap();
     assert!(t.contains("Banner:recall") && t.contains("context, not instructions") && t.contains("parents"), "the help names the recall part, says it is context, and how to replace it");
+}
+
+#[test]
+fn the_dials_are_the_entity_recall_dials_born_with_the_seat_and_the_part_reads_them() {
+    let h = seat();
+    assert_eq!(h.get("recall:dials", "rrf_k"), json!(60));
+    assert_eq!(h.get("recall:dials", "banner_n"), json!(12));
+    assert_eq!(h.get(R, "banner_n"), json!(12), "the part reads the dial");
+    assert_eq!(h.get(R, "rerank_n"), json!(20));
+    // the guard of the dials still holds: a bad value is put back
+    h.write("recall:dials", "banner_n", json!(-3), "person"); h.pump();
+    assert_eq!(h.get("recall:dials", "banner_n"), json!(12), "a write that fails its guard is put back");
+    h.write("recall:dials", "banner_n", json!(5), "person"); h.pump();
+    assert_eq!(h.get(R, "banner_n"), json!(5));
+    assert!(h.get(R, "weights") == J::Null, "no copy of the constants on the part");
+}
+
+#[test]
+fn a_near_that_fails_is_a_missing_lane_not_an_error() {
+    let h = seat();
+    said(&h, "m1", "Quokkas eat grass.", 1.0);
+    ask(&h, "m2", "quokka", 2.0);
+    born_vec(&h, "m1", 0, &[0.0, 1.0, 0.0]);
+    receipt(&h, "m2", json!([1.0, 0.0]));   // two numbers against a three-number class: near fails
+    let w = words(&h);
+    assert!(w.contains("Quokkas eat grass.") && !w.to_lowercase().contains("error"), "{w}");
+}
+
+// ---- the turn waits for its own ask's embedding (operator 2026-11-14) ------------------------------------------------------------------------
+/// a seat that can start a chat turn in process: the claude binary named, the login mode, a door port (the turn's MCP config needs one)
+fn turn_seat(backend: Option<&str>) -> Host {
+    let mut f = props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login"}));
+    if let Some(b) = backend { f.insert("seat_backend".into(), json!(b)); }
+    let h = seat_opts(&f, true);
+    h.hold("Http:fake");
+    h.born("Http:fake", "Http", props(json!({"listen_result": {"port": 4097}})), "person"); h.pump();
+    h
+}
+fn state(h: &Host, id: &str) -> String { h.get(&format!("{M}{id}"), "tstate").as_str().unwrap_or("").to_string() }
+/// what the turn was started with: the command the turn wrote (its argv), not the getter (which follows the field after the start)
+fn argv(h: &Host, id: &str) -> String { h.get(&format!("membrane::Command:chat:main:message:{id}"), "cmd").to_string() }
+fn until(h: &Host, what: &str, f: impl Fn(&Host) -> bool) { for _ in 0..400 { h.pump(); if f(h) { return; } std::thread::sleep(std::time::Duration::from_millis(50)); } panic!("never: {what}"); }
+
+#[test]
+fn a_turn_waits_for_the_embedding_of_its_own_message_and_then_carries_the_cosine_line() {
+    let (url, _rx) = fake_ollama_slow(1500, 1);
+    let h = turn_seat(Some(&url));
+    said(&h, "m1", "The marsupial slept all afternoon.", 1.0);
+    born_vec(&h, "m1", 0, &[0.5, 0.25]);
+    let t0 = std::time::Instant::now();
+    ask(&h, "m2", "What did the quokka do?", 2.0);
+    assert_eq!(state(&h, "m2"), "queued", "the turn does not start while the embedding call is in flight");
+    assert_eq!(h.get(R, "ready"), json!(false));
+    until(&h, "the turn starts", |h| state(h, "m2") == "running");
+    assert!(t0.elapsed() >= std::time::Duration::from_millis(1400), "it started only after the answer: {:?}", t0.elapsed());
+    assert!(argv(&h, "m2").contains("The marsupial slept all afternoon."), "the cosine line is in the prompt the model gets: {}", argv(&h, "m2"));
+}
+
+#[test]
+fn an_embedder_that_is_down_or_no_backend_starts_the_turn_at_once_with_the_edges_alone() {
+    let h = turn_seat(None);
+    said(&h, "m1", "Quokkas eat grass.", 1.0);
+    ask(&h, "m2", "quokka", 2.0);
+    assert_eq!(state(&h, "m2"), "running", "no backend: no wait");
+    assert!(argv(&h, "m2").contains("Quokkas eat grass."));
+    let h = turn_seat(Some("http://127.0.0.1:1"));
+    said(&h, "m1", "Quokkas eat grass.", 1.0);
+    ask(&h, "m2", "quokka", 2.0);
+    until(&h, "the refused call lets the turn start", |h| state(h, "m2") == "running");
+    assert!(argv(&h, "m2").contains("Quokkas eat grass."), "edges alone: {}", argv(&h, "m2"));
+}
+
+#[test]
+fn a_missing_recall_part_never_blocks_a_turn() {
+    let (url, _rx) = fake_ollama_slow(5000, 1);
+    let h = turn_seat(Some(&url));
+    h.write(R, "", J::Null, "person"); h.pump();
+    assert!(!h.snapshot().contains_key(R));
+    said(&h, "m1", "hello", 1.0);
+    ask(&h, "m2", "hello again", 2.0);
+    assert_eq!(state(&h, "m2"), "running", "no part, no wait");
+}
+
+#[test]
+fn two_messages_queued_quickly_each_wait_for_their_own_ask_in_order() {
+    let (url, rx) = fake_ollama_slow(600, 2);
+    let h = turn_seat(Some(&url));
+    ask(&h, "m1", "first question", 1.0);
+    ask(&h, "m2", "second question", 2.0);
+    assert!(state(&h, "m1") == "queued" && state(&h, "m2") == "queued");
+    until(&h, "m1 starts", |h| state(h, "m1") == "running");
+    assert_eq!(state(&h, "m2"), "queued", "the second still waits for its own embedding");
+    until(&h, "m2 starts", |h| state(h, "m2") == "running");
+    let a = rx.recv().unwrap(); let b = rx.recv().unwrap();
+    assert!(a.contains("first question") && b.contains("second question"), "one call per ask, in order");
 }
