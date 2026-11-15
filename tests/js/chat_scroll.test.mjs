@@ -67,6 +67,9 @@ try {
   await new Promise((r) => ws.addEventListener('open', r, { once: true }));
   ws.addEventListener('message', (m) => { const d = JSON.parse(m.data); if (waiting.has(d.id)) { waiting.get(d.id)(d); waiting.delete(d.id); } else if (d.method === 'Runtime.exceptionThrown') errors.push(d.params.exceptionDetails.text); });
   await send('Runtime.enable'); await send('Page.enable');
+  // THE POLL FALLBACK under test: this file asserts the chat's own poll timers (3 s list / 700 ms active), which the view runs when the graph link is NOT up. With the link up the view rings on the seat's doorbell
+  // instead (tests/js/chat_view.test.mjs, link_page.test.mjs), so the link's one request is blocked here: the page then has no link and keeps its timers, which is what these assertions are about.
+  await send('Network.enable'); await send('Network.setBlockedURLs', { urls: ['*/ui/link'] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 700, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: `${url}/` });
   await until(`document.querySelectorAll('[data-key$=":me"]').length >= 20`, 'the first page of turns');

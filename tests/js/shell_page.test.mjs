@@ -77,6 +77,9 @@ async function browser() {
       const u = new URL(p.request.url), key = `${p.request.method} ${u.pathname}`;
       b.calls.push(key);
       if (p.request.method === 'POST' && u.pathname === '/membrane/chat/message') b.posts.push(p.request.postData);
+      // THE POLL FALLBACK under test: the hung-read and failed-read assertions below are about the chat's own poll timers, which run when the graph link is NOT up (with it up the view reads on the seat's doorbell:
+      // chat_view.test.mjs, link_page.test.mjs). The link's request is refused here, so the page has no link and keeps its timers.
+      if (u.pathname === '/ui/link') { send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'Failed' }); return; }
       const act = b.hook && b.hook(key, p.request);                 // 'fail' | 'hold' | undefined
       if (act === 'fail') { send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'Failed' }); return; }
       if (act === 'hold') { b.paused.push(p.requestId); return; }
@@ -85,7 +88,7 @@ async function browser() {
   });
   const send = (method, params = {}) => new Promise((r) => { waiting.set(++id, r); ws.send(JSON.stringify({ id, method, params })); });
   await send('Runtime.enable'); await send('Page.enable');
-  await send('Fetch.enable', { patterns: [{ urlPattern: '*/membrane/chat/*' }, { urlPattern: '*/session*' }] });
+  await send('Fetch.enable', { patterns: [{ urlPattern: '*/membrane/chat/*' }, { urlPattern: '*/session*' }, { urlPattern: '*/ui/link' }] });
   b.send = send;
   b.ev = async (expr) => { const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true }); return r.result?.result?.value; };
   b.until = async (expr, what, ms = 20000) => { const t0 = Date.now(); for (;;) { const v = await b.ev(expr); if (v) return v; if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what} (last: ${JSON.stringify(v)})`); await sleep(100); } };
