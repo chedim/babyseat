@@ -202,15 +202,18 @@ SemText.r_win getter:
     [{'t': x['t'], 'w': this.r_weights[len([y for y in have if y['s'] > x['s']])]} for x in have]
 
 -- THE EDGE LANE, as ranked rows {key, of, text, rank, sim, ov} (key = the text's eid + '#' + the sentence's start). The edges are flattened through JSON text (c1f has no nested
--- comprehension): each row of an entity's `edge_rows` gets the weight of the window text that mentions the entity (`tw`) and whether that text is the ask (`d`).
+-- comprehension): each row of an entity's `edge_rows` gets its part of the score `p` (the weight of the window text that mentions the entity x the entity's own weight `w`, the
+-- same for all its rows) and whether that text is the ask (`d`). `group_by` totals `p` and `d` per sentence (one step however many rows), so only the best are made rows: the
+-- `entity_pool_max` best plus as many as the ask has sentences (the ask's own are left out after the sort; the sort is stable, so the order is the one of all of them).
 SemText.r_edge getter:
   WHEN this.r_win == None: []
   ELSE:
-    parts = [join([replace(prop(m, 'edge_rows'), '{"key":', '{"tw":' + str(x['w']) + ',"d":' + ('1' if x['t'] == this.eid else '0') + ',"key":') for m in (prop(x['t'], 'mentions') or []) if (prop(m, 'edge_rows') or '') != ''], ',') for x in this.r_win]
+    parts = [join([replace(prop(m, 'edge_rows'), '{"key":', '{"p":' + str(x['w'] * (1 / prop(m, 'texts'))) + ',"d":' + ('1' if x['t'] == this.eid else '0') + ',"key":') for m in (prop(x['t'], 'mentions') or []) if (prop(m, 'edge_rows') or '') != ''], ',') for x in this.r_win]
     hj = json('[' + join([p for p in parts if p != ''], ',') + ']')
     hits = [] if hj is Error else hj
-    rows = [{'k': g['key'], 'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'd': len([r for r in g['rows'] if r['d'] == 1]), 'score': dot([r['tw'] for r in g['rows']], [r['w'] for r in g['rows']])} for g in group_by(hits, 'key') if g['rows'][0]['text'] != this.eid]
-    head(sort_by(sort_by(rows, 'k'), 'score', True), prop('recall:dials', 'entity_pool_max') or 0)
+    pool = prop('recall:dials', 'entity_pool_max') or 0
+    best = head(sort_by(sort_by(group_by(hits, 'key', ['p', 'd']), 'key'), 'p', True), pool + len(this.sentences or []))
+    head([{'k': g['key'], 'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'd': g['d'], 'score': g['p']} for g in best if g['rows'][0]['text'] != this.eid], pool)
 SemText.r_edge_keyed getter: [{'key': r['text'] + '#' + str(prop(prop(r['text'], 'sentences')[r['sent']], 'start')), 'of': r['text'], 'text': prop(prop(r['text'], 'sentences')[r['sent']], 'text'), 'd': r['d']} for r in this.r_edge]
 SemText.r_edge_rows getter:
   ej = '|' + join([x['key'] for x in this.r_edge_keyed], '|') + '|'

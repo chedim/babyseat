@@ -46,8 +46,8 @@ There is no `slice` builtin: a span's `text` is already cut, and `head(tail(t, l
 pack holds only the offsets.
 
 ## The builtins (`native/src/expr.rs`, `RESERVED`)
-Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit vsum near abs min max log fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
-lists and dicts `sort_by pluck distinct group_by concat fold`; time `ago epoch localtime num`; the field `instances referencing prop why`; host functions `jsonl listdir read sql stat recall rerank pronoun`
+Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit vsum vmean near abs min max log fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
+lists and dicts `sort_by pluck distinct group_by concat fold`; time `ago epoch localtime num`; the field `instances referencing prop props why`; host functions `jsonl listdir read sql stat recall rerank pronoun`
 (`pronoun` is what a bare `it`, `that`, `they` ... asks the host; the seat's host answers none, so a pronoun reads as the reasoned error `the pronoun "it" is not bound here`).
 `near(<list of numbers>, '<Class>', k)` (#1143, operator 2026-11-14; the shipped MAPPED class is `Vector`, `membrane/packs/vector.c1f`: `Vector:<id>.v` holds a list of numbers) is the k nearest instances of a MAPPED class (`MAPPED Vector f16`, `docs/cliffvm.md`, "Storage modes") by COSINE, best first, as a list of `{eid, score}`
 dicts (`eid` text, `score` a float); a tie breaks by eid, never by position. Brute force on the CPU over the class's native store (no GPU path is reachable from it). A getter that calls it recomputes when a vector of the
@@ -72,6 +72,23 @@ called with arguments), and an explicit accumulator name (`fold(init, 'acc', [..
 `log(x)` (#1143, operator 2026-11-15: the move-log voter's rarity is log(N / the events holding a thing), `membrane/packs/movelog.c1f`) is the natural log of a positive number: the f64 log
 rounded to f32, so two devices whose math libraries differ in the last bits of an f64 give the same answer (`log(1)` is 0.0). An Error with its reason on 0, a negative number, or anything that is
 not an Int or a Float (`log('e')`, `log(True)`, `log([1])`); a null gives a null (as every call). One step. Typed `Float`. Tests: `native/tests/log_1143.rs`.
+**Builtins over long lists** (#1143, operator 2026-11-15: the field's recall must scale; a comprehension pays steps per item, a builtin one step). Tests: `native/tests/props_vmean_1143.rs`;
+what they bought: `native/tests/recall_scale_1143.rs` and docs/semtext-and-legs.md ("Cost of the whole recall").
+- `props(ids, 'name')` is `[prop(e, 'name') for e in ids]` in one step: one property of every entity of a list (an entity or its id; a dict item reads its key, as `prop`; a null item
+  stays a null; a property an entity does not hold is its reasoned null `absent: ...`). `props(ids, at, 'name')` takes element `at[i]` of the i-th value, as `x[k]` does (a list by its
+  whole-number index, negative from the end; a dict by its key; a miss, a null value or a null index is a null): the GATHER a comprehension would write as `[prop(e, 'name')[k] ...]`.
+  The name is the LAST argument, so the getter ordering reads it as a property name (as `prop` and `pluck`). Each read is a read of the getter (it recomputes when one of those
+  properties changes). An Error with its reason: `ids` not a list, the name not text (or starting with `_`), `at` not a list or of another length than `ids` (one index per id), an item
+  that is not an entity, id, dict or null, an index that is a float, bool, list or dict. Typed `List(Any)`. Plain expression code (the browser engine has it).
+- `vmean(ids)` is the mean of the UNIT vectors `v` of a list of entities (each vector's direction counts the same, whatever its length), computed exactly as
+  `vsum([unit(prop(e, 'v')) for e in ids]) / n`: the unit in f64, the sum in f32 in list order (deterministic on every device), the division by the count in f64. The vectors are read
+  one at a time (for a MAPPED class, from the native store) and never held as a list. An id with no vector (`v` null or absent) and a null id are SKIPPED; when none has one the answer
+  is the reasoned null `empty: none of the N ids has a vector (v)`. An Error with its reason: `ids` not a list, an item that is not an entity or an id, a `v` that is not a list of
+  numbers (or failed), vectors of different dimensions, an f32 overflow. A zero vector counts as itself (as `unit` leaves it). Typed `List(Float)?`. Plain expression code.
+- `group_by(rows, key, sums)`: the optional third argument (a list of column names) adds to each group, beside `key` and `rows`, the TOTAL of each named column over the group's rows,
+  in row order from 0 (whole numbers stay whole until a float joins, as Python's `sum`; floats add in f64, the same value `dot(pluck(rows, c), ones)` gives). An Error with its reason: a
+  value that is not a number (or is missing), a column named `key` or `rows`, `sums` not a list of names. With no sums (or `[]`) the groups are as before.
+All three are one step however long the list (the reads and the arithmetic are the builtin's own cost, not counted: see Limits).
 There is NO `int()`, `dict()`, `merge`, `keys` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
 A new builtin needs the operator's approval; it is an arm of `call` and a name in `RESERVED`, with a Rust test.
 
@@ -180,7 +197,7 @@ The old caps (an expression at most 64 nodes / 400 characters) are removed. Inst
 `MEMBRANE_EVAL_BUDGET`. `VEC_MAX` (8192) stays. Structural limits that are not size caps: expressions nest at most 64 deep and
 evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All accounting lives in `expr::Budget`.
 **A native builtin's own cost is not counted**: a call (`json(text)`, `sort`, `len` ...) is one step however large its input, so a getter that
-hands a 1 MB stream to one builtin spends a handful of steps (operator, 2026-11-13: no per-input charges for now). `vsum` and `log` are one step each (`vsum` however many vectors); `fold` is one step
+hands a 1 MB stream to one builtin spends a handful of steps (operator, 2026-11-13: no per-input charges for now). `vsum`, `vmean`, `props` and `log` are one step each (`vsum` and `vmean` however many vectors, `props` however many entities); `fold` is one step
 plus the steps of the c1f it runs (its start, its list, its `if` and its step, once per element).
 
 **Time decides no value** (operator, 2026-11-13). Until then a getter or setter evaluation whose self time passed 10 ms became an Error

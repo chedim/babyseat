@@ -178,7 +178,9 @@ The old membrane's entity recall voter. For an ask whose `recall_on` is true, `S
   so an old entity whose state moved away is found by an old phase). `near` is a plain cosine, so the candidates come from the raw query, as in the old seat; the re-score is centred.
 - **The worldline** of a candidate: a young entity (fewer than `field_mature` mentions, or no episode yet) is its MEAN; an old one is its episodes, its open run (`run_acc / run_k`) and,
   while those hold less than `ent_cover` of its mentions, its mean too. The mean is not stored: it is recomputed for the candidates only, as the mean of the unit vectors of the
-  sentences that moved the entity (its `mentioned_in` entries whose text has applied that sentence, `field_n`); with none, the state stands in.
+  sentences that moved the entity (its `mentioned_in` entries whose text has applied that sentence, `field_n`); with none, the state stands in. Each text keeps the vector ids of its
+  applied sentences by sentence number (`SemText.ent_vids`, recomputed when its `field_n` moves on: once per text, not per ask), so a candidate's mean is two builtins: `props` (the id at each
+  mention's sentence) and `vmean` (the mean of those unit vectors, a mention with no vector skipped), docs/c1f-stdlib.md "Builtins over long lists".
 - **The score** of a candidate is the best, over its points, of `dot(unit(p - bg), unit(q - bg))`, `bg` = `FieldBg:all` (no background, or one of another length: no centring).
   The `ent_k` best are `entity_hits` (`[{e, s}]`), ties by the entity's eid.
 - **The evidence** (the old `evidence` / `entity_scores`): every text that moved one of those entities (the entity's `mentioned_in` texts, their `field_moves`) scores the sum over the
@@ -236,7 +238,8 @@ finds the rest in the graph. It computes only while `recall_on` is true (the ban
   docs/chat-keys.md); the bodies are read by their ids; a text that is not there (a turn with no answer) is skipped. Each step back counts half as much as the step before it (`r_ratio`, 0.5, a getter a
   layer overrides: weights 1, 1/2, 1/4, ...). Any other text (a `Memory` note, a leg of a pack) is a window of itself. With no store (the `sql` fails) a chat text falls back to itself alone.
 - **The edge lane.** The sentences that mention the Word / Identifier / Path entities of the window's texts; a shared entity adds the weight of the window text that mentions it times 1 / (the number
-  of sentences that mention it) (`edge_rows`); at most `entity_pool_max`.
+  of sentences that mention it) (`edge_rows`); at most `entity_pool_max`. Each edge row carries its part `p` (that product, the same for all rows of one entity and window text) and
+  `group_by(hits, 'key', ['p', 'd'])` totals them per sentence in one step, so only the best (`entity_pool_max` plus the ask's own sentences, left out after the sort) become rows.
 - **The cosine lane.** `near(r_query, 'Vector', pool)`. The query (`r_query`, operator 2026-11-15) is the weighted sum of the window's texts' vectors with the window's weights (`r_weights`,
   `vsum`); a text's vector is the unit of the sum of its sentence vectors (`Vector:of:<key>:s:<start>`, the embedding pipeline's). A window text with no vector yet is left out; with none,
   there is no query and no lane (`the_cosine_query_is_the_weighted_sum_of_the_windows_text_vectors`). The ASK's own vectors come from its own embedding call while that receipt is there

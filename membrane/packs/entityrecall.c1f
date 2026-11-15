@@ -64,16 +64,15 @@ SemText.ent_info getter:
     [{'e': r['e'], 'st': r['st'], 'n': r['n'], 'eps': r['eps'], 'rk': r['rk'], 'old': r['n'] >= mat and len(r['eps']) > 0, 'mean': not (r['n'] >= mat and len(r['eps']) > 0) or dot([x['n'] for x in r['eps']], [1 for x in r['eps']]) + r['rk'] < cov * r['n']} for r in rows]
 
 -- ---- the means, recomputed for the candidates that need one: the applied mentions (the text's `field_n` is past the sentence), then their sentence vectors ----------------
-SemText.ent_mrows getter:
-  WHEN this.ent_info == None: None
-  ELSE: fold([], [concat(acc, [{'e': r['e'], 't': x['text'], 's': x['sentence']} for x in (prop(r['e'], 'mentioned_in') or []) if x['sentence'] < (prop(x['text'], 'field_n') or 0)]) for r in this.ent_info if r['mean']])
--- (two evaluations, each with its own step budget: the vectors read, then their means)
-SemText.ent_mvecs getter:
-  WHEN this.ent_mrows == None: None
-  ELSE: [{'e': r['e'], 'v': prop('Vector:of:' + replace(r['t'], '::', '/') + ':s:' + str(prop(prop(r['t'], 'sentences')[r['s']], 'start')), 'v')} for r in this.ent_mrows]
+-- each text keeps the vector ids of its APPLIED sentences by sentence number (`ent_vids`, recomputed when the field moves on: once per text, not per ask), so a candidate's
+-- mentions become vector ids by one `props` (the id at each mention's sentence; a sentence not applied yet is past the end: a null) and its mean is one `vmean` (the mean of
+-- the unit vectors; a mention with no vector is skipped): a few steps a candidate however many mentions it has. A candidate with no vector has no mean.
+SemText.ent_vids getter: ['Vector:of:' + this.skey + ':s:' + str(s['start']) for s in head(this.sentences or [], this.field_n or 0)]
 SemText.ent_means getter:
-  WHEN this.ent_mvecs == None: None
-  ELSE: [{'e': g['key'], 'm': vsum([unit(x['v']) for x in g['rows']]) / len(g['rows'])} for g in group_by([x for x in this.ent_mvecs if x['v'] is List], 'e')]
+  WHEN this.ent_info == None: None
+  ELSE:
+    ms = [{'e': r['e'], 'mi': prop(r['e'], 'mentioned_in') or []} for r in this.ent_info if r['mean']]
+    [x for x in [{'e': r['e'], 'm': vmean(props(pluck(r['mi'], 'text'), pluck(r['mi'], 'sentence'), 'ent_vids'))} for r in ms] if x['m'] is List]
 
 -- ---- the score of each candidate: its best point, centred; the `ent_k` best entities -----------------------------------------------------------------------------------
 SemText.ent_scored getter:

@@ -1326,8 +1326,6 @@
       "SemText.ent_info": "List(Dict)?",
       "SemText.ent_k": "Int",
       "SemText.ent_means": "List(Dict)?",
-      "SemText.ent_mrows": "Any",
-      "SemText.ent_mvecs": "List(Dict)?",
       "SemText.ent_near_eps": "Any",
       "SemText.ent_near_states": "Any",
       "SemText.ent_over": "Int",
@@ -1336,6 +1334,7 @@
       "SemText.ent_q": "List(Float)?",
       "SemText.ent_qc": "List(Float)?",
       "SemText.ent_scored": "List(Dict)?",
+      "SemText.ent_vids": "List(Text)",
       "SemText.ent_weight": "Float",
       "SemText.entity_hits": "List(Dict)?",
       "SemText.entity_votes": "List(Dict)?"

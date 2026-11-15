@@ -337,7 +337,7 @@ pub const RESERVED: &[&str] = &[
     "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words", "spans",
     "join", "head", "tail", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
     "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop", "why",
-    "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun", "near", "vsum", "fold", "log",
+    "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun", "near", "vsum", "fold", "log", "vmean", "props",
     "it", "that", "they", "them", "these", "those", "he", "him", "she", "her",
     "and", "or", "not", "in", "is", "if", "else", "lambda", "for", "await", "yield",
 ];
@@ -946,6 +946,68 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
             if acc.iter().any(|x| !x.is_finite()) { return Err("vsum: not a finite number (an f32 overflowed)".into()); }
             Ok(floats(acc.into_iter().map(|x| x as f64).collect()))
         }
+        // vmean(ids) (#1143, operator 2026-11-15): the mean of the unit vectors `v` of a list of entities, as `vsum([unit(prop(e, 'v')) for e in ids]) / n` computes it
+        // (the unit in f64, the sum in f32 in list order, the division in f64), read one vector at a time; an id with no vector and a null id are skipped
+        "vmean" => {
+            argn(1)?;
+            let V::List(ids) = &a[0] else { return Err(format!("vmean(ids): ids is a list of entities, got a {}", kind_of(&a[0]))) };
+            let mut acc: Vec<f32> = vec![];
+            let mut n = 0usize;
+            for (i, x) in ids.iter().enumerate() {
+                let id = match x { V::Ent(e) | V::Str(e) => e, V::None | V::Nil(_) => continue, v => return Err(format!("vmean(ids): item {i} is a {}, not an entity", kind_of(v))) };
+                let v = w.attr(id, "v");
+                let x = match &v {
+                    V::None | V::Nil(_) => continue,
+                    V::Error(r) => return Err(format!("vmean: the vector of {id} failed: {r}")),
+                    V::List(_) => vec_of(&v).map_err(|e| format!("vmean: the vector of {id}: {e}"))?,
+                    o => return Err(format!("vmean: the vector (v) of {id} is a {}, not a list of numbers", kind_of(o))),
+                };
+                let nx = norm(&x);
+                let u: Vec<f64> = if nx > 1e-12 { x.iter().map(|p| p / nx).collect() } else { x };
+                if n == 0 { acc = vec![0.0; u.len()]; }
+                if u.len() != acc.len() { return Err(format!("vmean: the vector of {id} has dimension {}, the first has {}", u.len(), acc.len())); }
+                for (s, p) in acc.iter_mut().zip(&u) { *s += 1.0f32 * (*p as f32); }
+                n += 1;
+            }
+            if n == 0 { return Ok(V::Nil(format!("empty: none of the {} ids has a vector (v)", ids.len()))); }
+            if acc.iter().any(|x| !x.is_finite()) { return Err("vmean: not a finite number (an f32 overflowed)".into()); }
+            Ok(floats(acc.into_iter().map(|s| s as f64 / n as f64).collect()))
+        }
+        // props(ids, 'name') / props(ids, at, 'name') (#1143, operator 2026-11-15): one property of every entity of a list, as `[prop(e, 'name') for e in ids]`;
+        // with `at`, the at[i]-th element of the i-th value, as `[prop(e, 'name')[k] ...]` (a list by index, a dict by key; a miss is a null)
+        "props" => {
+            if a.len() < 2 || a.len() > 3 { return Err("props(ids, 'name') or props(ids, at, 'name'): 2 or 3 arguments".into()); }
+            let V::List(ids) = &a[0] else { return Err(format!("props(ids, 'name'): ids is a list of entities, got a {}", kind_of(&a[0]))) };
+            let V::Str(name) = &a[a.len() - 1] else { return Err("props(ids, 'name'): the name is a text (the last argument)".into()) };
+            if name.starts_with('_') { return Err(format!("no attribute {:?}", name)); }
+            let at: Option<&Vec<V>> = match a.len() {
+                3 => match &a[1] {
+                    V::List(l) if l.len() == ids.len() => Some(l),
+                    V::List(l) => return Err(format!("props(ids, at, 'name'): {} ids and {} indexes (one index per id)", ids.len(), l.len())),
+                    v => return Err(format!("props(ids, at, 'name'): at is a list of indexes, got a {}", kind_of(v))),
+                },
+                _ => None,
+            };
+            let mut out = Vec::with_capacity(ids.len());
+            for (i, x) in ids.iter().enumerate() {
+                let v = match x {
+                    V::Ent(e) | V::Str(e) => w.attr(e, name),
+                    V::Dict(d) => d.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()).unwrap_or(V::None),
+                    V::None | V::Nil(_) => x.clone(),
+                    v => return Err(format!("props: item {i} is a {}, not an entity", kind_of(v))),
+                };
+                out.push(match at {
+                    None => v,
+                    Some(at) => match (&v, &at[i]) {
+                        (_, V::List(_) | V::Dict(_) | V::Float(_) | V::Bool(_)) => return Err(format!("props: index {i} is a {}, not an index (a whole number or a key)", kind_of(&at[i]))),
+                        (V::Error(_), _) => v,
+                        (_, k) if nullish(k) => V::None,
+                        _ => index_value(v, at[i].clone(), w).map_err(|e| format!("props: item {i}: {e}"))?,
+                    },
+                });
+            }
+            Ok(V::List(out))
+        }
         // fold(init, [step for x in xs if keep]) is evaluated by `ev_fold` (its step is not evaluated before the call); reaching here means a wrong shape
         "fold" => Err(FOLD_USE.into()),
         // log(x) (#1143, operator 2026-11-15): the natural log, the f64 log rounded to f32 (two math libraries that differ in an f64's last bits agree); x a positive number
@@ -1059,10 +1121,19 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
             Ok(V::List(out))
         }
         "group_by" => {
-            // rows grouped by a key, in first-seen order: [{key, rows}]
-            argn(2)?;
+            // rows grouped by a key, in first-seen order: [{key, rows}]; with sums (#1143), each group also holds the total of each named column
+            if a.len() < 2 || a.len() > 3 { return Err("group_by(rows, key, sums?): 2 or 3 arguments".into()); }
             let none: Vec<V> = Vec::new(); let l: &Vec<V> = match &a[0] { V::List(l) => l, V::None | V::Nil(_) => &none, _ => return Err("group_by(rows, key): rows is a list".into()) };  // #1065: a pending read (None) is empty
             let key = text_of(&a[1])?;
+            let sums: Vec<String> = match a.get(2) {
+                None => vec![],
+                Some(V::List(s)) => s.iter().map(|x| match x {
+                    V::Str(c) if c == "key" || c == "rows" => Err(format!("group_by: a group already holds {c:?}: sum another column")),
+                    V::Str(c) => Ok(c.clone()),
+                    v => Err(format!("group_by(rows, key, sums): sums is a list of column names, got a {}", kind_of(v))),
+                }).collect::<Result<_, Err>>()?,
+                Some(v) => return Err(format!("group_by(rows, key, sums): sums is a list of column names, got a {}", kind_of(v))),
+            };
             let mut groups: Vec<(V, Vec<V>)> = vec![];
             let mut by_text: HashMap<String, usize> = HashMap::new();   // a text key finds its group at once (a text equals only a text); any other key scans the groups
             for r in l {
@@ -1073,7 +1144,26 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
                 }
                 match groups.iter_mut().find(|(g, _)| !matches!(g, V::Str(_)) && py_eq(g, &k)) { Some(g) => g.1.push(r.clone()), None => groups.push((k, vec![r.clone()])) }
             }
-            Ok(V::List(groups.into_iter().map(|(k, rows)| V::Dict(vec![("key".into(), k), ("rows".into(), V::List(rows))])).collect()))
+            let mut out = Vec::with_capacity(groups.len());
+            for (k, rows) in groups {
+                let mut d = vec![("key".to_string(), k), ("rows".to_string(), V::None)];
+                for c in &sums {
+                    // in row order, from 0: whole numbers stay whole until a float joins (as Python's sum)
+                    let mut t = V::Int(0);
+                    for r in &rows {
+                        let x = match r { V::Dict(rd) => rd.iter().find(|(n, _)| n == c).map(|(_, y)| y.clone()).unwrap_or(V::None), _ => V::None };
+                        t = match (&t, &x) {
+                            (V::Int(p), V::Int(q)) => V::Int(p.checked_add(*q).ok_or_else(|| format!("group_by: the sum of {c:?} overflowed"))?),
+                            (_, V::Int(_) | V::Float(_)) => V::Float(numf(&t).unwrap() + numf(&x).unwrap()),
+                            _ => return Err(format!("group_by: the column {c:?} of a row of the group {} is not a number (got a {})", py_str(&d[0].1), kind_of(&x))),
+                        };
+                    }
+                    d.push((c.clone(), t));
+                }
+                d[1].1 = V::List(rows);
+                out.push(V::Dict(d));
+            }
+            Ok(V::List(out))
         }
         "concat" => {
             // lists joined end to end (`+` on lists is vector addition: lists are vectors)
@@ -1374,6 +1464,11 @@ fn ev_neg(a: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
 fn ev_index(b: &Node, i: &Node, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
             let base = ev(b, env, w, m)?;
             let idx = ev(i, env, w, m)?;
+            index_value(base, idx, w)
+        }
+
+/// `base[idx]`: a list by its index (negative from the end), a dict by its key, an entity by a property name; a miss is a null
+fn index_value(base: V, idx: V, w: &dyn World) -> Result<V, Err> {
             match (base, idx) {
                 (e @ V::Error(_), _) | (_, e @ V::Error(_)) => Ok(e),
                 (V::Nil(r), _) => Ok(V::Nil(r)),
