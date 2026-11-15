@@ -2,7 +2,7 @@
 //! An event (a text) HOLDS, for each thing, its own move of it or the move of the previous turn in its chat, whichever is larger (a text that is not a chat's has its own
 //! moves only). Each thing the QUESTION (the ask SemText) mentions weighs log(N / the events holding it), N the texts the field applied; an event scores the sum over those
 //! things of that weight x the move it holds; scores are divided by the top one; ties by key; the first DEPTH (20) as rows `{key, of, text, score}`
-//! (`SemText.movelog_votes`, computed while `recall_on`, NOT fused into recall yet). Each thing keeps its posting list (`ml_held_by`: the events holding it, with the move
+//! (`SemText.movelog_votes`, computed while `recall_on`; the vote of `recall` reads it, `vote_1143.rs`). Each thing keeps its posting list (`ml_held_by`: the events holding it, with the move
 //! held) so the voter reads only the question's things, never every text.
 //! The seat runs in process with its store (chat order is the store's key order) and its drivers; the model server is a tiny one in the test (loopback), whose vectors are
 //! the table `model` below. The question is a text like the others: its vectors land too, so it holds what it mentions (it is never a row of its own vote).
@@ -340,6 +340,41 @@ fn only_the_first_depth_rows_are_given() {
     let r = votes(&h, "q", &format!("Are {} here?", ids.join(" ")));
     assert_eq!(r.len(), 20, "DEPTH: {r:?}");
     assert_eq!(of(&r), (0..20).map(|i| leaf_eid(&format!("n{i:02}"))).collect::<Vec<_>>(), "equal scores: by key");
+}
+
+/// THE VOTE with the shipped voters (#1143 step 6, membrane/packs/mentions.c1f): the recall's score of a hit is the sum of its points on the four ballots (the move log 2, entity
+/// recall 0.75, the cosine and the edge lane 0.125 each; the i-th of a ballot earns weight x (20 - i)); the answer, which shares no word with the question, is held by the move log
+/// and outranks a text the lanes alone find
+#[test]
+fn the_recall_sums_the_points_of_the_shipped_voters() {
+    let h = seat();
+    chat(&h, "m1", "Tell me about pottery_class.", Some("It meets every week."), 1.0);
+    leaf(&h, "x", "Rain falls weekly.");
+    let ml = votes(&h, "q", "Was pottery_class weekly?");
+    let e = leaf_eid("q");
+    let rec = h.get(&e, "recall");
+    let rec = rec.as_array().unwrap_or_else(|| panic!("{rec} {}", h.get(&e, "failed"))).clone();
+    let mut want: std::collections::HashMap<String, f64> = Default::default();
+    let mut add = |rows: &J, w: f64, ranked: bool| {
+        for (i, r) in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]).iter().enumerate() {
+            let i = if ranked { r["rank"].as_f64().unwrap() - 1.0 } else { i as f64 };
+            if !ranked && i >= 20.0 { break; }
+            *want.entry(r["key"].as_str().unwrap().to_string()).or_insert(0.0) += if i < 20.0 { w * (20.0 - i) } else { 0.0 };
+        }
+    };
+    add(&J::Array(ml.clone()), 2.0, false);
+    add(&h.get(&e, "entity_votes"), 0.75, false);
+    add(&h.get(&e, "r_cos_rows"), 0.125, true);
+    add(&h.get(&e, "r_edge_rows"), 0.125, true);
+    assert!(!h.get(&e, "r_cos_rows").as_array().unwrap().is_empty() && !h.get(&e, "r_edge_rows").as_array().unwrap().is_empty() && !ml.is_empty(), "three voters at least");
+    for r in &rec {
+        let k = format!("{}#{}", r["semtext"].as_str().unwrap(), r["start"]);
+        near(r["score"].as_f64().unwrap(), want[&k], &k);
+    }
+    assert_eq!(rec.len(), want.len(), "every key a voter or a lane names: {rec:?}");
+    let at = |of: &str| rec.iter().position(|r| r["semtext"] == json!(of)).unwrap_or_else(|| panic!("{of}: {rec:?}"));
+    assert_eq!(at(&body("m1")), 0, "{rec:?}");
+    assert!(at(&answer("m1")) < at(&leaf_eid("x")), "the move log's answer outranks the lanes' text: {rec:?}");
 }
 
 /// the text of the i-th of many: three of five common things, two common words and one thing of its own

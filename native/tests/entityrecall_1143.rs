@@ -1,6 +1,6 @@
 //! ENTITY RECALL by worldline on SemText (#1143, step 5 of the field; membrane/packs/entityrecall.c1f): for the ask (the shared recall's query, `r_query`), the entities nearest it
 //! by their WORLDLINE (a young entity's mean, an old one's episodes), centred on the field's background, then the texts that moved those entities, each scored by the sum over
-//! the entities of (similarity x the move the text made of it). One getter, `SemText.entity_votes`, rows `{key, of, text, score}`; not fused into `recall` yet.
+//! the entities of (similarity x the move the text made of it). One getter, `SemText.entity_votes`, rows `{key, of, text, score}`; the vote of `recall` reads it (vote_1143.rs).
 //! Every test runs the shipped packs in process, with no model server: the receipts are written by the test (the field_1143 harness).
 use membrane_vm::host::{boot_started, Host, Options};
 use serde_json::{json, Map, Value as J};

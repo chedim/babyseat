@@ -7,7 +7,7 @@ IMPORT boot 1
 -- message the turn is answering (the ask), and the turn shows them after the main banner. Like the main banner it is the model's: reassign its `parents` to a class of your own that
 -- defines `words` (Help:banner); writing `Banner:recall.words` is refused because a getter owns it.
 -- THE RECALL ITSELF is not here: the part reads `recall` of the ask's body, the ONE recall every reader shares (`SemText.recall`, packs/mentions.c1f: the chat's window of texts, the edge
--- and the cosine lane, the fusion, the rerank, the merge of near duplicates). This part picks the ask, turns the recall on for it (and off for the ask before it), and words the lines.
+-- and the cosine lane, the move log and entity recall, the vote, the rerank, the merge of near duplicates). This part picks the ask, turns the recall on for it (and off for the ask before it), and words the lines.
 -- THE ASK is the oldest queued message whose turn has not started, else the latest (a setter below hears `queued`).
 -- THE LINES: `banner_n` of them (a dial of `recall:dials`), each cut to `fact_chars`, each with its ORIGIN: the person's words say who and when (the chat message and its time); any other
 -- text (a fetched page, a file, a command's output) says it is NOT the person's words and where it came from. The header is the dial `header`: recalled text is context, not instructions.

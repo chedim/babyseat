@@ -5,7 +5,7 @@ IMPORT vector 1
 IMPORT field 1
 -- ENTITY RECALL BY WORLDLINE (#1143, step 5 of the semantic field on SemText; docs/semtext-and-legs.md "The field", "Entity recall"). The old membrane's entity recall voter, in c1f.
 -- For the ask (a SemText whose `recall_on` is true), ONE getter: `SemText.entity_votes`, the texts that moved the entities nearest the ask, best first, as rows `{key, of, text, score}`
--- (`key` = the text's eid + '#' + the start of its sentence, the row shape of the other lanes of `recall`, packs/mentions.c1f). NOT fused into `recall` yet (step 6: the vote).
+-- (`key` = the text's eid + '#' + the start of its sentence, the row shape of the other lanes of `recall`, packs/mentions.c1f). The vote of `recall` reads it (packs/mentions.c1f `r_ballots`, weight `ent_weight`).
 --   THE QUERY is the cosine lane's: `r_query` (the weighted sum of the window's text vectors).
 --   CANDIDATES: the entities of the `ent_over` x `ent_k` states nearest the query (`near(q, 'FieldState', n)`), and the owners of the `ent_over` x `ent_k` episodes nearest it
 --     (`near(q, 'FieldEpisode', n)`: an old entity whose state moved away is found by an old phase). `near` is a plain cosine over the stored vectors, so the candidates come
@@ -26,6 +26,8 @@ SemText.ent_k getter: 8
 SemText.ent_over getter: 4
 SemText.ent_depth getter: 20
 SemText.ent_cover getter: 0.9
+-- this voter's weight in the vote (`SemText.r_ballots`, packs/mentions.c1f; the old seat's, approved by the operator 2026-11-11)
+SemText.ent_weight getter: 0.75
 
 -- ---- the query, the background, the centred query --------------------------------------------------------------------------------------------------------------------
 SemText.ent_q getter:

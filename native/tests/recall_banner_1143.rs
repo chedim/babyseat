@@ -1,6 +1,6 @@
 //! The recall part of the banner (#1143, stages 2 and 3 of the semantic field, operator 2026-11-14): `Banner:recall` is a banner part (the multi-banner
 //! mechanism) whose `words` hold the lines recalled for the current message (the ask): the edge lane (`SemText.related`) and the cosine lane
-//! (sentence vectors) fused by reciprocal rank, reranked by the fitted weights, shown with their origin under the header recall always had.
+//! (sentence vectors), with the move log and entity recall, combined by the vote (vote_1143.rs), reranked by the fitted weights, shown with their origin under the header recall always had.
 //! Every test runs on the SHIPPED packs of the barest seat. Until the native `near` builtin and the embedding pipeline merge, the cosine lane's hits are
 //! written by the test (`cos_in`) and the ask's vector arrives as a stubbed receipt of the one embedding call.
 use membrane_vm::host::{self, Host, Options};

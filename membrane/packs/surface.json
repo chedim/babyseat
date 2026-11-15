@@ -707,7 +707,7 @@
     "classes": [
       "SemText"
     ],
-    "members": 19,
+    "members": 20,
     "writes": [],
     "claims": [],
     "boot_facts": []
@@ -1122,7 +1122,7 @@
       "Span",
       "Word"
     ],
-    "members": 69,
+    "members": 74,
     "writes": [
       "*.request",
       "*.retire",

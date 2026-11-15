@@ -11,7 +11,7 @@ IMPORT field 1
 --         the texts the field applied (`MoveLog:all.n`); an event scores the sum over those things of that weight x the move it holds; the scores are divided by the top one (a top
 --         of 0 or less: no vote); ties by key; the first `ml_depth` as rows {key, of, text, score}: `of` the text, `key` the text's eid + '#' + the start of its sentence that moved
 --         a question's thing the most (the first sentence when the text only holds its previous turn's move), `text` that sentence. The question itself is never a row. One round
---         (the old ROUNDS = 1). Recall does NOT read it yet (the vote of step 6).
+--         (the old ROUNDS = 1). The vote of `recall` reads it (packs/mentions.c1f `r_ballots`).
 --   THE POSTING LIST (the old `held_by`): each thing keeps `ml_held_by`, the events holding it as [{t: the text, h: the move held}], so the vote reads only the question's things,
 --         never every text. It is kept by two setters, one write per thing:
 --           `movelog-post`  when a landing is ready (field.c1f `field_ready`): each text the landing gave moves (the landing text, and the earlier texts of a word that
@@ -23,7 +23,7 @@ IMPORT field 1
 --         (the engine keeps the first write of a thing's list in a round). Texts applied before this pack have no postings (no backfill).
 --         `MoveLog:all.n` counts the texts at their first landing.
 -- THE CONSTANTS are getters on SemText a model's layer can override (carried from the old seat): `ml_depth` 20 (the vote's depth), `ml_weight` 2 (this voter's weight in the
--- vote; read by the fusion of step 6, not yet).
+-- vote, read by `r_ballots`, packs/mentions.c1f).
 
 SemText.ml_depth getter: 20
 SemText.ml_weight getter: 2

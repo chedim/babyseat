@@ -1,6 +1,6 @@
-# SemText and legs: how code builds the graph (built: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges, sentence vectors, the shared recall, the recall banner part, Memory, entity recall by worldline)
+# SemText and legs: how code builds the graph (built: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges, sentence vectors, the shared recall, the recall banner part, Memory, entity recall by worldline, the move-log voter, the vote)
 
-A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "The field", "Entity recall by worldline", "The move-log voter", "Recall in the banner", "Memory"); recall's use of the field (the vote, step 6) and everything under "Not built" is not. It is the shape the semantic field
+A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "The field", "Entity recall by worldline", "The move-log voter", "Recall: one getter on SemText" with its vote, "Recall in the banner", "Memory"); everything under "Not built" is not. It is the shape the semantic field
 takes in the barest seat: ONE graph (the VM's entities), with the semantic state an opt-in component of an entity, and code (c1f
 packs) building the graph from text.
 
@@ -24,7 +24,7 @@ packs) building the graph from text.
 4. Mention rules (c1f, in a pack the model can layer over) create `Word:<normalised surface>`, `File:<path>` and the like by
    constructor and link them to the spans (mention edges). An entity is OWNED by its mentions: it lives while one mention exists, so
    forgetting a message tidies the graph. The recall index holds weak references.
-5. The field (`packs/field.c1f`, "The field" below) moves entity states by the sentence vectors as they land and logs each move on the text. Recall does not read it yet.
+5. The field (`packs/field.c1f`, "The field" below) moves entity states by the sentence vectors as they land and logs each move on the text. Recall reads it through two voters (entity recall and the move log) in its vote ("Recall: one getter on SemText").
 
 ## The model builds more legs
 A leg is just a SemText, so any pack the model writes can make one: a command's output
@@ -168,11 +168,11 @@ sentence number, the move); `field_n` on the text counts the sentences applied.
   before older history: that history then moves the states after it).
 - **How**: c1f has no loop with an accumulator, so one landing is one cascade: a setter makes a VIRTUAL `FieldStep` per (entity, mention), each chained to the previous mention of the same entity; their
   getters compute the walk; when every chain is computed, one setter writes each state, each text's moves, the nursery, the episodes and the background. The steps are collected when the round ends.
-- `recall` does not read the field yet: entity recall and the move-log voter (below) are built as their own getters; the vote (step 6) is not.
+- `recall` reads the field through entity recall and the move-log voter (below), each its own getter, in its vote (step 6, "Recall: one getter on SemText").
 
 ### Entity recall by worldline (#1143, step 5; `membrane/packs/entityrecall.c1f`, tests `native/tests/entityrecall_1143.rs`)
 The old membrane's entity recall voter. For an ask whose `recall_on` is true, `SemText.entity_votes` is the list of texts that moved the entities nearest the ask, best first, as rows
-`{key, of, text, score}` (`key` = the text's eid + `#` + the start of its sentence, the row shape of the other lanes). It is NOT fused into `recall` yet: the vote (step 6) will read it.
+`{key, of, text, score}` (`key` = the text's eid + `#` + the start of its sentence, the row shape of the other lanes). The vote of `recall` reads it with the weight `ent_weight` (0.75, a getter of this pack).
 - **The query** is the cosine lane's `r_query` (the weighted sum of the window's text vectors).
 - **Candidates**: the entities of the 32 states nearest the query (`near(q, 'FieldState', ent_over x ent_k)`) and the owners of the 32 episodes nearest it (`near(q, 'FieldEpisode', ...)`,
   so an old entity whose state moved away is found by an old phase). `near` is a plain cosine, so the candidates come from the raw query, as in the old seat; the re-score is centred.
@@ -195,8 +195,8 @@ The old membrane's entity recall voter. For an ask whose `recall_on` is true, `S
 - Not built: the move log's previous turn (`held`), the answerable-events filter of the old voter, the old seat's word hop (it was off for the vote: `hop=False`).
 
 ### The move-log voter (#1143, step 4; `membrane/packs/movelog.c1f`, tests `native/tests/movelog_1143.rs`)
-The old membrane's `movelog.settle`, over the move log above (`field_moves`). It is ONE getter, `SemText.movelog_votes`, computed while `recall_on` is true (as `recall`); **recall does not read it yet**
-(the fusion of the voters is step 6).
+The old membrane's `movelog.settle`, over the move log above (`field_moves`). It is ONE getter, `SemText.movelog_votes`, computed while `recall_on` is true (as `recall`); the vote of `recall` reads it
+(step 6).
 - **Held**: an event (a text) holds, for each thing (Word / Identifier / Path entity), the LARGER of its own move of it (the largest of its sentences') and the move of its PREVIOUS TURN (that
   turn's own move, not what that turn held). The previous turn of an answer body is its message's body; of a message body, the answer body of the message before it, else that message's body
   (chat order is the store's key order, the way recall's window reads it). A text that is not a chat's (a `Memory` note, a pack's leg) has its own moves only.
@@ -211,7 +211,7 @@ The old membrane's `movelog.settle`, over the move log above (`field_moves`). It
   text, and the earlier texts of a word that materialises) and each one's follower (`ml_next`) hold the new moves, the larger value kept; at a chat text's FIRST landing it also makes the link (the
   text holds the previous turn's moves, the previous turn learns `ml_next`), because the previous turn was read when the text was mentioned (`ml_prev`, one `sql` per chat text); `movelog-link`
   makes the link later for a text that landed before the store answered.
-- **The constants** are getters on SemText a layer overrides: `ml_depth` 20 and `ml_weight` 2 (the voter's weight in the vote, read by step 6, not yet). Both carried from the old seat
+- **The constants** are getters on SemText a layer overrides: `ml_depth` 20 and `ml_weight` 2 (the voter's weight in the vote of `recall`). Both carried from the old seat
   (`recall_vote.py`; approved for the port 2026-11-15).
 - **Cost** (measured 2026-11-15 by bisecting the step budget, `measure_the_step_budget`, a question naming seven things that every text or three in five hold): 150 texts: the vote 3,301 steps,
   the largest expression of the posting setter (one thing's list rewritten) 1,855 steps for a thing held by 91 texts; 600 texts: the vote 12,751 steps, the setter 7,255 for 361 holders. Both are
@@ -222,7 +222,7 @@ The old membrane's `movelog.settle`, over the move log above (`field_moves`). It
   round, so one landing's postings can be lost: the field's own apply has the same limit). Texts the field applied before this pack existed have no postings (no backfill).
 
 ### Not built
-A backlog of stored texts that are not chat bodies (the backlog query reads chat bodies only; any other text is asked when its text is written), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, recall's use of the field (the move log voter, the vote; entity recall is its own getter, not read by `recall`), a collection of stored Word entities, the
+A backlog of stored texts that are not chat bodies (the backlog query reads chat bodies only; any other text is asked when its text is written), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, the old vote's instance-histories voter and its `bge` reranker, a collection of stored Word entities, the
 mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).
 
 
@@ -245,17 +245,37 @@ finds the rest in the graph. It computes only while `recall_on` is true (the ban
   a message is embedded once (`a_chat_asks_own_call_writes_the_sentence_vectors_of_its_message`, `a_chat_message_is_embedded_once`); any other text embeds its whole text as one input
   (one vector, not kept). The queue leaves a text alone while its own call is out (`in_flight`) and while it is the body of a message queued for a turn that has not started (the
   banner is about to ask it); once the turn starts or ends it is the queue's again (so a failed call or a missing banner part only delays it).
-- **Fusion and rerank** as before: reciprocal rank (`rrf_k`), ties by key; the first `rerank_top` rows reranked by the fitted weights over the cosine score, the fused place and the share of the ask's own
-  entities the sentence mentions.
+- **The vote** (step 6; the old seat's `recall_vote.py`, operator 2026-11-11 and 2026-11-15; `r_ballots`, `r_voted`; tests `native/tests/vote_1143.rs` and
+  `the_recall_sums_the_points_of_the_shipped_voters` in `movelog_1143.rs`): weighted Borda. Each voter's ballot is its first `vote_depth` (20) rows, and its i-th row (from 0) earns the voter's
+  weight x (20 - i). The voters: the move log (`movelog_votes`, weight `ml_weight` 2), entity recall (`entity_votes`, `ent_weight` 0.75), the embedder = the cosine lane (`r_cos_weight` 0.125)
+  and the word lane = the edge lane (`r_edge_weight` 0.125). The weights are the approved ones, kept as they are with the old seat's other voters missing; each is a getter a layer overrides
+  (the two voters' in their own packs). A voter that is not there or that failed (an Error, a budget exceeded) adds nothing. The points are summed per key (the text's eid + `#` + the
+  sentence's start): every voter names a sentence (the move log and entity recall the sentence of the text that moved the things most), so two sentences of one text are two hits, as in the
+  lanes; nothing merges them. Best first, ties by key. The lanes' rows past the depth stay hits with 0 points (no cut-off; they come after the voted ones, by key); a voter's rows past the
+  depth are not hits (as the old seat's ballots). The vote replaced reciprocal-rank fusion: the dial `rrf_k` is still loaded with the dials but nothing reads it.
+- **The rerank** of the first `rerank_top` rows by the `legacy` set of the fitted weights (`weights.legacy`: fitted with neither the reply-model features nor `bge`, the closest to what this
+  seat has; it was `weights.rerank`, fitted with `bge`) over the cosine score, the voted place (`inv_rank` = 1 / the place) and the share of the ask's own entities the sentence mentions; the
+  other features are 0. A row only the move log or entity recall found has a cosine score and a share of 0.
+- **Not ported from the old vote**: the instance-histories voter (weight 3: a parser and a date reader this seat does not have) and the `bge` reranker (a model runtime). The old seat
+  kept the vote's order when the reranker was down; this recall reranks the vote's first 20 by the `legacy` weights (operator 2026-11-15).
+- **Cost of the whole recall** (each evaluation has its own step budget; measured 2026-11-15 by bisecting the budget on `measure_the_step_budget_of_the_whole_recall`, a chat whose texts each name
+  8 of 40 identifiers and three words every text says, every voter voting). 150 texts: the largest evaluation takes about 33,000 steps (the near duplicates' pair counts, `r_pairs`); by part, the edge lane 13,900
+  (`r_edge`), the cosine lane 3,100, the move log 2,800, entity recall 18,000 (`ent_mvecs`), the vote, rerank and merge 33,000. 600 texts: entity recall needs about 122,900
+  (`ent_mvecs` reads the sentence vectors of its 32 candidates' mentions, and the three words every text says are candidates with 600 mentions each), so under the default budget it
+  fails (`budget exceeded`) and the vote goes on without it (its ballot is missing); the rest fits: the edge lane 54,400 (linear in the mentions of the ask's entities), the cosine lane
+  3,100, the move log 2,800, the vote, rerank and merge 29,500. Nothing is cut (no threshold was given): somewhere between 150 and 600 such texts (not bisected by text count), entity recall drops out of the vote. With every
+  lane and ballot full and no key shared (114 hits of 13 words, the most the shipped dials allow; `full_ballots_of_long_sentences_stay_inside_the_step_budget`) the largest
+  evaluation, the pair counts, takes about 79,500.
 - **The ask itself is never a hit**; nothing else is left out (recent chat texts are hits: the model gets no chat history).
 - **Near duplicates merge, greedy**: two hits are near duplicates when the shorter sentence has at least `dup_share` of its distinct words (`plain`, lowercase) in the other's; a hit is dropped
   only when it is a near duplicate of a better-placed hit that was KEPT, so in a chain A ~ B ~ C with A and C not alike, B goes and C stays (`a_chain_of_near_duplicates_keeps_its_far_end`).
   `dup_share` is a getter a layer overrides; it reads the dial `dup_share` of `recall:dials` (0.8; the old unused dial `dedupe_jaccard`, renamed). The shared words of every pair are counted
-  with builtins and vector operations; a `fold` then walks the hits in order with the keep-mask so far, a few vector operations per hit (`r_kept`). Cost: with both pools full (24 + 50
-  hits of 13 words) the largest evaluation takes about 37,700 steps of the 100,000 budget (about 35,000 before the fold; measured 2026-11-15 by bisecting the budget on
-  `full_pools_of_long_sentences_stay_inside_the_step_budget`); the pair count grows with the square of the hits, so pools about twice as large would exceed it.
-- **No score cut-off**: every hit, best first, `{semtext, start, text, score, sim, overlap}` (`score` the fused one); the readers cut the count.
-- The dials are the entity `recall:dials` (`banner_n`, `pool`, `entity_pool_max`, `rrf_k`, `rerank`, `rerank_top`, `fact_chars`, `header`, `weights`, `assoc_n`, `assoc_clip`, `dup_share`; loaded from
+  with builtins and vector operations; a `fold` then walks the hits in order with the keep-mask so far, a few vector operations per hit (`r_kept`); the pairs' counts are their own getter (`r_pairs`), so the counting and the fold each have their own step budget. Cost: with both
+  pools full (24 + 50 hits of 13 words) the largest evaluation took about 37,700 steps of the 100,000 budget before the vote; with the vote's two ballots full as well and no key shared
+  (114 hits) the counting of the pairs takes about 79,500 (89,900 before it was split from the fold). The pair count grows with the square of the hits, so about 12% more hits than
+  that (about 128) would exceed the budget (then `recall` is a reasoned null, `budget exceeded`, never a wrong list).
+- **No score cut-off**: every hit, best first, `{semtext, start, text, score, sim, overlap}` (`score` the vote's points); the readers cut the count.
+- The dials are the entity `recall:dials` (`banner_n`, `pool`, `entity_pool_max`, `rerank`, `rerank_top`, `fact_chars`, `header`, `weights`, `assoc_n`, `assoc_clip`, `dup_share`; loaded from
   `native/packs/recall-policy.json`, guarded by the host).
 
 ## Recall in the banner (#1143)
