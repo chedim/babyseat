@@ -9,6 +9,7 @@ pub mod text;
 #[cfg(unix)]
 pub mod mapped;
 pub mod topk;
+pub mod vecstore;
 pub mod packs;
 pub mod expr;
 pub mod infer;

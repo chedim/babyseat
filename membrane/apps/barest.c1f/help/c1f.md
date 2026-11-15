@@ -131,8 +131,21 @@ V.summed getter: [1, 2] + [3, 4]
 V.joined getter: concat([1, 2], [3])
 ```
 
+A `Vector` keeps a list of numbers in compact form: write a list to `Vector:<id>.v` and a rule reads it back as a list of numbers (so `dot`, `norm`, `unit` and `distance` take it). The first
+vector written fixes how many numbers every vector of the class has; another length is refused with a receipt. `near(list, 'Vector', k)` returns the k nearest `Vector`s by cosine, best first, as a
+list of `{eid, score}` (ties by eid). The results are stable on one device (the same inputs give the same answer), not promised identical across devices.
+
+```c1f
+-- given Vector:a {"v": [1.0, 0.0, 0.0]}
+-- given Vector:b {"v": [0.0, 1.0, 0.0]}
+-- given Vector:c {"v": [0.9, 0.1, 0.0]}
+-- given Probe:q {"want": [1.0, 0.0, 0.0]}
+-- reads Probe:q.closest = ["Vector:a", "Vector:c"]
+Probe.closest getter: pluck(near(this.want, 'Vector', 2), 'eid')
+```
+
 Builtins: `len abs min max lower strip replace startswith lines words spans join head tail sort_by before after pluck distinct group_by concat json str num plain
-unspeak dot norm distance unit fit clip ago epoch localtime prop why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
+unspeak dot norm distance unit near fit clip ago epoch localtime prop why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
 refused when the pack loads:
 
 ```c1f-error
