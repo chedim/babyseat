@@ -1,16 +1,17 @@
-# Cliffhanger fields: the design (goal 606594617c19, issue #994)
+# Cliffhanger fields: the design (issue #994)
 
-Status: the design of cliffvm's field language (getters, setters, packs), BUILT in `native/` and used by every pack of the release; the sections below keep the reasoning. The syntax a model writes is taught by `Help:c1f`, `Help:packs` and `Help:upgrade`
-(`membrane/apps/barest.c1f/help/`), each code block of which is a test. Sections that describe the 0.7 Python seat's packs (the whole banner, `banner.c1f`, Blurp) are history, not the release.
+The design of cliffvm's field language (getters, setters, packs), BUILT in `native/` and used by every pack of the release; the sections below keep the reasoning. The syntax a model writes is taught by `Help:c1f`, `Help:packs` and `Help:upgrade`
+(`membrane/apps/barest.c1f/help/`), each code block of which is a test. The reference of what the host does is docs/cliffvm.md.
 Syntax source: github.com/chedim/cliffhanger README (read 2026-11-09). Where the README is silent
 the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
+
 
 ## 1. The syntax (the syntax pass, 2026-11-09)
 
 Membrane's syntax, made consistent, plus `ELSE` and `ALWAYS` from the spec. Cliffhanglets (pieces of
 cliffhanger code: setters and getters) are stored in `.c1f` files (decided 2026-11-09). Besides the built-in goal
 graph, packs load at runtime from `membrane/packs/*.c1f` and from `Pack` entities in the field
-(`membrane::pack:<name>`, the text in `c1f`), which can be edited live (`membrane/fields_live.py`).
+(`Pack:<name>`, the text in `text`: `entity_write {spec: 'Pack:<name>', prop: 'text', value: <c1f>}`), which can be edited live (docs/cliffvm.md, "Pack entities").
 
 **Packs, imports and ownership (decided 2026-11-09).** A pack starts with its header:
 ```
@@ -76,17 +77,16 @@ Kept from the spec (github.com/chedim/cliffhanger README): `WHEN` / `ELSE WHEN` 
 
 **Migration.** The old WHEN/WHERE/WRITE triggers translate into this form
 (`translate::translated_goalgraph_setters`, printed with `syntax::print`). `tests/syntax_994.rs`
-holds the text pack equal to the translated triggers, and the pinned field checksum is unchanged.
-A trigger with no field form is refused, never guessed.
+holds the text pack equal to the translated triggers. A trigger with no field form is refused, never guessed.
 
 ## 2. The rules (1-9)
 
 1. **Fields.** Everything is a field on an entity; entities are instances of classes; a field is
    declared once on a class (name, type, getter, setters).
-2. **Getters are cached and eager.** A new getter never computes on load (traces start at `{}`);
-   after load it recalculates when an input changes. A field with a getter holds its last computed
-   value. A read
-   returns the cache; a read never writes and never fires anything.
+2. **Getters are cached and eager.** A getter's value is computed once when its pack loads (and at start, a rebuild: no setter and no effect runs), then recalculated by the engine
+   when an input it read changes, never on a read. A field with a getter holds its last computed value; a read
+   returns the cache, never writes and never fires anything. Loading or replacing a pack recomputes only the getters it changed or added
+   (`Fields::set_getters`); an idle seat evaluates no getter.
 3. **Own name = previous cached value, never an input.** Inside a getter the field's own name is
    its previous value: `x = (x or 0) + 1` is an accumulator. A getter's own field is never one of
    its inputs: reading its own name does not subscribe, so the getter recalculates only when a
@@ -95,8 +95,8 @@ A trigger with no field form is refused, never guessed.
 4. **A recalculated value is a write through the setters.** When inputs change the getter runs
    and its result is written like any write. That write fires its dependents (rule 5) inside the
    current round (rule 8).
-5. **Every change fires.** A write whose stored value differs fires the triggers/getters that
-   depend on that field. A write of the same value is no change and fires nothing.
+5. **Every change fires; an unchanged value stops the wave.** A write whose stored value differs fires the triggers/getters that
+   depend on that field. A write of the same value is no change and fires nothing: a getter that recomputes to the value it already had wakes none of its readers (early cutoff).
 6. **Setters.** A field has several setters, run in the order added. A write to the field's own
    name from inside its setter stores directly and bypasses the setters. Three jobs: effects
    (chat, exec, llm), guarding (refuse/alter), write-through computed values.
@@ -133,107 +133,13 @@ A trigger with no field form is refused, never guessed.
 
 Cold start: new world = effects run once; warm restart = none; rebuild = silent (decision 4).
 
-## 4. Today's constructs mapped
+## 4. The goal graph
 
-| Today | Field form |
-| - | - |
-| trigger `changed ?x.p` | an `on` setter (or dependent getter) on field `p` |
-| `isa ?x C` | the field is declared on class C |
-| `filter expr` | `WHEN expr:` in the guard/getter |
-| `below p N` | `WHEN this.p < N:` |
-| `every S` | a rule on the clock field (`WHEN clock - last >= S:`), rule 9 |
-| write `?x.p = e` | a setter writing `p`, or a computed field `p` with getter `e` |
-| method dispatch | a write to a method field; the adapter is its `on` setter |
-| calls as writes (adapters.py) | `llm.call` etc. are fields; writing one is the call |
-| VM WHEN/WHERE/WRITE | translation layer, removed at the end |
+The built-in goal graph (`PACK goalgraph 1`, `native/packs/goalgraph.c1f`; the engine loads it first, `Fields::goalgraph`) is the first pack written in this syntax: the getters `finished`, `open_blockers` and `due` and the
+setters that ready a task, arm a wait and ask a goal to replan. The file is the source of truth (a copy here would drift). `native/src/translate.rs` turns the old WHEN/WHERE/WRITE triggers into this form and
+`native/tests/syntax_994.rs` holds the text pack equal to the translated triggers. A counting getter (`open_blockers`) replaces decrement-on-event: it is idempotent and replay-safe.
 
-## 5. All 12 goalgraph.TRIGGERS rewritten
-
-Counting becomes a computed field instead of decrement-on-event: idempotent and replay-safe. The
-five counting triggers (1, 2, 6, 7, 8) are the getter; the other seven become the nine setters below (ready and wait-armed also run on
-status), as shipped in `native/packs/goalgraph.c1f`:
-
-```
--- The goal graph (#773, #994) in cliffhanger's field syntax (native/src/syntax.rs).
--- Migrated from packs/goalgraph.json by the translator; tests/syntax_994.rs holds the two equal.
---
--- The getter (built into the engine, fields.rs `recount`): a task's or wait's open blockers are counted, never
--- decremented, so a dropped or doubled write can't make them drift:
---   Task.open_blockers getter: the blockers of this (Task, Decision, Wait) that are not finished
---   finished: Task and Wait -> status == 'done'; Decision -> status == 'closed'
-
--- a task with nothing open in its way is owed (on the count, and on its own status)
-Task.open_blockers on-setter ready:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'owed'
-Task.status on-setter ready-on-status:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'owed'
-
--- a task or a card that ends asks its goal to replan
-Task.status on-setter replan-task:
-  WHEN (this.status == 'done' or this.status == 'failed' or this.status == 'stuck'):
-    this.goal.replan = 'task ' + this.eid + ' ' + this.status
-Decision.status on-setter replan-card:
-  WHEN (this.status == 'closed' or this.status == 'dropped'):
-    this.goal.replan = 'card ' + this.eid + ' ' + this.status
-
--- a wait with nothing open in its way is armed; when it is due, its adapter checks
-Wait.open_blockers on-setter wait-armed:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'armed'
-    this.armed_since = clock
-Wait.status on-setter wait-armed-on-status:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'armed'
-    this.armed_since = clock
-Wait.due on-setter wait-check:
-  WHEN this.due:
-    this.check = 'due'
-
--- a goal asked to replan calls the planner (and again after a reopen with a new reason)
-Goal.replan on-setter plan:
-  WHEN (this.status or 'open') == 'open' and this.replan:
-    membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
-Goal.status on-setter plan-after-reopen:
-  WHEN this.status == 'open' and this.replan and this.planned_ts and this.replan != this.planned_replan:
-    membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
-```
-Wait example fields: `open_blockers`, `armed`, `armed_since`, `due`. Note: today's `wait check`
-fires every 10 s; in fields `due` recalculates on each clock tick, so the check cadence is the
-tick, and the adapter must be idempotent per `every_s`. The parity checksum will show any drift.
-
-Getter rows 13 and 15: ASSUMPTION, confirm with the operator. I read them as rows 13 and 15 of
-the entity-script group (migration rows 12-15): row 13 `autonode.py` tick scripts become
-clock-driven input fields (decision 1); row 15 `chat_io.py` chat/say scripts become `on`
-setters on a `say` field paced by freeze (decision 2).
-
-## 6. Migration table, in the order we would do it
-
-| # | Item | Source | Becomes |
-| - | - | - | - |
-| 1 | Parity gate | #971 journal | the checksum test (section 7) |
-| 2 | Goal-graph triggers (12) | goalgraph.py | section 5 |
-| 3 | Banner rules | graphbanner.py (deleted, #1143: map mode is the only mode) | - |
-| 4 | Recall policy | recall_policy.py #983 | guard setters |
-| 5 | Calls as writes | adapters.py #959/#956 | `on` setters |
-| 6 | Self learned triggers (179) | ch_learn.py | field rules |
-| 7 | Seed packs | seedpack.py #982, #984-991 | field declarations (finish data moves only; no new WHEN/WHERE/WRITE) |
-| 8 | Entity scripts (rows 12-15) | night.py, autonode.py, chat_io.py | getters/setters; sensors pushed |
-| 9 | VM | native/ (Rust, the only VM target), ch_native.py | WHEN/WHERE/WRITE as translation layer, then removed. Fields are built on the native VM only; no Python VM (ch.py) work. Python VM removal is the separate goal membrane::goal:aeac0f121bf2 |
-
-## 7. How
-
-One conversion per item, behind the issue's switch; no item switches on a live seat without the
-operator's go. Parity gate: replay the same #971 journal under today's triggers and under fields,
-both sides run on the native VM; checksum the whole field (every entity's stored and cached fields, sorted) and compare. Per-rule
-"Done means" tests stay as VM unit tests. The checksum gates every migration row.
-
-## 8. Same-PR doc edits (not in this draft)
-
-(0.7 doc edits, moot: the Python seat's doctrine.md and entity-field.md are gone.)
-
-## 9. The field engine in the browser
+## 5. The field engine in the browser
 
 The same Rust engine (getters, setters, `.c1f` packs, imports) is compiled to WebAssembly (`native/build-web.sh`,
 binding `native/src/web.rs`) and runs in the babyseat client (`membrane/apps/barest.c1f/ui/fieldvm.js`, loaded by `index.html`).
@@ -292,7 +198,7 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/apps/bar
   there. `native/tests/wasm_check_1143.rs` keeps `cargo check --target wasm32-unknown-unknown --no-default-features --features wasm`
   green (it skips when the target is missing); the shipped `fieldvm_core*` files are rebuilt with `native/build-web.sh`.
 
-## 10. The language, 2026-11-10: setters and getters support the same forms
+## 6. The language, 2026-11-10: setters and getters support the same forms
 
 - **Bare ifs** in any expression: `'on' if this.level > 0 else 'off'` (chains: `a if c else b if d else e`).
 - **Arms** (alternative definitions of one field; the first whose condition holds wins):
@@ -319,48 +225,6 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/apps/bar
   never calls out); an error in one is the getter's error (a `refused` receipt, the field keeps its value). Effects
   are never getters: they stay writes to adapter branches. The seat's slow ones (`recall`, `rerank`) run off the
   engine like `sql(...)`: the getter reads None until the answer lands, and the banner waits for them without the
-  field's lock (a slow recall never stalls the thinker or another chat). Each keeps its answer for its getter until
+  field's lock (a slow recall never stalls another chat). Each keeps its answer for its getter until
   that getter asks with other arguments, so a chain in one getter settles; each banner build starts fresh.
 
-## 11. Libraries in `.c1f`
-
-(0.7 history: `banner.c1f`, the whole banner with recall and Blurp, is in `membrane/packs/` but NOT loaded in the release; the release's banner is `membrane/apps/barest.c1f/default_banner.c1f` and `Help:banner`.)
-
-- **`membrane/packs/banner.c1f`** (the whole banner): one `Banner:<admin>:<chat>` per person per chat, internal
-  chats too; a turn writes `ask` and the seat's facts as fields (`paused`, `alerts` -- the track alerts it took --,
-  `tools`, and Blurp's `blurp` / `suggest` when Blurp is on), and shows `text` (every section and the layout:
-  RECALL, OPEN, DECIDED, WORKING ON, ABOUT, STABLE, SINCE, the paused / alert / more lines; `lines` is RECALL). Built-ins: `recall(text, pool, session)`,
-  `rerank(rows, text, weights)`, `pick(rows, n, session)`, `line(row)`, `topic(text)`; a row is
-  `{h, n, ts, role, via, score, fact}`. Dials on the instance start as a copy of `recall:dials`. An instance of
-  another class runs that class's pack (Memo's own banner). A script's error is shown in place of the lines.
-- **`membrane/packs/about.c1f`** (a view pack, `IMPORT dom 1`): the About window (ⓘ) in every page, drawn from
-  `About:seat` {version, sha, changelog}. A view pack's classes are mirrored to pages like any pack's, though the
-  pack itself waits on the seat (no `dom` there). Note: an on-setter sees the getters as they were before the write in
-  the same round, so the pack computes what it shows in the setter itself.
-- **`membrane/packs/mcp.c1f`** (#963): MCP servers and what they offer as entities.
-  - `McpServer:<name>` {transport stdio|http, command, args, env_from, url, headers_from, enabled}; `state`
-    (off / starting / up / failed), `tool_count`. Secrets are named (`env_from`, `headers_from`), never stored.
-  - `McpTool:<server>:<tool>` {name, description, input_schema, server, listed, callable}, `McpResource:<server>:<uri>`,
-    `McpPrompt:<server>:<name>`; what a server stops listing stays, `listed = False`.
-  - Calls are writes: `McpTool:...call:run = {id, args}` -> `call:run_result` {id, status, rc, head, result}; secret-named
-    args, entity scripts and peers are refused; 60 s per call. `membrane::mcp.import = 'all'` imports Claude Code's
-    and opencode's configs as disabled servers (`import_result`).
-  - The I/O is `membrane/mcpfield.py` (one connection loop, no polling: list-changed notifications list again);
-    enabled servers connect again at boot, stop with the seat, and are mounted into the Claude rung as its own tools.
-
-## 12. Pronouns (#1101)
-
-A bare `it`, `that`, `they` / `them`, `these` / `those`, `he` / `him` or `she` / `her` in an expression, with no
-variable of that name, resolves when the method runs, innermost first through the chat's context stack (the turn's
-last touch, the entered entities, the chat's promoted subjects, the person's registers; `callctx.pronoun`), to the
-entity (a list of them, for `they`) it stands for:
-
-```c1f
-it.run = {args: ["--offline"]}          # "it" = the Command the conversation is on
-read(that.path)                         # "that" = the file mentioned before
-```
-
-It is live, not copied: a method written with `it` follows whatever "it" means each time it runs. A variable of the
-same name wins. An unbound or expired pronoun fails naming itself (`the pronoun "it" is not bound here`), never a
-silent wrong target. `this` is not a pronoun: it is the method's own object. The engine asks the host through its
-`pronoun` built-in (`native/src/expr.rs`); the Python side is `fields_live._Host.call`.

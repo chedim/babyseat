@@ -1,7 +1,7 @@
 # c1f apps and layers (decided 2026-11-13; BUILT 2026-11-13, #1143: see the status table)
 
 A c1f APP is a folder named `<name>.c1f/` (the extension is the same one a single pack file has; the loader tells a file from a
-directory). It follows the original cliffhanger modules (`~/projects/cliffhanger/README.md`: a module is a folder whose files map
+directory). It follows the original cliffhanger modules (github.com/chedim/cliffhanger README: a module is a folder whose files map
 onto the data tree and whose `.ct` files define triggers, each module a separate trigger layer), carried over to today's
 class-based c1f.
 
@@ -44,6 +44,7 @@ A pack's header is its first lines (anywhere before the code, one per line): `PA
 |---|---|
 | `VIRTUAL <Class>` | the class lives in memory only: never stored, restored or journalled |
 | `RESIDENT <Class>` | stored and always loaded; the default, with no line, is stored and loaded on demand |
+| `MAPPED <Class> <dtype>` | a lazy class whose property `v` (one big list of numbers) lives in the native vector store (`f16` is the only dtype); `near(...)` searches it (`membrane/packs/vector.c1f` declares `Vector`) |
 
 Rule A applies: only the OWNER of a class declares its mode (a storage line claims a class no pack owns yet, like a getter does); any other pack, imported or not, is refused with a text naming both packs ("pack b: RESIDENT X: pack a owns X (it declares it VIRTUAL) and only the
 owner of a class declares its storage mode"). One class per line; a class that is both `VIRTUAL` and `RESIDENT` in one pack is a parse error. The surface and types snapshots (`surface.json`, `types.json`) list a pack's `virtual` and `resident` classes.
@@ -75,12 +76,9 @@ owner of a class declares its storage mode"). One class per line; a class that i
   defines through B's import, is refused with `belongs to pack A: add IMPORT A`). The safety rule (`add IMPORT <pack>` for an override of
   a pack you do not import, transitively counted) and the write rule B are unchanged.
 
-## Open points
+## A runtime pack's place
 
-- How a model-loaded `Pack:<name>` entity (the pack-loading piece, `docs/cliffvm.md`) takes its layer position: a runtime pack is
-  loaded last and is therefore on top.
-- The doctrine says a model "replaces the banner completely by giving its entity a class of its own"; with layers a model could
-  instead override the banner's `text` arms. Keep both until a real case chooses.
+A model-loaded `Pack:<name>` entity (docs/cliffvm.md, "Pack entities") is loaded last and is therefore on top: its arms win over the packs below it (the model replaces the banner this way: `Help:banner`).
 
 ## Privilege (built 2026-11-13, #1143)
 
@@ -96,7 +94,7 @@ own or import (`compose` refuses it, tested).
   `privileged = false` (or none) revokes.
 - **Root of trust: by position, not by name** (decided 2026-11-13). The host marks the packs of the FIRST app given to `cliffvm run`
   privileged (`Host::load_app(.., trusted = true)`), whatever they are called, and nothing else: a pack named `boot` that is not first is
-  not trusted, a later app has no privilege until a grant. The shipped line is `cliffvm run membrane/packs/boot.c1f membrane/packs`.
+  not trusted, a later app has no privilege until a grant. `cliffvm serve` loads `boot` first (the first line of `membrane/apps/barest.packs`).
   boot.c1f grants `door_tools` at start with a setter on `Boot.started` (`Pack:door_tools.privileged = True`), so the model's
   `entity_write` can write the class a model-written pack owns. The model's tool (privileged) can write the text of the root's packs;
   consistent with "no security, the model owns its environment".

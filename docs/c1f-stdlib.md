@@ -1,7 +1,6 @@
 # The c1f standard library: the contracts and the builtins
 
-Status: the contracts below are built and pinned by `native/tests/contracts.rs`; the builtin list is the one in `native/src/expr.rs` (`RESERVED`, kept in step with `call` by a test). Older design text about proposals that
-were never added has been cut. Spec files: `tests/specs/*.json`.
+Status: the contracts below are built and pinned by `native/tests/contracts.rs`; the builtin list is the one in `native/src/expr.rs` (`RESERVED`, kept in step with `call` by a test). Spec files: `tests/specs/*.json`.
 
 c1f has no functions and no macros. A pack is getters and setters over entities, so a "library" can only be **data contracts and
 shared getters on a class** that every pack imports. The standard library is therefore the contract of the classes the OS is
@@ -10,12 +9,12 @@ built on, plus a small set of builtins. Principles:
 1. **Declare, don't restate.** A pack states what it is (allowed methods, whether it is public) as a property; the shared getter does
    the work once. A route family never writes its own 405 or 401.
 2. **Data, not code, crosses packs.** Facts the launcher knows are one dict; a family reads a key.
-3. **No new builtin unless the language cannot say it.** Each proposed builtin below has a reason a pack cannot work around.
+3. **No new builtin unless the language cannot say it.** A new builtin needs the operator's approval.
 4. **Every shared getter has a spec** (`tests/specs/*.json`) and every contract is documented here.
 
 ## The Request contract (`membrane/packs/door.c1f` is the library for the class `Request`)
-A request is an entity `Request:<n>`. A family pack `IMPORT door 1` and defines, for its family `<f>` (`models decisions state voice
-session self tools map fieldvm settings link`):
+A request is an entity `Request:<n>`. A family pack `IMPORT door 1` and defines, for its family `<f>` (the reserved names in `FAMILIES`,
+`native/tests/contracts.rs`):
 
 | getter | meaning | required |
 |---|---|---|
@@ -48,8 +47,9 @@ pack holds only the offsets.
 
 ## The builtins (`native/src/expr.rs`, `RESERVED`)
 Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit near abs min max fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
-lists and dicts `sort_by pluck distinct group_by concat`; time `ago epoch localtime num`; the field `instances referencing prop why`; host functions `jsonl listdir read sql stat recall rerank pronoun`.
-`near(<list of numbers>, '<Class>', k)` (#1143, operator 2026-11-14) is the k nearest instances of a MAPPED class (`MAPPED Vector f16`, `docs/cliffvm.md`, "Storage modes") by COSINE, best first, as a list of `{eid, score}`
+lists and dicts `sort_by pluck distinct group_by concat`; time `ago epoch localtime num`; the field `instances referencing prop why`; host functions `jsonl listdir read sql stat recall rerank pronoun`
+(`pronoun` is what a bare `it`, `that`, `they` ... asks the host; the seat's host answers none, so a pronoun reads as the reasoned error `the pronoun "it" is not bound here`).
+`near(<list of numbers>, '<Class>', k)` (#1143, operator 2026-11-14; the shipped MAPPED class is `Vector`, `membrane/packs/vector.c1f`: `Vector:<id>.v` holds a list of numbers) is the k nearest instances of a MAPPED class (`MAPPED Vector f16`, `docs/cliffvm.md`, "Storage modes") by COSINE, best first, as a list of `{eid, score}`
 dicts (`eid` text, `score` a float); a tie breaks by eid, never by position. Brute force on the CPU over the class's native store (no GPU path is reachable from it). A getter that calls it recomputes when a vector of the
 class is written, cleared or retired. An empty class is the reasoned null `empty: no vectors in class <Class>`; a query of another dimension, an all-zero query, `k < 1`, a non-number or a class name that is not text is an Error with
 its reason (as `dot` of two shapes). The browser engine answers `not available in the browser engine`. Determinism: vector results are NOT promised bit-identical across devices; on one device they are stable (the same inputs give the
@@ -73,6 +73,7 @@ A new builtin needs the operator's approval; it is an arm of `call` and a name i
   are an error. There is no list repetition and no `range`: no construct builds a list of N copies (open decision).
   Pinned by `native/tests/vector_arith_1143.rs`, shown in `Help:c1f`.
 - `concat` joins lists (`+` is vector addition); there is no `int()`; `clock` is epoch seconds.
+- Getters are eager and cached: a getter is recomputed when an input it read changes, a read returns the cache, and a recompute that gives the value it already held wakes none of its readers (early cutoff, docs/cliffhanger-fields.md rule 5).
 - A class a shipped pack declares is owned: other packs `IMPORT` it.
 
 ## Blocks and locals (getters and setters)
@@ -141,9 +142,9 @@ A call to a class name with NAMED arguments, on the right of a write whose left 
 - **Idempotent**: if the entity exists nothing is created again, and an argument fills only a property that has no value (an existing
   value is never overwritten). So a setter may construct on every request.
 - **Foreign eid prefix**: when the target's first segment is not the class (`membrane::Config:...` built as `Voice(...)`; the class
-  cannot be read from the eid) the entity is created as the class its eid names (`Config`, as the Python seat made it) and stamped
-  `parents: ['cls:voice']`, the ISA kind-mirror (`voice_io.entity()` stamps the same), so the engine mirrors it by kind. A `Voice`
-  getter then runs on it.
+  cannot be read from the eid) the entity is created as the class its eid names (`Config`) and stamped
+  `parents: ['cls:config', 'cls:voice']` (the eid class first, then the constructor's: docs/cliffvm.md, "the class list"), so a `Voice`
+  getter and a `Voice` setter run on it.
 - Outside the right of such a write a constructor is a reasoned error. Inference: it is `Entity(Class)`, and its arguments are typed.
 - Out of scope: value classes (`Std.Url(raw: x)` natives), `Import`, identity declarations.
 
@@ -153,8 +154,7 @@ error). Everything else is a write: the creation path, the class ownership check
 snapshot lists it as `<target>.[]`. It exists for the MCP door's `entity_write {spec, prop, value}` (`door_tools.c1f`); a pack that
 knows its property writes it by name.
 A constructor of a foreign-prefix entity (`Config:x = Voice(...)`) computes the kind's getters at once: the kind stamp (`parents`)
-is written after the birth, and the entity is born again for the getters. A SETTER of a kind still needs an ISA parent entity
-(`cls:voice`): a setter on a kind reaches only entities whose parent chain holds that entity; write the setter on the class instead.
+is written after the birth, and the entity is born again for the getters. A setter of a kind fires when the kind is in the entity's class list.
 
 ## Limits: the step budget (a dial); time limits nothing
 The old caps (an expression at most 64 nodes / 400 characters) are removed. Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is an Error `budget exceeded (N steps)` (a getter's
@@ -191,16 +191,6 @@ difference (unquoted entity targets count like quoted ones: a keyed `membrane::C
 writing a new property, claiming a new path or importing a new pack fails the test until the change is reviewed and recorded
 (`SURFACE_UPDATE=1 cargo test --test contracts surface`). There is no `private` keyword: the contract is the surface.
 
-## Natives: Rust inside core packs only (operator, 2026-11-12)
-A shipped pack may carry `native <Class>.<getter> (<args>) -> <Type> rust:` blocks. A build step extracts them into a generated
-Rust module compiled into the library and registered in the native-class table; the pack then uses the class like any other
-(`Std.Url(raw: x).decoded`). The declared signature is the contract: arguments are checked like casts before the block runs (a value
-of the wrong type or a null never reaches it: the call returns the reasoned null), and the return converts by type (`T?` is an Option,
-`Result<T, String>`'s `Err` becomes `None('error: ...')`, a panic is caught and becomes a reasoned null, an unlisted Rust type is a
-build error). A native is pure: it receives values and returns a value; I/O stays in the drivers. **Only core packs can contain Rust:**
-a `native` block in a pack loaded at runtime (a `Pack` entity, which is what the model writes) is refused by the loader, and no toolchain
-is needed on a seat. A sandboxed `native wasm:` variant for runtime packs is a later option.
-
 ## Inferred types (a report, enforces nothing)
 c1f is dynamic at run time, but a getter's type follows from its definition. `native/src/infer.rs` (`infer_expr`, `infer_pack`,
 `infer_packs`) deduces it from literals, the builtins' signatures, the types of other getters it reads (any order; a cycle is `Any`
@@ -226,7 +216,3 @@ getter cycle. Nothing fails on them yet. `membrane/packs/types.json` is the snap
 writes, findings`); `native/tests/contracts.rs` compares it and `TYPES_UPDATE=1 cargo test --test contracts types` regenerates it.
 
 An append write for lists (several producers adding to one list in a round) is a design note, not built: `docs/append-write.md`.
-
-## Order of work (done)
-1. The Request contract's shared getters with specs (`tests/specs/door_std.json`): `facts`, `jbody`, `qpairs`, and the declarative method gate `m_<f>`. Built. (`person` is gone with the users: docs/auth.md.)
-2. The families of the release are on the contract (no own 405 checks, fact comprehensions or JSON parses).
