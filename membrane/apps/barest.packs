@@ -21,6 +21,7 @@ chat_oai
 vector
 embed
 field
+entityrecall
 door_session
 legacy_import
 legacy_cutover

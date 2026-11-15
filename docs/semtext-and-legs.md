@@ -1,6 +1,6 @@
-# SemText and legs: how code builds the graph (built: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges, sentence vectors, the shared recall, the recall banner part, Memory)
+# SemText and legs: how code builds the graph (built: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges, sentence vectors, the shared recall, the recall banner part, Memory, entity recall by worldline)
 
-A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "The field", "Recall in the banner", "Memory"); recall's use of the field and everything under "Not built" is not. It is the shape the semantic field
+A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "The field", "Entity recall by worldline", "Recall in the banner", "Memory"); recall's use of the field (the vote) and everything under "Not built" is not. It is the shape the semantic field
 takes in the barest seat: ONE graph (the VM's entities), with the semantic state an opt-in component of an entity, and code (c1f
 packs) building the graph from text.
 
@@ -166,10 +166,34 @@ sentence number, the move); `field_n` on the text counts the sentences applied.
   before older history: that history then moves the states after it).
 - **How**: c1f has no loop with an accumulator, so one landing is one cascade: a setter makes a VIRTUAL `FieldStep` per (entity, mention), each chained to the previous mention of the same entity; their
   getters compute the walk; when every chain is computed, one setter writes each state, each text's moves, the nursery, the episodes and the background. The steps are collected when the round ends.
-- Recall does not read the field yet (steps 4-6: the move log voter, entity recall over `near(q, 'FieldState', k)` centred on the background, the vote).
+- `recall` does not read the field yet: entity recall (below) is built as its own getter, the move log voter and the vote (steps 4 and 6) are not.
+
+### Entity recall by worldline (#1143, step 5; `membrane/packs/entityrecall.c1f`, tests `native/tests/entityrecall_1143.rs`)
+The old membrane's entity recall voter. For an ask whose `recall_on` is true, `SemText.entity_votes` is the list of texts that moved the entities nearest the ask, best first, as rows
+`{key, of, text, score}` (`key` = the text's eid + `#` + the start of its sentence, the row shape of the other lanes). It is NOT fused into `recall` yet: the vote (step 6) will read it.
+- **The query** is the cosine lane's `r_query` (the weighted sum of the window's text vectors).
+- **Candidates**: the entities of the 32 states nearest the query (`near(q, 'FieldState', ent_over x ent_k)`) and the owners of the 32 episodes nearest it (`near(q, 'FieldEpisode', ...)`,
+  so an old entity whose state moved away is found by an old phase). `near` is a plain cosine, so the candidates come from the raw query, as in the old seat; the re-score is centred.
+- **The worldline** of a candidate: a young entity (fewer than `field_mature` mentions, or no episode yet) is its MEAN; an old one is its episodes, its open run (`run_acc / run_k`) and,
+  while those hold less than `ent_cover` of its mentions, its mean too. The mean is not stored: it is recomputed for the candidates only, as the mean of the unit vectors of the
+  sentences that moved the entity (its `mentioned_in` entries whose text has applied that sentence, `field_n`); with none, the state stands in.
+- **The score** of a candidate is the best, over its points, of `dot(unit(p - bg), unit(q - bg))`, `bg` = `FieldBg:all` (no background, or one of another length: no centring).
+  The `ent_k` best are `entity_hits` (`[{e, s}]`), ties by the entity's eid.
+- **The evidence** (the old `evidence` / `entity_scores`): every text that moved one of those entities (the entity's `mentioned_in` texts, their `field_moves`) scores the sum over the
+  entities of (the entity's score x the move the text made of it, summed over its sentences). A row's sentence is the one that holds the largest part of that sum. The ask itself is
+  never a row; the `ent_depth` best, ties by key. No score cut-off anywhere.
+- **Empty, not an error**: with no state, or a query of another length, the votes are `[]`; the reason stays on the two searches (`ent_near_states`, `ent_near_eps`), as the cosine
+  lane's `r_cos_raw` keeps its own. With the recall off nothing is computed (null).
+- **The constants** are getters on SemText a layer overrides: `ent_k` 8 and `ent_depth` 20 (approved), `ent_over` 4 (the over-fetch, 32 candidates of each kind) and `ent_cover` 0.9 (both
+  carried from the old seat, awaiting the operator's yes); the mature age is the field's `field_mature`.
+- **Cost**: one stage per getter (each evaluation has its own step budget). The largest is reading the candidates' sentence vectors for their means (`ent_mvecs`), about 30 steps a
+  mention read: with 300 texts naming 8 of 40 identifiers each (every entity 60 mentions, 32 candidates whose mean is a point) it takes about 57,600 steps of the 100,000 budget
+  (28,800 at 150 texts; measured 2026-11-15 by bisecting the budget on `a_realistic_field_stays_inside_the_step_budget`). So the candidates may hold about 3,300 applied mentions
+  between them; past that (a common word of thousands of mentions among the candidates) the evaluation answers `budget exceeded`, not a wrong list. Nothing is cut.
+- Not built: the move log's previous turn (`held`), the answerable-events filter of the old voter, the old seat's word hop (it was off for the vote: `hop=False`).
 
 ### Not built
-A backlog of stored texts that are not chat bodies (the backlog query reads chat bodies only; any other text is asked when its text is written), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, recall's use of the field (the move log voter, entity recall over the states, the vote), a collection of stored Word entities, the
+A backlog of stored texts that are not chat bodies (the backlog query reads chat bodies only; any other text is asked when its text is written), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, recall's use of the field (the move log voter, the vote; entity recall is its own getter, not read by `recall`), a collection of stored Word entities, the
 mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).
 
 
