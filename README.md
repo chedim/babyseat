@@ -44,7 +44,6 @@ macOS and Linux (x86_64 and arm64); there is no Windows build. The macOS binarie
 | installer | `curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh \| sh` (installs `~/.local/share/membrane-app/<version>` and a `~/.local/bin/babyseat` link; `--version X.Y.Z` picks one) | at the 0.7.61 release |
 | Docker | `docker run -p 127.0.0.1:4096:4096 -v babyseat-data:/data -e ANTHROPIC_API_KEY -v /path/to/linux/claude:/opt/claude:ro -e CLAUDE_BIN=/opt/claude chedim/babyseat` (the image has no `claude`; the admin token: `docker exec <container> cat /data/admin.token`) | at the 0.7.61 release |
 | binary | the GitHub release's `babyseat-0.7.61-<target>.tar.gz` and its `.sha256` (targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`): check the sha256, unpack, run `bin/cliffvm serve` | at the 0.7.61 release |
-| Home Assistant add-on | Home Assistant OS / Supervised: add the repository `https://github.com/chedim/membrane` in the add-on store, install **babyseat**; it announces itself to the integration ([addon/DOCS.md](addon/DOCS.md)) | at the next release |
 | from source | the next section | works today |
 
 `babyseat` and `membrane` are one command: it starts `cliffvm serve` and nothing else. The old subcommands (`opencode`, `store`, `ingest`, ...) are gone.
@@ -85,7 +84,7 @@ The key is handed to the CLI child and is never written to a property, a row, th
 ## Connect Home Assistant
 
 1. HACS, three dots, *Custom repositories*, `https://github.com/chedim/membrane`, category *Integration*; install **babyseat (membrane)** and restart Home Assistant.
-2. On Home Assistant OS or Supervised, the babyseat add-on runs the seat and Home Assistant discovers it (*Settings, Devices & services*, *Discovered*). Elsewhere, run `cliffvm serve` and add it by hand:
+2. Run the seat (`cliffvm serve`, or `pip install babyseat` and `babyseat`) and add it by hand:
    *Settings, Devices & services, Add integration, babyseat (membrane)*: the seat's address (`http://<seat-machine>:4096`; the seat needs `--bind` for that) and the token in `<data>/admin.token`.
 3. *Settings, Voice assistants*: pick the **Membrane seat** conversation agent.
 
