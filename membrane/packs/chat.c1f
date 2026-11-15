@@ -53,6 +53,10 @@ ChatMessage.turn_eid getter: this.eid + ':turn'
 ChatMessage.tstate getter: prop(this.turn_eid, 'status')
 ChatMessage.resp_eid getter: this.turn_eid + ':response'
 ChatMessage.said getter: prop(this.resp_eid, 'text')
+-- a turn that ended in an error after the model had said something keeps those words as the response's body and marks the response `interrupted` (with the error's `reason`): `cut` is that reason,
+-- `kept` the words (chat_turn.c1f); both none for any other turn
+ChatMessage.cut getter: prop(this.resp_eid, 'reason') if prop(this.resp_eid, 'interrupted') == True else None
+ChatMessage.kept_words getter: prop(this.resp_eid + ':body', 'text') if prop(this.resp_eid, 'interrupted') == True else None
 ChatMessage.turn_view getter: {'state': this.tstate, 'started': prop(this.turn_eid, 'started'), 'ended': prop(this.turn_eid, 'ended'), 'usage': prop(this.turn_eid, 'usage'), 'cost': prop(this.turn_eid, 'cost'), 'calls': prop(this.turn_eid, 'calls'), 'duration': prop(this.turn_eid, 'duration')}
 ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view}
 -- what the event stream sends: the view, but while the turn runs `response` is the partial answer (chat_turn.c1f `partial_text`, null until a word is out)
@@ -69,9 +73,9 @@ ChatMessage.tool_keys getter:
   ELSE: []
 -- `id` is the call's own entity key (distinct per call), so a page keys its rows by it: two identical calls are two lines
 ChatMessage.tool_rows getter: [{'id': k, 'name': replace(str(prop(k, 'name')), 'mcp__membrane__', ''), 'input': prop(k, 'input'), 'result': prop(k, 'result')} for k in this.tool_keys]
-ChatMessage.history_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': this.tool_rows}
+ChatMessage.history_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': this.tool_rows, 'interrupted': this.cut, 'kept': this.kept_words}
 -- THE PAGE'S VIEW: history_view with each tool as {id, name, input} only (the page shows no result; a result can be megabytes). The route sends this one; `history_view` keeps the whole result for other adapters.
-ChatMessage.page_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'sent_by': this.sent_by, 'tool_calls': [{'id': t['id'], 'name': t['name'], 'input': t['input']} for t in this.tool_rows]}
+ChatMessage.page_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'sent_by': this.sent_by, 'interrupted': this.cut, 'kept': this.kept_words, 'tool_calls': [{'id': t['id'], 'name': t['name'], 'input': t['input']} for t in this.tool_rows]}
 ChatResponse.kind getter: 'response'
 -- a response's summary is its whole text (nearer class than the root `Entity.summary`, packs/entity.c1f): the banner's error line shows it.
 ChatResponse.summary getter: str(this.text or '')

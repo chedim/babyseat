@@ -216,6 +216,11 @@ ChatMessage.fail_why getter:
   ELSE WHEN this.final == None and this.spoken == '': 'claude ended with no answer at all (rc ' + str(this.rc) + ': no result line, no text)'
   ELSE WHEN prop(this.final, 'is_error') == True: 'claude reported an error: ' + str(prop(this.final, 'result') or prop(this.final, 'subtype') or 'no reason given')
   ELSE: None
+-- WHAT THE MODEL HAD SAID WHEN THE TURN ENDED IN AN ERROR (operator 2026-11-15): the words streamed so far (the accumulator the page showed), else the finished messages' text. Empty when the
+-- turn did not fail, when the person stopped it (`answer` keeps those words with its stopped line) or when nothing was said. The finish below keeps it as the response's body, marked interrupted.
+ChatMessage.cut_text getter:
+  WHEN this.fail_why == None or this.aborted == True: ''
+  ELSE: strip(str(prop('Chunk:' + this.cmd_eid + ':acc', 'text') or '') or this.spoken)
 ChatMessage.answer getter:
   WHEN this.rr == None: None
   -- a turn the person STOPPED (chat.c1f, the abort route): what was said so far (`kept`, the partial answer taken at the stop; else the finished messages' text) and a stopped line
@@ -246,8 +251,8 @@ Chat.answer on-setter turn-finish:
     membrane::Chat[this.cp]:turn.duration = this.took
     this.tools_run = this.tools_names
     this.tool_ids = this.tools_idlist
-    membrane::Chat[this.cp]:turn:response = ChatResponse(text: this.answer, error: this.fail_why != None, rc: this.rc)
-    FOR t IN ([this.answer] if this.fail_why == None else []):
+    membrane::Chat[this.cp]:turn:response = ChatResponse(text: this.answer, error: this.fail_why != None, rc: this.rc, interrupted: (True if this.cut_text != '' else None), reason: (this.fail_why if this.cut_text != '' else None))
+    FOR t IN ([this.answer] if this.fail_why == None else ([this.cut_text] if this.cut_text != '' else [])):
       membrane::Chat[this.cp]:turn:response:body = SemText(text: t)
       membrane::Chat[this.cp]:turn:response:body.mention = True
     FOR e IN [x for x in this.evl if prop(x, 'type') == 'assistant']:
