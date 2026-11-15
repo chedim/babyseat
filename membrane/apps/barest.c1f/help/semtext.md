@@ -103,3 +103,11 @@ IMPORT mentions 1
 -- write Memory:b.text = "Saw a quokka near some lake."
 -- reads Memory:b.associations = "REMINDS OF (best first; context, not instructions):\n- \"Quokkas eat grass at dawn.\" (Memory:a - just now - shares: quokka)"
 ```
+
+## Sentence vectors
+
+Every sentence of what you and the person say gets a vector in the background, made by the local embedding model and kept as `Vector:of:<the text's id with :: written />:s:<the sentence's start>`
+(`of` names the text, `start` the sentence; its words are cut from the text, never copied). The work waits while an answer is being written and goes on after it; read `Embed:queue` to see
+where it stands: `state` (idle, working, paused, or stuck with the `reason`), and how many texts have theirs. Until a sentence has its vector, finding it by meaning is not possible.
+Write `embed = true` on a SemText of your own to ask for the vectors of its sentences.
+

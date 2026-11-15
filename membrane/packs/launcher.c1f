@@ -7,6 +7,7 @@ IMPORT boot 1
 --   minds            the claude CLI is the model of every background mind and of the chat's default pick
 --   cloud_models     one rung, `claude` (the claude CLI)
 --   seat_backend     the local backend's address: the default Ollama one (nothing needs to run there: a refused connection is an empty list of models)
+--   embed_model      mxbai-embed-large (the model that makes the vector of each sentence, packs/embed.c1f; asked of the model server at seat_backend)
 --   router_on        false (no router between the minds and the models)
 -- NOT here: chat_auth (the default api_key lives in chat_turn.c1f; `--fact chat_auth=login` opts into the CLI's login).
 
@@ -20,6 +21,9 @@ Boot.started on-setter launcher-models:
 Boot.started on-setter launcher-backend:
   WHEN this.seat_backend == None:
     this.seat_backend = 'http://127.0.0.1:11434'
+Boot.started on-setter launcher-embed-model:
+  WHEN this.embed_model == None:
+    this.embed_model = 'mxbai-embed-large'
 Boot.started on-setter launcher-router:
   WHEN this.router_on == None:
     this.router_on = False

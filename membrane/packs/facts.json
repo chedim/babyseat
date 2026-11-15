@@ -193,6 +193,10 @@
    "wired": false,
    "why": "the automatic history cutover's page (membrane/packs/legacy_cutover.c1f; #1143): how many old user rows one query reads, and so how many questions one background step imports and then leaves out of memory; default 5 (measured on the real store: 20 stalled the seat up to 3.5 s a page, 5 up to 0.9 s; a number flagged for the operator); told by `--fact legacy_batch=<n>`"
   },
+  "embed_model": {
+   "wired": false,
+   "why": "the embedding model that makes the vector of each sentence (membrane/packs/embed.c1f; asked of the model server at `seat_backend`, `POST /api/embed`); default mxbai-embed-large (operator-approved 2026-11-14; set in launcher.c1f); told by `--fact embed_model=<name>`"
+  },
   "effect_workers": {
    "wired": false,
    "why": "the cap on Command / File / Fetch / SqlQuery effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"
