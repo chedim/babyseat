@@ -223,3 +223,18 @@ fn a_write_of_the_model_call_target_is_refused_on_the_seat_and_still_handed_on_b
     f.react(&mut c, &H, w, 2.0, &mut seq);
     assert_eq!(f.calls.len(), 1);
 }
+
+#[test]
+fn a_computed_id_whose_key_holds_colons_and_a_namespace_lookalike_is_created_with_its_class_and_properties() {
+    // the page's tool rows: `(base + ':tools:t:' + k).tag = 'li'`, k built from a tool's name and its input JSON
+    let h = open();
+    h.load_pack("pg", "PACK pg 1\nView.shown getter: this.eid\nView.go on-setter go:\n  ALWAYS:\n    (this.base + ':tools:t:' + this.k).tag = 'li'\n    (this.base + ':tools:t:' + this.k).text = 'x'\n").unwrap();
+    h.born("View:a", "View", props(json!({"base": "View:a", "k": "entity_read|{\"spec\":\"membrane::Chat:main\"}"})), "person");
+    h.rebuild();
+    h.write("View:a", "go", json!(1), "person");
+    assert_eq!(refused(&h, "View:a"), "");
+    let eid = "View:a:tools:t:entity_read|{\"spec\":\"membrane::Chat:main\"}";
+    assert_eq!(h.snapshot()[eid]["cls"], json!("View"), "the class is the eid's first segment");
+    assert_eq!(h.get(eid, "tag"), json!("li"));
+    assert_eq!(h.get(eid, "text"), json!("x"));
+}
