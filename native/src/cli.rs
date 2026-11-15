@@ -110,7 +110,7 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
 /// The facts the arguments tell (the names facts.json lists); a source that is missing leaves its fact out.
 pub fn facts(r: &RunArgs) -> Map<String, J> {
     let mut m = Map::new();
-    for (k, v) in &r.facts { m.insert(k.clone(), v.clone()); }   // the named facts below win
+    for (k, v) in &r.facts { m.insert(k.clone(), v.clone()); }   // the facts the host itself owns (below) win; the seat defaults give way
     if let Some(p) = r.port { m.insert("door_port".into(), json!(p)); }
     // the folders of the apps for the door's data files, the UPPER layer (the later argument) first; a pack file has no folder
     let dirs: Vec<String> = r.apps.iter().rev().filter(|a| std::path::Path::new(a).is_dir()).map(|a| absolute(a)).collect();
@@ -123,12 +123,8 @@ pub fn facts(r: &RunArgs) -> Map<String, J> {
     if let Ok(h) = std::env::var("HOME") { m.insert("seat_home".into(), json!(h)); }
     // whether the seat's environment holds a non-empty ANTHROPIC_API_KEY (the claude turn's key, membrane/packs/chat_turn.c1f): ONLY the yes or no is told, never the value
     m.insert("anthropic_key_set".into(), json!(std::env::var("ANTHROPIC_API_KEY").map(|k| !k.is_empty()).unwrap_or(false)));
-    m.insert("seat_name".into(), json!("Bob"));
-    m.insert("seat_named".into(), json!(false));
-    m.insert("seat_aliases".into(), json!([]));
-    m.insert("seat_voice_out".into(), json!(false));
-    m.insert("seat_language".into(), json!("en"));
-    m.insert("seat_blurp".into(), json!(false));
+    // the seat's own defaults: a fact the launch names (`--fact seat_name=<name>`) wins over them
+    for (k, v) in [("seat_name", json!("Bob")), ("seat_named", json!(false)), ("seat_aliases", json!([])), ("seat_voice_out", json!(false)), ("seat_language", json!("en")), ("seat_blurp", json!(false))] { m.entry(k.to_string()).or_insert(v); }
     m
 }
 

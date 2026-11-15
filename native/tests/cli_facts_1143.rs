@@ -20,9 +20,12 @@ fn a_fact_option_becomes_a_boot_fact_json_or_text() {
 }
 
 #[test]
-fn the_named_facts_are_not_overridden_and_a_bad_option_is_refused() {
-    let r = run(&["run", "p", "--fact", "seat_name=Eve"]);
-    assert_eq!(facts(&r)["seat_name"], json!("Bob"));
+fn the_seats_own_defaults_give_way_to_a_named_fact_and_a_bad_option_is_refused() {
+    // the doctrine's name is the settings row, else the launch fact `seat_name`, else Bob: `--fact seat_name=<name>` must reach it (it used to be overwritten by the default)
+    let r = run(&["run", "p", "--fact", "seat_name=Eve", "--fact", "seat_language=de"]);
+    assert_eq!(facts(&r)["seat_name"], json!("Eve"));
+    assert_eq!(facts(&r)["seat_language"], json!("de"));
+    assert_eq!(facts(&run(&["run", "p"]))["seat_name"], json!("Bob"), "no fact named: the default");
     let a: Vec<String> = ["run", "p", "--fact", "novalue"].iter().map(|s| s.to_string()).collect();
     assert!(parse(&a).unwrap_err().contains("--fact"));
     let a: Vec<String> = ["run", "p", "--fact", "=1"].iter().map(|s| s.to_string()).collect();
