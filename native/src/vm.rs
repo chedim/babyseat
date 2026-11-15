@@ -176,6 +176,9 @@ struct Cur {
 
 /// The VM-provided, read-only property of every entity: the epoch time of its last write (the host stamps it with the write, in the same row; `Core::updated`).
 pub const UPDATED: &str = "updated";
+/// The VM-provided, read-only property of every entity: the eid of the CAUSE of its birth (the entity whose setter was running; for a door write, the Request of the call). A constant:
+/// set once at the birth, stored with the row (`StoredRow::born_by`), never written, so a getter that reads it is never invalidated by it. An entity with no cause reads as the plain "absent" null.
+pub const BORN_BY: &str = "born_by";
 /// The VM-provided, read-only property of every loaded entity: its place in the TOUCH CLOCK (a counter the core bumps at every read, write and load; RAM only,
 /// never stored). The smaller it is, the colder the entity. Reading it (or `updated`, `eid`, `cls`, `pinned`) is no touch. EXCEPTION: an entity that STORES a property
 /// named `touched` (the Python-era `Turn.touched`) reads its own: the clock does not shadow a stored value.
@@ -191,7 +194,7 @@ pub const COLLECTED_KEPT: usize = 4096;
 /// How many times one evaluation is done again after it loaded stored entities it looked for (a chain of references loads one link a time).
 const FAULT_RETRIES: usize = 8;
 
-pub struct StoredRow { pub cls: String, pub props: Map<String, J>, pub updated: f64 }
+pub struct StoredRow { pub cls: String, pub props: Map<String, J>, pub updated: f64, pub born_by: Option<String> }
 /// Reads one stored row by eid (the host's, from the store): how a LAZY entity loads when a setter writes it (docs/cliffvm.md, "Lazy load").
 pub type Loader = Box<dyn Fn(&str) -> Option<StoredRow> + Send>;
 
@@ -208,6 +211,8 @@ pub struct Core {
     pub last_now: f64,
     /// eid -> the time of its last write: what `<entity>.updated` reads (0 when it has none). Set by the host with each write; writing it is no write (no reaction, no recompute)
     pub updated: HashMap<String, f64>,
+    /// eid -> the eid of the cause of its birth: what `<entity>.born_by` reads. Set once at the birth (or when the row loads); absent for an entity with no cause.
+    pub born_by: HashMap<String, String>,
     /// the touch clock's counter (see `Ent::touched`) and the classes' storage modes (shared with `Fields`)
     pub clock: std::cell::Cell<u64>,
     pub storage: StorageMap,
@@ -325,6 +330,7 @@ impl<'a> expr::World for View<'a> {
             // the first class of the list (the eid class when it is the first, as written there otherwise)
             "cls" => V::Str(match e.class_names().into_iter().find(|c| !c.eq_ignore_ascii_case(ERROR_CLASS)) { Some(c) if !c.eq_ignore_ascii_case(&e.cls) => c, _ => e.cls.clone() }),
             "position" => e.pos.as_ref().map(|p| V::List(p.iter().map(|x| V::Float(*x)).collect())).unwrap_or(V::None),
+            BORN_BY => match self.core.born_by.get(eid) { Some(b) => V::Str(b.clone()), None => V::Nil(format!("absent: {eid}.{attr}")) },   // provided by the VM, a constant: shadows a stored property of that name
             UPDATED => V::Float(self.core.updated.get(eid).copied().unwrap_or(0.0)),   // provided by the VM: shadows a stored property of that name
             TOUCHED if !e.props.contains_key(TOUCHED) => V::Int(e.touched.get() as i64),   // likewise (reading it is no touch), unless the entity stores a property of that name (the Python-era `Turn.touched`): its own wins
             PINNED => match self.core.pinned_reason(eid) { Some(r) => V::Str(r), None => V::Bool(false) },
@@ -416,7 +422,7 @@ impl Core {
     pub fn new() -> Self {
         Core {
             why: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
-            inst_scans: Default::default(), inst_cache: Default::default(), docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
+            inst_scans: Default::default(), inst_cache: Default::default(), docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), born_by: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), queue_writes: true, dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
@@ -532,6 +538,7 @@ impl Core {
     fn remove(&mut self, eid: &str) {
         if let Some(i) = self.at.remove(eid) { self.order[i] = None; }
         self.updated.remove(eid);
+        self.born_by.remove(eid);
         if let Some(o) = self.docs.get(eid) { self.inst_touch(&o.cls, o.props.get("parents")); }
         if let Some(e) = self.docs.remove(eid) {
             self.reindex_entity(eid, Some(&e.props), None);
@@ -1106,6 +1113,7 @@ impl Core {
         if self.unloaded.remove(eid).is_none() { return false; }
         let Some(r) = self.loader.as_ref().and_then(|l| l(eid)) else { return false };
         self.updated.insert(eid.to_string(), r.updated);
+        match r.born_by { Some(b) => { self.born_by.insert(eid.to_string(), b); } None => { self.born_by.remove(eid); } }
         let now = self.last_now;
         self.load(eid.to_string(), r.cls, r.props, None, now);
         self.arrived.push(eid.to_string());

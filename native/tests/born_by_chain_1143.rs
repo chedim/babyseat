@@ -1,5 +1,5 @@
-//! A turn's tool calls are linked to the message (#1143, operator 2026-11-14): the turn's MCP config carries `X-Turn: <the message's id>`, and the door's `entity_write` records on that
-//! message (`made`) every entity the call CREATED (a write to one that already existed adds nothing). The seat is the shipped one with a fake `claude`.
+//! The chain of a turn's creations (#1143, operator 2026-11-14): the turn's MCP config carries `X-Turn: <the message's id>`; an entity a door `entity_write` creates says `born_by` = the call's Request
+//! (the VM's own), and the Request's `mc_message` is the message of the turn: entity -> born_by -> Request -> message, with plain reads. The seat is the shipped one with a fake `claude`.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -100,32 +100,30 @@ fn rpc_x(port: u16, turn: Option<&str>, tool: &str, args: J) -> String {
     let (_, body) = http_x(port, "POST", "/mcp", None, &extra, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}).to_string());
     serde_json::from_str::<J>(&body).ok().and_then(|r| r["result"]["content"][0]["text"].as_str().map(String::from)).unwrap_or(body)
 }
-fn made(port: u16, msg: &str) -> Vec<String> {
-    let t = rpc_x(port, None, "entity_read", json!({"spec": msg, "prop": "made"}));
-    serde_json::from_str::<Vec<String>>(&t).unwrap_or_default()
-}
+fn read(port: u16, spec: &str, prop: &str) -> String { rpc_x(port, None, "entity_read", json!({"spec": spec, "prop": prop})) }
 const MSG: &str = "membrane::Chat:main:message:t1";
 
 #[test]
-fn a_tool_call_links_what_it_created_to_the_message_it_belongs_to() {
-    let dir = setup("turnlink");
+fn what_a_tool_call_creates_walks_back_by_plain_reads_to_the_message_of_the_turn() {
+    let dir = setup("bornchain");
     let run = start(&dir, false, &[]);
-    rpc_x(run.port, None, "entity_write", json!({"spec": MSG, "prop": "text", "value": "hello"}));
-    // a new entity, written by a call that carries the turn
-    rpc_x(run.port, Some(MSG), "entity_write", json!({"spec": "Box:1", "prop": "n", "value": 1}));
-    assert_eq!(made(run.port, MSG), vec!["Box:1"], "the created entity is linked to the message");
-    assert_eq!(rpc_x(run.port, None, "entity_read", json!({"spec": "Box:1", "prop": "made_by"})), "membrane::Chat:main:message:t1", "and the entity says which message made it");
-    // another write to the same entity adds nothing; neither does a write to an entity that existed before
-    rpc_x(run.port, Some(MSG), "entity_write", json!({"spec": "Box:1", "prop": "n", "value": 2}));
-    rpc_x(run.port, None, "entity_write", json!({"spec": "Box:2", "prop": "n", "value": 1}));
-    rpc_x(run.port, Some(MSG), "entity_write", json!({"spec": "Box:2", "prop": "n", "value": 2}));
-    assert_eq!(made(run.port, MSG), vec!["Box:1"], "only a creation is linked");
-    // a second creation is added after the first
-    rpc_x(run.port, Some(MSG), "entity_write", json!({"spec": "Box:3", "prop": "n", "value": 1}));
-    assert_eq!(made(run.port, MSG), vec!["Box:1", "Box:3"]);
-    // a call with no turn, or a turn that is not a chat message, links nothing
-    rpc_x(run.port, None, "entity_write", json!({"spec": "Box:4", "prop": "n", "value": 1}));
-    rpc_x(run.port, Some("membrane::Box:1"), "entity_write", json!({"spec": "Box:5", "prop": "n", "value": 1}));
-    assert_eq!(made(run.port, MSG), vec!["Box:1", "Box:3"]);
-    assert_eq!(made(run.port, "Box:1"), Vec::<String>::new(), "a header naming a non-message is ignored");
+    let port = run.port;
+    rpc_x(port, None, "entity_write", json!({"spec": MSG, "prop": "text", "value": "hello"}));
+    // the call is still going (a command it started, held for its receipt): its Request is alive, so the chain can be walked
+    let t = std::thread::spawn(move || rpc_x(port, Some(MSG), "entity_write", json!({"spec": "Command:slow", "prop": "run", "value": {"id": "r1", "cmd": "sleep 3"}, "wait": 30})));
+    let req = wait("the entity names its cause", || { let r = read(port, "Command:slow", "born_by"); r.starts_with("Request:").then_some(r) });
+    assert_eq!(read(port, &req, "mc_turn"), MSG, "the header");
+    assert_eq!(read(port, &req, "mc_message"), MSG, "and the Request names the message of the turn");
+    let _ = t.join();
+    // a call with no turn: its entity still says its Request, which names no message
+    let t2 = std::thread::spawn(move || rpc_x(port, None, "entity_write", json!({"spec": "Command:slow2", "prop": "run", "value": {"id": "r2", "cmd": "sleep 3"}, "wait": 30})));
+    let r2 = wait("the entity names its cause", || { let r = read(port, "Command:slow2", "born_by"); r.starts_with("Request:").then_some(r) });
+    assert!(r2 != req, "{r2}");
+    let m2 = read(port, &r2, "mc_message");
+    assert!(!m2.starts_with("membrane::"), "no header, no message: {m2}");
+    let _ = t2.join();
+    // the cause never changes: a later write to the entity does not re-birth it; and the message itself, written by an earlier call, names that call's Request
+    rpc_x(port, None, "entity_write", json!({"spec": "Command:slow", "prop": "note", "value": 1}));
+    assert_eq!(read(port, "Command:slow", "born_by"), req);
+    assert!(read(port, MSG, "born_by").starts_with("Request:"));
 }

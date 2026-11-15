@@ -67,18 +67,15 @@ Request.mc_write on-setter mcp-write:
   ELSE WHEN this.mc_write != None:
     this.mc_w_t0 = clock
     this.mc_w_old = prop(prop(this.mc_write, 'spec'), prop(this.mc_write, 'prop') + '_result')
-    this.mc_w_born = prop(this.mc_w_id, 'eid') == None
     (prop(this.mc_write, 'spec')).[prop(this.mc_write, 'prop')] = prop(this.mc_write, 'value')
     this.mc_done = True
 
--- THE TURN'S LINK (operator 2026-11-14): the turn's MCP config carries `X-Turn: <the message's id>` (chat_turn.c1f). When an `entity_write` CREATED its entity (`mc_w_born`, read before the write), the
--- message lists it in `made` and the entity says `made_by` = the message. A call with no such header, or one that names no existing chat message, links nothing; a write to an entity that already existed adds nothing.
+-- THE TURN'S LINK (operator 2026-11-14): the turn's MCP config carries `X-Turn: <the message's id>` (chat_turn.c1f). Every entity says what birthed it (`born_by`, the VM's own): for a thing a call
+-- created, that is the call's Request, and the Request names the message it belongs to here (`mc_message`: the header's value when it names an existing chat message, nothing otherwise).
 Request.mc_turn getter: prop(this.headers, 'x-turn')
-Request.mc_turn_ok getter: this.mc_turn != None and startswith(str(this.mc_turn), 'membrane::Chat:') and prop(this.mc_turn, 'eid') != None
-Request.mc_done on-setter mcp-link:
-  WHEN this.mc_done == True and this.mc_w_born == True and this.mc_turn_ok:
-    (this.mc_turn).made = concat(prop(this.mc_turn, 'made') or [], [this.mc_w_spec])
-    (this.mc_w_id).made_by = this.mc_turn
+Request.mc_message getter:
+  WHEN this.mc_turn != None and startswith(str(this.mc_turn), 'membrane::Chat:') and prop(this.mc_turn, 'eid') != None: this.mc_turn
+  ELSE: None
 
 -- ---- what a write returns (docs/cliffvm.md, "The return entity") -------------------------------------------------------------------------------
 -- A write that starts an effect (a driver's verb) has a RECEIPT: the property `<prop>_result` of the same entity. The reply carries the receipt when it is

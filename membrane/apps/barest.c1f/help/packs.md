@@ -150,6 +150,23 @@ VIRTUAL Command
 Every entity also has `updated`, read-only and provided by the VM: the time of its last write (seconds since 1970), stamped with the write; reading it causes no recompute, writing it is refused:
 `Note:a.updated`.
 
+Every entity also remembers what birthed it: `born_by`, read-only and provided by the VM, is the id of the CAUSE of its birth, the entity whose setter was running when it was made, or, for a thing a tool call made, the request of that call. It is fixed at the birth and never changes, and writing it is refused. An entity that was loaded, or born by the seat itself, has no cause: it reads as an absent null. A request names the chat message its call belongs to (`mc_message`), so the chain is plain reads: the thing, its `born_by`, that request's `mc_message`; but a request is collected once its reply is sent ("How long a virtual entity lives"), so the chain can be followed while the call is open:
+
+```c1f
+PACK maker 1
+Box.go on-setter make:
+  ALWAYS:
+    Thing:t1 = Thing(n: 1)
+Thing.cause getter: this.born_by
+Box.made getter: [x.eid for x in instances('Thing') if x.born_by == this.eid]
+-- given Box:a {}
+-- write Box:a.go = 1
+-- reads Thing:t1.cause = "Box:a"
+-- reads Box:a.made = ["Thing:t1"]
+```
+
+`Box.made` is how to ask which things one cause made.
+
 ### How long a virtual entity lives
 
 A `VIRTUAL` entity is collected as soon as NOTHING HOLDS IT: at the end of the round, no write retires it. What holds it:

@@ -174,7 +174,7 @@ impl crate::host::Host {
         let now = self.now();
         *STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some((window_s, now));
         let props = json!({"window_s": 0.0, "top": [], "total_calls": 0, "total_ms": 0.0, "top_total": [], "life_calls": 0, "life_ms": 0.0, "reset": false, "at": now});
-        self.inject_born(now, ENTITY, "Stats", props.as_object().cloned().unwrap_or_default(), WRITER, WRITER);
+        self.inject_born(now, ENTITY, "Stats", props.as_object().cloned().unwrap_or_default(), WRITER, WRITER, None);
     }
 
     /// On the host's tick: a reset asked for (`Stats:eval.reset = true`) clears the table and the flag; a window that is over is published and starts again.

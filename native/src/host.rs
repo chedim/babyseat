@@ -77,7 +77,7 @@ fn stored_loader(db: Arc<Mutex<Connection>>) -> crate::vm::Loader {
         let db = db.lock().unwrap_or_else(|e| e.into_inner());
         let (body, updated): (String, f64) = db.query_row(&format!("SELECT body, updated FROM {ROWS} WHERE k = ?"), params![eid], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten()?;
         let row: J = serde_json::from_str(&body).ok()?;
-        Some(crate::vm::StoredRow { cls: row["cls"].as_str().unwrap_or("").to_string(), props: row["props"].as_object().cloned().unwrap_or_default(), updated })   // a getter's stored value too: the read is right away
+        Some(crate::vm::StoredRow { cls: row["cls"].as_str().unwrap_or("").to_string(), props: row["props"].as_object().cloned().unwrap_or_default(), updated, born_by: row["born_by"].as_str().map(String::from) })   // a getter's stored value too: the read is right away
     })
 }
 
@@ -90,7 +90,8 @@ pub fn is_outside(stamp: &str) -> bool { !stamp.starts_with(WRITER) }
 /// One line of the journal.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Line {
-    Born { ts: f64, writer: String, eid: String, cls: String, props: Map<String, J> },
+    /// `by`: the cause of the birth (`born_by`), written only for a birth the engine made but a replay cannot recompute (a virtual trigger's); an older journal has none: no cause.
+    Born { ts: f64, writer: String, eid: String, cls: String, props: Map<String, J>, by: Option<String> },
     Write { ts: f64, writer: String, eid: String, prop: String, new: J },
 }
 
@@ -98,7 +99,7 @@ impl Line {
     pub fn writer(&self) -> &str { match self { Line::Born { writer, .. } | Line::Write { writer, .. } => writer } }
     pub fn to_json(&self) -> J {
         match self {
-            Line::Born { ts, writer, eid, cls, props } => json!({"op": "born", "ts": ts, "writer": writer, "eid": eid, "cls": cls, "props": props}),
+            Line::Born { ts, writer, eid, cls, props, by } => { let mut o = json!({"op": "born", "ts": ts, "writer": writer, "eid": eid, "cls": cls, "props": props}); if let Some(b) = by { o["by"] = json!(b); } o }
             Line::Write { ts, writer, eid, prop, new } => json!({"op": "write", "ts": ts, "writer": writer, "eid": eid, "prop": prop, "new": new}),
         }
     }
@@ -106,7 +107,7 @@ impl Line {
         let s = |k: &str| j.get(k).and_then(|v| v.as_str()).map(String::from).ok_or_else(|| format!("journal line: no {k}"));
         let ts = j.get("ts").and_then(|v| v.as_f64()).unwrap_or(0.0);
         match j.get("op").and_then(|v| v.as_str()) {
-            Some("born") => Ok(Line::Born { ts, writer: s("writer")?, eid: s("eid")?, cls: s("cls")?, props: j.get("props").and_then(|p| p.as_object()).cloned().unwrap_or_default() }),
+            Some("born") => Ok(Line::Born { ts, writer: s("writer")?, eid: s("eid")?, cls: s("cls")?, props: j.get("props").and_then(|p| p.as_object()).cloned().unwrap_or_default(), by: j.get("by").and_then(|b| b.as_str()).map(String::from) }),
             Some("write") => Ok(Line::Write { ts, writer: s("writer")?, eid: s("eid")?, prop: s("prop")?, new: j.get("new").cloned().unwrap_or(J::Null) }),
             other => Err(format!("journal line: unknown op {other:?}")),
         }
@@ -183,7 +184,7 @@ pub struct MemoryConfig { pub budget_mb: Option<u64>, pub soft: Option<f64>, pub
 /// A resident-size reading in bytes (None: unreadable): the real one is `process_rss`; a test injects its own.
 pub type RssReading = Box<dyn Fn() -> Option<u64> + Send + Sync>;
 
-struct Pending { row: Option<(String, Map<String, J>, Map<String, J>)>, dirty: bool, updated: f64 }
+struct Pending { row: Option<(String, Map<String, J>, Map<String, J>)>, dirty: bool, updated: f64, by: Option<String> }
 
 /// Holds the round's time for the length of an outside write; the previous one comes back when it ends.
 struct RoundTs<'a> { h: &'a Host, prev: u64 }
@@ -354,7 +355,7 @@ impl Host {
     pub fn write(&self, eid: &str, prop: &str, new: J, writer: &str) {
         // an outside None written to an ENTITY (no property) is its death, the mirror of a birth: journalled as the `retire = true` it is, so a replay destroys it again
         let (prop, new) = if prop.is_empty() && new.is_null() { ("retire", json!(true)) } else { (prop, new) };
-        if prop == crate::vm::UPDATED || prop == crate::vm::PINNED { return; }   // the VM's own, read-only: refused, not journalled
+        if prop == crate::vm::UPDATED || prop == crate::vm::PINNED || prop == crate::vm::BORN_BY { return; }   // the VM's own, read-only: refused, not journalled
         let ts = self.now();
         self.journal_push(Line::Write { ts, writer: writer.into(), eid: eid.into(), prop: prop.into(), new: new.clone() });
         self.inject_write(ts, eid, prop, new, writer, writer);
@@ -363,8 +364,14 @@ impl Host {
     /// An outside birth (a request, the boot's entity): journalled, stored, loaded, its getters run.
     pub fn born(&self, eid: &str, cls: &str, props: Map<String, J>, writer: &str) {
         let ts = self.now();
-        self.journal_push(Line::Born { ts, writer: writer.into(), eid: eid.into(), cls: cls.into(), props: props.clone() });
-        self.inject_born(ts, eid, cls, props, writer, writer);
+        self.journal_push(Line::Born { ts, writer: writer.into(), eid: eid.into(), cls: cls.into(), props: props.clone(), by: None });
+        self.inject_born(ts, eid, cls, props, writer, writer, None);
+    }
+
+    /// The cause of an entity's birth (`<entity>.born_by`): None for one that has none. A stored entity that is not loaded loads first.
+    pub fn born_by(&self, eid: &str) -> Option<String> {
+        if self.eng().0.unloaded.contains_key(eid) { self.ensure_loaded(eid, self.now()); self.settle_loaded(); }
+        self.eng().0.born_by.get(eid).cloned()
     }
 
     fn round_at(&self, ts: f64) -> RoundTs<'_> { RoundTs { h: self, prev: self.round_ts.swap(ts.to_bits(), Ordering::SeqCst) } }
@@ -396,18 +403,19 @@ impl Host {
     /// How many times `instances(<class>)` walked every loaded entity so far (the engine's cache misses): a count of work for the tests.
     pub fn inst_scans(&self) -> u64 { self.eng().0.inst_scans() }
 
-    pub(crate) fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
+    pub(crate) fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str, by: Option<&str>) {
         let _t = self.txn();
         let _r = self.round_at(ts);
         self.ensure_loaded(eid, ts);
         let props = crate::vm::birth_props(cls, props);   // the eid class is the birth default of the class list (the journal keeps what was said)
-        self.store_born(eid, cls, &props, stamp);
+        self.store_born(eid, cls, &props, stamp, by);
         if let Some(t) = props.get("text") { self.pack_text(eid, t); }
         if let Some(v) = props.get("privileged") { self.note_outside_grant(eid, v, stamp); }
         {
             let mut g = self.eng();
             let (core, f, seq) = &mut *g;
             f.arrive(core, eid.into(), cls.into(), props, ts);
+            if let Some(b) = by { core.born_by.insert(eid.to_string(), b.to_string()); }
             f.settle(core, &NullHost, ts, seq);
         }
         self.drain_apply();
@@ -418,7 +426,7 @@ impl Host {
         for l in lines {
             self.journal_push(l.clone());
             match l {
-                Line::Born { ts, writer, eid, cls, props } => self.inject_born(*ts, eid, cls, props.clone(), writer, writer),
+                Line::Born { ts, writer, eid, cls, props, by } => self.inject_born(*ts, eid, cls, props.clone(), writer, writer, by.as_deref()),
                 Line::Write { ts, writer, eid, prop, new } => {
                     let seen = writer.strip_prefix("host:").unwrap_or(writer);
                     self.inject_write(*ts, eid, prop, new.clone(), seen, writer)
@@ -442,8 +450,8 @@ impl Host {
     }
 
     fn born_at(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, writer: &str) {
-        self.journal_push(Line::Born { ts, writer: writer.into(), eid: eid.into(), cls: cls.into(), props: props.clone() });
-        self.inject_born(ts, eid, cls, props, writer, writer);
+        self.journal_push(Line::Born { ts, writer: writer.into(), eid: eid.into(), cls: cls.into(), props: props.clone(), by: None });
+        self.inject_born(ts, eid, cls, props, writer, writer, None);
     }
 
     /// The clock input: armed waits come due.
@@ -500,8 +508,9 @@ impl Host {
             if let Some(cls) = w.get("born").and_then(|c| c.as_str()) {
                 let eid = w["eid"].as_str().unwrap_or("").to_string();
                 let stamp = if w.get("virt") == Some(&json!(true)) { stamp_virtual_writer("create") } else { stamp_born_writer(cls) };
-                self.store_born(&eid, cls, &Map::new(), &stamp);
-                if is_outside(&stamp) { self.journal_push(Line::Born { ts, writer: stamp, eid, cls: cls.into(), props: Map::new() }); }
+                let by = w.get("by").and_then(|b| b.as_str()).map(String::from);
+                self.store_born(&eid, cls, &Map::new(), &stamp, by.as_deref());
+                if is_outside(&stamp) { self.journal_push(Line::Born { ts, writer: stamp, eid, cls: cls.into(), props: Map::new(), by }); }
                 continue;
             }
             let (Some(eid), Some(prop)) = (w["eid"].as_str(), w["prop"].as_str()) else { continue };
@@ -724,6 +733,7 @@ impl Host {
             if cls.is_empty() || cls == PACK_CLASS { continue; }
             let mut g = self.eng(); let (core, f, _) = &mut *g;
             core.updated.insert(eid.clone(), updated);
+            if let Some(b) = row["born_by"].as_str() { core.born_by.insert(eid.clone(), b.to_string()); }
             f.arrive(core, eid, cls, restore_props(&row), now);
             n += 1;
         }
@@ -896,16 +906,18 @@ impl Host {
 
     /// Write back the rows the open transaction changed.
     fn flush(&self, db: &Connection) {
-        let dirty: Vec<(String, (String, Map<String, J>, Map<String, J>), f64)> = {
+        let dirty: Vec<(String, (String, Map<String, J>, Map<String, J>), f64, Option<String>)> = {
             let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
             let Some(m) = g.as_mut() else { return };
-            m.iter_mut().filter(|(_, p)| p.dirty).filter_map(|(k, p)| { p.dirty = false; p.row.clone().map(|r| (k.clone(), r, p.updated)) }).collect()
+            m.iter_mut().filter(|(_, p)| p.dirty).filter_map(|(k, p)| { p.dirty = false; p.row.clone().map(|r| (k.clone(), r, p.updated, p.by.clone())) }).collect()
         };
-        for (eid, (cls, p, w), updated) in dirty { self.write_row(db, &eid, &cls, &p, &w, updated); }
+        for (eid, (cls, p, w), updated, by) in dirty { self.write_row(db, &eid, &cls, &p, &w, updated, by.as_deref()); }
     }
 
-    fn write_row(&self, db: &Connection, eid: &str, cls: &str, props: &Map<String, J>, writers: &Map<String, J>, updated: f64) {
-        let body = json!({"cls": cls, "props": props, "writers": writers}).to_string();
+    fn write_row(&self, db: &Connection, eid: &str, cls: &str, props: &Map<String, J>, writers: &Map<String, J>, updated: f64, by: Option<&str>) {
+        let mut body = json!({"cls": cls, "props": props, "writers": writers});
+        if let Some(b) = by { body["born_by"] = json!(b); }   // one string, only for an entity that has a cause
+        let body = body.to_string();
         // the row, its class and the time of the write are ONE statement of the write's own transaction
         self.exec(db, &format!("INSERT INTO {ROWS} (k, body, cls, updated) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(k) DO UPDATE SET body = excluded.body, cls = excluded.cls, updated = excluded.updated"), params![eid, body, cls, updated]);
     }
@@ -916,11 +928,13 @@ impl Host {
         let got: Option<(String, f64)> = db.query_row(&format!("SELECT body, updated FROM {ROWS} WHERE k = ?"), params![eid], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten();
         let updated = got.as_ref().map_or(0.0, |g| g.1);
         let body = got.map(|g| g.0);
-        let row = body.and_then(|b| serde_json::from_str::<J>(&b).ok()).map(|j| (j["cls"].as_str().unwrap_or("").to_string(), j["props"].as_object().cloned().unwrap_or_default(), j["writers"].as_object().cloned().unwrap_or_default()));
-        if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.insert(eid.into(), Pending { row, dirty: false, updated }); }
+        let parsed = body.and_then(|b| serde_json::from_str::<J>(&b).ok());
+        let by = parsed.as_ref().and_then(|j| j["born_by"].as_str().map(String::from));
+        let row = parsed.map(|j| (j["cls"].as_str().unwrap_or("").to_string(), j["props"].as_object().cloned().unwrap_or_default(), j["writers"].as_object().cloned().unwrap_or_default()));
+        if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.insert(eid.into(), Pending { row, dirty: false, updated, by }); }
     }
 
-    fn store_born(&self, eid: &str, cls: &str, props: &Map<String, J>, stamp: &str) {
+    fn store_born(&self, eid: &str, cls: &str, props: &Map<String, J>, stamp: &str, by: Option<&str>) {
         let ts = self.stamp_ts();
         if self.storage_of(cls) == crate::fields::Storage::Virtual { self.eng().0.updated.insert(eid.to_string(), ts); return; }   // RAM only: no row, but it has its `updated`
         let _t = self.txn();
@@ -929,6 +943,7 @@ impl Host {
         let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         let Some(slot) = g.as_mut().and_then(|m| m.get_mut(eid)) else { return };
         let created = slot.row.is_none();
+        if created { if let Some(b) = by { slot.by = Some(b.to_string()); } }
         let (c, p, w) = slot.row.get_or_insert_with(|| (cls.to_string(), Map::new(), Map::new()));
         let mut changed = slot.dirty || created || c != cls;
         let mut wrote = created || c != cls;

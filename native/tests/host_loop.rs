@@ -290,7 +290,7 @@ fn a_plain_none_written_to_an_entity_destroys_it_by_an_outside_write_a_setter_an
     h.write("Box:2", "done", json!(true), "person");                  // the setter: `('Box:' + this.kid) = None`
     assert_eq!(h.snapshot().keys().cloned().collect::<Vec<_>>(), ["Box:2"]);
     let j = h.journal();
-    let mut j2 = vec![]; for e in ["Box:1", "Box:1:x", "Box:10", "Box:2"] { j2.push(Line::Born { ts: 0.0, writer: "person".into(), eid: e.into(), cls: "Box".into(), props: Map::new() }); }
+    let mut j2 = vec![]; for e in ["Box:1", "Box:1:x", "Box:10", "Box:2"] { j2.push(Line::Born { ts: 0.0, writer: "person".into(), eid: e.into(), cls: "Box".into(), props: Map::new(), by: None }); }
     j2.extend(j.into_iter().filter(|l| matches!(l, Line::Write { .. })));
     let r2 = mk(); r2.replay(&j2);
     assert_eq!(r2.snapshot().keys().cloned().collect::<Vec<_>>(), ["Box:2"], "the replay destroys again");

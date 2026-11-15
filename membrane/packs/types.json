@@ -1074,6 +1074,7 @@
       "Request.mc_is_err": "Bool",
       "Request.mc_known": "Bool",
       "Request.mc_known_method": "Bool",
+      "Request.mc_message": "Any",
       "Request.mc_method": "Text",
       "Request.mc_ok": "Bool",
       "Request.mc_params": "Any",
@@ -1105,7 +1106,6 @@
       "Request.mc_tool": "Any",
       "Request.mc_tools": "List(Dict)",
       "Request.mc_turn": "Any",
-      "Request.mc_turn_ok": "Bool",
       "Request.mc_w_bad": "Text?",
       "Request.mc_w_cap": "Int",
       "Request.mc_w_cls": "Text?",
@@ -1147,8 +1147,6 @@
     "writes": {
       "*.[prop(this.mc_write, 'prop')]": "Any",
       "*.go": "Bool",
-      "*.made": "List(Any)",
-      "*.made_by": "Any",
       "*.privileged": "Bool",
       "*.retire": "Bool",
       "*.scratch": "Bool",
@@ -1157,7 +1155,6 @@
       "Request.cl_final": "Any",
       "Request.cl_loading": "Bool",
       "Request.mc_done": "Bool",
-      "Request.mc_w_born": "Bool",
       "Request.mc_w_old": "Any",
       "Request.mc_w_returned": "Entity(Return)",
       "Request.mc_w_t0": "Num"

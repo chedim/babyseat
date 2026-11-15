@@ -376,8 +376,9 @@ impl Fields {
         self.trigger_virtual && core.docs.get(eid).map_or(false, |e| self.storage_of(&e.cls) != Storage::Virtual)
     }
     /// The `out` entry of a birth by a setter (the entity is in `core` already).
-    fn born_entry(&self, core: &Core, eid: &str, cls: &str) -> J {
-        let mut o = json!({"eid": eid, "born": cls});
+    /// `by` is the cause: the entity whose setter runs (the writer label that travels with `this`), kept for the entity (`Core::born_by`) and carried in the entry for the store and the journal.
+    fn born_entry(&self, core: &Core, eid: &str, cls: &str, by: &str) -> J {
+        let mut o = json!({"eid": eid, "born": cls, "by": by});
         if self.from_virtual(core, eid) { o["virt"] = json!(true); }
         o
     }
@@ -1003,6 +1004,7 @@ impl Fields {
     /// plan written entity by entity) must not fire on a half-made state. What references it recalculates live.
     fn birth(&mut self, core: &mut Core, e: &str, now: f64, seq: &mut i64) {
         self.known.insert(e.to_string());
+        self.mark(e, crate::vm::BORN_BY);   // what read its cause while it was not there reads it now
         if let Some(c) = core.docs.get(e).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c)); }
         for gi in self.getters_of(core, e) {
             let v = self.compute(core, None, e, gi, now, seq); self.flush_late(); let Some(v) = v else { continue };
@@ -1376,7 +1378,7 @@ impl Fields {
             for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
             for p in keys { self.mark(&e, &p); }
             // what read this eid while it was not there (its `eid`, its class) reads it now
-            for k in ["eid", "cls", crate::vm::UPDATED] { self.mark(&e, k); }
+            for k in ["eid", "cls", crate::vm::UPDATED, crate::vm::BORN_BY] { self.mark(&e, k); }
         }
     }
 
@@ -1527,6 +1529,10 @@ impl Fields {
                 self.receipt(core, eid, name, format!("refused: `{UPDATED_PROP}` is provided by the VM (the time of the entity's last write) and is read-only: no setter writes it"), J::Null, seq, now);
                 continue;
             }
+            if prop == crate::vm::BORN_BY {
+                self.receipt(core, eid, name, format!("refused: `{}` is provided by the VM (the entity whose setter was running when the entity was born) and is read-only: no setter writes it", crate::vm::BORN_BY), J::Null, seq, now);
+                continue;
+            }
             if prop == crate::vm::PINNED {
                 self.receipt(core, eid, name, format!("refused: `{prop}` is provided by the VM (the reason an entity cannot be unloaded) and is read-only: no setter writes it"), J::Null, seq, now);
                 continue;
@@ -1564,7 +1570,8 @@ impl Fields {
                     }
                 }
                 core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
-                self.out.push(self.born_entry(core, &tgt, cls));
+                core.born_by.insert(tgt.clone(), eid.to_string());
+                self.out.push(self.born_entry(core, &tgt, cls, eid));
                 self.birth(core, &tgt, now, seq);
             }
             if let Err(why) = self.may_write_ent(core, pack, &tgt) {
@@ -1635,7 +1642,8 @@ impl Fields {
             // the birth default of the class list: the eid's class first, then the constructor's class when it differs (the stamp), then any `parents` argument
             if own != cls && !args.iter().any(|(k, _)| k == "parents") { args.push(("parents".into(), json!([format!("cls:{}", cls.to_lowercase())]))); }
             core.load(tgt.clone(), own.clone(), Default::default(), None, now);
-            self.out.push(self.born_entry(core, &tgt, &own));
+            core.born_by.insert(tgt.clone(), eid.to_string());
+            self.out.push(self.born_entry(core, &tgt, &own, eid));
             self.birth(core, &tgt, now, seq);
         } else {
             if let Err(why) = self.may_write_ent(core, pack, &tgt) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }

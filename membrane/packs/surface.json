@@ -586,12 +586,10 @@
       "Request",
       "Return"
     ],
-    "members": 97,
+    "members": 96,
     "writes": [
       "*.[]",
       "*.go",
-      "*.made",
-      "*.made_by",
       "*.privileged",
       "*.retire",
       "*.scratch",
