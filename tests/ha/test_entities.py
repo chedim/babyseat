@@ -184,3 +184,20 @@ def test_an_entry_from_before_the_connect_only_move_is_migrated_through_both_ste
                                options={"seats": [], "ha_access": True})
     asyncio.run(pkg.async_migrate_entry(hass, e))
     assert e.minor_version == 4 and e.data["serve_url"] == "http://a.lan:4096" and hass.registry.entries == {}
+
+
+def test_no_two_entities_of_one_entry_share_a_display_name(ha, real_seat):
+    # real Home Assistant showed "Membrane seat Model" twice (the model sensor and the model select): a reading and a control may show the same value, but their names must differ
+    pkg, hass = ha
+
+    async def go():
+        s, entry = await _loaded(pkg, hass, real_seat)
+        try:
+            ents = []
+            for p in ("sensor", "binary_sensor", "select"):
+                ents += await _platform(p, hass, entry)
+            return [e._attr_name for e in ents]
+        finally:
+            await s.close()
+    names = asyncio.run(go())
+    assert len(names) == len(set(names)), f"two entities share a name: {sorted(names)}"

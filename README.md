@@ -88,7 +88,8 @@ The key is handed to the CLI child and is never written to a property, a row, th
 > can try it now: copy `custom_components/membrane` by hand, or turn on *Show beta versions* for the repository in HACS.
 
 1. HACS, three dots, *Custom repositories*, `https://github.com/chedim/membrane`, category *Integration*; install **babyseat (membrane)** and restart Home Assistant.
-2. *Settings, Devices & services, Add integration, babyseat (membrane)*: the seat's address (`http://<seat-machine>:4096`; the seat needs `--bind` for that) and the token in `<data>/admin.token`.
+2. On Home Assistant OS or Supervised, the babyseat add-on runs the seat and Home Assistant discovers it (*Settings, Devices & services*, *Discovered*). Elsewhere, run `cliffvm serve` and add it by hand:
+   *Settings, Devices & services, Add integration, babyseat (membrane)*: the seat's address (`http://<seat-machine>:4096`; the seat needs `--bind` for that) and the token in `<data>/admin.token`.
 3. *Settings, Voice assistants*: pick the **Membrane seat** conversation agent.
 
 The integration is a thin client: it starts no seat and installs no package. It makes a hidden Home Assistant user, *Membrane*, and runs every call the model writes as that

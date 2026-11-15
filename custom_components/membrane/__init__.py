@@ -96,7 +96,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     url = str(entry.data.get(CONF_SERVE_URL) or "")
     if urlsplit(url).scheme not in ("http", "https") or not entry.data.get(CONF_SERVE_PASS):
-        raise ConfigEntryAuthFailed("no seat address or token: give them again")       # an entry from inside mode: reauth asks both
+        raise ConfigEntryAuthFailed("no seat address or token: the seat no longer runs inside Home Assistant, give the address and token "
+                                    "of a seat that runs elsewhere")   # an entry from inside mode: reauth (reauth_no_seat) asks both
     client = SeatClient(async_get_clientsession(hass), url, entry.data[CONF_SERVE_PASS],
                         entry.data.get(CONF_SERVE_USER) or DEFAULT_SERVE_USER)
     health = SeatHealth(hass, entry, client)

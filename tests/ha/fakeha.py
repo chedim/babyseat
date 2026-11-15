@@ -162,8 +162,9 @@ class FakeEntityRegistry:
 
 
 class FakeConfigEntry:
-    def __init__(self, data=None, options=None, version=1, minor_version=4, domain="membrane", entry_id="e1", unique_id="membrane"):
+    def __init__(self, data=None, options=None, version=1, minor_version=4, domain="membrane", entry_id="e1", unique_id="membrane", source="user"):
         self.data, self.options = dict(data or {}), dict(options or {})
+        self.source = source                    # "ignore": the person pressed Ignore on a discovery (HA keeps the unique id, no data)
         self.version, self.minor_version, self.domain = version, minor_version, domain
         self.entry_id, self.unique_id = entry_id, unique_id
         self.runtime_data = None
@@ -191,10 +192,16 @@ class FakeConfigEntries:
     def __init__(self):
         self.entries: list[FakeConfigEntry] = []
         self.forwarded: list = []
+        self.progress: list = []                # the flows that set a unique id, ended or not (ConfigFlow._done)
         self.updated: list = []
+        self.reloaded = None
 
-    def async_entries(self, domain=None):
-        return [e for e in self.entries if domain in (None, e.domain)]
+    def flow_abort(self, flow):
+        """HA's flow.async_abort(flow_id): the person closed the dialog; the flow is no longer in progress."""
+        flow._done = True
+
+    def async_entries(self, domain=None, include_ignore=True):
+        return [e for e in self.entries if domain in (None, e.domain) and (include_ignore or e.source != "ignore")]
 
     def async_update_entry(self, entry, *, data=None, options=None, minor_version=None, version=None, unique_id=None, title=None):
         if data is not None:
@@ -215,6 +222,9 @@ class FakeConfigEntries:
         return True
 
     async def async_reload(self, entry_id):
+        self.reloaded = entry_id
+
+    def async_schedule_reload(self, entry_id):
         self.reloaded = entry_id
 
 
@@ -267,30 +277,62 @@ class ConfigFlow:
     context: dict = {}
     unique_id = None
 
-    async def async_set_unique_id(self, uid, *, raise_on_progress=True):
-        self.unique_id = uid
+    _done = False                                 # the flow ended (an entry, an abort): no longer in progress
 
-    def _abort_if_unique_id_configured(self, updates=None, **kw):
-        if any(e.unique_id == self.unique_id for e in self.hass.config_entries.async_entries(self.domain)):
-            raise AbortFlow("already_configured")
+    async def async_set_unique_id(self, uid, *, raise_on_progress=True):
+        """HA's: another flow of this unique id still in progress (a reauth aside) aborts this one `already_in_progress`."""
+        progress = self.hass.config_entries.progress
+        if raise_on_progress and any(f is not self and not f._done and f.unique_id == uid and f.source != "reauth" for f in progress):
+            self._done = True
+            raise AbortFlow("already_in_progress")
+        self.unique_id = uid
+        if self not in progress:
+            progress.append(self)
+
+    def _abort_if_unique_id_configured(self, updates=None, reload_on_update=True, **kw):
+        """HA's: the entry of this unique id gets `updates` merged in its data; it is reloaded only when it is loaded or retrying its
+        setup (an entry whose setup failed, a refused token among them, is NOT reloaded: `loaded` models that state), then the flow aborts."""
+        for e in self.hass.config_entries.async_entries(self.domain):
+            if e.unique_id == self.unique_id:
+                if updates is not None and dict(e.data, **updates) != e.data:
+                    self.hass.config_entries.async_update_entry(e, data=dict(e.data, **updates))
+                    if reload_on_update and getattr(e, "loaded", True):
+                        self.hass.config_entries.async_schedule_reload(e.entry_id)
+                self._done = True
+                raise AbortFlow("already_configured")
+
+    @property
+    def source(self):
+        return (self.context or {}).get("source")
+
+    def _async_current_entries(self, include_ignore=None):
+        """HA's: ignored entries count unless the flow is the person's own (source user), or `include_ignore` says."""
+        return self.hass.config_entries.async_entries(self.domain, include_ignore or (include_ignore is None and self.source != "user"))
 
     def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None, last_step=None):
         return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {},
                 "description_placeholders": description_placeholders or {}}
 
     def async_create_entry(self, *, title, data, options=None, description=None):
+        self._done = True
         return {"type": "create_entry", "title": title, "data": dict(data), "options": options}
 
     def async_abort(self, *, reason, description_placeholders=None):
+        self._done = True
         return {"type": "abort", "reason": reason}
 
     def _get_reauth_entry(self):
         return self.context["entry"]
 
-    def async_update_reload_and_abort(self, entry, *, data_updates=None, data=None, reason="reauth_successful", **kw):
+    def async_update_reload_and_abort(self, entry, *, data_updates=None, data=None, reason="reauth_successful", unique_id=None, **kw):
+        """HA's: the entry's data (and unique id) updated, the entry reloaded whatever its state, the flow aborted with `reason`."""
         d = dict(entry.data if data is None else data)
         d.update(data_updates or {})
         self.hass.config_entries.async_update_entry(entry, data=d)
+        if unique_id is not None:
+            entry.unique_id = unique_id
+        self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        self._done = True
         return {"type": "abort", "reason": reason}
 
 
@@ -354,6 +396,12 @@ def async_get_result_from_chat_log(user_input, chat_log):
     """The result HA would build: the last assistant content is the speech."""
     last = chat_log.content[-1].content if chat_log.content else ""
     return {"conversation_id": chat_log.conversation_id, "speech": last}
+
+
+class HassioServiceInfo:
+    """What the Supervisor hands `async_step_hassio`: the add-on's announced `config`, its `name`, `slug`, and the message's `uuid`."""
+    def __init__(self, config, name="babyseat", slug="local_babyseat", uuid="u1"):
+        self.config, self.name, self.slug, self.uuid = dict(config), name, slug, uuid
 
 
 def _mod(name, **attrs):

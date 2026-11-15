@@ -78,6 +78,32 @@ def test_every_dead_subcommand_exits_2_with_the_way_back(cmd, exe, capsys):
     assert calls == []
 
 
+@pytest.mark.parametrize("argv", [["--backend", "http://ollama:11434"], ["--port", "4096", "--model", "m"], ["--serve-port=4096"],
+                                  ["--cortex"], ["--cells", "3"], ["--loops", "2"], ["--field", "x"], ["--think"], ["--listen", "4097"]])
+def test_a_flag_of_the_old_python_seat_names_the_flags_serve_takes_and_exits_2(argv, exe, capsys):
+    _, calls = exe
+    with pytest.raises(SystemExit) as e:
+        launcher.main(argv)
+    assert e.value.code == 2 and calls == []
+    err = capsys.readouterr().err
+    flag = next(a for a in argv if a.split("=")[0] in launcher.OLD_FLAGS).split("=")[0]
+    assert flag in err
+    for f in ("--port", "--data-dir", "--bind", "--fact name=value"):
+        assert f in err, f
+    assert len(err.strip().splitlines()) <= 5
+
+
+def test_the_old_flags_are_a_short_list_of_exact_names_and_none_is_a_serve_flag():
+    assert 5 <= len(launcher.OLD_FLAGS) <= 30
+    assert not {"--port", "--data-dir", "--bind", "--fact", "--store", "--root", "--legacy"} & set(launcher.OLD_FLAGS)
+
+
+def test_a_flag_that_only_starts_like_an_old_one_is_passed_through(exe):
+    p, calls = exe
+    launcher.main(["--fact", "model=--model", "--models-dir", "x"])          # values and unknown flags are cliffvm's to judge
+    assert calls == [(str(p), [str(p), "serve", "--fact", "model=--model", "--models-dir", "x"])]
+
+
 def test_version_prints_the_wheels_version_and_needs_no_binary(monkeypatch, capsys):
     monkeypatch.delenv("CLIFFVM", raising=False)
     with pytest.raises(SystemExit) as e:

@@ -12,6 +12,9 @@ HERE = Path(__file__).resolve().parent
 GONE = ("opencode", "review", "ingest", "backfill", "move", "toybox", "self", "shadow", "store", "connect", "auth", "doctor",
         "bench", "codegraph", "erase-field", "install")
 LAST_PYTHON = "babyseat==0.7.53"
+# the Python seat's common flags, by exact name (`--x` or `--x=v`): each would be cliffvm's bare usage error, so the launcher names serve's own
+OLD_FLAGS = ("--backend", "--model", "--embed-model", "--field", "--audit", "--think", "--cortex", "--cells", "--loops", "--listen",
+             "--listen-host", "--serve", "--serve-port", "--serve-host", "--standalone", "--no-browser", "--no-thinker", "--no-dreamer")
 
 
 def binary() -> str | None:
@@ -43,6 +46,11 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(0)
     if args and args[0] in GONE:
         print(f"`{args[0]}` is not in this release (the Python seat is retired); `pip install {LAST_PYTHON}` has it.", file=sys.stderr)
+        raise SystemExit(2)
+    old = next((a.split("=", 1)[0] for a in args if a.split("=", 1)[0] in OLD_FLAGS), None)
+    if old:
+        print(f"`{old}` was a flag of the Python seat; this seat is `cliffvm serve`: --port <n>, --data-dir <dir>, --bind <addr>,\n"
+              f"--fact name=value (the rest: docs/cliffvm.md). `pip install {LAST_PYTHON}` has the old flags.", file=sys.stderr)
         raise SystemExit(2)
     exe = binary()
     if exe is None:

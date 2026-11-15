@@ -42,6 +42,17 @@ def test_the_token_texts_name_the_admin_token_file_and_no_role_wording():
         for path, text in texts.items():
             assert not re.search(r"owner|--sub|operator", text, re.I), f"{name}{path}: {text}"
         form = next(t for p, t in texts.items() if "/user/description" in p or p.endswith("/step/user/description"))
-        reauth = next(t for p, t in texts.items() if "reauth" in p and p.endswith("description"))
-        for t in (form, reauth):
+        reauths = [t for p, t in texts.items() if "reauth" in p and p.endswith("description")]
+        assert len(reauths) == 2, reauths                     # the refused token, and the entry that ran the seat inside Home Assistant
+        for t in (form, *reauths):
             assert "admin.token" in t and "door.secret" in t, t
+
+
+def test_no_string_holds_a_url_the_links_are_placeholders():
+    """hassfest refuses a URL inside a translation string ("please use description placeholders instead"): a link is a `{docs_url}` placeholder
+    the flow fills. The pattern is hassfest's own RE_URL (script/hassfest/translations.py, 2026-11-15)."""
+    re_url = re.compile(r"(((ftp|ftps|scp|http|https|mqtt|mqtts|socket|socks5):\/\/|www\.)"
+                        r"[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,5}(:[0-9]{1,5})?(\/.*)?)", re.IGNORECASE)
+    for name in ("strings.json", "translations/en.json"):
+        for path, text in _strings(json.loads((ROOT / name).read_text())):
+            assert not re_url.search(text), f"{name}{path}: {text}"

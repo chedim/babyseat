@@ -9,13 +9,36 @@
           "serve_pass": "Token"
         }
       },
-      "reauth_confirm": {
-        "title": "The seat needs a new token",
-        "description": "The seat at {url} refused Home Assistant's token (it ran out, or the seat's key changed), or this entry has no seat yet. Paste the admin token again: the file admin.token in the seat's data folder (new at every start of the seat), or one made with cliffvm token mint --ttl 30d --secret-file SEAT-FOLDER/door.secret.",
+      "user_ollama": {
+        "title": "Connect to a seat",
+        "description": "The address of a seat you run (cliffvm) and its admin token. The token is the file admin.token in the seat's data folder, and the seat prints its path when it starts. Or make one on the seat's machine with: cliffvm token mint --ttl 30d --secret-file SEAT-FOLDER/door.secret (SEAT-FOLDER is the data folder that holds door.secret). Every valid token is the admin: Assist, the seat's calls into the house, its sensors and its model select all work with it. See docs/home-assistant.md. Home Assistant's Ollama integration uses the server {ollama_url} with the model {ollama_model}. To have the seat think with the same server, start it with --fact seat_backend={ollama_url} and pick {ollama_model} in its model select.",
         "data": {
-          "serve_url": "Seat URL",
+          "serve_url": "Seat URL (e.g. http://192.168.1.20:4096)",
           "serve_pass": "Token"
         }
+      },
+      "reauth_confirm": {
+        "title": "The seat needs a new token",
+        "description": "The seat at {url} refused Home Assistant's token. It ran out, the seat's key changed, or it is a token of the old seat: the old seat's tokens are not valid on the new seat. Paste the new seat's admin token: the file admin.token in the seat's data folder (DATA-FOLDER/admin.token, new at every start of the seat, its path printed at start), or one made with cliffvm token mint --ttl 30d --secret-file DATA-FOLDER/door.secret. With the babyseat add-on, the token is in the add-on's log, and the add-on's discovery hands it to Home Assistant by itself when the add-on starts. More: {docs_url}",
+        "data": {
+          "serve_pass": "Token"
+        }
+      },
+      "reauth_no_seat": {
+        "title": "The seat moved out of Home Assistant",
+        "description": "This entry ran the seat inside Home Assistant. The seat no longer runs inside Home Assistant: install the babyseat add-on (Home Assistant OS or Supervised), or run cliffvm serve on a machine Home Assistant can reach (Container or Core), then enter its address and token here. The token is the seat's admin token: the file admin.token in the seat's data folder (its path printed at start), or one made with cliffvm token mint --ttl 30d --secret-file DATA-FOLDER/door.secret; with the add-on it is in the add-on's log, and the add-on's discovery fills this in by itself. Your chat history carries over; entities, goals, settings, model setup, tokens and allow-lists do not. More: {docs_url}",
+        "data": {
+          "serve_url": "Seat URL (e.g. http://192.168.1.20:4096)",
+          "serve_pass": "Token"
+        }
+      },
+      "hassio_confirm": {
+        "title": "Connect to the babyseat add-on",
+        "description": "The add-on {addon} runs a seat. Connect Home Assistant to it? Its address and token come from the add-on itself."
+      },
+      "hassio_confirm_ollama": {
+        "title": "Connect to the babyseat add-on",
+        "description": "The add-on {addon} runs a seat. Connect Home Assistant to it? Its address and token come from the add-on itself. Home Assistant's Ollama integration uses the server {ollama_url} with the model {ollama_model}: to have the seat think with the same server, set the add-on's Ollama URL and model options to these. Nothing is set by itself."
       }
     },
     "error": {
@@ -24,8 +47,12 @@
       "invalid_url": "That is not an http:// or https:// address."
     },
     "abort": {
-      "already_configured": "Membrane is already set up.",
-      "reauth_successful": "The new token works."
+      "already_configured": "Membrane is already set up (the add-on's discovery updated its token if it changed).",
+      "reauth_successful": "The new token works.",
+      "cannot_connect": "The seat didn't answer at the address the add-on gave.",
+      "invalid_auth": "The seat refused the token the add-on gave.",
+      "invalid_discovery": "The add-on's announcement had no host, port or token.",
+      "already_in_progress": "This seat is already being set up."
     }
   },
   "services": {
