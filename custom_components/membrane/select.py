@@ -16,7 +16,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
 
 class SeatModel(CoordinatorEntity, SelectEntity):
     _attr_has_entity_name = True
-    _attr_name = "Model"
+    _attr_name = "Model choice"
     _attr_icon = "mdi:robot"
 
     def __init__(self, coord, entry) -> None:
