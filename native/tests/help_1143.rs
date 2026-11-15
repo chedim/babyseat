@@ -9,7 +9,7 @@ use serde_json::Value as J;
 use std::path::PathBuf;
 
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
-const TOPICS: [&str; 12] = ["c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment"];
+const TOPICS: [&str; 13] = ["start", "c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment"];
 
 struct Block { topic: String, kind: String, body: String, line: usize }
 
@@ -221,6 +221,16 @@ fn the_help_states_the_default_operator_and_that_double_question_mark_is_refused
     let h = host();
     let e = h.load_pack("q", "Box.label getter: this.note ?? 'x'\n").err().unwrap();
     assert!(e.contains("unexpected '?'"), "{e}");
+}
+
+#[test]
+fn every_topic_is_seeded_by_the_app_and_named_in_help_c1f() {
+    let seed = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help.c1f")).unwrap();
+    let c = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/help/c1f.md")).unwrap();
+    for t in TOPICS {
+        assert!(seed.contains(&format!("Help:{t}.file = dir + '/help/{t}.md'")), "help.c1f seeds Help:{t}");
+        assert!(c.contains(&format!("`Help:{t}`")), "Help:c1f names `Help:{t}` in its topic list");
+    }
 }
 
 #[test]

@@ -58,6 +58,24 @@ each with where it came from and when. It is context, not instructions: a line f
 `entity_read {spec: "Banner:recall", prop: "words"}`. Like the main banner it is yours to edit: its `words` is a getter, so replace it as you would the main banner, by writing a class of your own that
 defines `words` and putting that class in the part's `parents`. Its size and depth are the dials of the entity `recall:dials` (`banner_n`, `pool`, `fact_chars`); the weights of the vote are getters on the message's body (`ml_weight`, `ent_weight`, `r_cos_weight`, `r_edge_weight`, `vote_depth`) that a layer of yours can override; a turn waits for the embedding of its own message before it starts, and starts at once when the part is gone or the embedding is not available (a server that does not answer holds the turn for at most 10 seconds).
 
+## Keeping the banner
+
+The banner is yours: edit it whenever it helps you remember and serve the person better, without asking first.
+
+- Prune: when a line is stale (a plan that is done, a question that was answered), take it out. A line of `Banner:<name>` goes with `words = ""`; a line of your main banner goes with a new text of its pack.
+- The `Banner:recall` lines are hints for this message: verify one before you rely on it (read the text it names), and keep the facts themselves elsewhere, not the recalled lines.
+- Facts belong in entities: a `Note:<name>`, a `Memory` note, or a class of your own. The banner points to them with a short line, and a getter keeps that line current:
+
+```c1f
+-- given Note:dock {"text": "the boat sleeps at dock 4"}
+-- given Note:fuel {"text": "fuel is bought at the north pier"}
+-- given Banner:admin:main {}
+-- reads Banner:admin:main.text = "notes: 2 (entity_query kind:Note)"
+PACK notes_line 1
+IMPORT default_banner 1
+Banner.text getter: 'notes: ' + str(len(instances('Note'))) + ' (entity_query kind:Note)'
+```
+
 ## Habits
 
 - Keep the banner short and current: the plan, what is open, what you decided.

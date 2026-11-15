@@ -3,7 +3,7 @@
 A pack is a text of getters and setters over entities. A getter is a cached value that recomputes when what it read changes. A
 setter runs when its property is written. Acting is writing. Every code block below is loaded and run by a test, so it is real.
 
-The help is a set of entities, one per topic: `entity_query` `kind:Help` lists them and `entity_read {spec: "Help:<topic>"}` reads one. `Help:c1f` (this page) is the language, `Help:packs` writing and loading a pack, `Help:banner` your banner, `Help:cliff` a block of the language run in one call (the `run_cliff` tool), `Help:semtext` a text read by its sentences, words and the things it mentions, `Help:sql` a second SQLite file read and written as entities, `Help:legacy` the previous store kept as a read-only source, `Help:ha` the house through Home Assistant (calls, the allow-list, the catalog), `Help:settings` the settings of the seat (what is shown, what is changed by one write), `Help:upgrade` what is new. The tools you hold are entity_query (find entities: `kind:<Class>` and `name~:<prefix>`, joined with `&`), entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect); `run_cliff` (one call: a small block of the language that reads, filters, joins and may write; `Help:cliff`); everything else is an entity you make and write to.
+The help is a set of entities, one per topic: `entity_query` `kind:Help` lists them and `entity_read {spec: "Help:<topic>"}` reads one. `Help:start` is the first minutes (what to read on arrival, when to act and when to ask), `Help:c1f` (this page) is the language, `Help:packs` writing and loading a pack, `Help:banner` your banner, `Help:cliff` a block of the language run in one call (the `run_cliff` tool), `Help:semtext` a text read by its sentences, words and the things it mentions, `Help:sql` a second SQLite file read and written as entities, `Help:legacy` the previous store kept as a read-only source, `Help:ha` the house through Home Assistant (calls, the allow-list, the catalog), `Help:settings` the settings of the seat (what is shown, what is changed by one write), `Help:environment` the environment variables of the seat, `Help:page` the page the person talks through, `Help:upgrade` what is new. The tools you hold are entity_query (find entities: `kind:<Class>`, `kind!:<Class>` and `name~:<eid prefix>`, joined with `&`; "Finding entities" below), entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect); `run_cliff` (one call: a small block of the language that reads, filters, joins and may write; `Help:cliff`); everything else is an entity you make and write to.
 
 ## Getters
 
@@ -286,8 +286,8 @@ seconds. The reply of `entity_write` carries the first and last 8 KB of each str
 
 A command has a TIME LIMIT, and you set it: `timeout_s` is your estimate, in seconds, of the longest the command may run (in the run value, or `Command:x.timeout_s = N` before the run). Without it the limit is
 120 s (the boot fact `command_timeout_s`); a long job states a bigger number (`timeout_s: 3600`); 0 or less is refused. Past the limit the seat stops the command and everything it started (SIGTERM, then SIGKILL 2 s later),
-frees its slot and answers `status: timeout`, `rc: 124`, `killed: true`, with the partial output. The result props of that run (`output`, `errors`, `ok`, `rc`) are then null WITH A REASON: `why(Command:x.output)` says
-how to start it again with a bigger `timeout_s`, and the getters built on them stay null with the same reason; what was collected stays in `Command:x.partial_output`. This runs for real here (a 30 s `sleep` with a limit of 1 s):
+frees its slot and answers `status: timeout`, `rc: 124`, `killed: true`, with the partial output. The result props of that run (`output`, `errors`, `ok`, `rc`) are then an Error WITH ITS REASON: `why(Command:x.output)` says
+how to start it again with a bigger `timeout_s`, and the getters built on them carry the same Error; what was collected stays in `Command:x.partial_output`. This runs for real here (a 30 s `sleep` with a limit of 1 s):
 
 ```c1f-run
 -- write Command:slow.run = {"id": "w1", "cmd": ["sleep", "30"], "timeout_s": 1}
@@ -328,6 +328,26 @@ round of your write ON THE ENTITY YOU WROTE AND ITS CHILDREN `<eid>:...`: a sett
 entity as `<verb>_result`. Add `wait` (seconds) to `entity_write` to hold the reply until the receipt arrives or that time has passed:
 `{spec: "Command:build", prop: "run", value: {id: "b1", args: []}, wait: 30}` answers with the program's stdout. Calls that wait run side by
 side with your other calls.
+
+## Finding entities: the query line of entity_query
+
+`entity_query {q, k, offset, full, count}` reads the store, so it finds every stored entity, loaded or not (a `VIRTUAL` class is in memory only and is read with `instances` instead). The line `q` holds terms
+joined with `&`; an empty `q` (or `kind:*`) is every entity. The terms:
+
+- `kind:<Class>`: the entities whose class is `<Class>` or that carry it on their `parents` list (`kind:ChatMessage` finds the messages, whose id names the class `Chat`);
+- `kind!:<Class>`: every entity except those (neither its class nor on its `parents`);
+- `name~:<eid prefix>`: the entities whose id starts with that text (a prefix, letter for letter).
+
+The first term of each form counts. Any other term is answered with `entity_query: unsupported term <the term> (...)` and the forms. The rows come in id order, one line each, `<eid> (<class>)`; `k` is the
+number of rows (20 unless you say, at most 100), `offset` skips that many (the next page), `full: true` adds each row's stored properties, `count: true` answers only the number (`12 entity(ies)`).
+
+```
+entity_query {q: "kind:Note"}                                      every Note
+entity_query {q: "kind:Note & kind!:Error"}                        the Notes with no failed property
+entity_query {q: "name~:Stop:"}                                    the ids that start with Stop:
+entity_query {q: "kind:ChatMessage", k: 50, offset: 50, full: true}   the second page of 50 messages, with their properties
+entity_query {q: "kind:Memory", count: true}                       how many notes you keep
+```
 
 ## Where things live
 
