@@ -23,8 +23,11 @@ fn seat_with(facts: &Map<String, J>) -> Host { seat_opts(facts, false) }
 fn seat_opts(facts: &Map<String, J>, store: bool) -> Host {
     membrane_vm::expr::set_eval_time_ms(Some(10_000));
     let file = store.then(|| {
+        // the clock alone can give two parallel tests one name (it ticks in microseconds here): a counter keeps each store its own
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("semrecall-{}-{n}.sqlite", std::process::id())).to_str().unwrap().to_string()
+        let s = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("semrecall-{}-{n}-{s}.sqlite", std::process::id())).to_str().unwrap().to_string()
     });
     let mut o = Options::new(file);
     o.effects = store;
@@ -136,6 +139,128 @@ fn near_duplicates_merge_and_every_row_has_its_score_with_no_cut_off() {
     assert_eq!(r.len(), 7, "every hit, however weak, is there (no score cut-off): {r:?}");
 }
 
+/// The merge is GREEDY: a hit goes only when it is a near duplicate of a hit already KEPT. A ~ B and B ~ C, A and C unlike, ranked A, B, C:
+/// B goes (a duplicate of A), C stays (its only twin, B, was not kept).
+#[test]
+fn a_chain_of_near_duplicates_keeps_its_far_end() {
+    let h = seat();
+    let a: Vec<String> = (1..10).map(|i| format!("alpha{i}")).collect();
+    let c: Vec<String> = (1..10).map(|i| format!("gamma{i}")).collect();
+    leaf(&h, "a", &format!("Quokka {}.", a.join(" ")));
+    leaf(&h, "b", &format!("Quokka {} {}.", a.join(" "), c.join(" ")));
+    leaf(&h, "c", &format!("Quokka {}.", c.join(" ")));
+    leaf(&h, "q", "quokka");
+    let r = recall(&h, "Leaf:x:q:body");
+    assert!(pos(&r, "alpha1").is_some(), "{r:?}");
+    assert!(pos(&r, "alpha1 alpha2 alpha3 alpha4 alpha5 alpha6 alpha7 alpha8 alpha9 gamma1").is_none(), "B is A's near duplicate: {r:?}");
+    assert!(texts(&r).iter().any(|t| t.starts_with("Quokka gamma1")), "C stays: its twin B was not kept: {r:?}");
+    assert_eq!(r.len(), 2, "{r:?}");
+}
+
+/// The share is the dial `dup_share` of `recall:dials` (the old unused `dedupe_jaccard`, renamed: one dial, the same 0.8), read by the overridable getter.
+#[test]
+fn the_near_duplicate_share_is_the_dial() {
+    let h = seat();
+    leaf(&h, "q", "quokka");
+    assert_eq!(h.get("recall:dials", "dup_share"), json!(0.8));
+    assert_eq!(h.get("recall:dials", "dedupe_jaccard"), J::Null, "renamed, not doubled");
+    assert_eq!(h.get("Leaf:x:q:body", "dup_share"), json!(0.8));
+    h.write("recall:dials", "dup_share", json!(0.5), "person"); h.pump();
+    assert_eq!(h.get("Leaf:x:q:body", "dup_share"), json!(0.5));
+    h.write("recall:dials", "dup_share", json!(1.5), "person"); h.pump();
+    assert_eq!(h.get("recall:dials", "dup_share"), json!(0.5), "guarded: a share is between 0 and 1");
+}
+
+/// the note's own embedding call (`Fetch:recall:note:<key>`, one per note): the receipt answers the request the note made (its `id` is echoed, as the Fetch driver does).
+/// With no drivers the engine consumes the request write (it reads empty), so the request is read from the note's `ask_job`, what the setter wrote.
+fn note_receipt(h: &Host, note: &str, embeddings: J) {
+    let f = format!("Fetch:recall:note:{}", note.replace("::", "/"));
+    assert!(h.snapshot().contains_key(&f), "the note asked its own call on {f}");
+    let job = h.get(note, "ask_job");
+    assert!(job.is_object(), "{job}");
+    h.write(&f, "request_result", json!({"id": job["id"], "status": "ok", "rc": 0, "http_status": 200, "body": json!({"embeddings": embeddings}).to_string()}), "person");
+    h.pump();
+}
+fn note_seat() -> Host { seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"}))) }
+fn note(h: &Host, eid: &str, text: &str) {
+    h.born(eid, "Memory", Map::new(), "person"); h.pump();
+    h.write(eid, "text", json!(text), "person"); h.pump();
+}
+
+/// Two notes written close together (inside the 10 s of the first call) each have their own call: the second never takes the first's place, so the first reply never waits forever.
+#[test]
+fn two_notes_written_quickly_each_have_their_own_embedding_call() {
+    let h = note_seat();
+    note(&h, "Memory:a", "A wombat dug a hole.");
+    note(&h, "Memory:b", "A koala climbed a tree.");
+    let s = h.snapshot();
+    assert!(s.contains_key("Fetch:recall:note:Memory:a") && s.contains_key("Fetch:recall:note:Memory:b"), "one call entity per note");
+    assert_eq!(h.get("Memory:a", "ask_job")["id"]["ask"], json!("Memory:a"));
+    assert_eq!(h.get("Memory:b", "ask_job")["id"]["ask"], json!("Memory:b"));
+    note_receipt(&h, "Memory:a", json!([[1.0, 0.0]]));
+    assert_eq!(h.get("Memory:a", "in_flight"), json!(false), "the first note's call landed");
+    assert_eq!(h.get("Memory:b", "in_flight"), json!(true), "the second still waits for its own");
+}
+
+/// The note's own call embeds its SENTENCES and writes their `Vector`s (the embedding pipeline's names and `emb_n`), so the note is embedded once: the queue does not
+/// send it while its call is out, and settles it (`embedded`, its ask retired) when the vectors are there. The note's call entity is let go then.
+#[test]
+fn a_notes_own_call_writes_its_sentence_vectors_and_the_queue_sees_it_embedded() {
+    let h = note_seat();
+    note(&h, "Memory:b", "Saw a quokka near the lake. It was asleep.");
+    let job = h.get("Memory:b", "ask_job");
+    assert_eq!(job["input"], json!(["Saw a quokka near the lake.", "It was asleep."]), "one input per sentence: {job}");
+    assert!(h.snapshot().contains_key("membrane::Embed:ask:Memory:b"), "the note is asked like every SemText");
+    assert_ne!(h.get("membrane::Embed:queue", "inflight")["eid"], json!("Memory:b"), "the queue does not embed a note whose own call is out");
+    note_receipt(&h, "Memory:b", json!([[1.0, 0.0], [0.0, 1.0]]));
+    let s2 = h.get("Memory:b", "sentences")[1]["start"].as_u64().unwrap();
+    assert_eq!(h.get("Vector:of:Memory:b:s:0", "v"), json!("[2 numbers, f16]"));
+    // each sentence got its own vector (the first input's to the first sentence): the nearest to [0, 1] is the second sentence's
+    h.load_pack("probe", "PACK probe 1\nIMPORT vector 1\nProbe.n getter: pluck(near([0.0, 1.0], 'Vector', 1), 'eid')\n").unwrap();
+    h.rebuild();
+    h.born("Probe:p", "Probe", Map::new(), "person"); h.pump();
+    assert_eq!(h.get("Probe:p", "n"), json!([format!("Vector:of:Memory:b:s:{s2}")]));
+    assert_eq!(h.get("Vector:of:Memory:b:s:0", "of"), json!("Memory:b"));
+    assert_eq!(h.get("Memory:b", "embedded"), json!(true), "the queue sees the note as embedded");
+    assert!(!h.snapshot().contains_key("membrane::Embed:ask:Memory:b"), "its ask is retired");
+    assert_ne!(h.get("membrane::Embed:queue", "inflight")["eid"], json!("Memory:b"), "and was never sent by the queue");
+    assert_eq!(h.get("Memory:b", "in_flight"), json!(false));
+    assert!(!h.snapshot().contains_key("Fetch:recall:note:Memory:b"), "the note's call entity is let go once its vectors are made");
+}
+
+/// THE COSINE QUERY is the window's texts' vectors, summed with the window's weights (`r_weights`): each text's vector is the unit of the sum of its sentence vectors.
+/// Here the ask (weight 1) has two sentences [0,0,3] and [0,0,1] (unit of the sum: [0,0,1]), the answer before it (1/2) [0,1,0], the message before that (1/4) [1,0,0]:
+/// the query is [0.25, 0.5, 1], so a text at [0,0,1] is nearest, then [0,1,0], then [1,0,0].
+#[test]
+fn the_cosine_query_is_the_weighted_sum_of_the_windows_text_vectors() {
+    let h = seat();
+    turn(&h, "m1", "Emus are birds.", Some("Koalas are not."), 1.0);
+    turn(&h, "m2", "Which is lazier? Tell me now.", None, 2.0);
+    let vec = |of: &str, start: u64, v: J| {
+        let ve = format!("Vector:of:{}:s:{start}", of.replace("::", "/"));
+        h.born(&ve, "Vector", props(json!({"of": of, "start": start})), "person");
+        h.write(&ve, "v", v, "person"); h.pump();
+    };
+    let s2 = h.get(&body("m2"), "sentences")[1]["start"].as_u64().unwrap();
+    vec(&body("m2"), 0, json!([0.0, 0.0, 3.0]));
+    vec(&body("m2"), s2, json!([0.0, 0.0, 1.0]));
+    vec(&format!("{M}m1:turn:response:body"), 0, json!([0.0, 1.0, 0.0]));
+    vec(&body("m1"), 0, json!([1.0, 0.0, 0.0]));
+    leaf(&h, "x", "Xylophones ring.");
+    leaf(&h, "y", "Yaks graze.");
+    leaf(&h, "z", "Zebras run.");
+    vec("Leaf:x:x:body", 0, json!([1.0, 0.0, 0.0]));
+    vec("Leaf:x:y:body", 0, json!([0.0, 1.0, 0.0]));
+    vec("Leaf:x:z:body", 0, json!([0.0, 0.0, 1.0]));
+    let r = recall(&h, &body("m2"));
+    let sim = |needle: &str| r[pos(&r, needle).unwrap_or_else(|| panic!("{needle}: {r:?}"))]["sim"].as_f64().unwrap();
+    let n = (0.25f64 * 0.25 + 0.5 * 0.5 + 1.0).sqrt();
+    assert!((sim("Zebras run.") - 1.0 / n).abs() < 1e-3, "{}: {r:?}", sim("Zebras run."));
+    assert!((sim("Yaks graze.") - 0.5 / n).abs() < 1e-3, "{r:?}");
+    assert!((sim("Xylophones ring.") - 0.25 / n).abs() < 1e-3, "{r:?}");
+    assert!(pos(&r, "Which is lazier?").is_none() && pos(&r, "Tell me now.").is_none(), "never the ask itself: {r:?}");
+}
+
 #[test]
 fn a_memory_note_reads_the_same_recall_with_its_own_vector_and_the_dials() {
     let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
@@ -149,9 +274,7 @@ fn a_memory_note_reads_the_same_recall_with_its_own_vector_and_the_dials() {
     h.write("Memory:b", "text", json!("Saw a quokka near some lake."), "person"); h.pump();
     assert_eq!(h.get("Memory:b", "in_flight"), json!(true), "the note's own embedding is asked, and the note waits for it");
     // the receipt of the note's own embedding call
-    if !h.snapshot().contains_key("Fetch:recall:note") { h.born("Fetch:recall:note", "Fetch", Map::new(), "person"); }
-    h.write("Fetch:recall:note", "request_result", json!({"id": {"ask": "Memory:b"}, "status": "ok", "rc": 0, "http_status": 200, "body": json!({"embeddings": [[1.0, 0.0]]}).to_string()}), "person");
-    h.pump();
+    note_receipt(&h, "Memory:b", json!([[1.0, 0.0]]));
     assert_eq!(h.get("Memory:b", "in_flight"), json!(false));
     let a = h.get("Memory:b", "associations").as_str().unwrap_or("").to_string();
     assert!(a.contains("The marsupial slept all afternoon."), "the cosine lane: no shared word, near by meaning: {a}");
@@ -208,9 +331,7 @@ fn full_pools_of_long_sentences_stay_inside_the_step_budget() {
     }
     h.born("Memory:b", "Memory", Map::new(), "person"); h.pump();
     h.write("Memory:b", "text", json!("A quokka."), "person"); h.pump();
-    if !h.snapshot().contains_key("Fetch:recall:note") { h.born("Fetch:recall:note", "Fetch", Map::new(), "person"); }
-    h.write("Fetch:recall:note", "request_result", json!({"id": {"ask": "Memory:b"}, "status": "ok", "rc": 0, "http_status": 200, "body": json!({"embeddings": [[1.0, 0.5]]}).to_string()}), "person");
-    h.pump();
+    note_receipt(&h, "Memory:b", json!([[1.0, 0.5]]));
     let r = h.get("Memory:b", "recall");
     assert_eq!(h.get("Memory:b", "failed"), J::Null, "no evaluation failed");
     let n = r.as_array().unwrap_or_else(|| panic!("{r}")).len();

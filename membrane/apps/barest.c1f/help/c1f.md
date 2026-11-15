@@ -144,8 +144,21 @@ list of `{eid, score}` (ties by eid). The results are stable on one device (the 
 Probe.closest getter: pluck(near(this.want, 'Vector', 2), 'eid')
 ```
 
-Builtins: `len abs min max lower strip replace startswith lines words spans join head tail sort_by before after pluck distinct group_by concat json str num plain
-unspeak dot norm distance unit near fit clip ago epoch localtime prop why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
+`vsum(vectors, weights)` adds up a list of vectors (each times its weight; the weights are optional). `fold(start, [step for x in xs])` carries a value across a list: `acc` is the start,
+then each step's value (an `if` after the list may skip an item; it sees `acc` too):
+
+```c1f
+-- given V:a {"vs": [[1, 0], [0, 1]], "xs": [1, 2, 3]}
+-- reads V:a.total = [2.0, 0.5]
+-- reads V:a.sum = 6
+-- reads V:a.spread = [1, 3]
+V.total getter: vsum(this.vs, [2, 0.5])
+V.sum getter: fold(0, [acc + x for x in this.xs])
+V.spread getter: fold([], [concat(acc, [x]) for x in this.xs if len([k for k in acc if abs(k - x) <= 1]) == 0])
+```
+
+Builtins: `len abs min max lower strip replace startswith lines words spans join head tail sort_by before after pluck distinct group_by concat fold json str num plain
+unspeak dot norm distance unit vsum near fit clip ago epoch localtime prop why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
 refused when the pack loads:
 
 ```c1f-error

@@ -54,8 +54,8 @@ fn receipt(h: &Host, id: &str, v: J) {
     h.write("Fetch:recall:ask", "request_result", json!({"id": {"ask": format!("{M}{id}:body")}, "status": "ok", "rc": 0, "http_status": 200, "head": "HTTP/1.1 200 OK", "body": json!({"embeddings": [v]}).to_string()}), "person");
     h.pump();
 }
-/// the ask's vector, as the recall of its body reads it
-fn ask_vec(h: &Host, id: &str) -> J { h.get(&format!("{M}{id}:body"), "ask_vec") }
+/// the vectors of the ask's own call (a chat ask embeds its whole text: one vector), as the recall of its body reads them
+fn ask_vec(h: &Host, id: &str) -> J { h.get(&format!("{M}{id}:body"), "ask_vecs") }
 fn lines(h: &Host) -> Vec<String> { words(h).lines().skip(1).map(str::to_string).collect() }
 
 #[test]
@@ -96,7 +96,7 @@ fn the_part_shows_the_head_of_the_ask_bodys_own_recall_and_has_no_lanes_of_its_o
     let l = lines(&h);
     assert_eq!(l.len(), rows.len().min(12), "{l:?} {rows:?}");
     for (line, row) in l.iter().zip(rows) { assert!(line.contains(row["text"].as_str().unwrap()), "{line} / {row}"); }
-    for p in ["edge_rows", "cos_raw", "fused", "ranked", "ask_vec", "rrf_k", "pool"] { assert_eq!(h.get(R, p), J::Null, "no `{p}` on the part"); }
+    for p in ["edge_rows", "cos_raw", "fused", "ranked", "ask_vecs", "rrf_k", "pool"] { assert_eq!(h.get(R, p), J::Null, "no `{p}` on the part"); }
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn a_receipt_that_belongs_to_an_older_ask_is_not_this_asks_vector() {
     receipt(&h, "m2", json!([1.0, 0.0]));
     assert_eq!(ask_vec(&h, "m1"), J::Null, "the receipt names m2, the ask is m1");
     receipt(&h, "m1", json!([0.0, 1.0]));
-    assert_eq!(ask_vec(&h, "m1"), json!([0.0, 1.0]));
+    assert_eq!(ask_vec(&h, "m1"), json!([[0.0, 1.0]]));
 }
 
 /// a hand-made sentence vector, as the embedding pipeline names it: `Vector:of:<key>:s:<start>` with `of`, `start` and `v`
@@ -227,7 +227,7 @@ fn with_a_model_backend_the_ask_is_embedded_by_one_call_and_without_one_no_call_
     let body: J = serde_json::from_str(req.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(body, json!({"model": "mxbai-embed-large", "input": "quokka facts"}));
     for _ in 0..200 { h.pump(); if ask_vec(&h, "m1") != J::Null { break; } std::thread::sleep(std::time::Duration::from_millis(50)); }
-    assert_eq!(ask_vec(&h, "m1"), json!([0.5, 0.25]), "the receipt is this ask's vector");
+    assert_eq!(ask_vec(&h, "m1"), json!([[0.5, 0.25]]), "the receipt is this ask's vector");
 }
 
 #[test]
@@ -288,6 +288,8 @@ fn state(h: &Host, id: &str) -> String { h.get(&format!("{M}{id}"), "tstate").as
 /// is an effect and keeps no copy on the Command, so the message's own `stdin` getter, none only once the turn is over, is read)
 fn argv(h: &Host, id: &str) -> String { format!("{} {}", h.get(&format!("membrane::Command:chat:main:message:{id}"), "cmd"), h.get(&format!("{M}{id}"), "stdin")) }
 fn until(h: &Host, what: &str, f: impl Fn(&Host) -> bool) { for _ in 0..400 { h.pump(); if f(h) { return; } std::thread::sleep(std::time::Duration::from_millis(50)); } panic!("never: {what}"); }
+/// the turn has started (it may already be over: `/usr/bin/true` answers at once, and one pump can both start the turn and take its receipt)
+fn started(h: &Host, id: &str) -> bool { h.get(&format!("{M}{id}:turn"), "started") != J::Null }
 
 #[test]
 fn a_turn_waits_for_the_embedding_of_its_own_message_and_then_carries_the_cosine_line() {
@@ -336,9 +338,9 @@ fn two_messages_queued_quickly_each_wait_for_their_own_ask_in_order() {
     ask(&h, "m1", "first question", 1.0);
     ask(&h, "m2", "second question", 2.0);
     assert!(state(&h, "m1") == "queued" && state(&h, "m2") == "queued");
-    until(&h, "m1 starts", |h| state(h, "m1") == "running");
+    until(&h, "m1 starts", |h| started(h, "m1"));
     assert_eq!(state(&h, "m2"), "queued", "the second still waits for its own embedding");
-    until(&h, "m2 starts", |h| state(h, "m2") == "running");
+    until(&h, "m2 starts", |h| started(h, "m2"));
     let a = rx.recv().unwrap(); let b = rx.recv().unwrap();
     assert!(a.contains("first question") && b.contains("second question"), "one call per ask, in order");
 }

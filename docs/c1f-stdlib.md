@@ -46,14 +46,29 @@ There is no `slice` builtin: a span's `text` is already cut, and `head(tail(t, l
 pack holds only the offsets.
 
 ## The builtins (`native/src/expr.rs`, `RESERVED`)
-Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit near abs min max fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
-lists and dicts `sort_by pluck distinct group_by concat`; time `ago epoch localtime num`; the field `instances referencing prop why`; host functions `jsonl listdir read sql stat recall rerank pronoun`
+Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit vsum near abs min max fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
+lists and dicts `sort_by pluck distinct group_by concat fold`; time `ago epoch localtime num`; the field `instances referencing prop why`; host functions `jsonl listdir read sql stat recall rerank pronoun`
 (`pronoun` is what a bare `it`, `that`, `they` ... asks the host; the seat's host answers none, so a pronoun reads as the reasoned error `the pronoun "it" is not bound here`).
 `near(<list of numbers>, '<Class>', k)` (#1143, operator 2026-11-14; the shipped MAPPED class is `Vector`, `membrane/packs/vector.c1f`: `Vector:<id>.v` holds a list of numbers) is the k nearest instances of a MAPPED class (`MAPPED Vector f16`, `docs/cliffvm.md`, "Storage modes") by COSINE, best first, as a list of `{eid, score}`
 dicts (`eid` text, `score` a float); a tie breaks by eid, never by position. Brute force on the CPU over the class's native store (no GPU path is reachable from it). A getter that calls it recomputes when a vector of the
 class is written, cleared or retired. An empty class is the reasoned null `empty: no vectors in class <Class>`; a query of another dimension, an all-zero query, `k < 1`, a non-number or a class name that is not text is an Error with
 its reason (as `dot` of two shapes). The browser engine answers `not available in the browser engine`. Determinism: vector results are NOT promised bit-identical across devices; on one device they are stable (the same inputs give the
 same answer, so a recompute stops the wave by early cutoff), and ties break by eid.
+`vsum(vectors, weights?)` (#1143, operator 2026-11-15: `+` adds two vectors, nothing added up a list) is the sum of a LIST of vectors, each times its weight when
+`weights` (a list of numbers, one per vector) is given: `vsum([[1, 0], [0, 1]], [2, 0.5])` is `[2.0, 0.5]`. The math is f32, element by element in list order (deterministic on every
+device; the result reads back as floats, `vsum([[0.1]])` is the f32 0.1). An Error with its reason (as `dot` of two shapes): no vector (`[]`), an item that is not a vector, vectors of
+different dimensions, a weight count that is not the vector count, a weight or element that is not a number, an f32 overflow. One step, like every builtin. Typed `List(Float)`.
+`fold(init, [step for x in xs if keep])` (#1143, operator 2026-11-15) carries a value across a list: `acc` is `init`, then for each `x` the `if` (it sees `acc` and `x`) may skip it,
+else `acc` becomes the step's value; the answer is the last `acc` (`init` for an empty or null list). `fold(0, [acc + x for x in [1, 2, 3]])` is 6; a greedy pass keeps state:
+`fold([], [concat(acc, [x]) for x in [1, 2, 3] if len([k for k in acc if abs(k - x) <= 1]) == 0])` is `[1, 3]` (2 is near the kept 1, 3 is near only the dropped 2).
+It is the comprehension's own shape (no lambda, no new syntax family: `lambda` stays refused); the one new name is `acc`, bound only inside the step and the `if` (it hides a local or a
+name of that name there; it is not reserved, so a local may still be called `acc` elsewhere); the loop's item may not be named `acc`. The call is one step and every node of `init`,
+`xs`, the `if` and each step costs its steps as anywhere else, so a long fold runs into the step budget like a long comprehension. An Error in the list, the `if` or a step is the
+answer at once. Any other shape (`fold(0, [1, 2])`, one argument) is an Error that shows the form. Typed `Any` (the step's `acc` is an untyped edge). Both are plain expression
+code (`native/src/expr.rs`), so the browser engine has them too. Tests: `native/tests/vsum_fold_1143.rs`.
+Rejected for the fold: `lambda` (a new syntax family, and the parser refuses it on purpose), a builtin that takes the step as TEXT (`fold(xs, init, 'acc + x')`: the getter ordering,
+the inferencer and the surface read strings as data, so the step's reads would be invisible), a builtin that names a getter to call per element (a getter is computed on an entity, never
+called with arguments), and an explicit accumulator name (`fold(init, 'acc', [...])`: the last string argument of a call is read as a property name).
 There is NO `int()`, `dict()`, `merge`, `keys` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
 A new builtin needs the operator's approval; it is an arm of `call` and a name in `RESERVED`, with a Rust test.
 
@@ -162,7 +177,8 @@ The old caps (an expression at most 64 nodes / 400 characters) are removed. Inst
 `MEMBRANE_EVAL_BUDGET`. `VEC_MAX` (8192) stays. Structural limits that are not size caps: expressions nest at most 64 deep and
 evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All accounting lives in `expr::Budget`.
 **A native builtin's own cost is not counted**: a call (`json(text)`, `sort`, `len` ...) is one step however large its input, so a getter that
-hands a 1 MB stream to one builtin spends a handful of steps (operator, 2026-11-13: no per-input charges for now).
+hands a 1 MB stream to one builtin spends a handful of steps (operator, 2026-11-13: no per-input charges for now). `vsum` is one step however many vectors; `fold` is one step
+plus the steps of the c1f it runs (its start, its list, its `if` and its step, once per element).
 
 **Time decides no value** (operator, 2026-11-13). Until then a getter or setter evaluation whose self time passed 10 ms became an Error
 `timeout N ms (allowance M ms)` and was recorded as a `Trip:<eid>#<prop>` entity. That made a value depend on the machine's load (the same

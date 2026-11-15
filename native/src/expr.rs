@@ -337,7 +337,7 @@ pub const RESERVED: &[&str] = &[
     "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words", "spans",
     "join", "head", "tail", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
     "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop", "why",
-    "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun", "near",
+    "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun", "near", "vsum", "fold",
     "it", "that", "they", "them", "these", "those", "he", "him", "she", "her",
     "and", "or", "not", "in", "is", "if", "else", "lambda", "for", "await", "yield",
 ];
@@ -921,6 +921,33 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         "norm" => { argn(1)?; Ok(V::Float(norm(&vec_of(&a[0])?))) }
         "distance" => { argn(2)?; Ok(V::Float(dist(&vec_of(&a[0])?, &vec_of(&a[1])?))) }
         "unit" => { argn(1)?; let x = vec_of(&a[0])?; let n = norm(&x); Ok(floats(if n > 1e-12 { x.iter().map(|v| v / n).collect() } else { x })) }
+        // vsum(vectors, weights?) (#1143, operator 2026-11-15): the weighted sum of a list of vectors, in f32, in list order (weights default to 1)
+        "vsum" => {
+            if a.is_empty() || a.len() > 2 { return Err("vsum(vectors, weights?): 1 or 2 arguments".into()); }
+            let V::List(vs) = &a[0] else { return Err("vsum(vectors, weights?): the first argument is a list of vectors".into()) };
+            if vs.is_empty() { return Err("vsum: no vector to add (an empty list has no dimension)".into()); }
+            let ws: Option<Vec<f32>> = match a.get(1) {
+                None => None,
+                Some(V::List(w)) => {
+                    if w.len() != vs.len() { return Err(format!("vsum: {} vectors and {} weights (one weight per vector)", vs.len(), w.len())); }
+                    Some(w.iter().map(|x| match x { V::Int(_) | V::Float(_) => Ok(numf(x).unwrap() as f32), _ => Err(format!("vsum: a weight is a number, got a {}", kind_of(x))) }).collect::<Result<_, Err>>()?)
+                }
+                Some(x) => return Err(format!("vsum: the weights are a list of numbers, got a {}", kind_of(x))),
+            };
+            let mut acc: Vec<f32> = vec![];
+            for (i, v) in vs.iter().enumerate() {
+                if !matches!(v, V::List(_)) { return Err(format!("vsum(vectors, weights?): the first argument is a list of vectors (item {} is a {})", i, kind_of(v))); }
+                let x = vec_of(v).map_err(|e| format!("vsum: vector {}: {}", i, e))?;
+                if i == 0 { acc = vec![0.0; x.len()]; }
+                if x.len() != acc.len() { return Err(format!("vsum: vector {} has dimension {}, the first has {}", i, x.len(), acc.len())); }
+                let w = ws.as_ref().map_or(1.0, |w| w[i]);
+                for (s, p) in acc.iter_mut().zip(&x) { *s += w * (*p as f32); }
+            }
+            if acc.iter().any(|x| !x.is_finite()) { return Err("vsum: not a finite number (an f32 overflowed)".into()); }
+            Ok(floats(acc.into_iter().map(|x| x as f64).collect()))
+        }
+        // fold(init, [step for x in xs if keep]) is evaluated by `ev_fold` (its step is not evaluated before the call); reaching here means a wrong shape
+        "fold" => Err(FOLD_USE.into()),
         "abs" => { argn(1)?; match &a[0] { V::Int(i) => Ok(V::Int(i.abs())), V::Float(x) => Ok(V::Float(x.abs())), V::Bool(b) => Ok(V::Int(*b as i64)), _ => Err("bad operand type for abs()".into()) } }
         "min" => { if a.is_empty() { return Err("min expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Less) }
         "max" => { if a.is_empty() { return Err("max expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Greater) }
@@ -1394,9 +1421,41 @@ fn ev_comp(elt: &Node, var: &String, iter: &Node, cond: &Option<Box<Node>>, env:
             Ok(V::List(out))
         }
 
+const FOLD_USE: &str = "fold(init, [step for x in xs]): a start value, then a comprehension whose step reads `acc` (the value so far) and `x`";
+
+/// `fold(init, [step for x in xs if keep])` (#1143, operator 2026-11-15): `acc` is `init`; for each x the `if` (it sees `acc` and `x`) may skip it,
+/// else `acc` becomes the step's value; the answer is the last `acc`. The comprehension's own shape, so no new syntax: only the name `acc` is new.
+/// Every node of `init`, `xs`, the `if` and the step costs its steps as anywhere else (the call itself is one). A null list is empty (as a
+/// comprehension's); an Error list, `if` or step is the answer at once.
+#[inline(never)]
+fn ev_fold(init: &Node, step: &Node, var: &String, iter: &Node, keep: &Option<Box<Node>>, env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
+    if var == "acc" { return Err("fold: `acc` is the value so far; name the loop's item another way".into()); }
+    let mut acc = ev(init, env, w, m)?;
+    if let V::Error(_) = acc { return Ok(acc); }
+    let xs = match ev(iter, env, w, m)? { V::List(l) => l, V::None | V::Nil(_) => vec![], e @ V::Error(_) => return Ok(e), v => return Err(format!("fold: can't iterate over {:?}", v)) };
+    let mut env2 = Env::child(env);
+    env2.vars.push(("acc".to_string(), V::None));
+    env2.vars.push((var.clone(), V::None));
+    for x in xs {
+        env2.vars[0].1 = std::mem::replace(&mut acc, V::None);
+        env2.vars[1].1 = x;
+        if let Some(c) = keep {
+            let cv = ev(c, &env2, w, m)?;
+            if let V::Error(_) = cv { return Ok(cv); }
+            if !truthy(&cv) { acc = std::mem::replace(&mut env2.vars[0].1, V::None); continue; }
+        }
+        acc = ev(step, &env2, w, m)?;
+        if let V::Error(_) = acc { return Ok(acc); }
+    }
+    Ok(acc)
+}
+
 #[inline(never)]
 fn ev_call(f: &String, args: &[Node], env: &Env, w: &dyn World, m: &mut Meter) -> Result<V, Err> {
-            let a = args.iter().map(|x| ev(x, env, w, m)).collect::<Result<Vec<_>, _>>()?;
+            if f == "fold" {
+                return match args { [init, Node::Comp(step, var, iter, keep)] => ev_fold(init, step, var, iter, keep, env, w, m), _ => Err(FOLD_USE.into()) };
+            }
+            let a =args.iter().map(|x| ev(x, env, w, m)).collect::<Result<Vec<_>, _>>()?;
             // a call over an Error is that Error (`why` reads it)
             if f != "why" { if let Some(e) = first_error(&a.iter().collect::<Vec<_>>()) { return Ok(e); } }
             let any_null = a.iter().any(nullish);
