@@ -28,7 +28,7 @@ Request.m_tools getter: ['POST']
 -- ---- Pack entities: the model's own packs (docs/cliffvm.md, "Pack entities") ----------------------------------------------------------
 -- `entity_write {spec: 'Pack:<name>', prop: 'text', value: <c1f>}` makes the entity (this pack owns the class) and the HOST loads the text
 -- (`Fields::set_pack`), then mirrors `loaded`, `error` and `good_text` back. `state` says in one word what became of the last text.
-Pack.state getter: 'error' if this.error != None else ('loaded' if this.loaded == True else 'waiting')
+Pack.state getter: 'removed' if str(this.text or '') == '' else ('error' if this.error != None else ('loaded' if this.loaded == True else 'waiting'))
 
 -- ---- the JSON-RPC request ---------------------------------------------------------------------------------------------------------------
 Request.mc_rpc getter:
@@ -58,7 +58,7 @@ Request.mc_w_id getter: ('membrane::' + this.mc_w_spec) if prop('membrane::' + t
 -- DEATH BY NULL (operator, 2026-11-14): `entity_write {spec: 'Stop:3', value: null}` with NO prop destroys the entity, the mirror of a birth (`Stop:3 = None`); a Pack unloads. The key
 -- `value` must be there and null: a call that merely forgets the prop is still refused.
 Request.mc_w_kill getter: this.mc_w_prop == '' and 'value' in this.mc_args and prop(this.mc_args, 'value') == None
-Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop (or value: null with no prop, to remove the entity)' if this.mc_w_spec == '' or (this.mc_w_prop == '' and not this.mc_w_kill) else ('refused: `parents` is not written by the model: classes are set at birth with a constructor (`x is Class` tests one)' if this.mc_w_prop == 'parents' else None)
+Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop (or value: null with no prop, to remove the entity)' if this.mc_w_spec == '' or (this.mc_w_prop == '' and not this.mc_w_kill) else ('refused: entity_write needs an id of the form <Class>:<key> (got `' + this.mc_w_spec + '`): an id with no colon names no entity, nothing was written' if not (':' in this.mc_w_spec) else ('refused: `parents` is not written by the model: classes are set at birth with a constructor (`x is Class` tests one)' if this.mc_w_prop == 'parents' else None))
 Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None and not this.mc_anon else None
 Request.mc_write on-setter mcp-write:
   WHEN this.mc_write != None and this.mc_w_kill:

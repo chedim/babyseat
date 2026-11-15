@@ -31,12 +31,12 @@ ws = [l.watts for l in instances('Lamp')]
 ## What an entity is called: `eid`, `cls`
 
 Every entity reads `eid` (its id: `Lamp:desk`) and `cls` (its class) next to its own properties; there is no `name` or `id`
-(those read null). Test a class with `x is Class`. One call can list every pack with its state: the clifflet's own scratch packs are not listed, so the list is the field's (a Pack with no text yet reads `waiting`, a loaded one `loaded`):
+(those read null; `cls` is the first class of the entity's list, and `kind` is only a property like any other: the word `kind:` belongs to `entity_query`, where `kind:<Class>` matches any class on an entity's list, not only that first one). Test a class with `x is Class`. One call can list every pack with its state: the clifflet's own scratch packs are not listed, so the list is the field's (a Pack whose text is empty or not written yet reads `removed`, a loaded one `loaded`):
 
 ```cliff
 -- given Lamp:desk {}
 -- given Pack:demo {}
--- value [["Pack:demo", "waiting"], "Lamp:desk Lamp"]
+-- value [["Pack:demo", "removed"], "Lamp:desk Lamp"]
 concat([[p.eid, p.state] for p in instances('Pack') if startswith(p.eid, 'Pack:d')], [join([l.eid, l.cls], ' ') for l in instances('Lamp')])
 ```
 

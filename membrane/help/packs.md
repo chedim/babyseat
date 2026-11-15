@@ -7,7 +7,7 @@ A pack starts `PACK <name> <version>` (then `IMPORT <pack> <version>` lines) and
 - expressions: Python-like (`a if c else b`, `[f(x) for x in xs]`, `FOR x IN xs: e`), `this`, `prop(x, name)` (a dict key or another entity's field, by id), `this.eid`. Caps: 400 characters and 64 nodes per arm (string literals excluded): split long logic into small named getters -- each is a field you can read.
 - built-ins: text (lower, strip, startswith, lines, words, join, head, clip, before, after, replace, str, json), lists (concat, sort_by, fit, distinct, group_by, pluck; `+` on lists adds vectors), time (localtime, ago, epoch), entities (instances(cls)), reads (sql(query, args...) and jsonl(name) on the seat's store -- see help('store'); read(path), listdir(path), stat(path)).
 - reads are getter-only and never block: a getter reads None until the answer lands, then recalculates. A setter that needs it reads the getter's field.
-- effects are WRITES, never getters: `File.write`, `Command.run`, `McpTool...call:run`, `membrane::llm.call`, `chat:<person>.say` -- from a setter, or by you with entity(action='write', spec, prop, value) -- each leaves a receipt on its entity (`<verb>_result`, `<verb>_rc`). Reach is the seat's OS user.
+- effects are WRITES, never getters: `File.write`, `Command.run`, `McpTool...call:run`, `chat:<person>.say` -- from a setter, or by you with entity(action='write', spec, prop, value) -- each leaves a receipt on its entity (`<verb>_result`, `<verb>_rc`). Reach is the seat's OS user.
 
 A class belongs to the first pack that declares on it; another pack that adds fields to it must `IMPORT` that pack (the load error says which).
 
