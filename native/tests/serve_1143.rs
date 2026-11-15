@@ -50,7 +50,15 @@ fn spawn(bin: &Path, args: &[&str], env: &[(&str, &str)], env_rm: &[&str]) -> Ch
     c.arg("serve").args(args).current_dir(std::env::temp_dir()).stdout(Stdio::piped()).stderr(Stdio::piped());
     for k in env_rm { c.env_remove(k); }
     for (k, v) in env { c.env(k, v); }
-    c.spawn().unwrap()
+    busy_retry(|| c.spawn())
+}
+/// a binary that was just copied can answer "Text file busy" (ETXTBSY) to an exec on Linux while another test thread is between fork and exec holding the copy's write descriptor:
+/// the second try works, so the tests try again for a moment (a real failure to start is another error and is not retried)
+fn busy_retry<T>(mut f: impl FnMut() -> std::io::Result<T>) -> T {
+    for _ in 0..100 {
+        match f() { Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(Duration::from_millis(50)), r => return r.unwrap() }
+    }
+    f().unwrap()
 }
 /// start `serve` and read stdout until the door is up and the lines after it are told (the curl example is the last)
 fn start(bin: &Path, args: &[&str], env: &[(&str, &str)], env_rm: &[&str]) -> Run {
@@ -128,7 +136,7 @@ fn a_binary_with_no_packs_beside_it_says_where_it_looked_and_how_to_name_the_fol
     let d = tmp("b");
     std::fs::create_dir_all(d.join("bin")).unwrap();
     std::fs::copy(BIN, d.join("bin/cliffvm")).unwrap();
-    let o = Command::new(d.join("bin/cliffvm")).args(["serve", "--port", "0", "--data-dir", d.join("data").to_str().unwrap()]).current_dir(&d).output().unwrap();
+    let o = busy_retry(|| Command::new(d.join("bin/cliffvm")).args(["serve", "--port", "0", "--data-dir", d.join("data").to_str().unwrap()]).current_dir(&d).output());
     assert_eq!(o.status.code(), Some(2), "refused");
     let e = String::from_utf8_lossy(&o.stderr);
     assert!(e.contains(&d.join("packs").display().to_string()) && e.contains("--root"), "{e}");
