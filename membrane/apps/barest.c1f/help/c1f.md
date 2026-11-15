@@ -157,8 +157,24 @@ V.sum getter: fold(0, [acc + x for x in this.xs])
 V.spread getter: fold([], [concat(acc, [x]) for x in this.xs if len([k for k in acc if abs(k - x) <= 1]) == 0])
 ```
 
+A long list is cheaper in one builtin than in a comprehension (a builtin is one step, a comprehension pays per item): `props(ids, 'name')` reads one property of every
+entity of a list (`props(ids, at, 'name')` takes element `at[i]` of each value), `vmean(ids)` is the mean of the unit vectors `v` of a list of entities (an id with no
+vector is skipped), and `group_by(rows, key, ['col'])` also totals each named column per group:
+
+```c1f
+-- given Vector:a {"v": [3.0, 4.0]}
+-- given Vector:b {"v": [0.0, 2.0]}
+-- given P:q {"ids": ["Vector:a", "Vector:b", "Vector:none"], "rows": [{"k": "x", "n": 1}, {"k": "y", "n": 5}, {"k": "x", "n": 2}]}
+-- reads P:q.dims = [2, 2, null]
+-- reads P:q.mid = [0.30000001192092896, 0.8999999761581421]
+-- reads P:q.tot = [3, 5]
+P.dims getter: props(this.ids, 'dim')
+P.mid getter: vmean(this.ids)
+P.tot getter: pluck(group_by(this.rows, 'k', ['n']), 'n')
+```
+
 Builtins: `len abs min max lower strip replace startswith lines words spans join head tail sort_by before after pluck distinct group_by concat fold json str num plain
-unspeak dot norm distance unit vsum near log fit clip ago epoch localtime prop why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
+unspeak dot norm distance unit vsum vmean near log fit clip ago epoch localtime prop props why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
 refused when the pack loads:
 
 ```c1f-error

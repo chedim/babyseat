@@ -499,7 +499,11 @@ fn call_ty_in(f: &str, args: &[Node], tys: &[Ty], env: &Env) -> Ty {
             Ty::list(if tys[0].any { Ty::any() } else { e })
         }
         "pluck" => { if ar(2, 2) { chk(0, Acc::List); chk(1, Acc::Text); } Ty::list(Ty::any()) }
-        "group_by" => { if ar(2, 2) { chk(0, Acc::List); chk(1, Acc::Text); } Ty::list(Ty::dict()) }
+        "group_by" => { if ar(2, 3) { chk(0, Acc::List); chk(1, Acc::Text); chk(2, Acc::List); } Ty::list(Ty::dict()) }
+        // props(ids, 'name') / props(ids, at, 'name'): the values are whatever the entities hold
+        "props" => { if ar(2, 3) { chk(0, Acc::List); if n == 3 { chk(1, Acc::List); } chk(n - 1, Acc::Text); } Ty::list(Ty::any()) }
+        // vmean(ids): a vector, or a null when no id has one
+        "vmean" => { if ar(1, 1) { chk(0, Acc::List); } Ty::list(Ty::float()).nullable() }
         "concat" => {
             let mut e = Ty::never();
             for (i, t) in tys.iter().enumerate() { chk(i, Acc::List); e = e.join(&t.elem()); }
