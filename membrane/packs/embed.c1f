@@ -47,8 +47,17 @@ Boot.started on-setter embed-seed:
 -- ---- the facts and the turns -------------------------------------------------------------------------------------------------------------------------
 EmbedQueue.backend getter: ([b.seat_backend for b in instances('Boot') if b.seat_backend != None] or [None])[0]
 EmbedQueue.model getter: ([b.embed_model for b in instances('Boot') if b.embed_model != None] or [None])[0]
--- a chat turn is running while a turn entity says so (the turns of the barest chat are `Chat:...:turn`, kind turn)
-EmbedQueue.busy getter: len([c for c in instances('Chat') if c.kind == 'turn' and c.state == 'running']) > 0
+-- A CHAT TURN IS RUNNING while an `Embed:turn:<key>` exists for this run. The turns are a lazy class (`instances('Chat')` would list only the loaded ones, and Chat cannot be resident), so each turn tells
+-- us itself: the setter below makes a small entity of OUR resident class when any turn (the main chat's or a session's) becomes `running`, and retires it when the turn is done or an error (an abort and a refusal
+-- end a turn the same way; `Boot.interrupted` ends the turns the last run left). `run` is the start of this run: an entity a dead run left is never counted.
+EmbedTurn.kind getter: 'turn'
+ChatTurn.state on-setter embed-turn:
+  ALWAYS:
+    FOR a IN ([1] if this.state == 'running' else []):
+      ('membrane::Embed:turn:' + replace(this.eid, '::', '/')) = EmbedTurn(of: this.eid, run: prop('membrane::Embed:queue', 'run'))
+    FOR a IN ([1] if this.state != 'running' and prop('membrane::Embed:turn:' + replace(this.eid, '::', '/'), 'of') != None else []):
+      ('membrane::Embed:turn:' + replace(this.eid, '::', '/')).retire = True
+EmbedQueue.busy getter: len([t for t in instances('Embed') if t.kind == 'turn' and t.run == this.run]) > 0
 -- what a held queue waits to see change: the last chat event, and how many asks are pending
 EmbedQueue.run getter: ([b.started for b in instances('Boot') if b.started != None] or [0])[0]
 EmbedQueue.sig getter: str(this.run) + '/' + str(prop('Doorbell:chat', 'at')) + '/' + str(len(this.asks))
@@ -56,7 +65,8 @@ EmbedQueue.sig getter: str(this.run) + '/' + str(prop('Doorbell:chat', 'at')) + 
 -- ---- the work: asks first (newest first), then the backlog page -----------------------------------------------------------------------------------
 EmbedQueue.asks getter: [prop(a, 'of') for a in sort_by([{'of': x.of, 'at': 0 - (x.at or 0)} for x in instances('Embed') if x.kind == 'ask' and x.state == 'pending'], 'at')]
 EmbedQueue.page_rows getter: sql("SELECT k, sk, row_number() OVER (ORDER BY sk DESC) AS n FROM (SELECT k, substr(k, instr(k, ':message:') + 9) AS sk FROM c_field WHERE cls = 'Chat' AND k LIKE '%:body' AND instr(k, ':message:') > 0 AND json_extract(body, '$.props.text') IS NOT NULL AND json_extract(body, '$.props.embedded') IS NULL) WHERE sk < ?1 AND (?2 = ?2 OR ?2 IS NULL) AND (?3 = ?3 OR ?3 IS NULL) ORDER BY sk DESC LIMIT 64", this.after or '~', prop('membrane::Legacy:seat', 'tick'), prop('Doorbell:chat', 'at'))
-EmbedQueue.page getter: this.page_rows if this.page_rows is List else []
+-- (no model or no server address: the backlog is not looked at, so reading it loads no stored text)
+EmbedQueue.page getter: this.page_rows if this.page_rows is List and this.model != None and this.backend != None else []
 EmbedQueue.texts getter: distinct(concat(head(this.asks, 64), [prop(r, 'k') for r in this.page]))
 -- a stored text that is not loaded yet reads `vec_todo` as none: that is `not known`, never `nothing to do` (the first text not known yet makes the queue wait for it, so the order holds)
 EmbedQueue.open getter: [t for t in this.texts if not (prop(t, 'vec_todo') is List) or len(prop(t, 'vec_todo')) > 0]

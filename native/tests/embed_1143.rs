@@ -17,6 +17,7 @@ fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 const MAKER: &str = "PACK embmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nIMPORT vector 1\nProbe.back getter: [prop(e, 'v') for e in this.eids]\n\
 Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[prop(this.say, 'id')]:body = SemText(text: prop(this.say, 'text'))\n\
 Box.ask on-setter ask:\n  WHEN this.ask != None:\n    membrane::Chat:main:message[this.ask]:body.embed = True\n\
+Box.sturn on-setter sturn:\n  WHEN this.sturn != None:\n    membrane::Chat:session[\'s1\']:message[this.sturn]:turn = ChatTurn(message: 1, queued_at: 1)\n\
 Box.turn on-setter turn:\n  WHEN this.turn != None:\n    membrane::Chat:main:message[this.turn]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.turn, queued_at: 1)\n";
 
 fn load(h: &Host, extra: &str) {
@@ -387,5 +388,50 @@ fn the_backlog_of_the_store_is_embedded_newest_first_once_the_seat_starts() {
     assert_eq!(order, ["Newest message.", "Middle message.", "Oldest message."], "newest first, one text a request");
     for id in ["1000-00000001", "2000-00000002", "3000-00000003"] { assert_eq!(h.get(&body(id), "embedded"), json!(true), "{id}"); }
     until("the progress", || h.get(Q, "line").as_str().map_or(false, |l| l.starts_with("3 of 3 texts have sentence vectors")), &h);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+const STURN: &str = "membrane::Chat:session:s1:message:t9:turn";
+
+#[test]
+fn a_turn_of_a_session_pauses_too_and_a_turn_that_ends_in_error_lets_the_queue_go_on() {
+    let h = seat();
+    box_(&h);
+    h.write("Box:a", "sturn", json!("t9"), "person");
+    h.pump();
+    h.write(STURN, "state", json!("running"), "person");
+    h.pump();
+    say(&h, "m1", "Asked while a session turn runs.", true);
+    assert_eq!(request(&h), J::Null);
+    assert_eq!(state(&h), json!("paused"));
+    h.write(STURN, "state", json!("error"), "person");
+    h.pump();
+    assert_eq!(inputs(&h), ["Asked while a session turn runs."], "an error ends the turn as done does");
+}
+
+#[test]
+fn a_turn_the_last_run_left_running_does_not_pause_the_next_run_forever() {
+    let dir = tmp("stale");
+    let file = dir.join("seat.sqlite");
+    {
+        let h = open(Some(file.to_str().unwrap()), false);
+        load(&h, "");
+        start(&h, &[]);
+        box_(&h);
+        h.write("Box:a", "turn", json!("t1"), "person");
+        h.pump();
+        h.write("membrane::Chat:main:message:t1:turn", "state", json!("running"), "person");
+        h.pump();
+        assert_eq!(h.get(Q, "busy"), json!(true));
+    }
+    std::thread::sleep(Duration::from_millis(20));
+    let h = open(Some(file.to_str().unwrap()), false);
+    load(&h, "");
+    h.load_stored_entities();
+    start(&h, &[]);
+    box_(&h);
+    say(&h, "m1", "Asked after a restart.", true);
+    assert_eq!(h.get(Q, "busy"), json!(false), "the dead run's pointer is not counted");
+    assert_eq!(inputs(&h), ["Asked after a restart."]);
     let _ = std::fs::remove_dir_all(dir);
 }

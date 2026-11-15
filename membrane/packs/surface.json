@@ -653,12 +653,14 @@
     ],
     "classes": [
       "Boot",
+      "ChatTurn",
       "EmbedAsk",
       "EmbedQueue",
+      "EmbedTurn",
       "Fetch",
       "SemText"
     ],
-    "members": 41,
+    "members": 43,
     "writes": [
       "*.cache",
       "*.emb_n",
