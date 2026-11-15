@@ -306,7 +306,7 @@ fn a_turn_waits_for_the_embedding_of_its_own_message_and_then_carries_the_cosine
     ask(&h, "m2", "What did the quokka do?", 2.0);
     assert_eq!(state(&h, "m2"), "queued", "the turn does not start while the embedding call is in flight");
     assert_eq!(h.get(R, "ready"), json!(false));
-    until(&h, "the turn starts", |h| state(h, "m2") == "running");
+    until(&h, "the turn starts", |h| started(h, "m2"));
     assert!(t0.elapsed() >= std::time::Duration::from_millis(1400), "it started only after the answer: {:?}", t0.elapsed());
     assert!(argv(&h, "m2").contains("The marsupial slept all afternoon."), "the cosine line is in the prompt the model gets: {}", argv(&h, "m2"));
 }
@@ -321,7 +321,7 @@ fn an_embedder_that_is_down_or_no_backend_starts_the_turn_at_once_with_the_edges
     let h = turn_seat(Some("http://127.0.0.1:1"));
     said(&h, "m1", "Quokkas eat grass.", 1.0);
     ask(&h, "m2", "quokka", 2.0);
-    until(&h, "the refused call lets the turn start", |h| state(h, "m2") == "running");
+    until(&h, "the refused call lets the turn start", |h| started(h, "m2"));
     assert!(argv(&h, "m2").contains("Quokkas eat grass."), "edges alone: {}", argv(&h, "m2"));
 }
 
@@ -393,7 +393,7 @@ fn a_hung_embedder_holds_the_turn_for_at_most_ten_seconds_and_the_turn_then_carr
     let t0 = std::time::Instant::now();
     ask(&h, "m2", "quokka", 2.0);
     assert_eq!(state(&h, "m2"), "queued", "the turn waits for the call");
-    until(&h, "the hung call times out and the turn starts", |h| state(h, "m2") == "running");
+    until(&h, "the hung call times out and the turn starts", |h| started(h, "m2"));
     let e = t0.elapsed();
     assert!(e >= std::time::Duration::from_secs(9) && e < std::time::Duration::from_secs(16), "the bound is the ask's own 10 s timeout: {e:?}");
     assert!(argv(&h, "m2").contains("Quokkas eat grass."), "edges alone: {}", argv(&h, "m2"));
