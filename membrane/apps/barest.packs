@@ -17,6 +17,7 @@ semtext
 mentions
 chat
 chat_turn
+embed
 door_session
 legacy_import
 legacy_cutover

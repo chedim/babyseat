@@ -233,6 +233,7 @@ Chat.answer on-setter turn-finish:
     FOR t IN ([this.answer] if this.fail_why == None else []):
       membrane::Chat[this.cp]:turn:response:body = SemText(text: t)
       membrane::Chat[this.cp]:turn:response:body.mention = True
+      membrane::Chat[this.cp]:turn:response:body.embed = True
     FOR e IN [x for x in this.evl if prop(x, 'type') == 'assistant']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:
         membrane::Chat[this.cp]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
