@@ -75,8 +75,11 @@ jobs:
       - run: pip install pytest aiohttp
       - run: CLIFFVM_BIN="$PWD/native/target/release/cliffvm" pytest -q -p no:cacheprovider tests/ha
   # the browser VM is committed as a build output: it must be the build of the Rust source in this tree
+  # a WARNING, not a gate (operator 2026-11-15): the same source builds to different bytes on a Mac and on this runner (the toolchains differ: Rust stable, wasm-pack and wasm-bindgen move), so the committed
+  # wasm can never match the runner's build until the toolchain is pinned; the page's JS tests (the js job) are what prove the committed engine works
   wasm:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
