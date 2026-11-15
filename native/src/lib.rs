@@ -15,6 +15,7 @@ pub mod infer;
 pub mod clock;
 pub mod walk;
 pub mod fields;
+pub mod link;
 pub mod getters;
 pub mod translate;
 pub mod vm;

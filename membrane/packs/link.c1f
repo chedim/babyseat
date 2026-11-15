@@ -9,16 +9,35 @@ VIRTUAL Page
 -- `<ns>` is `p` + 8 hex digits, made by the SEAT for each load of the page (door_fieldvm.c1f, `Request.fv_page`) and given to the page in the snapshot as `Link:page.ns`: a page cannot name itself.
 -- The class `Vm` is the page's ROOT (one stored row per page; kind: the page). `Page` is VIRTUAL (a report is not memory: a restart forgets it) and is HELD by its `Vm` through `Vm.page`, a reference, so it is
 -- not collected. A restart retires every `Vm` (the tabs of the last run do not report again until they are loaded again).
--- THE SEAT STAMPS THE TIME (the page has no wall clock it is held to): `Vm.seen` is `clock` at the last write of `caps` or `report`; `Vm.connected_at` at the first. `Vm.state` is `stale` when the page has
--- been silent for `link_stale_s` seconds (the Boot fact; THE NUMBER IS A DECISION: 120 is the value tried) and `connected` otherwise. There is no heartbeat yet: a quiet, healthy page is `stale` after that
--- time too. `stale` means "nothing has been heard", not "gone".
+-- THE SEAT STAMPS THE TIME (the page has no wall clock it is held to): `Vm.seen` is `clock` at the last write of `caps` or `report`; `Vm.connected_at` at the first. `Vm.state` is below: slice 2 replaced the slice-1 guess
+-- (`stale` after `link_stale_s` = 120 s, no heartbeat) with the LEASE of a page that talks (its link frames are its heartbeat).
 
 Page.ns getter: before(this.eid, '::')
-Vm.stale_s getter: ([num(b.link_stale_s) for b in instances('Boot') if num(b.link_stale_s) != None] or [120])[0]
-Vm.silent getter: clock - this.seen if this.seen != None else None
+-- THE LINK'S NUMBERS (docs/graph-link.md "Slice 2: built"; each one is the operator's pick of that list, a fact may override it): the seat reads them from `Boot`, so a pack and a test read one place.
+Boot.lk_hold getter: num(this.link_hold_s) if this.link_hold_s != None else 25
+Boot.lk_lease getter: num(this.link_lease_s) if this.link_lease_s != None else 60
+Boot.lk_lease_hidden getter: num(this.link_lease_hidden_s) if this.link_lease_hidden_s != None else 600
+Boot.lk_window getter: num(this.link_window) if this.link_window != None else 8
+Boot.lk_max_subs getter: num(this.link_max_subs) if this.link_max_subs != None else 200
+Boot.lk_max_links getter: num(this.link_max_links) if this.link_max_links != None else 16
+Boot.lk_max_value getter: num(this.link_max_value) if this.link_max_value != None else 65536
+Boot.lk_max_frame getter: num(this.link_max_frame) if this.link_max_frame != None else 262144
+-- the boot epoch: a value the seat's NEXT run cannot repeat (a page that sees it change resubscribes everything)
+Boot.started on-setter link-epoch:
+  ALWAYS:
+    this.lk_since = clock
+Boot.lk_epoch getter: str(this.lk_since) if this.lk_since != None else None
+-- A PAGE THAT TALKS IS CONNECTED (slice 2; this replaces the slice-1 guess of 120 s of silence): every frame of the link (packs/link_route.c1f) is a word from the page, kept on the page's `LinkPeer` (RAM: a frame is not history),
+-- and `last` is the later of that and the stamps of `caps` / `report`. The page is `stale` when it has been silent past its LEASE (`link_lease_s` 60 s for a visible page; `link_lease_hidden_s` 600 s for one that told the
+-- seat it is hidden). `stale` means "nothing has been heard", not "gone".
+Vm.peer_heard getter: prop(this.peer, 'heard')
+Vm.last getter: max([x for x in [this.seen, this.peer_heard, this.heard] if x != None]) if len([x for x in [this.seen, this.peer_heard, this.heard] if x != None]) > 0 else None
+Vm.hidden getter: prop(this.peer, 'hidden') if prop(this.peer, 'hidden') != None else this.was_hidden
+Vm.lease_s getter: ([b.lk_lease_hidden for b in instances('Boot')] or [600])[0] if this.hidden == True else ([b.lk_lease for b in instances('Boot')] or [60])[0]
+Vm.silent getter: clock - this.last if this.last != None else None
 Vm.state getter:
-  WHEN this.seen == None: None
-  ELSE WHEN this.silent >= this.stale_s: 'stale'
+  WHEN this.last == None: None
+  ELSE WHEN this.silent >= this.lease_s: 'stale'
   ELSE: 'connected'
 Vm.kind getter: 'page'
 

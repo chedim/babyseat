@@ -115,8 +115,9 @@
       "ChatTurn",
       "Request"
     ],
-    "members": 65,
+    "members": 67,
     "writes": [
+      "Doorbell:chat.at",
       "membrane:*.mention",
       "membrane:*.queued",
       "membrane:*=ChatLine()",
@@ -130,7 +131,10 @@
       "/membrane/chat/message/",
       "/membrane/chat/messages"
     ],
-    "boot_facts": []
+    "boot_facts": [],
+    "resident": [
+      "Doorbell"
+    ]
   },
   "chat_oai": {
     "imports": [
@@ -864,7 +868,7 @@
       "Page",
       "Vm"
     ],
-    "members": 8,
+    "members": 21,
     "writes": [
       "*.retire",
       "Vm:*.connected_at",
@@ -873,7 +877,15 @@
     ],
     "claims": [],
     "boot_facts": [
-      "link_stale_s",
+      "link_hold_s",
+      "link_lease_hidden_s",
+      "link_lease_s",
+      "link_max_frame",
+      "link_max_links",
+      "link_max_subs",
+      "link_max_value",
+      "link_window",
+      "lk_since",
       "started"
     ],
     "virtual": [
@@ -881,6 +893,66 @@
     ],
     "resident": [
       "Vm"
+    ]
+  },
+  "link_route": {
+    "imports": [
+      "boot",
+      "door",
+      "link"
+    ],
+    "classes": [
+      "Boot",
+      "LinkPeer",
+      "Request"
+    ],
+    "members": 46,
+    "writes": [
+      "*.ackd",
+      "*.capped",
+      "*.live",
+      "*.ns",
+      "*.retire",
+      "*.sent_n",
+      "*.sent_sig",
+      "*.sid",
+      "*.sprop",
+      "*.wid",
+      "LinkAllow:doorbell.prefixes",
+      "LinkAllow:seed.done",
+      "LinkAllow:setting.prefixes",
+      "LinkPeer:*.ack",
+      "LinkPeer:*.cur",
+      "LinkPeer:*.heard",
+      "LinkPeer:*.hidden",
+      "LinkPeer:*.last_n",
+      "LinkPeer:*.ns",
+      "LinkPeer:*.out_n",
+      "LinkPeer:*.up",
+      "Vm:*.connected_at",
+      "Vm:*.heard",
+      "Vm:*.peer",
+      "Vm:*.was_hidden"
+    ],
+    "claims": [
+      "/ui/link"
+    ],
+    "boot_facts": [
+      "lk_epoch",
+      "lk_hold",
+      "lk_lease",
+      "lk_lease_hidden",
+      "lk_max_frame",
+      "lk_max_links",
+      "lk_max_subs",
+      "lk_max_value",
+      "lk_window"
+    ],
+    "virtual": [
+      "LinkPeer"
+    ],
+    "resident": [
+      "LinkAllow"
     ]
   },
   "mcp": {

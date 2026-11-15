@@ -60,6 +60,7 @@ async function sign_in() {
   const mount = document.createElement('div');
   mount.id = 'mount';
   const host = await start(mount);
+  if (snap.page) host.set_ns(snap.page);                              // the page's name for the engine: ids with another `<ns>::` prefix are the seat's (docs/graph-link.md 15b)
   loadPacks(host, snap.packs || {});
   for (const e of snap.entities || []) host.feed(e.eid, e.cls, e.props, true);
   host.page.set('DomNode:page:html', document.documentElement);     // the theme: the shell writes `data-theme` on it (an allow-listed attribute)
@@ -69,5 +70,6 @@ async function sign_in() {
   host.feed('Shell:main', 'Shell', { open: true }, true);
   app.replaceChildren(mount);
   host.run_clock(CLOCK_MS);
+  host.start_link();                                                  // the graph link (fieldvm.js `Link`): subscriptions of the seat's values, one frame per flush to /ui/link; it does not start on an engine without the hooks
   window.MEMBRANE_PAGE = host;                                        // for tests and the console
 })().catch((e) => say('The page could not start: ' + (e && e.message ? e.message : e)));

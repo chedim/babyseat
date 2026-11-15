@@ -6,6 +6,9 @@
 //   4. two tabs are two roots (`kind:Vm` lists two), each with its own name; the names are `p` + 8 hex digits;
 //   5. a deliberately broken pack's load error reaches the seat as text, and that pack is not in `provides`;
 //   6. no script error on the page.
+// (the graph link's frames, `POST /ui/link`, are counted apart: `b.link`; `b.posts` is every OTHER POST, so the slice-1 counts below still mean what they said.)
+// SLICE 2, the phase at the end (section 7): subscriptions of the seat's values into the open settings window, counted in requests: a write by another client shows with no GET of the page; an idle page sends only the link's
+// keepalives; a hidden tab sends one frame and then nothing; a seat that restarts is found again within the jitter and the page subscribes again.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
@@ -22,12 +25,12 @@ if (!existsSync(chrome)) { console.log(`link page: skipped, no Chrome at ${chrom
 
 const packs = readFileSync(path.join(repo, 'membrane/apps/barest.packs'), 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).map((n) => `membrane/packs/${n}.c1f`);
 let nseat = 0;
-function startSeat({ apps = [] } = {}) {
-  const port = 24000 + Math.floor(Math.random() * 1000) + 7 * nseat++;
-  const dir = mkdtempSync(path.join(tmpdir(), 'link-page-'));
-  const args = ['run', ...packs, 'membrane/apps/barest.c1f', ...apps, '--store', path.join(dir, 'field.sqlite3'), '--port', String(port)];
+function startSeat({ apps = [], facts = [], port: at, dir: reuse } = {}) {
+  const port = at || 24000 + Math.floor(Math.random() * 1000) + 7 * nseat++;
+  const dir = reuse || mkdtempSync(path.join(tmpdir(), 'link-page-'));
+  const args = ['run', ...packs, 'membrane/apps/barest.c1f', ...apps, '--store', path.join(dir, 'field.sqlite3'), '--port', String(port), ...facts.flatMap((f) => ['--fact', f])];
   const child = spawn(bin, args, { cwd: repo, stdio: 'ignore', env: { ...process.env } });
-  return { port, dir, url: `http://127.0.0.1:${port}`, stop: () => { child.kill(); rmSync(dir, { recursive: true, force: true }); } };
+  return { port, dir, url: `http://127.0.0.1:${port}`, down: () => { child.kill(); }, stop: () => { child.kill(); rmSync(dir, { recursive: true, force: true }); } };
 }
 async function up(seat) { for (let i = 0; i < 150; i++) { try { if ((await fetch(`${seat.url}/`)).ok) return; } catch {} await sleep(200); } throw new Error('the seat did not come up'); }
 const call = async (s, tool, args) => (await (await fetch(`${s.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }) })).json()).result.content[0].text;
@@ -41,13 +44,14 @@ async function tab(url) {
   const t = url ? await (await fetch(`http://127.0.0.1:${dbg}/json/new?${encodeURIComponent('about:blank')}`, { method: 'PUT' })).json() : (await tabs()).find((x) => x.type === 'page');
   const ws = new WebSocket(t.webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-  let id = 0; const waiting = new Map(); const b = { errors: [], posts: [] };
+  let id = 0; const waiting = new Map(); const b = { errors: [], posts: [], link: [], gets: [] };
   ws.addEventListener('message', (m) => {
     const d = JSON.parse(m.data);
     if (waiting.has(d.id)) { waiting.get(d.id)(d); waiting.delete(d.id); return; }
     const p = d.params || {};
     if (d.method === 'Runtime.exceptionThrown') b.errors.push(p.exceptionDetails?.exception?.description || p.exceptionDetails?.text);
-    else if (d.method === 'Network.requestWillBeSent' && p.request.method === 'POST') b.posts.push({ path: new URL(p.request.url).pathname, body: p.request.postData });
+    else if (d.method === 'Network.requestWillBeSent' && p.request.method === 'POST') { const x = { path: new URL(p.request.url).pathname, body: p.request.postData }; (x.path === '/ui/link' ? b.link : b.posts).push(x); }
+    else if (d.method === 'Network.requestWillBeSent' && p.request.method === 'GET') b.gets.push(new URL(p.request.url).pathname);
   });
   const send = (method, params = {}) => new Promise((r) => { waiting.set(++id, r); ws.send(JSON.stringify({ id, method, params })); });
   await send('Runtime.enable'); await send('Page.enable'); await send('Network.enable');
@@ -137,6 +141,75 @@ try {
   const caps3 = c.writes().find((x) => x.prop === 'caps').value;
   assert.ok(!caps3.provides.some((p) => p.pack === 'broken_view'), 'a pack that did not load is not provided');
   assert.ok(caps3.provides.some((p) => p.pack === 'link_view'));
+
+  // 7. SLICE 2: the settings window follows the seat's own values through the link (a seat with a short hold: the held poll is released after 2 s)
+  const seat3 = startSeat({ facts: ['link_hold_s=2'] });
+  await up(seat3);
+  const d = await tab(`${seat3.url}/`);
+  const nsd = await d.until(`(window.MEMBRANE_PAGE && window.MEMBRANE_PAGE.get('Link:page') || {}).ns`, 'the link page knows its name');
+  await d.until(`window.MEMBRANE_PAGE.get('Shell:main').open === true`, 'the shell is open');
+  await d.ev(`document.querySelector('[data-key="DomNode:shell:nav:settings"]').dispatchEvent(new MouseEvent('click', {bubbles: true}))`);
+  const row = (id) => `(window.MEMBRANE_PAGE.get('DomNode:set:${id}:now') || {}).text`;
+  await d.until(`${row('chat.max_steps')} === 'In force: 2048 steps'`, 'the settings rows are drawn');
+  await d.until(`(window.MEMBRANE_PAGE.get('Link:page') || {}).up === true`, 'the link is up (the engine has the hooks and the seat answered)');
+  const frames = () => d.link.map((x) => JSON.parse(x.body));
+  const subsOf = () => frames().flatMap((f) => f.subs);
+  await d.until(`window.MEMBRANE_PAGE.get('membrane::Setting:chat.max_steps') && window.MEMBRANE_PAGE.get('membrane::Setting:chat.max_steps').current !== undefined`, 'a replica of the seat\'s value arrived');
+  assert.ok(subsOf().some((x) => x[0] === 'membrane::Setting:chat.max_steps' && x[1] === 'current'), 'the engine named the value the row reads, and the page told the seat');
+  assert.ok(subsOf().some((x) => x[0] === 'membrane::Doorbell:chat' && x[1] === 'at'), 'and the chat\'s doorbell');
+  assert.ok(!subsOf().some((x) => /Chat:(main|message|session)/.test(x[0])), 'never the chat');
+  assert.equal(frames().filter((f) => f.subs.length > 0).length <= 3, true, 'the window\'s 27 rows are announced in a handful of frames (one per flush), not one per row');
+  // the other client writes: the row follows with NO request of the page
+  await sleep(1500);
+  const before = { settings: d.gets.filter((g) => g === '/ui/settings').length, chat: d.gets.filter((g) => g === '/membrane/chat/messages').length, posts: d.posts.length };
+  await call(seat3, 'entity_write', { spec: 'Setting:chat.max_steps', prop: 'set', value: 777 });
+  await d.until(`${row('chat.max_steps')} === 'In force: 777 steps'`, 'the open window shows the new value');
+  assert.equal(d.gets.filter((g) => g === '/ui/settings').length, before.settings, 'with no read of /ui/settings');
+  assert.equal(d.posts.length, before.posts, 'and no write');
+  assert.ok(before.chat <= 2, `the chat history was read at most twice (the load and the first ring), not on a timer: ${before.chat}`);
+
+  // idle: the link's keepalives only. Three held polls come back empty; during them the page sends nothing else and reads nothing
+  const idle0 = { link: d.link.length, gets: d.gets.filter((g) => g !== '/session/status').length, posts: d.posts.length };
+  for (let i = 0; i < 100 && d.link.length < idle0.link + 3; i++) await sleep(200);
+  assert.ok(d.link.length >= idle0.link + 3, 'the keepalives came');
+  const idleFrames = d.link.slice(idle0.link).map((x) => JSON.parse(x.body));
+  assert.ok(idleFrames.every((f) => f.subs.length === 0 && f.unsubs.length === 0 && !f.resync), 'an idle frame is a bare keepalive');
+  assert.ok(d.link.slice(idle0.link).every((x) => x.body.length < 200), 'under 200 bytes each');
+  assert.equal(d.gets.filter((g) => g !== '/session/status').length, idle0.gets, 'an idle page reads nothing (the shell\'s status line is the one other poll, not the link\'s)');
+  assert.equal(d.posts.length, idle0.posts, 'and writes nothing');
+
+  // a hidden tab: ONE frame, then nothing, however long and whatever changes; visible: ONE frame with resync and the new value
+  await d.ev(`Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))`);
+  for (let i = 0; i < 50 && !d.link.some((x) => JSON.parse(x.body).hidden === true); i++) await sleep(100);
+  await d.until(`window.MEMBRANE_PAGE.graph.inflight === 0`, 'the hidden frame is answered and the released poll is back (nothing is in flight)');
+  const hid = d.link.length;
+  assert.equal(d.link.filter((x) => JSON.parse(x.body).hidden === true).length, 1, 'one frame says hidden');
+  await call(seat3, 'entity_write', { spec: 'Setting:chat.max_steps', prop: 'set', value: 888 });
+  await sleep(5000);                                                              // two holds and more: a hidden page sends nothing
+  assert.equal(d.link.length, hid, 'a hidden tab sends no frame');
+  assert.equal(await d.ev(row('chat.max_steps')), 'In force: 777 steps', 'and shows what it had');
+  await d.ev(`Object.defineProperty(document, 'hidden', {value: false, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))`);
+  await d.until(`${row('chat.max_steps')} === 'In force: 888 steps'`, 'visible again: the value that changed meanwhile arrives');
+  const back = d.link.slice(hid).map((x) => JSON.parse(x.body));
+  assert.equal(back[0].hidden, false); assert.equal(back[0].resync, true, 'one frame, asking for a resync');
+
+  // the seat restarts (same port, same store): the page finds it again within the jitter and subscribes again
+  const port3 = seat3.port;
+  seat3.down();
+  await d.until(`(window.MEMBRANE_PAGE.get('Link:page') || {}).up === false`, 'the page notices the seat is gone', 30000);
+  const failedAt = d.link.length;
+  await sleep(1500);
+  const seat3b = startSeat({ facts: ['link_hold_s=2'], port: port3, dir: seat3.dir });
+  await up(seat3b);
+  await d.until(`(window.MEMBRANE_PAGE.get('Link:page') || {}).up === true`, 'the page is connected to the new seat', 30000);
+  const after = d.link.slice(failedAt).map((x) => JSON.parse(x.body));
+  const resub = after.find((f) => f.subs.some((x) => x[0] === 'membrane::Setting:chat.max_steps'));
+  assert.ok(resub, 'after the restart the page announced its subscriptions again');
+  assert.ok(resub.subs.length >= 25, `all of them, in ONE frame (${resub.subs.length})`);
+  await call(seat3b, 'entity_write', { spec: 'Setting:chat.max_steps', prop: 'set', value: 999 });
+  await d.until(`${row('chat.max_steps')} === 'In force: 999 steps'`, 'and the row follows the NEW seat');
+  assert.deepEqual(d.errors, [], 'no script error on the link page');
+  seat3b.stop();
 
   // 6. no script error
   for (const t of [a, b, c]) assert.deepEqual(t.errors, [], 'no script error');

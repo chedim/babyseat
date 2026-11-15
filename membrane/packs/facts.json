@@ -1,9 +1,41 @@
 {
  "_doc": "The Boot facts packs read (docs/c1f-stdlib.md). wired=true: `cliffvm` (cli.rs, host.rs, launcher.c1f or scripts/seat) writes it; wired=false: a pack reads it and it is told only when a launch line names it (`--fact name=value`), else the pack's own default stands.",
  "facts": {
-  "link_stale_s": {
+  "link_hold_s": {
    "wired": false,
-   "why": "seconds of silence after which a page the seat heard from (Vm:<name>, packs/link.c1f) reads `stale` instead of `connected` (--fact link_stale_s=...; default 120: a value tried, not decided)"
+   "why": "seconds the seat holds an empty poll of POST /ui/link before it answers it empty (the keepalive); default 25 (graph link decision 18; a value tried, not decided)"
+  },
+  "link_lease_s": {
+   "wired": false,
+   "why": "seconds of silence after which a visible page is gone: its link row is collected and its `Vm` reads `stale` (packs/link.c1f, packs/link_route.c1f); default 60"
+  },
+  "link_lease_hidden_s": {
+   "wired": false,
+   "why": "the same lease for a page that told the seat it is hidden; default 600"
+  },
+  "link_window": {
+   "wired": false,
+   "why": "how many frames of the seat a page may leave unacked before it gets a resync snapshot instead of deltas; default 8"
+  },
+  "link_max_subs": {
+   "wired": false,
+   "why": "most subscriptions (an entity and one property each) one page link may hold; the rest are refused, not queued; default 200"
+  },
+  "link_max_links": {
+   "wired": false,
+   "why": "most page links a seat serves at once; the next is refused; default 16"
+  },
+  "link_max_value": {
+   "wired": false,
+   "why": "most characters of one subscribed value; a bigger one is refused with its size and never sent; default 65536"
+  },
+  "link_max_frame": {
+   "wired": false,
+   "why": "most characters of a frame a page posts (a bigger one is a 413) and of a reply the seat sends (a bigger set goes out in parts); default 262144"
+  },
+  "lk_since": {
+   "wired": false,
+   "why": "not a launch fact: the time the link pack wrote at start, the seat's epoch of this run (packs/link.c1f)"
   },
   "anthropic_key_set": {
    "wired": true,

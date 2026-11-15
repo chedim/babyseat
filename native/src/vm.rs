@@ -207,6 +207,11 @@ pub struct Core {
     /// finds nothing notes the eid in `wanted` and the host loads it between rounds (`Host::fault_wanted`); `instances` lists only `docs`.
     pub unloaded: HashMap<String, String>,
     pub wanted: std::cell::RefCell<std::collections::BTreeSet<String>>,
+    /// THE GRAPH LINK (docs/graph-link.md, "Slice 2: engine interface"): this VM's own namespace (None: nothing is foreign), the replicas of foreign entities (fed by the link,
+    /// inert), and the foreign (eid, prop) any evaluation read since the round began (what `Fields` turns into subscriptions)
+    pub own_ns: Option<String>,
+    pub replicas: std::collections::BTreeMap<String, crate::link::Replica>,
+    pub foreign_reads: std::cell::RefCell<std::collections::BTreeSet<(String, String)>>,
     pub loader: Option<Loader>,
     /// stored entities a read loaded in the middle of an evaluation (`fault_now`): in `docs` already, still to be registered with the field (`Fields::complete_arrivals`)
     pub arrived: Vec<String>,
@@ -323,6 +328,7 @@ struct View<'a> { core: &'a Core }
 
 impl<'a> expr::World for View<'a> {
     fn attr(&self, eid: &str, attr: &str) -> V {
+        if self.core.own_ns.is_some() { if let Some(v) = self.core.foreign_read(eid, attr) { return v; } }
         let Some(e) = self.core.docs.get(eid) else {
             if self.core.unloaded.contains_key(eid) { self.core.wanted.borrow_mut().insert(eid.to_string()); return V::None; }   // stored, not loaded: asked for (the host loads it between rounds), not absent
             if self.core.collected_set.contains(eid) { return V::Nil(COLLECTED.to_string()); }   // a virtual entity nothing held any more: a null that says so
@@ -425,7 +431,7 @@ impl Core {
     pub fn new() -> Self {
         Core {
             why: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
-            inst_scans: Default::default(), inst_cache: Default::default(), docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), born_by: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
+            inst_scans: Default::default(), inst_cache: Default::default(), docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), own_ns: None, replicas: Default::default(), foreign_reads: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), born_by: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), queue_writes: true, dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
@@ -555,6 +561,37 @@ impl Core {
         }
     }
 
+    // ---- the graph link (docs/graph-link.md, "Slice 2: engine interface") ---------------------------------------------------------------------------------
+    /// Tell the engine its own namespace (`p<hex>` for a page, `membrane` for the seat). Until then nothing is foreign.
+    pub fn set_ns(&mut self, ns: &str) { self.own_ns = Some(ns.to_string()); }
+    /// A foreign id: it has `::` and the text before it is not this VM's namespace.
+    pub fn is_foreign(&self, eid: &str) -> bool {
+        match (&self.own_ns, eid.split_once("::")) { (Some(ns), Some((p, _))) => p != ns, _ => false }
+    }
+    /// A foreign entity the link feeds: inert (no getter, no setter).
+    pub fn is_replica(&self, eid: &str) -> bool { !self.replicas.is_empty() && self.replicas.contains_key(eid) }
+    /// What reading `eid.attr` says when `eid` is foreign and not an ordinary local entity: the reasoned null (`pending`, `absent`, `refused`), or None when the replica holds the value
+    /// (the read goes on as usual). The read is noted (`foreign_reads`) for the subscriptions.
+    fn foreign_read(&self, eid: &str, attr: &str) -> Option<V> {
+        if !self.is_foreign(eid) { return None; }
+        let rep = self.replicas.get(eid);
+        if rep.is_none() && self.docs.contains_key(eid) { return None; }   // a local entity that has a foreign-looking id: not a replica, no subscription
+        let special = crate::link::is_special(attr);
+        if !special { self.foreign_reads.borrow_mut().insert((eid.to_string(), attr.to_string())); }
+        match rep.map(|r| &r.state) {
+            Some(crate::link::ReplicaState::Gone) => Some(V::Nil(format!("absent: {eid} does not exist"))),
+            Some(crate::link::ReplicaState::Refused(why)) => Some(V::Nil(format!("refused: {why}"))),
+            Some(crate::link::ReplicaState::Live) if special || rep.map_or(false, |r| r.have.contains(attr)) => None,
+            _ => Some(V::Nil(format!("pending: {eid}.{attr}"))),
+        }
+    }
+    /// The revisions held: eid -> the last `rev` applied (what a client says in `hello.have`).
+    pub fn replica_revs(&self) -> Vec<(String, f64)> { self.replicas.iter().filter(|(_, r)| r.state == crate::link::ReplicaState::Live).map(|(k, r)| (k.clone(), r.rev)).collect() }
+    /// The entities a retired `Vm:<ns>` takes with it: every id starting with `<ns>::`.
+    pub fn namespace_of_vm(eid: &str) -> Option<String> { eid.strip_prefix("Vm:").filter(|n| !n.is_empty() && !n.contains(':')).map(|n| format!("{n}::")) }
+    /// Forget the replica notes under a prefix (a retired namespace).
+    pub fn forget_replicas(&mut self, prefix: &str) { self.replicas.retain(|k, _| !k.starts_with(prefix)); }
+
     /// The next place in the touch clock.
     pub fn bump(&self) -> u64 { let t = self.clock.get() + 1; self.clock.set(t); t }
 
@@ -619,6 +656,8 @@ impl Core {
         if !self.virt_live.contains(v) { return true; }
         if self.in_flight(v, e) { return true; }
         if let Some((p, _)) = v.rsplit_once(':') { if self.docs.contains_key(p) && !dead.contains(p) { return true; } }
+        // a namespaced id lives with its root `Vm:<ns>` (docs/graph-link.md, section 2)
+        if let Some((ns, _)) = v.split_once("::") { let root = format!("Vm:{ns}"); if self.docs.contains_key(&root) && !dead.contains(&root) { return true; } }
         if let Some(m) = self.ref_in.get(v) {
             for h in m.keys() { if h != v && !dead.contains(h) && self.held(h, dead, seen) { return true; } }
         }
@@ -646,6 +685,7 @@ impl Core {
             work.extend(ts);                                                                         // what it held may be free now
             let below = format!("{v}:");
             work.extend(self.virt_live.range(below.clone()..).take_while(|c| c.starts_with(&below)).cloned());   // and so may its children
+            if let Some(ns) = Core::namespace_of_vm(&v) { work.extend(self.virt_live.range(ns.clone()..).take_while(|c| c.starts_with(&ns)).cloned()); }   // a retired Vm takes its namespace
         }
         order
     }
@@ -1487,4 +1527,10 @@ impl Core {
         v.push(("core.expr_cache".into(), self.cache.len() as u64, 0));
         v
     }
+}
+
+/// The class an eid names: after a `namespace::`, up to the next colon (`membrane::Chat:main` is `Chat`).
+pub fn class_of_eid(eid: &str) -> String {
+    let tail = eid.rsplit_once("::").map_or(eid, |(_, r)| r);
+    tail.split(':').next().unwrap_or("").to_string()
 }

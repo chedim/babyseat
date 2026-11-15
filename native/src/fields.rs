@@ -285,6 +285,9 @@ const OVERRIDE_RULE: &str = "a layer overrides only what it imports";
 /// How many times the start-up pass may repeat while values still change (see `rebuild`).
 const REBUILD_PASSES: usize = 16;
 
+/// What the link's owner says about a foreign entity (`Fields::apply_val`).
+pub enum LinkVal { Props(serde_json::Map<String, J>), Gone, Refused(String) }
+
 pub struct Fields {
     pub setters: Vec<OnSet>,
     /// the llm calls the plan fields asked for (the effect that is not a prop write)
@@ -352,6 +355,8 @@ pub struct Fields {
     /// set while the setters of a write on a VIRTUAL entity run: what they write to a stored entity is marked `virt` in `out`, so the host journals it as an
     /// outside write (the virtual trigger is not in the journal, a replay could not derive it again)
     trigger_virtual: bool,
+    /// the graph link's subscription table (link.rs)
+    link: crate::link::LinkSubs,
 }
 
 /// How a class is stored (docs/cliffvm.md, "Storage modes"): its OWN class (the eid's), declared by the pack that owns it.
@@ -393,7 +398,7 @@ impl Fields {
     /// The class table the engine's core reads too (`Core::storage`): one shared map, written by `compose`.
     pub fn storage_handle(&self) -> crate::vm::StorageMap { self.storage.clone() }
     pub fn goalgraph() -> Self {
-        let mut f = Fields { setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
+        let mut f = Fields { link: Default::default(), setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
             known: Default::default(), primed: false, fresh: vec![], late: vec![], flips: Default::default(), class_deferred: Default::default(), recon: Default::default(), in_run: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
@@ -688,7 +693,7 @@ impl Fields {
         if !self.primed || self.getters.is_empty() {
             self.glevel = glevel;
             self.getters = gs;
-            self.deps.clear(); self.reads.clear(); self.dirty.clear(); self.known.clear(); self.primed = false; self.fresh.clear();
+            self.deps.clear(); self.reads.clear(); self.dirty.clear(); self.known.clear(); self.primed = false; self.fresh.clear(); self.link.dirty = true;
             return;
         }
         let same_prop = |a: &[Getter], b: &[Getter], prop: &str| -> bool {
@@ -819,6 +824,7 @@ impl Fields {
     /// `Entity`; ties by declaration). The first is the property's node; the rest are only the arms it falls through to.
     fn chain(&self, core: &Core, eid: &str, prop: &str) -> Vec<usize> {
         let Some(e) = core.docs.get(eid) else { return vec![] };
+        if core.is_replica(eid) { return vec![]; }   // a replica is inert (docs/graph-link.md, section 2)
         let mut v: Vec<(usize, usize)> = (0..self.getters.len()).filter(|&i| self.getters[i].prop == prop)
             .filter_map(|i| class_rank(core, eid, e, &self.getters[i].cls).map(|r| (r, i))).collect();
         v.sort();
@@ -828,6 +834,7 @@ impl Fields {
     /// One node per property: the nearest class's getter (its chain holds the rest).
     fn getters_of(&self, core: &Core, eid: &str) -> Vec<usize> {
         let Some(e) = core.docs.get(eid) else { return vec![] };
+        if core.is_replica(eid) { return vec![]; }
         let mut best: std::collections::HashMap<&str, (usize, usize)> = Default::default();
         for i in 0..self.getters.len() {
             let Some(r) = class_rank(core, eid, e, &self.getters[i].cls) else { continue };
@@ -916,11 +923,11 @@ impl Fields {
                 v => crate::expr::to_json(v).unwrap_or(J::Null),
             })).collect());
         }
-        if let Some(old) = self.reads.remove(&key) { for k in old { if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); } } }
+        if let Some(old) = self.reads.remove(&key) { for k in old { if core.own_ns.is_some() && core.is_foreign(&k.0) { self.link.dirty = true; } if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); } } }
         let mut ins: Vec<(String, String)> = reads.into_iter().filter(|(e, p)| !(e == eid && *p == g.prop)).collect();
         if reads_name(&g.expr, "clock") || chain.iter().any(|&c| reads_name(&self.getters[c].expr, "clock")) { ins.push((CLOCK.into(), String::new())); }
         ins.sort(); ins.dedup();
-        for k in &ins { self.deps.entry(k.clone()).or_default().insert(key.clone()); }
+        for k in &ins { if core.own_ns.is_some() && core.is_foreign(&k.0) { self.link.dirty = true; } self.deps.entry(k.clone()).or_default().insert(key.clone()); }
         self.reads.insert(key, ins);
         match r {
             Ok(v) => {
@@ -1280,6 +1287,7 @@ impl Fields {
         // what its getters read is forgotten with it: a reload under another class must not run the old class's getters
         self.reads.retain(|(e, _), _| e != eid);
         for set in self.deps.values_mut() { set.retain(|(e, _)| e != eid); }
+        self.link.dirty = true;
         for (p, v) in &old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); }
         self.dirty.retain(|(_, e, _)| e != eid);
         self.new_round();
@@ -1295,6 +1303,7 @@ impl Fields {
         self.dirty.retain(|(_, e, _)| e != eid);
         self.reads.retain(|(e, _), _| e != eid);
         for set in self.deps.values_mut() { set.retain(|(e, _)| e != eid); }
+        self.link.dirty = true;
         self.layer_of.retain(|(e, _), _| e != eid);
         true
     }
@@ -1309,7 +1318,69 @@ impl Fields {
         self.dirty.retain(|(_, e, _)| !gone.contains(e.as_str()));
         self.reads.retain(|(e, _), _| !gone.contains(e.as_str()));
         for set in self.deps.values_mut() { set.retain(|(e, _)| !gone.contains(e.as_str())); }
+        self.link.dirty = true;
         self.layer_of.retain(|(e, _), _| !gone.contains(e.as_str()));
+    }
+
+    // ---- the graph link (docs/graph-link.md, "Slice 2: engine interface"; link.rs) ---------------------------------------------------------------------
+    /// The round's end: the foreign keys a getter holds (`deps`) or any evaluation read in this round are the subscriptions; one nobody reads lives the grace out.
+    fn link_round(&mut self, core: &Core, now: f64) {
+        if core.own_ns.is_none() { return; }
+        let reads = std::mem::take(&mut *core.foreign_reads.borrow_mut());
+        if self.link.dirty {
+            self.link.dirty = false;
+            self.link.dep_keys = self.deps.iter().filter(|(k, s)| !s.is_empty() && core.is_foreign(&k.0) && !crate::link::is_special(&k.1)).map(|(k, _)| k.clone()).collect();
+        }
+        let live = |k: &&(String, String)| core.is_replica(&k.0) || !core.docs.contains_key(&k.0);   // an ordinary local entity with a foreign-looking id is nobody's replica
+        let held: std::collections::BTreeSet<(String, String)> = self.link.dep_keys.iter().filter(live).cloned().collect();
+        if held.is_empty() && reads.is_empty() && self.link.engaged.is_empty() { return; }
+        self.link.update(&held, &reads, now);
+    }
+    /// The notices since the last call: (subs, unsubs), each `[{eid, props}]` sorted, and the engine time a pending unsub is decidable (`due`).
+    pub fn link_drain(&mut self) -> (Vec<J>, Vec<J>, Option<f64>) { let (s, u) = self.link.drain(); (s, u, self.link.due()) }
+    /// A reconnect: every live subscription is announced again by the next drain.
+    pub fn link_reset(&mut self) { self.link.announced.clear(); }
+    /// The keys now subscribed, as (eid, prop): for the tests and for `hello`.
+    pub fn link_keys(&self) -> Vec<(String, String)> { self.link.engaged.keys().cloned().collect() }
+    /// Retire a namespace (`Vm:<ns>` went): its replicas, notes and subscriptions are forgotten. The entities themselves are the caller's (`remove`).
+    pub fn link_forget(&mut self, core: &mut Core, prefix: &str) { core.forget_replicas(prefix); self.link.forget_prefix(prefix); }
+
+    /// Apply what the owner sent about `eid` (docs/graph-link.md, section 15b) as outside writes in ONE round. `Props` is a delta; the readers recompute.
+    pub fn apply_val(&mut self, core: &mut Core, host: &dyn Host, eid: &str, rev: f64, val: LinkVal, now: f64, seq: &mut i64) {
+        use crate::link::{Replica, ReplicaState};
+        let waking = self.link.props_of(eid);   // what is waiting on this entity (pending, absent, refused) wakes on any change of its state
+        match val {
+            LinkVal::Props(props) => {
+                let was_live = core.replicas.get(eid).map_or(false, |r| r.state == ReplicaState::Live) && core.docs.contains_key(eid);
+                let r = core.replicas.entry(eid.to_string()).or_insert(Replica { rev, have: Default::default(), state: ReplicaState::Live });
+                r.rev = rev; r.state = ReplicaState::Live;
+                if !was_live {
+                    if !core.docs.contains_key(eid) { self.arrive(core, eid.to_string(), crate::vm::class_of_eid(eid), Default::default(), now); }
+                    for p in &waking { self.mark(eid, p); }
+                    for k in ["eid", "cls"] { self.mark(eid, k); }
+                }
+                let mut work = VecDeque::new();
+                for (p, v) in props {
+                    let new_have = core.replicas.get_mut(eid).map_or(false, |r| r.have.insert(p.clone()));
+                    let old = core.docs.get(eid).and_then(|e| e.props.get(&p).cloned()).unwrap_or(J::Null);
+                    if old == v && !new_have { self.mark(eid, &p); continue; }   // pending -> the same null: readers recompute
+                    if old == v { continue; }
+                    *seq += 1;
+                    let w = Write { eid: eid.into(), prop: p, new: v, old, writer: "link:val".into(), chain: json!({}), seq: *seq };
+                    core.hear(w.clone(), None, now);
+                    work.push_back(w);
+                }
+                self.new_round();
+                for w in &work { self.visited.insert((w.eid.clone(), w.prop.clone())); }
+                self.run(core, host, work, now, seq);
+            }
+            LinkVal::Gone | LinkVal::Refused(_) => {
+                let state = match val { LinkVal::Refused(why) => ReplicaState::Refused(why), _ => ReplicaState::Gone };
+                core.replicas.insert(eid.to_string(), Replica { rev, have: Default::default(), state });
+                for p in &waking { self.mark(eid, p); }
+                if core.docs.contains_key(eid) { self.remove(core, host, eid, now, seq); } else { self.settle(core, host, now, seq); }
+            }
+        }
     }
 
     pub fn react(&mut self, core: &mut Core, host: &dyn Host, w: Write, now: f64, seq: &mut i64) {
@@ -1350,7 +1421,7 @@ impl Fields {
                 break;
             };
             // a getter of a class the entity no longer has (its `parents` changed after something marked it) computes nothing
-            if !core.docs.get(&e).map_or(false, |d| class_rank(core, &e, d, &self.getters[gi].cls).is_some()) { continue; }
+            if core.is_replica(&e) || !core.docs.get(&e).map_or(false, |d| class_rank(core, &e, d, &self.getters[gi].cls).is_some()) { continue; }
             let v = self.compute(core, Some(host), &e, gi, now, seq);
             work.extend(std::mem::take(&mut self.late));   // what the compute wrote for a failure (`failed`, the class entry) is heard like any write
             let Some(v) = v else { continue };
@@ -1358,6 +1429,7 @@ impl Fields {
             self.emit_unchecked(core, &mut work, &e, &prop, v, &format!("getter:{}", prop), seq, now);
         }
         self.in_run = false;
+        self.link_round(core, now);
     }
 
     /// Load a stored entity that is not loaded yet (a lazy class), as a restore does: its row's properties (a getter's value is computed again), its `updated`, its
@@ -1399,6 +1471,8 @@ impl Fields {
     }
 
     fn step(&mut self, core: &mut Core, host: &dyn Host, work: &mut VecDeque<Write>, w: Write, now: f64, seq: &mut i64) {
+        // a write that lands on a REPLICA only wakes what reads it: no setter, no driver, no learner (docs/graph-link.md, section 2)
+        if core.is_replica(&w.eid) { self.mark(&w.eid, &w.prop); self.mark_refs(&w.prop, &w.old, &w.new); return; }
         self.driver_effect(core, work, &w, now, seq);
         self.mark(&w.eid, &w.prop);
         // a `parents` write names kinds the entity did not have at its birth: the getters of those kinds are computed in this round (a getter

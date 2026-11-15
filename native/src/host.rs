@@ -53,10 +53,10 @@ pub fn stamp_virtual_writer(engine_writer: &str) -> String { format!("host:virtu
 pub fn stamp_born_writer(_cls: &str) -> String { format!("{WRITER}create") }
 
 /// The class an eid names: after a `namespace::`, up to the next colon (`membrane::Chat:main` is `Chat`).
-pub fn class_of_eid(eid: &str) -> String {
-    let tail = eid.rsplit_once("::").map_or(eid, |(_, r)| r);
-    tail.split(':').next().unwrap_or("").to_string()
-}
+pub fn class_of_eid(eid: &str) -> String { crate::vm::class_of_eid(eid) }
+
+/// The seat's own namespace for the graph link.
+pub const SEAT_NS: &str = "membrane";
 
 /// How many lazy rows the warm boot loads in the background by default (the boot fact `warm_rows`; a threshold, flagged for the operator).
 pub const DEFAULT_WARM_ROWS: usize = 1000;
@@ -274,6 +274,7 @@ impl Host {
         let journal_next = db.query_row(&format!("SELECT MAX(k) FROM {JOURNAL}"), [], |r| r.get::<_, Option<String>>(0)).map_err(dbe)?.and_then(|k| k.parse::<u64>().ok()).map_or(0, |k| k + 1);   // the primary key's index: no scan
         let db = Arc::new(Mutex::new(db));
         let mut core = Core::new();
+        core.set_ns(SEAT_NS);   // the graph link: ids under `membrane::` and bare ids are this VM's, any other `ns::` is foreign (docs/graph-link.md, 15b)
         core.queue_writes = false;   // a field host runs no trigger engine: the queue would only hold every write's values (vm.rs `queue_writes`)
         if o.store.is_some() { core.loader = Some(stored_loader(db.clone())); }   // a lazy entity a setter writes loads from the store
         let mut waiter = None;
@@ -399,6 +400,23 @@ impl Host {
         }
         self.drain_apply();
     }
+
+    // ---- the graph link (docs/graph-link.md, 15b): the same notices and applies as the browser's `Field` -----------------------------------------------
+    /// Tell the engine its own namespace (default `membrane`).
+    pub fn set_ns(&self, ns: &str) { self.eng().0.set_ns(ns); }
+    /// Apply what a foreign owner sent (a replica: RAM only, never stored, never journalled) and the round it causes.
+    pub fn feed_val(&self, eid: &str, val: crate::fields::LinkVal, rev: f64) {
+        let _t = self.txn();
+        let ts = self.now();
+        { let mut g = self.eng(); let (core, f, seq) = &mut *g; let mut s = *seq; f.apply_val(core, &NullHost, eid, rev, val, ts, &mut s); *seq = s; }
+        self.drain_apply();
+    }
+    /// The notices since the last call: (subs, unsubs, due).
+    pub fn link_notices(&self) -> (Vec<J>, Vec<J>, Option<f64>) { self.eng().1.link_drain() }
+    /// A reconnect: the next notices announce every subscription again.
+    pub fn link_reset(&self) { self.eng().1.link_reset(); }
+    /// The revisions held per replica.
+    pub fn replica_revs(&self) -> Vec<(String, f64)> { self.eng().0.replica_revs() }
 
     /// How many times `instances(<class>)` walked every loaded entity so far (the engine's cache misses): a count of work for the tests.
     pub fn inst_scans(&self) -> u64 { self.eng().0.inst_scans() }
@@ -533,14 +551,18 @@ impl Host {
                 packs_retired.push(name.to_string());
             }
             let below = format!("{eid}:");
-            let owned: Vec<String> = { let g = self.eng(); g.0.docs.keys().filter(|k| k.starts_with(&below)).cloned().collect() };
+            // a retired `Vm:<ns>` takes the whole namespace `<ns>::` with it (docs/graph-link.md, section 2)
+            let ns = Core::namespace_of_vm(eid);
+            let owned: Vec<String> = { let g = self.eng(); g.0.docs.keys().filter(|k| k.starts_with(&below) || ns.as_ref().map_or(false, |n| k.starts_with(n.as_str()))).cloned().collect() };
+            if let Some(n) = &ns { let mut g = self.eng(); let (core, f, _) = &mut *g; f.link_forget(core, n); core.unloaded.retain(|k, _| !k.starts_with(n.as_str())); }
             self.eng().0.unloaded.retain(|k, _| k != eid && !k.starts_with(&below));   // a stored child that was never loaded is deleted with the rest, and does not wait to load
             for e in std::iter::once(eid).chain(owned.iter()) {
                 { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, e, ts, seq); }
             }
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.retain(|k, _| k != eid && !k.starts_with(&below)); }   // a retired row is not written back
+            if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.retain(|k, _| k != eid && !k.starts_with(&below) && !ns.as_ref().map_or(false, |n| k.starts_with(n.as_str()))); }   // a retired row is not written back
             self.exec(&db, &format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
+            if let Some(n) = &ns { self.exec(&db, &format!("DELETE FROM {ROWS} WHERE substr(k, 1, length(?1)) = ?1"), params![n]); }
         }
         let any = any || !retired.is_empty();
         // THE MEMORY POLICY (docs/cliffvm.md, "Unload"): over the memory budget, the coldest loaded entities leave the engine, their rows kept. The VM's own: nothing a pack or
