@@ -74,6 +74,7 @@ fn try_start(dir: &Path, bind: Option<&str>, facts: &[&str]) -> Result<Seat, Ref
     if bind.is_none() {
         cmd = Command::new("sh");
         cmd.arg(r.join("scripts/seat")).args(["--data-dir", dir.to_str().unwrap(), "--port", "0"]);
+        cmd.args(["--fact", "seat_backend=http://127.0.0.1:9"]);   // serve defaults the model server to the real Ollama's port: a dead one, so no message of a test ever reaches it
         for f in facts { cmd.arg("--fact").arg(f); }
         cmd.env("CLIFFVM", BIN).env("CLAUDE_BIN", &fake);
     } else {
