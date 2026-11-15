@@ -28,7 +28,7 @@ fn ticking() -> Box<dyn Fn() -> f64 + Send + Sync> {
     let n = Arc::new(AtomicU64::new(CLOCK.fetch_add(100_000, Ordering::SeqCst)));
     Box::new(move || 1_800_000_000.0 + n.fetch_add(1, Ordering::SeqCst) as f64)
 }
-const PACKS: &[&str] = &["entity", "boot", "fs", "proc", "fetch", "sql", "store", "door", "semtext", "mentions", "chat", "chat_turn", "door_session", "door_auth", "legacy_import", "legacy_persons", "legacy_cutover", "settings", "environment"];
+const PACKS: &[&str] = &["entity", "boot", "fs", "proc", "fetch", "sql", "store", "door", "router", "semtext", "mentions", "chat", "chat_turn", "door_session", "door_auth", "legacy_import", "legacy_persons", "legacy_cutover", "settings", "environment"];
 fn facts_of(d: &std::path::Path, extra: &[(&str, J)]) -> Map<String, J> {
     let mut m = Map::new();
     m.insert("seat_data_dir".into(), json!(d.join(".membrane").to_string_lossy()));
