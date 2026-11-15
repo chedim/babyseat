@@ -74,8 +74,8 @@ ChatMessage.mcp_url getter:
   ELSE: 'http://' + this.mcp_host + ':' + str(this.port) + '/mcp'
 ChatMessage.mcp_server getter:
   WHEN this.over or this.port == None: None
-  ELSE WHEN this.admin_file != None: {'type': 'http', 'url': this.mcp_url, 'headers': {'Authorization': 'Bearer ${MEMBRANE_ADMIN_TOKEN}'}}
-  ELSE: {'type': 'http', 'url': this.mcp_url}
+  ELSE WHEN this.admin_file != None: {'type': 'http', 'url': this.mcp_url, 'headers': {'Authorization': 'Bearer ${MEMBRANE_ADMIN_TOKEN}', 'X-Turn': this.eid}}
+  ELSE: {'type': 'http', 'url': this.mcp_url, 'headers': {'X-Turn': this.eid}}
 -- what the run's `env_from` hands the child: the admin's token (a seat with a secret) and, in key mode, the API key (both named, never valued here). ONE key check: the key is named
 -- only when `key_set` (the launcher's fact: set AND non-empty) is true, the same test `plan` refuses on, so the driver's "environment variable ... is not set" can never be reached in key mode.
 ChatMessage.admin_env getter:

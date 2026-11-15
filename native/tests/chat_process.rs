@@ -278,7 +278,8 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert!(after("--system-prompt").contains("Modify your banner to help you maintain continuity."), "the system prompt carries the doctrine");
     assert!(!after("--system-prompt").to_lowercase().contains("history reaches"), "the prompt never says what the model lacks (it makes Claude panic)");
     assert!(after("--mcp-config").contains(&format!("127.0.0.1:{port}/mcp")));
-    assert!(!after("--mcp-config").contains("headers"), "the barest seat has no secret: the MCP config names no header");
+    assert!(!after("--mcp-config").contains("Authorization"), "the barest seat has no secret: the MCP config names no token header");
+    assert!(after("--mcp-config").contains("X-Turn"), "the config names the turn (the message's id) for the link of what a call creates");
     assert_eq!(args[args.len() - 2], "--", "the options end before the prompt");
     assert_eq!(args[args.len() - 1], "what is up", "the prompt is the message alone");
     assert!(!args.iter().any(|x| x == "--bare" || x == "--resume" || x == "--continue"), "{args:?}");
@@ -1585,7 +1586,8 @@ fn the_turns_cli_reaches_the_mcp_door_with_the_admin_token_from_its_environment_
     assert_eq!(v["state"], "done", "the seat accepted the token the CLI sent: {v}");
     assert_eq!(v["tools"], json!(["entity_write", "entity_read"]));
     let h: J = serde_json::from_str(&std::fs::read_to_string(dir.join("mcp_headers.json")).unwrap()).unwrap();
-    assert_eq!(h["raw"], json!({"Authorization": "Bearer ${MEMBRANE_ADMIN_TOKEN}"}), "the config names the variable, not the token");
+    assert_eq!(h["raw"]["Authorization"], json!("Bearer ${MEMBRANE_ADMIN_TOKEN}"), "the config names the variable, not the token");
+    assert!(h["raw"]["X-Turn"].as_str().map_or(false, |t| t.starts_with("membrane::Chat:")), "and the turn: {h}");
     assert_eq!(h["sent"]["Authorization"], format!("Bearer {tok}"), "what the CLI sent is the admin's token");
     assert!(!h["argv"].to_string().contains(&tok), "the token is not in argv (a process listing shows argv)");
     assert!(!std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("with a token")))).unwrap().contains(&tok));
