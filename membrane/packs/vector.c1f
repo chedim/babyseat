@@ -1,0 +1,6 @@
+PACK vector 1
+MAPPED Vector f16
+-- THE VECTOR (#1143): `Vector:<id>.v` is a list of numbers kept in the native store, compact (f16), not in the entity's row: write a list to it, read a list of floats back in a
+-- rule (`dot`, `norm`, `unit`, `distance` take it), and `near(q, 'Vector', k)` finds the k nearest instances by cosine. The first vector written fixes the dimension; another length is
+-- refused with a receipt on the entity (`refused`). A stored row and an `entity_read` without a property show `[1024 numbers, f16]`; `entity_read` with `prop: v` prints them all.
+Vector.dim getter: len(this.v)

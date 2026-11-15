@@ -1262,5 +1262,15 @@
     "resident": [
       "Ctx"
     ]
+  },
+  "vector": {
+    "imports": [],
+    "classes": [
+      "Vector"
+    ],
+    "members": 1,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
   }
 }

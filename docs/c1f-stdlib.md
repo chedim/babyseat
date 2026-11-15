@@ -47,8 +47,13 @@ There is no `slice` builtin: a span's `text` is already cut, and `head(tail(t, l
 pack holds only the offsets.
 
 ## The builtins (`native/src/expr.rs`, `RESERVED`)
-Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit abs min max fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
+Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit near abs min max fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
 lists and dicts `sort_by pluck distinct group_by concat`; time `ago epoch localtime num`; the field `instances referencing prop why`; host functions `jsonl listdir read sql stat recall rerank pronoun`.
+`near(<list of numbers>, '<Class>', k)` (#1143, operator 2026-11-14) is the k nearest instances of a MAPPED class (`MAPPED Vector f16`, `docs/cliffvm.md`, "Storage modes") by COSINE, best first, as a list of `{eid, score}`
+dicts (`eid` text, `score` a float); a tie breaks by eid, never by position. Brute force on the CPU over the class's native store (no GPU path is reachable from it). A getter that calls it recomputes when a vector of the
+class is written, cleared or retired. An empty class is the reasoned null `empty: no vectors in class <Class>`; a query of another dimension, an all-zero query, `k < 1`, a non-number or a class name that is not text is an Error with
+its reason (as `dot` of two shapes). The browser engine answers `not available in the browser engine`. Determinism: vector results are NOT promised bit-identical across devices; on one device they are stable (the same inputs give the
+same answer, so a recompute stops the wave by early cutoff), and ties break by eid.
 There is NO `int()`, `dict()`, `merge`, `keys` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
 A new builtin needs the operator's approval; it is an arm of `call` and a name in `RESERVED`, with a Rust test.
 

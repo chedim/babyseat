@@ -207,6 +207,8 @@ pub struct Pack {
     /// `VIRTUAL <Class>` / `RESIDENT <Class>` header lines: the classes this pack declares RAM-only / always loaded (docs/cliffvm.md, "Storage modes")
     pub virtuals: Vec<String>,
     pub residents: Vec<String>,
+    /// `MAPPED <Class> <dtype>` header lines: the classes this pack declares MAPPED, their `v` kept in the native vector store as that dtype (`f16` only; vecstore.rs)
+    pub mapped: Vec<(String, String)>,
     pub setters: Vec<OnSet>,
     pub getters: Vec<Getter>,
 }
@@ -253,10 +255,24 @@ pub fn parse_full(src: &str) -> Result<Pack, String> {
             let mine = if word == "VIRTUAL" { &mut pack.virtuals } else { &mut pack.residents };
             if !mine.iter().any(|c| c == class) { mine.push(class.to_string()); }
             body.push('\n');
+        } else if line == "MAPPED" || line.starts_with("MAPPED ") {
+            // a MAPPED class (docs/cliffvm.md, "Storage modes"): `MAPPED <Class> <dtype>`, its `v` kept in the native vector store; only f16 so far
+            let mut it = line.split_whitespace().skip(1);
+            let class = it.next().ok_or(format!("line {}: MAPPED needs a class name and a dtype (`MAPPED Vector f16`)", n + 1))?;
+            let dtype = it.next().ok_or(format!("line {}: MAPPED {} needs a dtype (`MAPPED {} f16`: the only dtype so far)", n + 1, class, class))?;
+            if it.next().is_some() { return Err(format!("line {}: MAPPED takes one class and one dtype: `MAPPED {} {}`", n + 1, class, dtype)); }
+            if !class.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { return Err(format!("line {}: MAPPED {}: a class name is letters, digits and underscores", n + 1, class)); }
+            if dtype != crate::vecstore::DTYPE { return Err(format!("line {}: MAPPED {} {}: the dtype `{}` is not supported (only `{}`)", n + 1, class, dtype, dtype, crate::vecstore::DTYPE)); }
+            reserved_class(class, n + 1, false)?;
+            if !pack.mapped.iter().any(|(c, _)| c == class) { pack.mapped.push((class.to_string(), dtype.to_string())); }
+            body.push('\n');
         } else {
             body.push_str(raw);
             body.push('\n');
         }
+    }
+    if let Some((c, _)) = pack.mapped.iter().find(|(c, _)| pack.virtuals.contains(c) || pack.residents.contains(c)) {
+        return Err(format!("{c} is declared MAPPED and also VIRTUAL or RESIDENT: a class has one storage mode (leave the other line out)"));
     }
     if let Some(c) = pack.virtuals.iter().find(|c| pack.residents.contains(c)) {
         return Err(format!("{c} is declared both VIRTUAL and RESIDENT: a class has one storage mode (VIRTUAL = kept in memory only, RESIDENT = stored and always loaded; leave both out for stored and loaded on demand)"));

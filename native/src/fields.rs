@@ -357,6 +357,8 @@ pub struct Fields {
     skipped: std::collections::BTreeMap<(String, String, String, String), String>,
     /// class -> its storage mode, from the active owner packs' VIRTUAL / RESIDENT header lines (`compose`)
     storage: crate::vm::StorageMap,
+    /// class -> dtype of the MAPPED classes (`MAPPED <Class> f16`: their `v` lives in the native vector store, vecstore.rs); shared with the core
+    mapped: crate::vm::MappedMap,
     /// set while the setters of a write on a VIRTUAL entity run: what they write to a stored entity is marked `virt` in `out`, so the host journals it as an
     /// outside write (the virtual trigger is not in the journal, a replay could not derive it again)
     trigger_virtual: bool,
@@ -370,10 +372,11 @@ pub use crate::vm::Storage;
 /// A storage line of pack `n` (`VIRTUAL X` / `RESIDENT X`) that the pack may not make: the class belongs to another pack, which alone declares its mode.
 /// The text says what to do, for a pack written by a model.
 fn storage_conflict(n: &str, p: &crate::syntax::Pack, owner: &std::collections::HashMap<String, String>, packs: &std::collections::BTreeMap<String, crate::syntax::Pack>) -> Option<String> {
-    for (word, list) in [("VIRTUAL", &p.virtuals), ("RESIDENT", &p.residents)] {
+    let mapped: Vec<String> = p.mapped.iter().map(|(c, _)| c.clone()).collect();
+    for (word, list) in [("VIRTUAL", &p.virtuals), ("RESIDENT", &p.residents), ("MAPPED", &mapped)] {
         for c in list {
             let Some(o) = owner.get(c).filter(|o| *o != n) else { continue };
-            let theirs = packs.get(o).map(|q| if q.virtuals.contains(c) { " (it declares it VIRTUAL)" } else if q.residents.contains(c) { " (it declares it RESIDENT)" } else { " (it declares no storage mode: the class is stored and loaded on demand)" }).unwrap_or("");
+            let theirs = packs.get(o).map(|q| if q.virtuals.contains(c) { " (it declares it VIRTUAL)" } else if q.mapped.iter().any(|(m, _)| m == c) { " (it declares it MAPPED)" } else if q.residents.contains(c) { " (it declares it RESIDENT)" } else { " (it declares no storage mode: the class is stored and loaded on demand)" }).unwrap_or("");
             return Some(format!("pack {n}: {word} {c}: pack {o} owns {c}{theirs} and only the owner of a class declares its storage mode. Remove the line from pack {n}; to change the mode, change it in pack {o}"));
         }
     }
@@ -402,11 +405,12 @@ impl Fields {
     pub fn storage_of(&self, cls: &str) -> Storage { self.storage.read().unwrap_or_else(|e| e.into_inner()).get(cls).copied().unwrap_or(Storage::Lazy) }
     /// The class table the engine's core reads too (`Core::storage`): one shared map, written by `compose`.
     pub fn storage_handle(&self) -> crate::vm::StorageMap { self.storage.clone() }
+    pub fn mapped_handle(&self) -> crate::vm::MappedMap { self.mapped.clone() }
     pub fn goalgraph() -> Self {
         let mut f = Fields { link: Default::default(), setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false, calls_refused: false, refused_by: Default::default(), receipt_n: 0,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
             known: Default::default(), primed: false, fresh: vec![], late: vec![], flips: Default::default(), class_deferred: Default::default(), recon: Default::default(), in_run: false, packs: Default::default(),
-            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
+            owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), mapped: Default::default(), trigger_virtual: false };
         let gg = crate::syntax::parse_full(crate::translate::GOALGRAPH_CH).expect("packs/goalgraph.c1f parses");
         f.packs.insert("goalgraph".into(), gg);
         f.load_order.push("goalgraph".into());
@@ -531,7 +535,7 @@ impl Fields {
                 if let Some(why) = self.override_without_import(n, &active) { self.pack_errors.insert(n.clone(), why); continue; }
                 // STORAGE MODES (docs/cliffvm.md): only the class OWNER declares VIRTUAL / RESIDENT; a storage line claims a class no pack owns yet
                 if let Some(why) = storage_conflict(n, p, &owner, &self.packs) { self.pack_errors.insert(n.clone(), why); continue; }
-                for c in p.virtuals.iter().chain(p.residents.iter()) { owner.entry(c.clone()).or_insert_with(|| n.clone()); }
+                for c in p.virtuals.iter().chain(p.residents.iter()).chain(p.mapped.iter().map(|(c, _)| c)) { owner.entry(c.clone()).or_insert_with(|| n.clone()); }
                 for c in p.classes() { owner.entry(c).or_insert_with(|| n.clone()); }
                 active.push(n.clone());
             }
@@ -597,6 +601,7 @@ impl Fields {
         let mut modes: HashMap<String, Storage> = HashMap::new();
         for n in &active { for c in &self.packs[n].virtuals { modes.insert(c.clone(), Storage::Virtual); } for c in &self.packs[n].residents { modes.insert(c.clone(), Storage::Resident); } }
         *self.storage.write().unwrap_or_else(|e| e.into_inner()) = modes;
+        *self.mapped.write().unwrap_or_else(|e| e.into_inner()) = active.iter().flat_map(|n| self.packs[n].mapped.iter().cloned()).collect();
         self.owner = owner;
         self.setters = setters;
         self.set_getters(getters);
@@ -1228,6 +1233,11 @@ impl Fields {
         core.hear(r, None, now);
     }
 
+    /// A write from outside the engine that the host refuses (a `v` that is not a list of numbers, the wrong dimension): the receipt on the entity, as a setter's refusal.
+    pub fn refuse_outside(&mut self, core: &mut Core, eid: &str, reason: String, now: f64, seq: &mut i64) {
+        if core.docs.contains_key(eid) { self.receipt(core, eid, "door", reason, J::Null, seq, now); }
+    }
+
     /// Is `prop` one of the verbs the drivers run (drivers::VERBS) on this entity's class?
     fn is_driver_verb(core: &Core, eid: &str, prop: &str) -> bool {
         #[cfg(feature = "store")]
@@ -1237,6 +1247,14 @@ impl Fields {
     }
 
     fn emit_as(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, prop: &str, new: J, writer: &str, seq: &mut i64, now: f64, check: bool) {
+        // a MAPPED class's `v` goes to the native vector store: the write carries its COMPACT form (what the journal keeps); a refused one leaves a receipt on the entity
+        let new = if prop == crate::vm::VECTOR_PROP && core.docs.get(eid).map_or(false, |e| core.is_mapped(&e.cls)) {
+            match core.vector_in(eid, &new) {
+                Ok(Some(c)) => c,
+                Ok(None) => return,   // the same f16 values: nothing changes, nothing wakes (early cutoff)
+                Err(why) => { self.receipt(core, eid, writer, why, J::Null, seq, now); return; }
+            }
+        } else { new };
         if core.docs.get(eid).map(|e| e.props.get(prop) == Some(&new)).unwrap_or(false) { return; }   // idempotent
         // a driver verb (`Request.send`, `Command.run`, ...) is a COMMAND, not a state: each write of it is one effect, run in write order, and the slot is consumed
         // at once. The loop check guards state that could cycle inside a cascade; two commands in one cascade (two producers sending to one stream) are both run.
@@ -1288,7 +1306,7 @@ impl Fields {
     /// referenced it recalculates, live, as after a write of each of its fields to nothing.
     pub fn remove(&mut self, core: &mut Core, host: &dyn Host, eid: &str, now: f64, seq: &mut i64) {
         let Some(old) = core.docs.get(eid).map(|e| e.props.clone()) else { return };
-        if let Some(c) = core.docs.get(eid).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c)); }
+        if let Some(c) = core.docs.get(eid).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c.clone())); self.mark_key(&(crate::vm::VECTORS_READ.to_string(), c)); }
         *seq += 1;
         core.hear(Write { eid: eid.into(), prop: String::new(), new: J::Null, old: J::Null, writer: "remove".into(),
                           chain: json!({}), seq: *seq }, None, now);
@@ -1485,6 +1503,7 @@ impl Fields {
         if core.is_replica(&w.eid) { self.mark(&w.eid, &w.prop); self.mark_refs(&w.prop, &w.old, &w.new); return; }
         self.driver_effect(core, work, &w, now, seq);
         self.mark(&w.eid, &w.prop);
+        if w.prop == crate::vm::VECTOR_PROP { if let Some(c) = core.docs.get(&w.eid).map(|e| e.cls.clone()).filter(|c| core.is_mapped(c)) { self.mark_key(&(crate::vm::VECTORS_READ.to_string(), c)); } }
         // a `parents` write names kinds the entity did not have at its birth: the getters of those kinds are computed in this round (a getter
         // that gets a value then is an ordinary change: its setters fire)
         if w.prop == "parents" && w.writer == "field:error" {
