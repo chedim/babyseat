@@ -24,6 +24,14 @@ pub mod plan;
 pub mod stats;
 #[cfg(feature = "alloc-stats")]
 pub mod alloc_stats;
+#[cfg(feature = "phase-trace")]
+pub mod trace;
+
+/// A trace mark (src/trace.rs): empty unless the cargo feature `phase-trace` is on.
+#[macro_export]
+macro_rules! span { ($n:literal) => { #[cfg(feature = "phase-trace")] let _span = $crate::trace::span($n); }; }
+#[macro_export]
+macro_rules! gauge { ($n:literal, $v:expr) => { #[cfg(feature = "phase-trace")] $crate::trace::gauge($n, $v); }; }
 
 #[cfg(feature = "store")]
 pub mod store;

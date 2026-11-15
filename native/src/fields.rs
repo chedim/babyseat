@@ -1306,6 +1306,10 @@ impl Fields {
     /// referenced it recalculates, live, as after a write of each of its fields to nothing.
     pub fn remove(&mut self, core: &mut Core, host: &dyn Host, eid: &str, now: f64, seq: &mut i64) {
         let Some(old) = core.docs.get(eid).map(|e| e.props.clone()) else { return };
+        crate::span!("remove");
+        crate::gauge!("deps", self.deps.len());
+        crate::gauge!("reads", self.reads.len());
+        crate::gauge!("dirty", self.dirty.len());
         if let Some(c) = core.docs.get(eid).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c.clone())); self.mark_key(&(crate::vm::VECTORS_READ.to_string(), c)); }
         *seq += 1;
         core.hear(Write { eid: eid.into(), prop: String::new(), new: J::Null, old: J::Null, writer: "remove".into(),
@@ -1354,8 +1358,10 @@ impl Fields {
     /// The round's end: the foreign keys a getter holds (`deps`) or any evaluation read in this round are the subscriptions; one nobody reads lives the grace out.
     fn link_round(&mut self, core: &Core, now: f64) {
         if core.own_ns.is_none() { return; }
+        crate::span!("link_round");
         let reads = std::mem::take(&mut *core.foreign_reads.borrow_mut());
         if self.link.dirty {
+            crate::span!("link_scan");
             self.link.dirty = false;
             self.link.dep_keys = self.deps.iter().filter(|(k, s)| !s.is_empty() && core.is_foreign(&k.0) && !crate::link::is_special(&k.1)).map(|(k, _)| k.clone()).collect();
         }
@@ -1420,6 +1426,7 @@ impl Fields {
     /// A round: the queued writes run (getters marked, setters fired); when the queue is empty, the dirty getters
     /// recalculate, lowest level first, and a changed value is written (which can queue more). Until both are empty.
     fn run(&mut self, core: &mut Core, host: &dyn Host, mut work: VecDeque<Write>, now: f64, seq: &mut i64) {
+        crate::span!("run");
         core.last_now = now;
         self.in_run = true;
         self.complete_arrivals(core, now);

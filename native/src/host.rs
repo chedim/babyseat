@@ -607,6 +607,7 @@ impl Host {
     // ---- the engine's output -----------------------------------------------------------------------------------------
     /// Take what the engine did since the last drain and apply it to the store, stamped. -> whether there was any.
     fn drain_apply(&self) -> bool {
+        crate::span!("drain_apply");
         let _t = self.txn();
         self.fault_wanted();
         let (out, _calls) = { let mut g = self.eng(); let f = &mut g.1; (std::mem::take(&mut f.out), std::mem::take(&mut f.calls)) };
@@ -652,7 +653,7 @@ impl Host {
             { let mut g = self.eng(); let cls = class_of_eid(eid); if g.0.is_mapped(&cls) { g.0.vectors.remove_tree(&cls, eid); } }   // a retired entity's vector leaves the store, loaded or not
             // a retired `Vm:<ns>` takes the whole namespace `<ns>::` with it (docs/graph-link.md, section 2)
             let ns = Core::namespace_of_vm(eid);
-            let owned: Vec<String> = { let g = self.eng(); g.0.docs.keys().filter(|k| k.starts_with(&below) || ns.as_ref().map_or(false, |n| k.starts_with(n.as_str()))).cloned().collect() };
+            let owned: Vec<String> = { crate::span!("retire_scan"); let g = self.eng(); crate::gauge!("docs", g.0.docs.len()); g.0.docs.keys().filter(|k| k.starts_with(&below) || ns.as_ref().map_or(false, |n| k.starts_with(n.as_str()))).cloned().collect() };
             if let Some(n) = &ns { let mut g = self.eng(); let (core, f, _) = &mut *g; f.link_forget(core, n); core.unloaded.retain(|k, _| !k.starts_with(n.as_str())); }
             self.eng().0.unloaded.retain(|k, _| k != eid && !k.starts_with(&below));   // a stored child that was never loaded is deleted with the rest, and does not wait to load
             for e in std::iter::once(eid).chain(owned.iter()) {
@@ -664,13 +665,15 @@ impl Host {
             self.exec(&db, &format!("DELETE FROM {VECTORS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);   // its vector leaves the table (the engine's store dropped it with the entity)
             if let Some(n) = &ns { self.exec(&db, &format!("DELETE FROM {ROWS} WHERE substr(k, 1, length(?1)) = ?1"), params![n]); }
         }
+        crate::gauge!("retired_batch", retired.len());
         let any = any || !retired.is_empty();
         // THE MEMORY POLICY (docs/cliffvm.md, "Unload"): over the memory budget, the coldest loaded entities leave the engine, their rows kept. The VM's own: nothing a pack or
         // the model writes names an entity to evict. Not journalled, changes no value.
-        self.evict_under_pressure();
+        { crate::span!("evict"); self.evict_under_pressure(); }
         // THE COLLECTOR (docs/cliffvm.md, "Garbage collection"): the virtual entities nothing holds any more leave the engine at the end of the round. Removing them
         // is a round of its own (what read them recalculates), which drains again.
-        let dead = { let g = self.eng(); g.0.gc_dead() };
+        let dead = { crate::span!("gc_dead"); let g = self.eng(); g.0.gc_dead() };
+        crate::gauge!("dead_batch", dead.len());
         let any = any || !dead.is_empty();
         for d in &dead { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, d, ts, seq); core.note_collected(d); }
         if !dead.is_empty() { self.drain_apply(); }
