@@ -6,7 +6,7 @@ NEEDS (nothing here installs anything; it is a manual run, not a CI job):
     on its first start.
   - a cliffvm binary (`cd native && cargo build --release --no-default-features --features bin`, or any built one): --cliffvm or $CLIFFVM.
 
-  V/bin/python scripts/ha_core_smoke.py --cliffvm native/target/release/cliffvm [--work DIR] [--ha-port 8133] [--keep]
+  V/bin/python scripts/ha_core_smoke.py --cliffvm native/target/release/cliffvm [--work DIR] [--ha-port 8133] [--keep] [--skip-rest] [--skip-discovery] [--skip-inside]
 
 What it does, all on 127.0.0.1, all removed at the end (the work folder too, unless --keep):
   1. a private seat: the release launcher (scripts/seat: strict door, its own data folder, a free port), a FAKE claude that answers
@@ -15,7 +15,13 @@ What it does, all on 127.0.0.1, all removed at the end (the work folder too, unl
   3. the manual config flow over REST, the entities, the hidden user, Assist, `membrane.ask`, a refused token -> reauth -> repaired, the
      entry's removal (the hidden user goes with it); every WARNING/ERROR line of the log that names the component is printed;
   4. the add-on's Supervisor discovery (`async_step_hassio`) through Home Assistant's own flow manager, in-process (Core cannot get a real
-     Supervisor announcement): confirm form, entry, a second announcement with a new token, the Ollama hint with an `ollama` entry present.
+     Supervisor announcement): confirm form, entry, a second announcement with a new token, the Ollama hint with an `ollama` entry present;
+  5. RUN A SEAT INSIDE HOME ASSISTANT (the default path, seat_runner.py) in another real `hass`: a release tarball built here with
+     scripts/dist/build.sh from --cliffvm (this host's target), a FAKE OpenAI-compatible endpoint on loopback (it streams "Done: <message>" and
+     records each request), a fake 0.7 store in <config>/membrane/.membrane (the history cutover); the menu -> inside -> openai flow over REST,
+     the seat started by the component, Assist through it to the endpoint, the options flow (the seat restarts), a reload, Home Assistant's stop,
+     then a start that DOWNLOADS the tarball from a local release server (the entry's `release_base`, written into .storage while hass is down:
+     the flow has no field for it) and checks it, and the removal: after each, the seat process that was running is gone.
 Exit status 0 when every check passed; each check prints PASS/FAIL with its evidence.
 """
 from __future__ import annotations
@@ -259,9 +265,12 @@ async def wait_for(fn, timeout=30.0, every=0.5):
 
 async def drive_rest(hass: Hass, seat: Seat, s: aiohttp.ClientSession) -> None:
     # (a) the manual config flow
-    st, form = await hass.req(s, "POST", "/api/config/config_entries/flow", {"handler": "membrane", "show_advanced_options": False})
-    check(st == 200 and form.get("step_id") == "user" and [f["name"] for f in form.get("data_schema", [])] == ["serve_url", "serve_pass"],
-          "the manual flow shows the form (serve_url, serve_pass)", f"{st} {json.dumps(form)[:400]}")
+    st, menu = await hass.req(s, "POST", "/api/config/config_entries/flow", {"handler": "membrane", "show_advanced_options": False})
+    check(st == 200 and menu.get("type") == "menu" and menu.get("menu_options") == ["inside", "connect"], "the first step is the menu (inside first, then connect)",
+          f"{st} {json.dumps(menu)[:300]}")
+    st, form = await hass.req(s, "POST", f"/api/config/config_entries/flow/{menu['flow_id']}", {"next_step_id": "connect"})
+    check(st == 200 and form.get("step_id") == "connect" and [f["name"] for f in form.get("data_schema", [])] == ["serve_url", "serve_pass"],
+          "connect shows the form (serve_url, serve_pass)", f"{st} {json.dumps(form)[:400]}")
     st, bad = await hass.req(s, "POST", f"/api/config/config_entries/flow/{form['flow_id']}", {"serve_url": seat.url, "serve_pass": "not-a-token"})
     check(st == 200 and bad.get("errors") == {"base": "invalid_auth"}, "a wrong token is invalid_auth on the form", f"{st} {bad.get('errors')}")
     st, done = await hass.req(s, "POST", f"/api/config/config_entries/flow/{form['flow_id']}", {"serve_url": seat.url + "/", "serve_pass": seat.token()})
@@ -305,7 +314,8 @@ async def drive_rest(hass: Hass, seat: Seat, s: aiohttp.ClientSession) -> None:
     ask = next((d["services"].get("ask") for d in svcs if d["domain"] == "membrane"), None) or {}
     check(ask.get("name") == "Ask the seat" and sorted(ask.get("fields") or {}) == ["session", "text"] and (ask.get("response") or {}).get("optional") is False,
           "membrane.ask is described (services.yaml + strings: name, fields, response only)", json.dumps(ask)[:300])
-    for cat, want in (("config", ["step.user.title", "step.user_ollama.description", "step.reauth_confirm.description", "step.reauth_no_seat.description",
+    for cat, want in (("config", ["step.user.menu_options.inside", "step.connect_ollama.description", "step.reauth_confirm.description", "step.reauth_no_seat.description",
+                                  "step.inside.data.provider", "step.anthropic.data.anthropic_api_key", "step.reauth_inside.description", "abort.unsupported_platform",
                                   "step.hassio_confirm.description", "step.hassio_confirm_ollama.description", "error.invalid_auth", "abort.invalid_discovery"]),
                       ("services", ["ask.name", "send_message.fields.text.name"])):
         tr = ((await hass.ws(s, {"type": "frontend/get_translations", "language": "en", "category": cat, "integration": ["membrane"]})).get("result") or {}).get("resources") or {}
@@ -446,7 +456,7 @@ async def drive_discovery(cfg: Path, seat: Seat) -> None:
 
         from homeassistant.helpers.translation import async_get_translations
         tr = await async_get_translations(hass, "en", "config", ["membrane"])
-        keys = [k for k in ("step.hassio_confirm_ollama.description", "step.user_ollama.description", "abort.invalid_discovery")
+        keys = [k for k in ("step.hassio_confirm_ollama.description", "step.connect_ollama.description", "abort.invalid_discovery")
                 if f"component.membrane.config.{k}" not in tr]
         check(not keys, "the translations HA loads name every step and abort used", f"missing: {keys}")
 
@@ -477,6 +487,8 @@ async def drive_discovery(cfg: Path, seat: Seat) -> None:
         await hass.async_block_till_done()
         later = await mgr.async_init("membrane", context={"source": config_entries.SOURCE_HASSIO}, data=info(newer))
         user = await mgr.async_init("membrane", context={"source": config_entries.SOURCE_USER})
+        if user.get("type") == "menu":
+            user = await mgr.async_configure(user["flow_id"], {"next_step_id": "connect"})
         check(ign.get("type") == "create_entry" and later.get("type") == "abort" and later.get("reason") == "already_configured"
               and user.get("type") == "form", "discovery: an ignored seat stays ignored, the manual form is still offered",
               f"ignore={ign.get('type')} later={later.get('reason')} user={user.get('type')}/{user.get('reason')}")
@@ -485,7 +497,8 @@ async def drive_discovery(cfg: Path, seat: Seat) -> None:
             await hass.config_entries.async_remove(e.entry_id)
         await hass.async_block_till_done()
 
-        # an entry of the old component that ran the seat inside Home Assistant (1.2, a stale sensor): migrated, reauth_no_seat, then the add-on fills it
+        # an entry of the old component that ran the seat inside Home Assistant but names no Ollama URL (1.2, a stale sensor): nothing to run, so
+        # migrated with no address, reauth_no_seat, then the add-on fills it (one WITH its Ollama URL runs its seat again: the inside run, 5)
         from homeassistant.helpers import entity_registry as er
         old = config_entries.ConfigEntry(domain="membrane", title="Membrane", data={"mode": "inside"}, source="user", version=1, minor_version=2,
                                          unique_id="membrane", discovery_keys={}, subentries_data=[],
@@ -496,8 +509,8 @@ async def drive_discovery(cfg: Path, seat: Seat) -> None:
         await hass.config_entries.async_setup(old.entry_id)
         await hass.async_block_till_done()
         flows = reauths()
-        check(old.minor_version == 4 and old.data.get("serve_url") == "" and reg.async_get(stale.entity_id) is None,
-              "migration: a 1.2 inside entry is 1.4 with no address, its old sensor gone", f"{old.minor_version} {dict(old.data)} {stale.entity_id}")
+        check(old.minor_version == 5 and old.data.get("serve_url") == "" and reg.async_get(stale.entity_id) is None,
+              "migration: a 1.2 inside entry with no Ollama URL is 1.5 with no address, its old sensor gone", f"{old.minor_version} {dict(old.data)} {stale.entity_id}")
         check(old.state is config_entries.ConfigEntryState.SETUP_ERROR and len(flows) == 1 and flows[0]["step_id"] == "reauth_no_seat",
               "migration: the inside entry asks for a seat (reauth_no_seat)", f"{old.state} {[(f['step_id']) for f in flows]}")
         again = await mgr.async_init("membrane", context={"source": config_entries.SOURCE_HASSIO}, data=info(newer))
@@ -513,7 +526,8 @@ async def drive_discovery(cfg: Path, seat: Seat) -> None:
         await hass.async_block_till_done()
         pending = await mgr.async_init("membrane", context={"source": config_entries.SOURCE_HASSIO}, data=info(newer))
         manual = await mgr.async_init("membrane", context={"source": config_entries.SOURCE_USER})
-        check(manual.get("step_id") == "user_ollama" and "http://ollama.invalid:11434" in str(manual.get("description_placeholders")),
+        manual = await mgr.async_configure(manual["flow_id"], {"next_step_id": "connect"})
+        check(manual.get("step_id") == "connect_ollama" and "http://ollama.invalid:11434" in str(manual.get("description_placeholders")),
               "the manual form carries the Ollama hint", str(manual)[:300])
         made = await mgr.async_configure(manual["flow_id"], {"serve_url": seat.url, "serve_pass": newer})
         await hass.async_block_till_done()
@@ -527,6 +541,261 @@ async def drive_discovery(cfg: Path, seat: Seat) -> None:
         await hass.async_stop()
 
 
+# ---- run a seat inside Home Assistant ----------------------------------------------------------------------------------------------------------
+
+SMOKE_KEY = "sk-smoke-OPENAI-0123456789"          # the fake endpoint's key: must reach the endpoint as a bearer and appear nowhere else
+
+
+class FakeOpenAI:
+    """An OpenAI-compatible endpoint on loopback: POST /v1/chat/completions streams `Done: <the last user text>` as server-sent events. `seen`: (model, bearer, last user text)."""
+
+    def __init__(self):
+        self.seen: list[tuple[str, str, str]] = []
+
+    @staticmethod
+    def _last_user(messages) -> str:
+        for m in reversed(messages or []):
+            if m.get("role") == "user":
+                c = m.get("content")
+                return c if isinstance(c, str) else " ".join(p.get("text", "") for p in c or [] if isinstance(p, dict))
+        return ""
+
+    async def _chat(self, req):
+        from aiohttp import web
+        body = await req.json()
+        text = self._last_user(body.get("messages"))
+        self.seen.append((str(body.get("model")), req.headers.get("Authorization", ""), text))
+        r = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await r.prepare(req)
+        for piece in ("Done: ", text.splitlines()[-1] if text else ""):
+            await r.write(("data: " + json.dumps({"choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]}) + "\n\n").encode())
+        await r.write(("data: " + json.dumps({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}) + "\n\ndata: [DONE]\n\n").encode())
+        await r.write_eof()
+        return r
+
+    async def start(self):
+        from aiohttp import web
+        app = web.Application()
+        app.router.add_post("/v1/chat/completions", self._chat)
+        self.runner = web.AppRunner(app)
+        await self.runner.setup()
+        site = web.TCPSite(self.runner, "127.0.0.1", 0)
+        await site.start()
+        self.url = f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}"
+        return self
+
+
+class ReleaseFolder:
+    """The release download folder on loopback (what `release_base` names); `asked` is every path asked."""
+
+    def __init__(self, folder: Path):
+        self.folder, self.asked = folder, []
+
+    async def _get(self, req):
+        from aiohttp import web
+        self.asked.append(req.path)
+        f = self.folder / req.match_info["name"]
+        return web.Response(body=f.read_bytes()) if f.is_file() else web.Response(status=404)
+
+    async def start(self):
+        from aiohttp import web
+        app = web.Application()
+        app.router.add_get("/{name}", self._get)
+        self.runner = web.AppRunner(app)
+        await self.runner.setup()
+        site = web.TCPSite(self.runner, "127.0.0.1", 0)
+        await site.start()
+        self.url = f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}"
+        return self
+
+
+def old_store(path: Path) -> None:
+    """A 0.7 Python seat's store, the real schema (c_sessions, c_messages, c_entities: native/tests/legacy_fixture), one session of one question and its answer."""
+    import sqlite3
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cx = sqlite3.connect(path)
+    cx.executescript("CREATE TABLE c_sessions (k TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE c_messages (k TEXT PRIMARY KEY, body TEXT NOT NULL); "
+                     "CREATE TABLE c_entities (k TEXT PRIMARY KEY, body TEXT NOT NULL);")
+    s = {"id": "ses_old", "title": "From the old seat", "agent": "build", "directory": "/config/membrane", "projectID": "membrane", "version": "1.0",
+         "time": {"created": 1_790_000_000_000, "updated": 1_790_000_100_000}}
+    cx.execute("INSERT INTO c_sessions VALUES (?, ?)", ("ses_old", json.dumps({"s": s})))
+    u = {"info": {"role": "user", "id": "msg_u1", "agent": "build", "time": {"created": 1_790_000_010_000}, "sessionID": "ses_old"},
+         "parts": [{"text": "an old question about the porch light", "id": "prt_u1", "type": "text", "sessionID": "ses_old", "messageID": "msg_u1"}]}
+    a = {"info": {"role": "assistant", "id": "msg_a1", "parentID": "msg_u1", "agent": "build", "mode": "build", "sessionID": "ses_old", "finish": "stop",
+                  "time": {"created": 1_790_000_010_050, "completed": 1_790_000_012_000}},
+         "parts": [{"id": "prt_a1", "type": "text", "text": "an old answer", "time": {"start": 1, "end": 2}}]}
+    cx.execute("INSERT INTO c_messages VALUES (?, ?)", ("ses_old|msg_u1", json.dumps({"n": 1, "sid": "ses_old", "mid": "msg_u1", "row": u})))
+    cx.execute("INSERT INTO c_messages VALUES (?, ?)", ("ses_old|msg_a1", json.dumps({"n": 2, "sid": "ses_old", "mid": "msg_a1", "row": a})))
+    cx.commit()
+    cx.close()
+
+
+def pid_alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (ProcessLookupError, TypeError, ValueError):
+        return False
+
+
+def seat_pid(cfg: Path):
+    try:
+        return int((cfg / "membrane" / "seat.pid").read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def argv_of(pid) -> str:
+    return subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+
+
+async def mcp_read(s, cfg: Path, port: int, spec: str):
+    tok = (cfg / "membrane" / "admin.token").read_text().strip()
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_read", "arguments": {"spec": spec}}}
+    async with s.post(f"http://127.0.0.1:{port}/mcp", json=body, headers={"Authorization": f"Bearer {tok}"}) as r:
+        got = await r.json(content_type=None)
+    return ((got.get("result") or {}).get("content") or [{}])[0].get("text", "")
+
+
+async def drive_inside(work: Path, cliffvm: str, ha_port: int, s) -> None:
+    sys.path.insert(0, str(ROOT))
+    from custom_components.membrane import seat_runner as sr      # the platform map and the asset name (the hass venv has what its package imports)
+    sys.path.pop(0)
+    version = json.loads((CC / "manifest.json").read_text())["version"]
+    target = sr.release_target()
+    rel, stage = work / "release", work / "stage" / version
+    rel.mkdir(parents=True, exist_ok=True)
+    tarball = rel / sr.asset_name(version, target)
+    b = subprocess.run(["sh", str(ROOT / "scripts" / "dist" / "build.sh"), "--bin", cliffvm, "--out", str(stage), "--archive", str(tarball)],
+                       capture_output=True, text=True)
+    check(b.returncode == 0 and tarball.is_file() and Path(str(tarball) + ".sha256").is_file(), f"the release tarball of {version} ({target}) is built",
+          (b.stdout + b.stderr)[-300:])
+    cfg = config_dir(work / "ha-inside", ha_port)
+    # the first start finds the dist folder in place (the flow names no release_base, and nothing may reach GitHub here); the download is step (f)
+    shutil.copytree(stage, cfg / "membrane" / "app" / version)
+    old_store(cfg / "membrane" / ".membrane" / "field.sqlite" / "field.sqlite3")
+    oai = await FakeOpenAI().start()
+    relsrv = await ReleaseFolder(rel).start()
+    hass = Hass(cfg, ha_port)
+    try:
+        await hass.start(s)
+        await hass.onboard(s)
+
+        # (a) the flow over REST: menu -> inside -> openai
+        st, menu = await hass.req(s, "POST", "/api/config/config_entries/flow", {"handler": "membrane"})
+        fid = menu.get("flow_id")
+        st, pick = await hass.req(s, "POST", f"/api/config/config_entries/flow/{fid}", {"next_step_id": "inside"})
+        check(pick.get("step_id") == "inside" and [f["name"] for f in pick.get("data_schema", [])] == ["provider"],
+              "inside: the provider form", json.dumps(pick)[:300])
+        st, form = await hass.req(s, "POST", f"/api/config/config_entries/flow/{fid}", {"provider": "openai"})
+        check(form.get("step_id") == "openai" and {f["name"] for f in form.get("data_schema", [])} == {"base_url", "model", "api_key", "seat_name"},
+              "inside: the openai form (base_url, model, api_key, seat_name)", json.dumps(form)[:300])
+        st, bad = await hass.req(s, "POST", f"/api/config/config_entries/flow/{fid}", {"base_url": "not a url", "model": "m"})
+        check(bad.get("errors") == {"base_url": "invalid_url"}, "inside: a URL that is not http(s) stays on the form", json.dumps(bad)[:200])
+        t0 = time.time()
+        st, done = await hass.req(s, "POST", f"/api/config/config_entries/flow/{fid}", {"base_url": oai.url, "model": "smoke-model", "api_key": SMOKE_KEY})
+        check(done.get("type") == "create_entry", "inside: the entry is made", json.dumps(done)[:300])
+        entry_id = (done.get("result") or {}).get("entry_id")
+
+        async def loaded():
+            _, es = await hass.req(s, "GET", "/api/config/config_entries/entry?domain=membrane")
+            return es if es and es[0].get("state") == "loaded" else None
+        es = await wait_for(loaded, 120)
+        stored = json.loads((cfg / ".storage" / "core.config_entries").read_text())["data"]["entries"]
+        data = next(e["data"] for e in stored if e["domain"] == "membrane")
+        port = int(data.get("serve_port") or 0)
+        pid1 = seat_pid(cfg)
+        check(bool(es) and data.get("mode") == "inside" and data.get("provider") == "openai" and port > 0,
+              "inside: the entry is loaded, its seat on 127.0.0.1", f"{time.time() - t0:.1f} s; port {port}; state {json.dumps(es)[:200]}")
+        cmd = argv_of(pid1)
+        check(pid_alive(pid1) and "serve" in cmd and f"--port {port}" in cmd and "--bind 127.0.0.1" in cmd and SMOKE_KEY not in cmd,
+              "inside: the seat process runs `cliffvm serve` with no key on its command line", cmd[:300])
+        async with s.get(f"http://127.0.0.1:{port}/global/health") as r:
+            check(r.status == 401, "inside: the seat's door wants a token", str(r.status))
+
+        # (b) Assist -> the component -> the seat -> the endpoint
+        _, states = await hass.req(s, "GET", "/api/states")
+        conv = next((x["entity_id"] for x in states if x["entity_id"].startswith("conversation.") and "membrane" in x["entity_id"]), None)
+        st, said = await hass.req(s, "POST", "/api/conversation/process", {"text": "turn the porch light on", "agent_id": conv, "language": "en"})
+        speech = (((said or {}).get("response") or {}).get("speech") or {}).get("plain", {}).get("speech", "") if isinstance(said, dict) else ""
+        check(st == 200 and "Done:" in speech and "turn the porch light on" in speech, "inside: Assist answers through the seat the component started",
+              f"{st} {speech!r}")
+        check(any(m == "smoke-model" and a == f"Bearer {SMOKE_KEY}" and "porch light" in t for m, a, t in oai.seen),
+              "inside: the endpoint got the model and the key as a bearer", json.dumps([(m, a[:12] + "...", t[-60:]) for m, a, t in oai.seen])[:400])
+
+        # (c) the history cutover finds <config>/membrane/.membrane by itself
+        async def cut():
+            txt = await mcp_read(s, cfg, port, "Legacy:cutover")
+            return txt if '"done"' in txt or "done" in txt.split("state", 1)[-1][:20] else None
+        txt = await wait_for(cut, 60, 1)
+        check(bool(txt) and ".membrane/field.sqlite/field.sqlite3" in txt, "inside: the history cutover found the 0.7 store in <config>/membrane/.membrane and imported it",
+              (txt or await mcp_read(s, cfg, port, "Legacy:cutover"))[:400])
+
+        # (d) the options flow: another model, the key kept (an empty key field): the seat restarts with it
+        st, of = await hass.req(s, "POST", "/api/config/config_entries/options/flow", {"handler": entry_id})
+        st, of2 = await hass.req(s, "POST", f"/api/config/config_entries/options/flow/{of['flow_id']}", {"provider": "openai"})
+        st, ofd = await hass.req(s, "POST", f"/api/config/config_entries/options/flow/{of['flow_id']}", {"base_url": oai.url, "model": "smoke-model-2"})
+        check(of.get("step_id") == "init" and of2.get("step_id") == "openai" and ofd.get("type") == "create_entry", "options: provider -> openai form -> saved",
+              f"{of.get('step_id')} {of2.get('step_id')} {ofd.get('type')}")
+
+        async def restarted():
+            p = seat_pid(cfg)
+            return p if p and p != pid1 and pid_alive(p) and await loaded() else None
+        pid2 = await wait_for(restarted, 120)
+        check(bool(pid2) and not pid_alive(pid1), "options: the seat restarted (the old process is gone)", f"{pid1} -> {pid2}")
+        st, said = await hass.req(s, "POST", "/api/conversation/process", {"text": "and the kitchen", "agent_id": conv, "language": "en"})
+        speech = (((said or {}).get("response") or {}).get("speech") or {}).get("plain", {}).get("speech", "") if isinstance(said, dict) else ""
+        check("Done:" in speech and any(m == "smoke-model-2" and a == f"Bearer {SMOKE_KEY}" for m, a, _ in oai.seen),
+              "options: the new model answers, the stored key kept", f"{speech!r} {[m for m, _, _ in oai.seen]}")
+
+        # (e) a reload, then Home Assistant's stop: each time the running seat is gone
+        st, _ = await hass.req(s, "POST", f"/api/config/config_entries/entry/{entry_id}/reload")
+
+        async def reloaded():
+            p = seat_pid(cfg)
+            return p if p and p != pid2 and pid_alive(p) and await loaded() else None
+        pid3 = await wait_for(reloaded, 120)
+        check(bool(pid3) and not pid_alive(pid2), "reload: a new seat, the old process gone", f"{pid2} -> {pid3}")
+        await asyncio.to_thread(hass.stop)
+        check(not pid_alive(pid3), "Home Assistant's stop stops the seat", f"pid {pid3}: {argv_of(pid3)[:120]}")
+
+        # (f) the download: no dist folder, the entry names the local release (written while hass is down), the start fetches and checks it
+        shutil.rmtree(cfg / "membrane" / "app")
+        store = cfg / ".storage" / "core.config_entries"
+        doc = json.loads(store.read_text())
+        for e in doc["data"]["entries"]:
+            if e["domain"] == "membrane":
+                e["data"]["release_base"] = relsrv.url
+        store.write_text(json.dumps(doc, indent=2))
+        await hass.start(s)
+        es = await wait_for(loaded, 180)
+        app = cfg / "membrane" / "app" / version
+        check(bool(es) and relsrv.asked == [f"/{tarball.name}", f"/{tarball.name}.sha256"] and (app / "bin" / "cliffvm").is_file()
+              and (app / "MANIFEST.sha256").read_text() == (stage / "MANIFEST.sha256").read_text(),
+              "download: the start fetched the tarball and its sha256 from release_base, checked and unpacked it", f"asked {relsrv.asked}; {json.dumps(es)[:150]}")
+        st, said = await hass.req(s, "POST", "/api/conversation/process", {"text": "after the download", "agent_id": conv, "language": "en"})
+        speech = (((said or {}).get("response") or {}).get("speech") or {}).get("plain", {}).get("speech", "") if isinstance(said, dict) else ""
+        check("Done:" in speech and "after the download" in speech, "download: Assist answers through the downloaded seat", repr(speech))
+        pid4 = seat_pid(cfg)
+
+        # (g) the removal: the seat goes with the entry
+        st, gone = await hass.req(s, "DELETE", f"/api/config/config_entries/entry/{entry_id}")
+        await asyncio.sleep(1)
+        check(st == 200 and pid4 and not pid_alive(pid4) and seat_pid(cfg) is None, "removal: the seat process is gone", f"{st} pid {pid4} {argv_of(pid4)[:100]}")
+    finally:
+        await asyncio.to_thread(hass.stop)
+        await oai.runner.cleanup()
+        await relsrv.runner.cleanup()
+        for p in (seat_pid(cfg),):
+            if p and pid_alive(p) and str(cfg) in argv_of(p):      # only a seat of this run's folder
+                os.kill(p, 15)
+    logs = "\n".join(x.read_text(errors="replace") for x in cfg.glob("hass.log*"))
+    check(SMOKE_KEY not in logs and not re.search(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.", logs), "no key and no token in hass.log", "")
+    check(any("membrane seat:" in ln for ln in logs.splitlines()), "the seat's own lines reach Home Assistant's log", "")
+    lines = hass.component_lines()
+    check(not lines, "inside: no unexpected WARNING/ERROR from the component", "\n      ".join(lines[:40]))
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cliffvm", default=os.environ.get("CLIFFVM", str(ROOT / "native" / "target" / "release" / "cliffvm")))
@@ -535,6 +804,7 @@ async def main() -> int:
     ap.add_argument("--keep", action="store_true", help="keep the work folder (logs, config)")
     ap.add_argument("--skip-rest", action="store_true")
     ap.add_argument("--skip-discovery", action="store_true")
+    ap.add_argument("--skip-inside", action="store_true")
     a = ap.parse_args()
     if not Path(a.cliffvm).is_file():
         raise SystemExit(f"no cliffvm at {a.cliffvm}")
@@ -561,6 +831,9 @@ async def main() -> int:
             await drive_discovery(config_dir(work / "ha-discovery", a.ha_port), seat)
             lines = await asyncio.to_thread(Hass(work / "ha-discovery", 0).component_lines)
             check(not lines, "no WARNING/ERROR from the component in the in-process run", "\n      ".join(lines[:40]))
+        if not a.skip_inside:
+            async with aiohttp.ClientSession() as s:
+                await drive_inside(work, a.cliffvm, a.ha_port, s)
     finally:
         if hass is not None:
             await asyncio.to_thread(hass.stop)

@@ -27,8 +27,8 @@ from .const import (CONF_BACKEND, CONF_HA_USER_ID, CONF_MODE, CONF_MODEL, CONF_O
                     CONF_SERVE_PORT, CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_PORT, DEFAULT_SERVE_USER, DOMAIN, ISSUE_SEAT_STOPPED, MODE_INSIDE, SEAT_DIR)
 from .coordinator import SeatHealth
 from .house import House, find_user
-from .seat_client import SeatClient, SeatSessionGone
-from .seat_options import SeatOptionsError, seat_facts
+from .seat_client import SeatClient, SeatError, SeatSessionGone
+from .seat_options import DEFAULT_ANTHROPIC_MODEL, SeatOptionsError, seat_facts
 from .seat_runner import (APP_DIR, RELEASE_BASE, DistError, SeatProcess, SeatStartError, UnsupportedPlatform, component_version, ensure_dist,
                           free_port, port_free, release_target)
 
@@ -150,6 +150,17 @@ async def _start_seat(hass: HomeAssistant, entry: ConfigEntry) -> SeatProcess:
     return seat
 
 
+async def _apply_model(client: SeatClient, settings: dict) -> None:
+    """The entry's model is the seat's pick. The seat seeds its pick from the `minds` fact only at its first start (router.c1f), so a model changed in
+    Configure is written through the seat's own options route (what the model select posts) when the seat runs on another one."""
+    model = settings.get(CONF_MODEL) or (DEFAULT_ANTHROPIC_MODEL if settings.get(CONF_PROVIDER) == "anthropic" else "")
+    try:
+        if model and ((await client.options()).get("background") or {}).get("loops") != model:
+            await client.set_model(model)
+    except SeatError as e:
+        _LOGGER.warning("membrane: the seat did not take the model %s: %s", model, e)
+
+
 async def _settings_changed(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """The options flow changed the seat's settings: the entry is reloaded (the seat restarts with them). Other updates (the hidden user's id) are not."""
     data = getattr(entry, "runtime_data", None)
@@ -173,6 +184,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             seat.on_token = client.set_token               # the runner's fresh token (it mints one a day) is the one the client sends
         health = SeatHealth(hass, entry, client)
         await health.async_config_entry_first_refresh()          # ConfigEntryAuthFailed -> reauth; the seat down -> HA retries
+        if seat is not None:
+            await _apply_model(client, seat.settings)
         house = House(hass, client, entry)
         await house.ensure_user()                                 # the user every call runs as: created once, found again after
         entry.runtime_data = SeatData(client, health, house, seat)

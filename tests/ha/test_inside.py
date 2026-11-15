@@ -409,3 +409,21 @@ def test_a_setup_that_fails_after_the_seat_started_stops_the_seat(ha, run, tmp_p
         return pid, _alive(pid)
     pid, alive = _setup_inside(pkg, hass, tmp_path, run, body)
     assert not alive
+
+
+def test_the_entrys_model_is_the_seats_pick_at_every_start(ha, run, tmp_path):
+    """The seat seeds its pick (Minds:seat) from the `minds` fact only at its FIRST start (router.c1f): a model changed in Configure would never reach it
+    (the real Home Assistant run, scripts/ha_core_smoke.py, answered "No Anthropic API key" after the change). The setup writes the entry's model through
+    the seat's own options route when the seat runs on another; a seat already on it gets no write."""
+    pkg, hass = ha
+    posts = tmp_path / "config" / "membrane" / "fake-posts.jsonl"
+
+    async def body(e, srv):
+        await pkg.async_setup_entry(hass, e)
+        first = posts.read_text().splitlines() if posts.exists() else []
+        await pkg.async_unload_entry(hass, e)
+        await pkg.async_setup_entry(hass, e)
+        return first, posts.read_text().splitlines() if posts.exists() else []
+    first, after = _setup_inside(pkg, hass, tmp_path, run, body, model="claude-opus-5-5")
+    assert [json.loads(x) for x in first] == [{"loops": "claude-opus-5-5"}]
+    assert after == first, "the seat already runs on it: no second write"

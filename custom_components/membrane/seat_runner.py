@@ -221,7 +221,9 @@ async def ensure_dist(session: aiohttp.ClientSession, run_blocking, app_dir: Pat
 # ---- (c) the process -------------------------------------------------------------------------------------------------------------------------------
 
 def port_free(port: int) -> bool:
+    """Nothing listens on 127.0.0.1:`port`. SO_REUSEADDR as the seat's own listener binds: a port a stopped seat left in TIME_WAIT is free."""
     s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         s.bind(("127.0.0.1", int(port)))
         return True

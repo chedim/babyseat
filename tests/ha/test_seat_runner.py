@@ -360,3 +360,20 @@ def test_redact_hides_the_secrets_and_anything_token_shaped(sr):
     line = "key sk-ant-SECRET-abcdef tok eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.c2ln and tok-123 ok"
     out = sr.redact(line, ["tok-123", ""])
     assert "SECRET" not in out and "eyJhbGci" not in out and "tok-123" not in out and out.endswith("ok")
+
+
+def test_a_port_a_stopped_seat_just_left_is_free_again(sr):
+    """Real Home Assistant (scripts/ha_core_smoke.py): every restart moved the seat to another port: the stopped seat's connections leave the port in
+    TIME_WAIT, which a bind without SO_REUSEADDR counts as taken (the seat's own listener binds with it)."""
+    import socket
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen()
+    port = srv.getsockname()[1]
+    c = socket.create_connection(("127.0.0.1", port))
+    a, _ = srv.accept()
+    a.close()                       # the server side closes first: its end of the connection is in TIME_WAIT
+    c.close()
+    srv.close()
+    assert sr.port_free(port)

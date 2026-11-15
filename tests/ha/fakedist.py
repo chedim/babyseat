@@ -9,6 +9,7 @@ its environment and its pid):
   {"mode": "exit", "code": C}          exits C at once, after a stderr line that holds a token-shaped string
   {"mode": "nohealth"}                 writes the token and never answers health (no listener)
   {"mode": "ignore_term"}              like ok, but SIGTERM is ignored (the runner has to kill it)
+  GET/POST /membrane/options           the seat's model pick: `want["loops"]` (default "first-model") until a POST {loops} writes <data>/fake-loops; each POST is a line of fake-posts.jsonl
 `cliffvm token mint ...` prints `minted-<n>` (n counts the mints in <secret file>.mints).
 """
 from __future__ import annotations
@@ -67,6 +68,14 @@ class H(BaseHTTPRequestHandler):
         h = self.headers.get("Authorization", "")
         got = base64.b64decode(h[6:]).decode().partition(":")[2] if h.startswith("Basic ") else (h[7:] if h.startswith("Bearer ") else "")
         code, body = (200, b'{"healthy":true}') if self.path == "/global/health" and got == token else ((401, b'{}') if got != token else (404, b'{}'))
+        if self.path == "/membrane/options" and got == token:          # the seat's model pick (Minds:seat.loops), kept in <data>/fake-loops; each POST logged
+            f = os.path.join(data, "fake-loops")
+            if self.command == "POST":
+                loops = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}").get("loops")
+                open(f, "w").write(loops)
+                open(os.path.join(data, "fake-posts.jsonl"), "a").write(json.dumps({"loops": loops}) + "\n")
+            cur = open(f).read() if os.path.exists(f) else want.get("loops", "first-model")
+            code, body = 200, json.dumps({"background": {"loops": cur, "models": [cur]}}).encode()
         self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.end_headers()
         self.wfile.write(body)
     do_POST = do_GET
