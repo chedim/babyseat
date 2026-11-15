@@ -51,35 +51,6 @@ pub fn f16_to_f32(h: u16) -> f32 {
     f32::from_bits(bits)
 }
 
-const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-pub fn to_b64(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for c in bytes.chunks(3) {
-        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
-        s.push(B64[(n >> 18) as usize & 63] as char);
-        s.push(B64[(n >> 12) as usize & 63] as char);
-        s.push(if c.len() > 1 { B64[(n >> 6) as usize & 63] as char } else { '=' });
-        s.push(if c.len() > 2 { B64[n as usize & 63] as char } else { '=' });
-    }
-    s
-}
-
-pub fn from_b64(s: &str) -> Result<Vec<u8>, String> {
-    let val = |c: u8| B64.iter().position(|x| *x == c).map(|p| p as u32);
-    let t = s.trim_end_matches('=').as_bytes();
-    let mut out = Vec::with_capacity(t.len() * 3 / 4);
-    for c in t.chunks(4) {
-        if c.len() == 1 { return Err("base64: a stray character".into()); }
-        let mut n = 0u32;
-        for (i, ch) in c.iter().enumerate() { n |= val(*ch).ok_or("base64: not a base64 character")? << (18 - 6 * i); }
-        out.push((n >> 16) as u8);
-        if c.len() > 2 { out.push((n >> 8) as u8); }
-        if c.len() > 3 { out.push(n as u8); }
-    }
-    Ok(out)
-}
-
 /// A list of numbers -> f16 words. Refuses (with the reason) a non-number, an infinite or too large one, an empty list.
 pub fn to_f16(list: &[serde_json::Value]) -> Result<Vec<u16>, String> {
     if list.is_empty() { return Err("an empty list is no vector".into()); }
@@ -98,11 +69,11 @@ pub fn bytes_to_words(b: &[u8]) -> Result<Vec<u16>, String> {
 }
 
 /// The compact object of a vector (what the engine carries and the journal keeps).
-pub fn compact_of(words: &[u16]) -> serde_json::Value { serde_json::json!({ COMPACT_KEY: to_b64(&words_to_bytes(words)) }) }
+pub fn compact_of(words: &[u16]) -> serde_json::Value { serde_json::json!({ COMPACT_KEY: crate::jwt::base64_encode(&words_to_bytes(words)) }) }
 /// The f16 words of a compact object (None when the value is not one).
 pub fn words_of_compact(v: &serde_json::Value) -> Option<Result<Vec<u16>, String>> {
     let s = v.as_object().filter(|o| o.len() == 1)?.get(COMPACT_KEY)?.as_str()?;
-    Some(from_b64(s).and_then(|b| bytes_to_words(&b)))
+    Some(crate::jwt::base64_decode(s, false).ok_or_else(|| "base64: not valid base64".to_string()).and_then(|b| bytes_to_words(&b)))
 }
 /// What a stored row and a door read of `v` show instead of the numbers.
 pub fn summary(n: usize) -> serde_json::Value { serde_json::json!(format!("[{n} numbers, {DTYPE}]")) }

@@ -155,11 +155,11 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
             Err(e) => { eprintln!("cliffvm: {e}"); return 2; }
         }
     }
-    if let Some(n) = r.facts.iter().find(|(k, _)| k == "effect_workers").and_then(|(_, v)| v.as_u64()) { h.set_effect_workers(n.max(1) as usize); }   // the cap on Command / File / Fetch effects running at once (default 4)
-    if let Some(n) = r.facts.iter().find(|(k, _)| k == "command_timeout_s").and_then(|(_, v)| v.as_f64()) { h.set_command_timeout(n); }   // the limit of a Command run that states no timeout_s (default 120 s)
-    if let Some(n) = r.facts.iter().find(|(k, _)| k == "warm_rows").and_then(|(_, v)| v.as_u64()) { h.set_warm_rows(n as usize); }   // how many lazy rows the warm boot loads in the background (default host::DEFAULT_WARM_ROWS; 0 = none)
-    // the memory policy (docs/cliffvm.md, "Unload"): the budget, the fractions and the batch are the operator's boot facts; a fact left unnamed gets the launcher's default (10% of the machine's memory, a batch of 200, a hard line at 90%), see host.rs `MemoryConfig::with_defaults`
     let fact = |n: &str| r.facts.iter().find(|(k, _)| k == n).map(|(_, v)| v);
+    if let Some(n) = fact("effect_workers").and_then(|v| v.as_u64()) { h.set_effect_workers(n.max(1) as usize); }   // the cap on Command / File / Fetch effects running at once (default 4)
+    if let Some(n) = fact("command_timeout_s").and_then(|v| v.as_f64()) { h.set_command_timeout(n); }   // the limit of a Command run that states no timeout_s (default 120 s)
+    if let Some(n) = fact("warm_rows").and_then(|v| v.as_u64()) { h.set_warm_rows(n as usize); }   // how many lazy rows the warm boot loads in the background (default host::DEFAULT_WARM_ROWS; 0 = none)
+    // the memory policy (docs/cliffvm.md, "Unload"): the budget, the fractions and the batch are the operator's boot facts; a fact left unnamed gets the launcher's default (10% of the machine's memory, a batch of 200, a hard line at 90%), see host.rs `MemoryConfig::with_defaults`
     let mem = host::MemoryConfig { budget_mb: fact("memory_budget_mb").and_then(|v| v.as_u64()), soft: fact("unload_soft").and_then(|v| v.as_f64()), hard: fact("unload_hard").and_then(|v| v.as_f64()), batch: fact("unload_batch").and_then(|v| v.as_u64()) }.with_defaults(host::physical_memory_bytes());
     h.set_memory(mem.clone());
     // TEST ONLY: MEMBRANE_TEST_RSS names a file that holds the resident size in bytes; the policy reads it at every drain instead of the process's own (unreadable: the real one)
@@ -168,9 +168,8 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
     h.load_stored_entities();                    // then every other entity the model wrote (banner lines, trips, messages), minus what a getter computed
     h.rebuild();
     // the eval accounting (stats.rs): on unless `--fact eval_stats=false`; `Stats:eval` is told every `eval_stats_window_s` (default stats::DEFAULT_WINDOW_S); needs the shipped pack `stats`
-    let fact = |k: &str| r.facts.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
     let has_pack = h.engine().lock().unwrap_or_else(|e| e.into_inner()).1.has_pack("stats");   // the pack that declares the class
-    if has_pack && fact("eval_stats") != Some(json!(false)) { h.enable_stats(fact("eval_stats_window_s").and_then(|v| v.as_f64()).filter(|w| *w > 0.0).unwrap_or(crate::stats::DEFAULT_WINDOW_S)); }
+    if has_pack && fact("eval_stats") != Some(&json!(false)) { h.enable_stats(fact("eval_stats_window_s").and_then(|v| v.as_f64()).filter(|w| *w > 0.0).unwrap_or(crate::stats::DEFAULT_WINDOW_S)); }
     // THE BOOT PLAN (plan.rs): boot.json's steps in the order boot.c1f says. This host runs none of them itself (they are the Python
     // seat's steps: nothing here to run), so each is `skipped`; what the plan decides is when the boot is over. Then `started`.
     // the plan lives with the first app: its folder, or the folder a pack file is in

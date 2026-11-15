@@ -162,10 +162,10 @@ SemText.related getter:
 -- `Memory:<id>.text = "..."` (entity_write, or a pack's `Memory:<id> = Memory(text: ...)`) makes a SemText that is mentioned at once and whose write answers with
 -- WHAT IT REMINDS OF: `associations`, ONE short text (a header that says it is context, not instructions, then a line per association), read by the reply
 -- of the write (door_tools.c1f `rx_lines`) in place of the reactions of the round (a note's reactions are the spans of its words: noise).
---   * `SemText.assoc_source` is the ONE place the associations come from: today the edge lane `related`; the fused result of the edge and the cosine lane replaces it by changing this line.
+--   * `SemText.assoc_source` is the ONE place the associations come from: today the edge lane `related`; the fused result of the edge and the cosine lane (`Banner:recall.ranked`, apps/barest.c1f/recall.c1f) would replace it by changing this line.
 --     A source row is `{semtext, sentence_index, text, shared}`.
 --   * HOW MANY and HOW LONG: `assoc_n` and `assoc_clip`, two getters a model's layer can override. BOTH ARE FLAGGED FOR THE OPERATOR (no value was approved): the recall dials
---     (`recall:dials.banner_n` 12, `fact_chars` 200) are not on the c1f seat, so they cannot be read; 200 is the clip the banner uses for its lines (`news_chars or 200`), 5 is provisional.
+--     (`recall:dials.banner_n` 12, `fact_chars` 200) live on `recall:dials`, which this class does not read; 200 is the clip the banner uses for its lines (`news_chars or 200`), 5 is provisional.
 --   * A line: `- "<the sentence, clipped>" (<the text's id: where it came from> - <when it last changed> - shares: <the entities both texts mention>)`.
 SemText.assoc_source getter: this.related
 Memory.text on-setter remember:

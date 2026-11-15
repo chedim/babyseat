@@ -6,8 +6,8 @@ IMPORT fetch 1
 IMPORT boot 1
 -- THE RECALL PART OF THE BANNER (#1143, operator 2026-11-14, stages 2 and 3 of the semantic field). `Banner:recall` is a banner PART (the multi-banner mechanism, packs/chat_turn.c1f
 -- `banner_more`): its `words` hold the lines recalled for the message the turn is answering (the ask), and the turn shows them after the main banner. Like the main banner it is the
--- model's: reassign its `parents` to a class of your own that defines `words` (Help:banner), or write `Banner:recall.words` is refused because a getter owns it.
--- THE ASK is the newest queued message (a setter below hears `queued`); it arms the edge lane on the message's body and, when the seat has a model backend, asks it ONE embedding of the message text.
+-- model's: reassign its `parents` to a class of your own that defines `words` (Help:banner); writing `Banner:recall.words` is refused because a getter owns it.
+-- THE ASK is the oldest queued message whose turn has not started, else the latest (a setter below hears `queued`); it arms the edge lane on the message's body and, when the seat has a model backend, asks it ONE embedding of the message text.
 -- TWO LANES, each a ranked list of SENTENCES (key = the text's eid + '#' + the sentence's start):
 --   EDGES   `SemText.related` of the ask's body (packs/mentions.c1f): sentences of other texts that mention the same Word/Identifier/Path entities, best first, at most `the dial entity_pool_max`.
 --   COSINE  the sentences whose vectors are nearest the ask's vector, best first, at most `the dial pool` (the vectors are `Vector:of:<key>:s:<start>` with `of` and `start`, the embedding pipeline's).

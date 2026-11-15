@@ -265,15 +265,14 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                     }
                 }) };
                 let slot = crate::store::child_slot(sh, eid);
-                let (mut out_r, mut err_r) = {
+                let (mut out_r, mut err_r, in_w) = {
                     let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
                     *g = Some(child);
                     let ch = g.as_mut().unwrap();
-                    (ch.stdout.take(), ch.stderr.take())
+                    (ch.stdout.take(), ch.stderr.take(), ch.stdin.take())
                 };
-                let mut in_w = slot.lock().unwrap_or_else(|e| e.into_inner()).as_mut().and_then(|ch| ch.stdin.take());
                 // the write is on its own thread: the child may fill its output pipes (read below) before it has read all of its input; dropping the handle closes the pipe (end of input)
-                let in_t = stdin_text.map(|text| std::thread::spawn(move || { if let Some(mut w) = in_w.take() { let _ = std::io::Write::write_all(&mut w, text.as_bytes()); } }));
+                let in_t = stdin_text.map(|text| std::thread::spawn(move || { if let Some(mut w) = in_w { let _ = std::io::Write::write_all(&mut w, text.as_bytes()); } }));
                 let err_t = std::thread::spawn(move || { let mut s = String::new(); if let Some(r) = err_r.as_mut() { let _ = std::io::Read::read_to_string(r, &mut s); } s });
                 // `partial: true`: what each read brings, cut at its last newline, is pushed as an outside birth `Chunk:<command>:<n>` ({cmd, id, n,
                 // data}) while the process runs; the unterminated tail goes at the end. The receipt below still carries the whole output.

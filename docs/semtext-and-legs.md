@@ -141,12 +141,11 @@ vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (th
   to be waiting; the next start counts exactly); a page of the backlog is asked again at a chat event or at the import's next page, so the very last page of an import is found at the next chat event or start.
 - WHEN IT FAILS (no model server, the model not installed (the reason says `ollama pull <model>`), a timeout, a wrong answer): `fail`/`reason`/`line`/`state: stuck` say why, the sentences stay pending, and the queue is held until the next
   change that is not its own: a chat event (message, turn start or end) or a new ask; then, with no turn running, it tries again. No timer, no loop, never an Error that stops a round.
-- REPLAY: the Fetch driver's receipt is stamped as a derived write (`driver:request`), NOT a journalled outside write (only the Sql driver's `record:` receipts are); the vectors a receipt made are stored (rows and the vector store), but a replay of the journal alone does not
-  remake them (the queue would ask again). Making the receipt an outside write is a one-line native change (`stamp_writer`), not done here.
+- REPLAY: the Fetch driver's receipt is a derived write (`driver:request`), but a write to a MAPPED class (`Vector`) is journalled whole and compact, so a replay of the journal remakes the vectors (docs/cliffvm.md, "MAPPED").
 - Tests: `native/tests/embed_1143.rs` (in-process, receipts written by the test, one end-to-end test against a tiny model server in the test) and `native/tests/embed_process_1143.rs` (the real seat, a closed port).
 
 ### Not built
-Sentence vectors for anything but chat bodies and asked texts (the backlog is chat bodies only), recall by meaning (stage 2: `near` over the vectors), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, the recall index, the field engine's use of the legs, a collection of stored Word entities, the
+Sentence vectors for anything but chat bodies and asked texts (the backlog is chat bodies only), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, the field engine's use of the legs, a collection of stored Word entities, the
 mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).
 
 
