@@ -214,7 +214,7 @@ ChatMessage.fail_why getter:
   ELSE WHEN this.final == None and this.rc != 0: 'claude failed (rc ' + str(this.rc) + '): ' + strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or ''))
   ELSE WHEN this.final == None and this.evs is Error: 'claude ended with no result line and its output could not be read (' + (why(this.evs) or 'unreadable') + ')'
   ELSE WHEN this.final == None and this.spoken == '': 'claude ended with no answer at all (rc ' + str(this.rc) + ': no result line, no text)'
-  ELSE WHEN prop(this.final, 'is_error') == True: 'claude reported an error: ' + str(prop(this.final, 'result'))
+  ELSE WHEN prop(this.final, 'is_error') == True: 'claude reported an error: ' + str(prop(this.final, 'result') or prop(this.final, 'subtype') or 'no reason given')
   ELSE: None
 ChatMessage.answer getter:
   WHEN this.rr == None: None

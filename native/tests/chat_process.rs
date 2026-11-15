@@ -1983,3 +1983,17 @@ fn the_model_tools_never_list_parents_and_a_write_of_it_is_refused_and_is_answer
     assert!(!e && !t.contains("parents"), "{t}");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn a_turn_the_cli_stops_on_its_own_limit_says_why_in_its_error() {
+    // the CLI's result for a turn limit has no text (`subtype: error_max_turns`, `is_error`): the seat's message names the subtype, not 'None'
+    let script = QUICK.replace(r#""subtype": "success", "is_error": False, "result": "Answer to " + prompt,"#, r#""subtype": "error_max_turns", "is_error": True,"#);
+    assert_ne!(script, QUICK, "the fake's final result line was replaced");
+    let (mut run, port, _dir) = fake_seat_script("maxturns", &[], &[], &script);
+    let id = send(port, "go");
+    wait("error", || (view(port, &id)["state"] == "error").then_some(()));
+    let r = view(port, &id)["response"].as_str().unwrap_or("").to_string();
+    assert!(r.contains("error_max_turns"), "the reason is named: {r}");
+    assert!(!r.ends_with("None"), "{r}");
+    assert!(terminate(&mut run));
+}
