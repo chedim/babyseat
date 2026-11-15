@@ -54,6 +54,8 @@ pub struct Ent {
 pub enum Storage { Lazy, Virtual, Resident }
 /// class -> storage mode, ONE table: `Fields::compose` writes it, the core reads it (`.pinned`).
 pub type StorageMap = std::sync::Arc<std::sync::RwLock<HashMap<String, Storage>>>;
+/// class -> dtype of the MAPPED classes (`MAPPED Vector f16`): ONE table, `Fields::compose` writes it, the core reads it.
+pub type MappedMap = std::sync::Arc<std::sync::RwLock<HashMap<String, String>>>;
 
 /// The class names of a `parents` value (`cls:<name>` entries, the name after the last colon): a list, or one entry.
 pub fn parent_names(parents: &J) -> Vec<String> {
@@ -236,6 +238,9 @@ pub struct Core {
     /// the touch clock's counter (see `Ent::touched`) and the classes' storage modes (shared with `Fields`)
     pub clock: std::cell::Cell<u64>,
     pub storage: StorageMap,
+    /// the MAPPED classes and the native vector store their `v` lives in (vecstore.rs; docs/cliffvm.md, "Storage modes"). Never evicted: the memory policy unloads entity rows only.
+    pub mapped: MappedMap,
+    pub vectors: crate::vecstore::VecStores,
     /// GARBAGE COLLECTION of VIRTUAL entities (docs/cliffvm.md): the reverse index of `{"$ref": id}` values (target -> holder -> how many), what each (holder, prop)
     /// holds, the live virtual entities, the ones to look at when the round ends (born, or just released), the owners whose in-flight work ended, the ones the host holds
     /// itself, and the recently collected (a read of one is a null with a reason)
@@ -358,6 +363,7 @@ impl<'a> expr::World for View<'a> {
             _ => { e.touched.set(self.core.bump());
               // the class `Error` overlay: a property listed in the entity's `failed` reads as the Error, whatever it stores (the getter still recomputes under it)
               if let Some(r) = e.failure(attr) { return V::Error(r.to_string()); }
+              if attr == VECTOR_PROP && self.core.is_mapped(&e.cls) { return self.core.vector_value(&e.cls, eid); }
               match e.props.get(attr) {
                 Some(j) if !j.is_null() => { let mut v = expr::from_json(j); if matches!(v, V::List(_) | V::Dict(_)) { self.core.overlay_nested(eid, attr, &mut v); } v }
                 // a getter that computed None (`nulled`) is a plain null; a property the entity never had says `absent`, naming both
@@ -380,6 +386,10 @@ struct Traced<'a> { inner: View<'a>, reads: std::cell::RefCell<Vec<(String, Stri
 
 /// The read key a getter's query is tracked under: when its rows arrive, the getter is dirty (fields.rs).
 pub const SQL: &str = "\u{0}sql";
+/// what a call of `near(.., '<Class>', ..)` reads: a write, clearing or removal of a vector of that class marks it (the getters that call `near` recompute)
+pub const VECTORS_READ: &str = "\u{0}vectors";
+/// the property a MAPPED class keeps in the native vector store
+pub const VECTOR_PROP: &str = "v";
 /// The read key of `instances(cls)`: a birth or a retirement of that class makes the reader dirty (fields.rs).
 pub const CLASS_READ: &str = "\u{0}class";
 
@@ -414,6 +424,7 @@ impl<'a> expr::World for Traced<'a> {
             if let Some(k) = r.1 { self.reads.borrow_mut().push((SQL.to_string(), k)); }
             return Some(r.0);
         }
+        if f == "near" { if let Some(V::Str(c)) = a.get(1) { self.reads.borrow_mut().push((VECTORS_READ.to_string(), c.clone())); } }
         if let Some(r) = self.inner.core.native_call(f, a) { return Some(r); }
         let Some(h) = self.host else { return Some(Ok(V::None)) };
         let args = match a.iter().map(expr::to_json).collect::<Result<Vec<_>, _>>() { Ok(v) => v, Err(e) => return Some(Err(e)) };
@@ -443,7 +454,7 @@ impl Core {
     pub fn new() -> Self {
         Core {
             why: Default::default(), nulled: Default::default(), nested_last: vec![], locals: Default::default(),
-            inst_scans: Default::default(), inst_cache: Default::default(), docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), own_ns: None, replicas: Default::default(), foreign_reads: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), born_by: HashMap::new(), clock: Default::default(), storage: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
+            inst_scans: Default::default(), inst_cache: Default::default(), docs: HashMap::new(), unloaded: HashMap::new(), wanted: Default::default(), own_ns: None, replicas: Default::default(), foreign_reads: Default::default(), loader: None, arrived: vec![], last_now: 0.0, updated: HashMap::new(), born_by: HashMap::new(), clock: Default::default(), storage: Default::default(), mapped: Default::default(), vectors: Default::default(), ref_in: Default::default(), ref_of: Default::default(), ref_holders: Default::default(), virt_live: Default::default(), gc_candidates: Default::default(), gc_owners: Default::default(), host_held: Default::default(), collected: Default::default(), collected_set: Default::default(), order: Vec::new(), at: HashMap::new(), triggers: Vec::new(),
             by_prop: HashMap::new(), always: HashSet::new(), seen: HashMap::new(), state: HashMap::new(),
             q: VecDeque::new(), queue_writes: true, dropped: 0, fired: HashMap::new(), refused: HashMap::new(), errors: HashMap::new(),
             seq: 0, learner: false, trace: None, cur: None, cache: expr::Cache::new(), ref_ix: Default::default(),
@@ -752,6 +763,7 @@ impl Core {
     pub fn hear(&mut self, w: Write, born: Option<(String, Map<String, J>, Option<Vec<f64>>)>, now: f64) {
         if w.prop.is_empty() {
             if w.new.is_null() {
+                if let Some(c) = self.docs.get(&w.eid).map(|e| e.cls.clone()) { self.vectors.remove(&c, &w.eid); }   // a destroyed entity takes its vector with it (an unload, which is not this, does not)
                 self.remove(&w.eid);
                 self.seen.remove(&w.eid);
                 self.state.remove(&w.eid);
@@ -759,22 +771,35 @@ impl Core {
                 self.load(w.eid.clone(), cls, props, pos, now);
             }
         } else if self.docs.contains_key(&w.eid) {
+            // a MAPPED class's `v` goes to the vector store; the entity keeps the summary text (the row never holds the numbers)
+            let mut kept: Option<J> = None;
+            if w.prop == VECTOR_PROP {
+                let cls = self.docs.get(&w.eid).map(|e| e.cls.clone()).unwrap_or_default();
+                if self.is_mapped(&cls) {
+                    match crate::vecstore::words_of_compact(&w.new) {
+                        Some(Ok(words)) => { if self.vectors.put(&cls, &w.eid, &words).is_ok() { kept = Some(crate::vecstore::summary(words.len())); } }
+                        _ if w.new.is_null() => { self.vectors.remove(&cls, &w.eid); }
+                        _ => {}
+                    }
+                }
+            }
+            let newv: &J = kept.as_ref().unwrap_or(&w.new);
             if let Some(e) = self.docs.get(&w.eid) { e.touched.set(self.bump()); }   // a write is a touch
-            if w.prop != "position" { self.set_refs(&w.eid, &w.prop, if w.new.is_null() { None } else { Some(&w.new) }); }
+            if w.prop != "position" { self.set_refs(&w.eid, &w.prop, if newv.is_null() { None } else { Some(newv) }); }
             if w.prop != "position" {
                 let old = self.docs.get(&w.eid).and_then(|e| e.props.get(&w.prop).cloned());
-                self.reindex(&w.eid, &w.prop, old.as_ref(), if w.new.is_null() { None } else { Some(&w.new) });
+                self.reindex(&w.eid, &w.prop, old.as_ref(), if newv.is_null() { None } else { Some(newv) });
             }
             if w.prop == "parents" || w.prop == "scratch" {
-                if let Some(o) = self.docs.get(&w.eid) { self.inst_touch(&o.cls, o.props.get("parents")); self.inst_touch(&o.cls, if w.prop == "parents" { Some(&w.new) } else { o.props.get("parents") }); }
+                if let Some(o) = self.docs.get(&w.eid) { self.inst_touch(&o.cls, o.props.get("parents")); self.inst_touch(&o.cls, if w.prop == "parents" { Some(newv) } else { o.props.get("parents") }); }
             }
             let e = self.docs.get_mut(&w.eid).unwrap();
             if w.prop == "position" {
-                e.pos = match &w.new { J::Array(a) => Some(a.iter().map(f).collect()), _ => None };
-            } else if w.new.is_null() {
+                e.pos = match newv { J::Array(a) => Some(a.iter().map(f).collect()), _ => None };
+            } else if newv.is_null() {
                 e.props.remove(&w.prop);
             } else {
-                e.props.insert(w.prop.clone(), w.new.clone());
+                e.props.insert(w.prop.clone(), newv.clone());
             }
         }
         if !(w.prop.is_empty() && w.new.is_null()) && !w.writer.starts_with("trigger:") {
@@ -930,6 +955,64 @@ impl Core {
     }
 
     /// The engine's own built-ins that need the Core: `sql(query, args...)` (the store driver, store.rs). None: not one.
+    /// Whether a class keeps its `v` in the native vector store (its owner pack declared it `MAPPED`).
+    pub fn is_mapped(&self, cls: &str) -> bool { self.mapped.read().unwrap_or_else(|e| e.into_inner()).contains_key(cls) }
+
+    /// A write of `v` to an entity of a MAPPED class, checked and put in its COMPACT form (`{"$f16": base64}`), the one form the engine, the journal and a replay carry.
+    /// Ok(None): the very same f16 values are stored already. Err: the reason it is refused (a text for the receipt). A null (clearing) passes. Nothing is stored here: `hear` does.
+    pub fn vector_in(&self, eid: &str, new: &J) -> Result<Option<J>, String> {
+        #[cfg(not(feature = "store"))]
+        { let _ = (eid, new); return Err("v: the vector store is not available in the browser engine (it is native)".into()); }
+        #[cfg(feature = "store")]
+        {
+            use crate::vecstore as vs;
+            if new.is_null() { return Ok(Some(J::Null)); }
+            let words = match new {
+                J::Array(a) => vs::to_f16(a).map_err(|why| format!("{eid}.v: {why}"))?,
+                o if o.is_object() => match vs::words_of_compact(o) { Some(r) => r.map_err(|why| format!("{eid}.v: {why}"))?, None => return Err(format!("{eid}.v is a list of numbers (got {o})")) },
+                other => return Err(format!("{eid}.v is a list of numbers (got {})", if other.is_string() { "text".to_string() } else { other.to_string() })),
+            };
+            let cls = self.docs.get(eid).map(|e| e.cls.clone()).unwrap_or_else(|| class_of_eid(eid));
+            if let Some(d) = self.vectors.dim(&cls) {
+                if d != words.len() { return Err(format!("{eid}.v has {} numbers but the vectors of {cls} have {d} (the dimension is fixed by the first vector written)", words.len())); }
+            }
+            if self.vectors.get(&cls, eid) == Some(&words[..]) { return Ok(None); }
+            Ok(Some(vs::compact_of(&words)))
+        }
+    }
+
+    /// `<entity>.v` of a MAPPED class as a rule reads it: the list of floats, decoded from f16 (exact in f64); a null that says why when none is stored.
+    pub fn vector_value(&self, cls: &str, eid: &str) -> V {
+        match self.vectors.get(cls, eid) {
+            Some(w) => V::List(w.iter().map(|h| V::Float(crate::vecstore::f16_to_f32(*h) as f64)).collect()),
+            None => V::Nil(format!("absent: {eid}.v (no vector stored)")),
+        }
+    }
+
+    /// `near(<list of numbers>, '<Class>', k)`: the k nearest instances of the class by cosine, best first, `{eid, score}` dicts, ties by eid. CPU, brute force (vecstore.rs).
+    fn near(&self, a: &[V]) -> Result<V, String> {
+        #[cfg(not(feature = "store"))]
+        { let _ = a; return Err("near: not available in the browser engine (the vector store is native)".into()); }
+        #[cfg(feature = "store")]
+        {
+            if a.len() != 3 { return Err("near(list, 'Class', k): a list of numbers, a class name and how many".into()); }
+            let V::Str(cls) = &a[1] else { return Err("near(list, 'Class', k): the class is a name in quotes".into()) };
+            let k = match &a[2] { V::Int(n) => *n, V::Float(f) if f.fract() == 0.0 => *f as i64, _ => return Err("near: k is a whole number".into()) };
+            if k < 1 { return Err(format!("near: k is {k}, and it must be 1 or more")); }
+            let V::List(items) = &a[0] else { return Err("near: the first argument is a list of numbers".into()) };
+            let mut q: Vec<f32> = Vec::with_capacity(items.len());
+            for (i, x) in items.iter().enumerate() {
+                let f = match x { V::Int(n) => *n as f64, V::Float(f) => *f, _ => return Err(format!("near: item {i} of the query is not a number")) };
+                if !f.is_finite() { return Err(format!("near: item {i} of the query is not finite")); }
+                q.push(f as f32);
+            }
+            let Some(c) = self.vectors.class(cls).filter(|c| c.len() > 0) else { return Ok(V::Nil(format!("empty: no vectors in class {cls}"))) };
+            if q.len() != c.dim { return Err(format!("near: the query has {} numbers but the vectors of {cls} have {} (dimension)", q.len(), c.dim)); }
+            if q.iter().all(|x| *x == 0.0) { return Err("near: the query is all zero: it has no direction to compare".into()); }
+            Ok(V::List(c.near(&q, k as usize).into_iter().map(|(e, s)| V::Dict(vec![("eid".to_string(), V::Str(e)), ("score".to_string(), V::Float(s as f64))])).collect()))
+        }
+    }
+
     pub fn native_call(&self, f: &str, a: &[V]) -> Option<Result<V, String>> {
         if f == "instances" {
             // every entity of a class (its eid class, or a kind in its `parents` list; not its ancestors'), in id order, as entities; an entity with `scratch = true` (the scaffolding of
@@ -951,6 +1034,7 @@ impl Core {
             };
             return Some(Ok(V::List(ids.iter().map(|k| V::Ent(k.clone())).collect())));
         }
+        if f == "near" { return Some(self.near(a)); }
         if f != "sql" && f != "jsonl" && f != "read" && f != "listdir" && f != "stat" { return None; }
         // a setter runs once, when something is written: it can't wait for a query's rows. A getter reads sql(...)
         // (it recomputes when the rows arrive) and the setter reads the getter's field.

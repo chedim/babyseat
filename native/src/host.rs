@@ -26,6 +26,8 @@ pub const WRITER: &str = "trigger:field:";
 pub const ROWS: &str = "c_field";
 /// the journal's collection (table `c_journal`): k = sequence number, body = a line
 pub const JOURNAL: &str = "c_journal";
+/// the vector store's table (vecstore.rs): eid -> class and the f16 bytes (little endian). Not an entity row; the memory policy never touches it.
+pub const VECTORS: &str = "c_vectors";
 /// a journalled line longer than this (bytes of its JSON) is kept in RAM without its value (see `journal_push`); a threshold flagged for the operator
 pub const JOURNAL_RAM_MAX_BYTES: usize = 262_144;
 /// the writer of what the door pushes in (a request) and of what the boot tells (facts, started)
@@ -271,9 +273,14 @@ impl Host {
             db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {t} (k TEXT PRIMARY KEY, body TEXT NOT NULL)")).map_err(dbe)?;
         }
         migrate(&db)?;
+        db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {VECTORS} (k TEXT PRIMARY KEY, cls TEXT NOT NULL, data BLOB NOT NULL)")).map_err(dbe)?;
         let journal_next = db.query_row(&format!("SELECT MAX(k) FROM {JOURNAL}"), [], |r| r.get::<_, Option<String>>(0)).map_err(dbe)?.and_then(|k| k.parse::<u64>().ok()).map_or(0, |k| k + 1);   // the primary key's index: no scan
+        // the vector store (vecstore.rs): every stored vector comes into its class's matrix at open, in key order (the order means nothing to an answer)
+        let stored_vectors: Vec<(String, String, Vec<u8>)> = db.prepare(&format!("SELECT k, cls, data FROM {VECTORS} ORDER BY k")).map_err(dbe)?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(dbe)?.filter_map(|r| r.ok()).collect();
         let db = Arc::new(Mutex::new(db));
         let mut core = Core::new();
+        for (k, cls, data) in stored_vectors { if let Ok(w) = crate::vecstore::bytes_to_words(&data) { let _ = core.vectors.put(&cls, &k, &w); } }
         core.set_ns(SEAT_NS);   // the graph link: ids under `membrane::` and bare ids are this VM's, any other `ns::` is foreign (docs/graph-link.md, 15b)
         core.queue_writes = false;   // a field host runs no trigger engine: the queue would only hold every write's values (vm.rs `queue_writes`)
         if o.store.is_some() { core.loader = Some(stored_loader(db.clone())); }   // a lazy entity a setter writes loads from the store
@@ -288,6 +295,7 @@ impl Host {
             core.store = Some(st);
         }
         let mut fields = Fields::goalgraph();
+        core.mapped = fields.mapped_handle();
         core.storage = fields.storage_handle();   // the core reads the classes' modes too (`.pinned`)
         fields.inbound_by_host = true;
         fields.calls_refused = true;
@@ -359,12 +367,60 @@ impl Host {
         let (prop, new) = if prop.is_empty() && new.is_null() { ("retire", json!(true)) } else { (prop, new) };
         if crate::vm::vm_provided(prop).is_some() { return; }   // the VM's own, read-only: refused, not journalled
         let ts = self.now();
+        // a MAPPED class's `v` is journalled COMPACT (base64 of the f16 bytes), so a replay restores the same f16 values; a refused one is a receipt, not a journal line
+        let new = match self.vector_form(eid, prop, new, ts) { Ok(n) => n, Err(()) => return };
         self.journal_push(Line::Write { ts, writer: writer.into(), eid: eid.into(), prop: prop.into(), new: new.clone() });
         self.inject_write(ts, eid, prop, new, writer, writer);
     }
 
+    /// The class of a loaded entity (the eid's when it is not loaded) when it is MAPPED, else None.
+    fn mapped_class(&self, eid: &str) -> Option<String> {
+        let g = self.eng();
+        let cls = g.0.docs.get(eid).map(|e| e.cls.clone()).unwrap_or_else(|| class_of_eid(eid));
+        g.0.is_mapped(&cls).then_some(cls)
+    }
+
+    /// An outside write of `v` to an entity of a MAPPED class, in its compact form; any other write passes as it is. A refusal (not a list of numbers, the wrong dimension) is
+    /// told by a receipt on the entity (`refused`) and returns Err; the very same stored values are a no-op (Err too: nothing to do, nothing to journal).
+    fn vector_form(&self, eid: &str, prop: &str, new: J, ts: f64) -> Result<J, ()> {
+        if prop != crate::vm::VECTOR_PROP || self.mapped_class(eid).is_none() { return Ok(new); }
+        self.ensure_loaded(eid, ts);
+        let r = self.eng().0.vector_in(eid, &new);
+        match r {
+            Ok(Some(c)) => Ok(c),
+            Ok(None) => Err(()),
+            Err(why) => {
+                let _t = self.txn();
+                let _r = self.round_at(ts);
+                { let mut g = self.eng(); let (core, f, seq) = &mut *g; let mut s = *seq; f.refuse_outside(core, eid, why, ts, &mut s); *seq = s; }
+                self.drain_apply();
+                Err(())
+            }
+        }
+    }
+
+    /// The vector table follows a `v` write (compact: the bytes; null: gone) and the row shows the summary instead of the numbers. -> the value the ROW keeps.
+    fn vector_row(&self, eid: &str, prop: &str, new: &J) -> J {
+        if prop != crate::vm::VECTOR_PROP { return new.clone(); }
+        let Some(cls) = self.mapped_class(eid) else { return new.clone() };
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        match crate::vecstore::words_of_compact(new) {
+            Some(Ok(w)) => { self.exec(&db, &format!("INSERT INTO {VECTORS} (k, cls, data) VALUES (?1, ?2, ?3) ON CONFLICT(k) DO UPDATE SET cls = excluded.cls, data = excluded.data"), params![eid, cls, crate::vecstore::words_to_bytes(&w)]); crate::vecstore::summary(w.len()) }
+            _ if new.is_null() => { self.exec(&db, &format!("DELETE FROM {VECTORS} WHERE k = ?1"), params![eid]); J::Null }
+            _ => new.clone(),
+        }
+    }
+
     /// An outside birth (a request, the boot's entity): journalled, stored, loaded, its getters run.
     pub fn born(&self, eid: &str, cls: &str, props: Map<String, J>, writer: &str) {
+        let mut props = props;
+        // a MAPPED class's `v` is not a birth property (it would sit in the row and the journal as numbers): it is written right after the birth
+        let v = if self.eng().0.is_mapped(cls) { props.remove(crate::vm::VECTOR_PROP) } else { None };
+        self.born_plain(eid, cls, props, writer);
+        if let Some(v) = v { self.write(eid, crate::vm::VECTOR_PROP, v, writer); }
+    }
+
+    fn born_plain(&self, eid: &str, cls: &str, props: Map<String, J>, writer: &str) {
         let ts = self.now();
         self.journal_push(Line::Born { ts, writer: writer.into(), eid: eid.into(), cls: cls.into(), props: props.clone(), by: None });
         self.inject_born(ts, eid, cls, props, writer, writer, None);
@@ -385,7 +441,9 @@ impl Host {
         let _t = self.txn();
         let _r = self.round_at(ts);
         self.ensure_loaded(eid, ts);
-        self.store_prop(eid, None, prop, &new, stamp);
+        let new = match self.vector_form(eid, prop, new, ts) { Ok(n) => n, Err(()) => return };   // a replayed line is compact already; the same values stored are a no-op
+        let row = self.vector_row(eid, prop, &new);
+        self.store_prop(eid, None, prop, &row, stamp);
         if prop == "text" { self.pack_text(eid, &new); }
         if prop == "privileged" { self.note_outside_grant(eid, &new, stamp); }
         {
@@ -534,7 +592,8 @@ impl Host {
             }
             let (Some(eid), Some(prop)) = (w["eid"].as_str(), w["prop"].as_str()) else { continue };
             let stamp = if w.get("virt") == Some(&json!(true)) { stamp_virtual_writer(w["writer"].as_str().unwrap_or("")) } else { stamp_writer(w["writer"].as_str().unwrap_or("")) };
-            self.store_prop(eid, None, prop, &w["new"], &stamp);
+            let row = self.vector_row(eid, prop, &w["new"]);   // a MAPPED `v`: the table takes the bytes, the row keeps the summary; the journal line below keeps the compact form
+            self.store_prop(eid, None, prop, &row, &stamp);
             if prop == "text" { self.pack_text(eid, &w["new"]); }
             if prop == "privileged" && eid.starts_with(PACK_PREFIX) { self.packs_dirty.store(true, Ordering::SeqCst); }   // `granted_by` is mirrored
             if is_outside(&stamp) { self.journal_push(Line::Write { ts, writer: stamp, eid: eid.into(), prop: prop.into(), new: w["new"].clone() }); }
@@ -552,6 +611,7 @@ impl Host {
                 packs_retired.push(name.to_string());
             }
             let below = format!("{eid}:");
+            { let mut g = self.eng(); let cls = class_of_eid(eid); if g.0.is_mapped(&cls) { g.0.vectors.remove_tree(&cls, eid); } }   // a retired entity's vector leaves the store, loaded or not
             // a retired `Vm:<ns>` takes the whole namespace `<ns>::` with it (docs/graph-link.md, section 2)
             let ns = Core::namespace_of_vm(eid);
             let owned: Vec<String> = { let g = self.eng(); g.0.docs.keys().filter(|k| k.starts_with(&below) || ns.as_ref().map_or(false, |n| k.starts_with(n.as_str()))).cloned().collect() };
@@ -563,6 +623,7 @@ impl Host {
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.retain(|k, _| k != eid && !k.starts_with(&below) && !ns.as_ref().map_or(false, |n| k.starts_with(n.as_str()))); }   // a retired row is not written back
             self.exec(&db, &format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
+            self.exec(&db, &format!("DELETE FROM {VECTORS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);   // its vector leaves the table (the engine's store dropped it with the entity)
             if let Some(n) = &ns { self.exec(&db, &format!("DELETE FROM {ROWS} WHERE substr(k, 1, length(?1)) = ?1"), params![n]); }
         }
         let any = any || !retired.is_empty();

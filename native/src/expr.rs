@@ -337,7 +337,7 @@ pub const RESERVED: &[&str] = &[
     "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words", "spans",
     "join", "head", "tail", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
     "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop", "why",
-    "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun",
+    "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun", "near",
     "it", "that", "they", "them", "these", "those", "he", "him", "she", "her",
     "and", "or", "not", "in", "is", "if", "else", "lambda", "for", "await", "yield",
 ];

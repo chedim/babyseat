@@ -2036,5 +2036,12 @@
     "resident": [
       "Ctx"
     ]
+  },
+  "vector": {
+    "getters": {
+      "Vector.dim": "Int"
+    },
+    "writes": {},
+    "findings": []
   }
 }
