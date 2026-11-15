@@ -8,9 +8,12 @@
 # old membrane-seat -- whose RECORD lists membrane/* and bin/membrane, the very
 # files babyseat just wrote. An empty shim leaves an install with no module and
 # no `membrane` command. So this one ships the same module (the publish lane
-# copies ../../membrane in before building; never committed, see .gitignore)
-# and the `membrane` script, and the upgrade ends with both in place.
-# Build by hand: cp -R membrane shim/membrane-seat/membrane &&
+# copies the three files in before building; never committed)
+# and the `membrane` script, and the upgrade ends with both in place. Since 0.7.60 the module is the
+# launcher's three files only (the data and the binary live in babyseat's `membrane/dist/`, which the
+# old RECORD never listed).
+# Build by hand: mkdir -p shim/membrane-seat/membrane &&
+#   cp membrane/__init__.py membrane/launcher.py membrane/__main__.py shim/membrane-seat/membrane/ &&
 #   python -m build shim/membrane-seat --outdir dist
 [build-system]
 requires = ["setuptools>=77"]
@@ -35,7 +38,4 @@ membrane = "membrane.launcher:main"
 
 [tool.setuptools]
 packages = ["membrane"]
-
-[tool.setuptools.package-data]
-membrane = ["skills/*/SKILL.md", "skills/*/*.md", "viewer.html", "three.min.js", "*.woff2",
-            "ui/*.html", "ui/*.js", "ui/*.mjs", "ui/*.svg", "ui/*.wasm", "packs/*.c1f", "CHANGELOG.md", "help/*.md", "doctrine.md"]
+include-package-data = false

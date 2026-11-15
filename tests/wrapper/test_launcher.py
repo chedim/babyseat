@@ -102,6 +102,61 @@ def test_the_console_scripts_point_at_the_launcher():
 def test_the_launcher_holds_no_seat_logic():
     # no flag parsing, no store path, no secret: the file stays small
     src = (ROOT / "membrane" / "launcher.py").read_text()
-    assert len(src.splitlines()) < 60
+    assert len(src.splitlines()) < 70
     for w in ("argparse", "sqlite", "jwt", "ANTHROPIC", "subprocess"):
         assert w not in src
+
+
+# ---- the packaged binary: its dist folder must be this wheel's (#1143, packaging) ----
+def _dist(tmp_path, monkeypatch, version, mode=0o755):
+    monkeypatch.delenv("CLIFFVM", raising=False)
+    here = tmp_path / "membrane"
+    (here / "dist" / "bin").mkdir(parents=True)
+    exe = here / "dist" / "bin" / "cliffvm"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(mode)
+    if version is not None:
+        (here / "dist" / "VERSION").write_text(version + "\n")
+    monkeypatch.setattr(launcher, "HERE", here)
+    return exe
+
+
+def test_a_dist_of_another_version_is_refused_and_nothing_is_exec(tmp_path, monkeypatch, capsys):
+    _dist(tmp_path, monkeypatch, "0.0.1")
+    monkeypatch.setattr(os, "execv", lambda *a: pytest.fail("a mismatched binary must not run"))
+    with pytest.raises(SystemExit) as e:
+        launcher.main([])
+    assert e.value.code == 1
+    err = capsys.readouterr().err
+    assert "0.0.1" in err and __version__ in err and "pip install" in err
+
+
+def test_a_dist_without_a_version_file_is_refused(tmp_path, monkeypatch):
+    _dist(tmp_path, monkeypatch, None)
+    monkeypatch.setattr(os, "execv", lambda *a: pytest.fail("no VERSION: not this wheel's"))
+    with pytest.raises(SystemExit) as e:
+        launcher.main([])
+    assert e.value.code == 1
+
+
+def test_the_matching_dist_runs_serve_with_the_arguments(tmp_path, monkeypatch):
+    exe = _dist(tmp_path, monkeypatch, __version__)
+    calls = []
+    monkeypatch.setattr(os, "execv", lambda path, argv: calls.append((path, argv)))
+    launcher.main(["--port", "0"])
+    assert calls == [(str(exe), [str(exe), "serve", "--port", "0"])]
+
+
+def test_a_lost_exec_bit_is_restored_not_fatal(tmp_path, monkeypatch):
+    exe = _dist(tmp_path, monkeypatch, __version__, mode=0o644)
+    calls = []
+    monkeypatch.setattr(os, "execv", lambda path, argv: calls.append(path))
+    launcher.main([])
+    assert calls == [str(exe)] and os.access(exe, os.X_OK)
+
+
+def test_the_override_is_not_version_checked(exe):
+    # a developer's own build (CLIFFVM) runs whatever it is
+    _, calls = exe
+    launcher.main([])
+    assert len(calls) == 1

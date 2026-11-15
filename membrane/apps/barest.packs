@@ -3,6 +3,7 @@
 boot
 entity
 stats
+environment
 door
 door_auth
 fs
@@ -25,3 +26,4 @@ door_models
 ha
 settings
 link
+link_route

@@ -20,7 +20,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
     d
 }
 
-/// scripts/seat on a fresh data folder, a free port, the fake claude `/usr/bin/true`; -> the seat and its owner token
+/// scripts/seat on a fresh data folder, a free port, the fake claude `/usr/bin/true`; -> the seat and its admin token
 fn seat(tag: &str) -> Run { let dir = tmp(tag); start_in(dir) }
 /// the same on the folder `dir` (a second start on it is a restart: the store, the secret and the page's cookie are kept)
 fn start_in(dir: std::path::PathBuf) -> Run { start_with(dir, &[]) }
@@ -30,7 +30,7 @@ fn start_with(dir: std::path::PathBuf, facts: &[&str]) -> Run { launch(dir, fact
 /// (what the removed second launcher started; the test starts it itself, no script)
 fn seat_full(tag: &str) -> Run { launch(tmp(tag), &[], true) }
 fn launch(dir: std::path::PathBuf, facts: &[&str], full: bool) -> Run {
-    let _ = std::fs::remove_file(dir.join("d/owner.token"));
+    let _ = std::fs::remove_file(dir.join("d/admin.token"));
     let root = format!("{}/..", env!("CARGO_MANIFEST_DIR"));
     let mut child = if full {
         let d = dir.join("d");
@@ -54,7 +54,7 @@ fn launch(dir: std::path::PathBuf, facts: &[&str], full: bool) -> Run {
     }
     assert!(port != 0, "the door came up");
     std::mem::forget(rx);
-    let token = wait("the owner token", || std::fs::read_to_string(dir.join("d/owner.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
+    let token = wait("the admin token", || std::fs::read_to_string(dir.join("d/admin.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
     Run { child, port, token, dir }
 }
 
@@ -67,7 +67,7 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
     }
 }
 
-/// one request on its own connection, with the owner token; -> (status, body text). No answer in `secs` seconds is a FAILURE, never a wait.
+/// one request on its own connection, with the admin token; -> (status, body text). No answer in `secs` seconds is a FAILURE, never a wait.
 fn http(run: &Run, method: &str, path: &str, body: &str, secs: u64) -> (u16, String) {
     let mut s = TcpStream::connect(("127.0.0.1", run.port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(secs))).unwrap();
@@ -260,7 +260,7 @@ fn bare(run: &Run, method: &str, path: &str) -> u16 {
 }
 
 #[test]
-fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_owner() {
+fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_admin() {
     let run = seat("fieldvm");
     assert_eq!(bare(&run, "GET", "/ui/fieldvm"), 401, "the snapshot is the seat's field: not public");
     let (st, s) = api(&run, "GET", "/ui/fieldvm", J::Null);
@@ -271,8 +271,9 @@ fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_owner() {
     names.sort();
     let folder = format!("{}/../membrane/apps/barest.c1f", env!("CARGO_MANIFEST_DIR"));
     let mut want: Vec<String> = std::fs::read_dir(&folder).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map(|x| x == "c1f").unwrap_or(false))
-        .filter(|p| std::fs::read_to_string(p).unwrap().lines().any(|l| l.starts_with("IMPORT dom "))).map(|p| p.file_stem().unwrap().to_string_lossy().to_string()).collect();
+        .filter(|p| std::fs::read_to_string(p).unwrap().lines().any(|l| l.starts_with("IMPORT dom "))).map(|p| p.file_stem().unwrap().to_string_lossy().to_string()).filter(|n| n != "login_view").collect();   // login_view is the sign-in screen: the page fetches it from /ui/www on a 401, a signed-in page's packs never carry it
     want.sort();
+    assert!(!names.contains(&"login_view".to_string()), "the sign-in pack is not in a signed-in page's snapshot");
     assert!(!want.is_empty() && names == want, "only the app folder's packs that import dom: {names:?} vs {want:?}");
     let shell = packs["shell_view"].as_str().unwrap();
     assert_eq!(shell, std::fs::read_to_string(format!("{folder}/shell_view.c1f")).unwrap(), "the file's text, whole");

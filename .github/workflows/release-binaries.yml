@@ -1,7 +1,7 @@
 name: release-binaries
 
 # THE RELEASE BINARY AND ITS DIST FOLDER (#1143, docs/packaging-plan.md, decided 2026-11-14): `cliffvm` built per platform and assembled with the packs, the barest app and
-# the page into dist/<version>/ (scripts/dist/build.sh), smoke-tested from that folder alone (scripts/dist/smoke.sh: --version, `serve --port 0`, /global/health with the owner
+# the page into dist/<version>/ (scripts/dist/build.sh), smoke-tested from that folder alone (scripts/dist/smoke.sh: --version, `serve --port 0`, /global/health with the admin
 # token), and uploaded as workflow artifacts: the tar.gz of the dist folder, and the wheel payload (scripts/dist/assemble_wheel_payload.sh) the wheel wrapper packages.
 # It PUBLISHES NOTHING: no PyPI, no GitHub release, no Docker push (publishing is the operator's `!` line). Runs on a tag `v*` and by hand only.
 #
@@ -17,6 +17,7 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+  workflow_call:        # wheels.yml (the wheels are built from this run's wheel-payload-<target> artifacts) and so publish.yml
 
 permissions:
   contents: read
@@ -88,7 +89,7 @@ jobs:
             otool -l "dist/$VER/bin/cliffvm" | grep -A3 LC_BUILD_VERSION || true
           fi
 
-      - name: "smoke test (the folder alone, --version, serve --port 0, /global/health with the owner token)"
+      - name: "smoke test (the folder alone, --version, serve --port 0, /global/health with the admin token)"
         run: ${{ matrix.smoke }} sh scripts/dist/smoke.sh "dist/$VER"
 
       - name: the wheel payload (the dist folder the wrapper packages as membrane/dist/)
@@ -97,7 +98,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.target }}
-          path: dist/babyseat-${{ env.VER }}-${{ matrix.target }}.tar.gz
+          # the tarball and its .sha256 (install.sh checks the download against it before extracting)
+          path: |
+            dist/babyseat-${{ env.VER }}-${{ matrix.target }}.tar.gz
+            dist/babyseat-${{ env.VER }}-${{ matrix.target }}.tar.gz.sha256
           if-no-files-found: error
           retention-days: 14
 

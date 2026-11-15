@@ -1,13 +1,45 @@
 {
- "_doc": "The Boot facts packs read (docs/c1f-stdlib.md). wired=true: the launcher writes it today; wired=false: a pack reads it and the launcher does not tell it yet (the to-do list for the door's cutover).",
+ "_doc": "The Boot facts packs read (docs/c1f-stdlib.md). wired=true: `cliffvm` (cli.rs, host.rs, launcher.c1f or scripts/seat) writes it; wired=false: a pack reads it and it is told only when a launch line names it (`--fact name=value`), else the pack's own default stands.",
  "facts": {
-  "link_stale_s": {
+  "link_hold_s": {
    "wired": false,
-   "why": "seconds of silence after which a page the seat heard from (Vm:<name>, packs/link.c1f) reads `stale` instead of `connected` (--fact link_stale_s=...; default 120: a value tried, not decided)"
+   "why": "seconds the seat holds an empty poll of POST /ui/link before it answers it empty (the keepalive); default 25 (graph link decision 18; a value tried, not decided)"
+  },
+  "link_lease_s": {
+   "wired": false,
+   "why": "seconds of silence after which a visible page is gone: its link row is collected and its `Vm` reads `stale` (packs/link.c1f, packs/link_route.c1f); default 60"
+  },
+  "link_lease_hidden_s": {
+   "wired": false,
+   "why": "the same lease for a page that told the seat it is hidden; default 600"
+  },
+  "link_window": {
+   "wired": false,
+   "why": "how many frames of the seat a page may leave unacked before it gets a resync snapshot instead of deltas; default 8"
+  },
+  "link_max_subs": {
+   "wired": false,
+   "why": "most subscriptions (an entity and one property each) one page link may hold; the rest are refused, not queued; default 200"
+  },
+  "link_max_links": {
+   "wired": false,
+   "why": "most page links a seat serves at once; the next is refused; default 16"
+  },
+  "link_max_value": {
+   "wired": false,
+   "why": "most characters of one subscribed value; a bigger one is refused with its size and never sent; default 65536"
+  },
+  "link_max_frame": {
+   "wired": false,
+   "why": "most characters of a frame a page posts (a bigger one is a 413) and of a reply the seat sends (a bigger set goes out in parts); default 262144"
+  },
+  "lk_since": {
+   "wired": false,
+   "why": "not a launch fact: the time the link pack wrote at start, the seat's epoch of this run (packs/link.c1f)"
   },
   "anthropic_key_set": {
-   "wired": false,
-   "why": "told by `cliffvm run` (the Python seat has no such fact): whether the seat's environment holds a non-empty ANTHROPIC_API_KEY (told by `cliffvm run`: only the yes or no, never the key); the claude turn is refused without it unless chat_auth is login"
+   "wired": true,
+   "why": "told by `cliffvm`: whether the seat's environment holds a non-empty ANTHROPIC_API_KEY (only the yes or no, never the key); the claude turn is refused without it unless chat_auth is login"
   },
   "chat_auth": {
    "wired": false,
@@ -27,19 +59,19 @@
   },
   "door_port": {
    "wired": true,
-   "why": "the port the Rust door listens on; absent = no door (set from MEMBRANE_DOOR_PORT at the cutover)"
+   "why": "the port the Rust door listens on (`--port`; 0 = any free port; the default 4096 is `launcher.c1f`'s `Boot.default_port`)"
   },
   "door_secret_file": {
    "wired": true,
    "why": "the JWT secret file the door verifies tokens with"
   },
   "app_dirs": {
-   "wired": false,
-   "why": "told by `cliffvm run` (the Python seat has no apps yet): the folders of the apps given to it, the upper layer first; the door serves an app's `ui/` files, an upper layer's file shadowing a lower one's (docs/c1f-layers.md)"
+   "wired": true,
+   "why": "told by `cliffvm`: the folders of the apps given to it, the upper layer first; the door serves an app's `ui/` files, an upper layer's file shadowing a lower one's (docs/c1f-layers.md)"
   },
   "ui_dir": {
    "wired": true,
-   "why": "the folder of the UI's files: the lowest layer under each app's own ui/ folder (--ui-dir; none by default)"
+   "why": "an extra folder of the page's files: the lowest layer under each app's own ui/ folder (`cliffvm run --ui-dir`; none by default and none in `serve`)"
   },
   "build_id": {
    "wired": true,
@@ -123,19 +155,19 @@
   },
   "memory_budget_mb": {
    "wired": false,
-   "why": "the memory budget of the seat in MB (native/src/host.rs `sense_memory`; NO default): the host's sensor writes Mem:host {rss, budget, level} at every tick; unset = the level is always ok and nothing is unloaded; told by `--fact memory_budget_mb=<n>`"
+   "why": "the memory budget of the seat in MB (native/src/host.rs `evict_under_pressure`; NO default): the VM itself evicts the coldest loaded stored entities when the process is over the lines; unset = no pressure and nothing is evicted; told by `--fact memory_budget_mb=<n>`"
   },
   "unload_soft": {
    "wired": false,
-   "why": "the soft line as a fraction of memory_budget_mb (NO default): the level is `soft` from this fraction; unset = there is no soft level (below the hard line is ok); told by `--fact unload_soft=<f>`"
+   "why": "the soft line as a fraction of memory_budget_mb (NO default): the VM starts to evict from this fraction; unset = there is no soft line (below the hard line is fine); told by `--fact unload_soft=<f>`"
   },
   "unload_hard": {
    "wired": false,
-   "why": "the hard line as a fraction of memory_budget_mb (NO number of its own): the level is `hard` from this fraction; unset = the budget itself (1.0); told by `--fact unload_hard=<f>`"
+   "why": "the hard line as a fraction of memory_budget_mb (NO number of its own): the VM evicts from this fraction; unset = the budget itself (1.0); told by `--fact unload_hard=<f>`"
   },
   "unload_batch": {
    "wired": false,
-   "why": "how many of the coldest entities one unload pass asks to leave the engine (membrane/apps/barest.c1f/unload.c1f; NO default): unset = no unloading; a pass runs at every tick while the level is not ok; told by `--fact unload_batch=<n>`"
+   "why": "how many of the coldest entities one eviction pass takes out of the engine (native/src/host.rs; NO default): unset = no eviction; a pass runs at the end of every drain while the process is over a line; told by `--fact unload_batch=<n>`"
   },
   "command_timeout_s": {
    "wired": false,
@@ -149,13 +181,13 @@
    "wired": false,
    "why": "second SQLite files to open as entities (membrane/packs/sql.c1f, native/src/sqldrv.rs): a LIST of {name, path, mode} (mode ro, the default, opens the file read-only and immutable; rw may write); each entry SEEDS `SqlSource:<name>` as if it were written by hand, and a source that already has a path is left alone; the seat's own store is refused; told by `--fact sql_sources='[{\"name\": \"lex\", \"path\": \"/data/words.sqlite\"}]'`"
   },
-  "legacy_page": {
-   "wired": false,
-   "why": "the lazy history import (membrane/packs/legacy_import.c1f, door_session.c1f; #1143): how many old user rows one query reads when a session imported as a header only is opened for the first time (GET /session/<sid>/message imports its messages, once, and answers). NO default: unset, an open imports nothing (the eager `Legacy:seat.import` stays); told by `--fact legacy_page=<n>`"
-  },
   "legacy_path": {
-   "wired": false,
+   "wired": true,
    "why": "the earlier (Python, 0.7.x) seat's store, for the automatic history cutover (membrane/packs/legacy_cutover.c1f; #1143): a file (its field.sqlite3), or a folder that holds it (its `.membrane` folder, its `field.sqlite` folder, or the folder of field.sqlite3). Told, it is the ONLY place looked at (a path that holds no store is an error shown as text, never a fallback); unset, the seat looks in `<seat_data_dir>`, `<seat_data_dir>/.membrane`, `<seat_cwd>/.membrane`, `<seat_home>/membrane/.membrane` and `/config/membrane/.membrane` (each `field.sqlite/field.sqlite3`), the first that has a store wins, and when none has one nothing happens; told by `--fact legacy_path=<path>` (the launcher's `--legacy <path>`)"
+  },
+  "env_allow": {
+   "wired": false,
+   "why": "names of environment variables that carry their VALUE on `Environment:host` besides the default list (HOME, USER, LANG, XDG_DATA_HOME, XDG_CONFIG_HOME, TMPDIR, CLAUDE_BIN, MEMBRANE_DATA_DIR; native/src/host.rs `boot_environment`, membrane/packs/environment.c1f); a JSON list or text with commas; a name with KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL in it is refused (it reads `set`, never its value) and the start says so; told by `--fact env_allow=FOO_BAR`"
   },
   "legacy_batch": {
    "wired": false,
@@ -173,17 +205,17 @@
    "wired": false,
    "why": "the seconds between two publications of `Stats:eval` (default 10, a threshold flagged for the operator); told by `--fact eval_stats_window_s=<s>`"
   },
-  "operator": {
+  "host_names": {
    "wired": false,
-   "why": "the person the page's owner cookie is minted for (door_auth.c1f; the released MEMBRANE_OPERATOR); default `owner`; told by `--fact operator=<name>`"
+   "why": "the Host names (besides localhost, 127.0.0.1 and [::1]) for which a loopback request is given the page's admin cookie (door_auth.c1f, the DNS-rebinding check); a JSON list or comma text, no default list; told by `--fact host_names=<a,b>`"
   },
-  "owner_token_file": {
+  "admin_token_file": {
    "wired": false,
-   "why": "where `cliffvm run` wrote the owner's token (<seat_data_dir>/owner.token, mode 0600) when the seat has a door secret; chat_turn.c1f adds the Authorization header and the run's env_from only when it is set; absent on the barest seat"
+   "why": "where `cliffvm run` wrote the admin's token (<seat_data_dir>/admin.token, mode 0600) when the seat has a door secret; chat_turn.c1f adds the Authorization header and the run's env_from only when it is set; absent on the barest seat"
   },
-  "owner_token_ttl_s": {
+  "admin_token_ttl_s": {
    "wired": false,
-   "why": "how long the owner token minted at every boot lives, in seconds (native/src/owner.rs); default 2592000 (30 days), a threshold flagged for the operator; told by `--fact owner_token_ttl_s=<n>`"
+   "why": "how long the admin token minted at every boot lives, in seconds (native/src/admin.rs); default 2592000 (30 days), a threshold flagged for the operator; told by `--fact admin_token_ttl_s=<n>`"
   },
   "quota_probe_s": {
    "wired": false,

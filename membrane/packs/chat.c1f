@@ -1,6 +1,7 @@
 PACK chat 1
 IMPORT door 1
 IMPORT semtext 1
+RESIDENT Doorbell
 -- THE BARE CHAT (#1143, operator 2026-11-12): ONE chat, `membrane::Chat:main`, no persons, no security. The route is the door's
 -- `session` family:
 --   POST /membrane/chat/message {text}   the person's message becomes an entity under the chat; 202 {id}
@@ -22,11 +23,20 @@ IMPORT semtext 1
 -- packs/chat_turn.c1f runs the turn. The kinds are
 -- ChatMessage / ChatResponse / ChatTool, not Message / Response: a pack owns the classes it declares on, and Message was retired
 -- from messages.c1f for that reason.
--- The chat's banner is the instance `membrane::Banner:owner:main`, born at start by the app's default_banner pack (the model replaces its `text`); chat_turn.c1f reads its `text`. `queued` is written AFTER the message and its turn are born (a birth runs no setter): it is the event the turn (chat_turn.c1f) starts on.
+-- The chat's banner is the instance `membrane::Banner:admin:main`, born at start by the app's default_banner pack (the model replaces its `text`); chat_turn.c1f reads its `text`. `queued` is written AFTER the message and its turn are born (a birth runs no setter): it is the event the turn (chat_turn.c1f) starts on.
 -- The id is the arrival time in milliseconds and the request's number: `<ms>-<n>`.
 -- THE BODY (docs/semtext-and-legs.md): the message's words are ALSO a SemText, made explicitly, `<message>:body` (packs/semtext.c1f): its sentences, words,
 -- identifiers and paths are read from it, and `mention = True` asks the mention rules (packs/mentions.c1f, when loaded) to turn its words into entities. The message's
 -- `text` stays what it was (the page's API); the body holds the same string once more. The answer is a SemText the same way (chat_turn.c1f, `...:turn:response:body`); a tool's result is not.
+
+-- THE DOORBELL (#1143, the graph link slice 2, docs/graph-link.md decision 10): `Doorbell:chat.at` is the time of the last thing that happened in any chat: a message posted (`queued`) or a turn changing state (queued, running, done,
+-- error). It is a value of its own, NOT under `Chat:` (the link never serves `Chat:`), so the chat page can subscribe it and fetch the history route ONLY when it changes. One stored row; it holds no text.
+ChatMessage.queued on-setter chat-bell-posted:
+  WHEN this.queued == True:
+    ('Doorbell:chat').at = clock
+ChatTurn.state on-setter chat-bell-turn:
+  ALWAYS:
+    ('Doorbell:chat').at = clock
 
 Chat.title getter: 'main'
 -- the model of the seat's own pick (the launcher's `minds.seat_default`; `claude` when it names none): a session or a message with no pick of its own runs on it

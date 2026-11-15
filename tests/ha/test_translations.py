@@ -32,3 +32,16 @@ def test_the_two_files_say_the_same():
     a = json.loads((ROOT / "strings.json").read_text())
     b = json.loads((ROOT / "translations/en.json").read_text())
     assert a == b
+
+
+def test_the_token_texts_name_the_admin_token_file_and_no_role_wording():
+    """No users (2026-11-14): every valid token is the admin. The texts say where the token is (`admin.token`, printed at start, or one minted with
+    `--secret-file`) and never `--sub owner` or a per-role sentence."""
+    for name in ("strings.json", "translations/en.json"):
+        texts = dict(_strings(json.loads((ROOT / name).read_text())))
+        for path, text in texts.items():
+            assert not re.search(r"owner|--sub|operator", text, re.I), f"{name}{path}: {text}"
+        form = next(t for p, t in texts.items() if "/user/description" in p or p.endswith("/step/user/description"))
+        reauth = next(t for p, t in texts.items() if "reauth" in p and p.endswith("description"))
+        for t in (form, reauth):
+            assert "admin.token" in t and "door.secret" in t, t

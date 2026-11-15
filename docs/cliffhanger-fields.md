@@ -1,6 +1,7 @@
 # Cliffhanger fields: the design (goal 606594617c19, issue #994)
 
-Status: DRAFT for operator review. Nothing here switches on a live seat without the operator's go.
+Status: the design of cliffvm's field language (getters, setters, packs), BUILT in `native/` and used by every pack of the release; the sections below keep the reasoning. The syntax a model writes is taught by `Help:c1f`, `Help:packs` and `Help:upgrade`
+(`membrane/apps/barest.c1f/help/`), each code block of which is a test. Sections that describe the 0.7 Python seat's packs (the whole banner, `banner.c1f`, Blurp) are history, not the release.
 Syntax source: github.com/chedim/cliffhanger README (read 2026-11-09). Where the README is silent
 the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
 
@@ -125,8 +126,7 @@ A trigger with no field form is refused, never guessed.
 2. **Freeze delays effects only.** On a hot entity, heat/gravity/freeze pace the `on` setters'
    effects (chat, exec, llm). Getters always recalculate at once.
 3. **A setter may write any field the writer is allowed to write.** Each target field enforces
-   through its own `set` guards. This widens the entity-scripts covenant in docs/entity-field.md
-   (updated in the same PR).
+   through its own `set` guards. This widens the 0.7 entity-scripts covenant.
 4. **A rebuild never runs effects.** Recompute after migration, lost cache or a new getter is a
    silent restore. Accumulators come from the saved cache or from #971 journal replay.
 5. **Two-phase setters**, as rule 7.
@@ -231,13 +231,12 @@ both sides run on the native VM; checksum the whole field (every entity's stored
 
 ## 8. Same-PR doc edits (not in this draft)
 
-doctrine.md (sensor line, SCHEDULED READS) and docs/entity-field.md (entity-scripts covenant,
-decision 3). Until the design lands, #980 PRs #984-991 add no more WHEN/WHERE/WRITE triggers.
+(0.7 doc edits, moot: the Python seat's doctrine.md and entity-field.md are gone.)
 
 ## 9. The field engine in the browser
 
 The same Rust engine (getters, setters, `.c1f` packs, imports) is compiled to WebAssembly (`native/build-web.sh`,
-binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/fieldvm.js`, loaded by `index.html`).
+binding `native/src/web.rs`) and runs in the babyseat client (`membrane/apps/barest.c1f/ui/fieldvm.js`, loaded by `index.html`).
 
 - **Following the seat:** the page starts from `GET /ui/fieldvm` (the seat's packs and every entity of a class they
   declare on), then applies each `field.write` and `field.pack` event from `/ui/serve/event`. When the stream drops it
@@ -273,7 +272,7 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
   `Fetch:<id>.request = {id, url, method?, headers?, body?, timeout_s?}`; the shell makes ONE `fetch()` and writes `request_result` back in the
   seat's shape: `{id, status:'ok', rc:0, head:'<code> <text>', http_status, headers (lower-case names), body, started, finished, ms}`; a failure is
   `{id, status:'error', rc, head:<reason>, started, finished, ms}` (rc 2 refused before sending, rc 1 network failure, abort, timeout). A non-2xx is
-  a normal result with its `http_status`. Same origin only (`location.origin`, credentials `same-origin`, so the owner cookie goes with it; any
+  a normal result with its `http_status`. Same origin only (`location.origin`, credentials `same-origin`, so the admin cookie goes with it; any
   other origin is refused with a reason); verbs GET/POST/PATCH/DELETE; headers `content-type` and `accept` only (never authorization or cookie);
   `body` text only. No page-side timeout unless the request has `timeout_s`. `abort = true` on the entity aborts the one in flight. The same
   request id written again on the same entity is not fetched twice.
@@ -325,7 +324,9 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/ui/field
 
 ## 11. Libraries in `.c1f`
 
-- **`membrane/packs/banner.c1f`** (the whole banner): one `Banner:<owner>:<chat>` per person per chat, internal
+(0.7 history: `banner.c1f`, the whole banner with recall and Blurp, is in `membrane/packs/` but NOT loaded in the release; the release's banner is `membrane/apps/barest.c1f/default_banner.c1f` and `Help:banner`.)
+
+- **`membrane/packs/banner.c1f`** (the whole banner): one `Banner:<admin>:<chat>` per person per chat, internal
   chats too; a turn writes `ask` and the seat's facts as fields (`paused`, `alerts` -- the track alerts it took --,
   `tools`, and Blurp's `blurp` / `suggest` when Blurp is on), and shows `text` (every section and the layout:
   RECALL, OPEN, DECIDED, WORKING ON, ABOUT, STABLE, SINCE, the paused / alert / more lines; `lines` is RECALL). Built-ins: `recall(text, pool, session)`,

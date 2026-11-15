@@ -24,11 +24,11 @@ function world(extra = {}) {
   f.set_pack('dom', DOM); f.set_pack('fetch', FETCH);
   for (const [n, s] of Object.entries({ ...PACKS, ...extra })) f.set_pack(n, s);
   assert.deepEqual(JSON.parse(f.pack_errors()), {}, 'the packs load');
-  const w = { f, t: T0, log: [] };
+  const w = { f, t: T0, log: [], subs: [], unsubs: [] };
   w.flush = () => {
     const all = [];
     for (;;) {                                                           // the host's rule: a retire write removes the entity, and what that changes is drained again
-      const o = JSON.parse(f.drain()); w.log.push(...o.writes); all.push(...o.writes);
+      const o = JSON.parse(f.drain()); w.log.push(...o.writes); all.push(...o.writes); w.subs.push(...(o.subs || [])); w.unsubs.push(...(o.unsubs || []));
       const gone = o.writes.filter((x) => x.prop === 'retire' && x.new === true);
       for (const x of gone) f.remove(x.eid, w.t);
       if (!gone.length) return all;
@@ -99,7 +99,7 @@ scenario('one section per group, in the operator\'s order, each row in its order
   assert.deepEqual(rowsOf('model'), ['model.chat', 'model.default', 'model.list', 'model.cloud', 'model.signin', 'model.cli']);
   assert.deepEqual(rowsOf('chat'), ['chat.max_steps', 'chat.timeout']);
   assert.deepEqual(rowsOf('home'), ['home.allow']);
-  assert.deepEqual(rowsOf('access'), ['access.owner', 'access.token_life', 'access.token_file', 'access.mode', 'access.people', 'access.port']);
+  assert.deepEqual(rowsOf('access'), ['access.token_life', 'access.token_file', 'access.mode', 'access.port']);
   assert.equal(rowsOf('limits').length, 9);
   assert.equal(w.eids('DomNode:set:map.').length, 0, 'a hidden row has no node'); assert.equal(w.eids('DomNode:setg:map').length, 0, 'and no group');
   assert.equal(w.get('SetRow:map.window'), null);
@@ -166,11 +166,11 @@ scenario('an out-of-range number: the seat\'s reason is shown next to the row, t
   assert.equal(w.n('chat.max_steps', 'state').text, 'Saving…', 'the old refusal is not shown while the new write is out');
 });
 
-scenario('a refusal of the call itself (a person who is not the owner: 403) or a failure is text, with the reason, and the row is usable again', () => {
+scenario('a refusal of the call itself (a 403 or a failure; the seat itself never answers 403 for who asks) is text, with the reason, and the row is usable again', () => {
   const w = world().open();
   w.type('chat.timeout', 'in', '5'); w.submit('chat.timeout');
-  w.reply('setw:chat.timeout', 403, { type: 'error', error: { message: 'for the owner' } });
-  assert.equal(w.n('chat.timeout', 'state').text, 'Not saved: the seat answered: for the owner'); assert.equal(w.n('chat.timeout', 'state')['data-kind'], 'bad');
+  w.reply('setw:chat.timeout', 403, { type: 'error', error: { message: 'forbidden by a proxy' } });
+  assert.equal(w.n('chat.timeout', 'state').text, 'Not saved: the seat answered: forbidden by a proxy'); assert.equal(w.n('chat.timeout', 'state')['data-kind'], 'bad');
   assert.equal(w.n('chat.timeout', 'save').disabled, false);
   assert.equal(w.n('chat.timeout', 'now').text, 'In force: 21600 seconds');
   w.submit('chat.timeout'); w.fail('setw:chat.timeout', 'the connection was reset');
@@ -184,7 +184,7 @@ scenario('a refusal of the call itself (a person who is not the owner: 403) or a
 
 scenario('a restart row has NO control: its value, the badge and the launch line, in text', () => {
   const w = world().open();
-  for (const id of ['access.port', 'limits.command_timeout_s', 'model.signin', 'model.cli', 'import.page', 'access.token_file']) {
+  for (const id of ['access.port', 'limits.command_timeout_s', 'model.signin', 'model.cli', 'limits.warm_rows', 'access.token_file']) {
     assert.equal(w.n(id, 'badge').text, 'Needs a restart', id);
     assert.match(w.n(id, 'how').text, /^How to change it: start the seat with --/, id);
     const mine = w.eids('DomNode:set:' + id + ':');
@@ -322,14 +322,14 @@ scenario('an answer of an older read (a newer one was asked for) is dropped', ()
 });
 
 scenario('no secret is on the page: the view shows only what the feed holds, and the feed holds names of variables, never values', () => {
-  const SECRETS = ['sk-ant-secret-0001', 'hunter2pw', 'owner-jwt-token-xyz'];
+  const SECRETS = ['sk-ant-secret-0001', 'hunter2pw', 'admin-jwt-token-xyz'];
   const w = world().open((rows) => {
     byId(rows, 'model.cloud').current = [{ name: 'gpt', backend: 'openai', api_key_env: 'OTHER_PROVIDER_KEY' }];   // what the seat's feed carries (native/tests/settings_1143.rs: the real feed holds no secret)
-    byId(rows, 'access.token_file').current = '/data/owner.token';
+    byId(rows, 'access.token_file').current = '/data/admin.token';
   });
   const page = allText(w) + JSON.stringify(w.log.filter((x) => x.eid.startsWith('DomNode:')).map((x) => x.new));
   for (const s of SECRETS) assert.ok(!page.includes(s), s);
-  assert.ok(page.includes('OTHER_PROVIDER_KEY') && page.includes('/data/owner.token'), 'the NAME of the variable and the PATH of the file are shown');
+  assert.ok(page.includes('OTHER_PROVIDER_KEY') && page.includes('/data/admin.token'), 'the NAME of the variable and the PATH of the file are shown');
   // and nothing the page sends carries one either: a write is the setting id and the value typed
   w.type('chat.timeout', 'in', '90'); w.submit('chat.timeout');
   assert.ok(!w.asked('setw:chat.timeout').body.includes('sk-'), 'the write holds no key');
@@ -342,6 +342,48 @@ scenario('an idle page does no work: ticks write nothing, a view with no poll', 
   const mine = w.log.slice(before).filter((x) => /^(SetRow|SettingsView|DomNode:set)/.test(x.eid) || x.eid === 'Fetch:settings');
   assert.equal(mine.length, 0, 'no settings write while idle');
   assert.equal(w.get('Nav:settings').active, true);
+});
+
+// THE LINK (#1143, graph link slice 2): when the page's link is up (`Link:page.up`), a row reads what is in force from the SEAT'S OWN value, `membrane::Setting:<id>.current`, which the engine subscribes by dependency and the
+// link feeds (here the test plays the link: the foreign entity is fed as a plain local entity, which every engine reads normally and never subscribes). A write by another tab shows with NO request of this view.
+scenario('with the link up a row follows the seat\'s own value: a change elsewhere shows with no new request; with the link down the polled value stands', () => {
+  const w = world().open();
+  const asked = () => w.asked('settings').id, reads = () => w.log.filter((x) => x.eid === 'Fetch:settings' && x.prop === 'request').length;
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 2048 steps');
+  w.feed('membrane::Setting:chat.max_steps', 'Setting', { current: 5000 });
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 2048 steps', 'the link is not up: a value of the seat\'s is not read');
+  w.feed('Link:page', 'Link', { up: true });
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 5000 steps', 'up: the row shows the seat\'s value');
+  assert.equal(w.n('chat.max_steps', 'in').value, '5000', 'and an unedited box follows it');
+  const r0 = reads();
+  w.feed('membrane::Setting:chat.max_steps', 'Setting', { current: 6000 });
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 6000 steps', 'another tab wrote it: it shows');
+  assert.equal(reads(), r0, 'with no request of the view'); assert.equal(asked(), 'feed-1');
+  w.feed('Link:page', 'Link', { up: false });
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 2048 steps', 'link down: back to the last polled rows');
+});
+
+// THE REAL ENGINE PATH (the wasm with the link hooks, docs/graph-link.md 15b): the page is `pAAAAAAAA`; with the link up the rows READ foreign values, so the ENGINE names the subscriptions (`drain().subs`, ONE per
+// entity with its props) and a value the link feeds (`feed_vals`, as `fieldvm.js Link` does) is what the row shows. Counted: the subscriptions announced, the requests of the view.
+scenario('the engine subscribes what the rows read, once each, and a value fed by the link is shown with no request of the view', () => {
+  const w = world(); w.f.set_ns('pAAAAAAAA'); w.open();
+  assert.equal(w.subs.length, 0, 'link not up: the rows read nothing of the seat\'s');
+  const reads0 = w.log.filter((x) => x.eid === 'Fetch:settings' && x.prop === 'request').length;
+  w.feed('Link:page', 'Link', { up: true });
+  const all = w.subs.map((s) => s.eid + ':' + s.props.join(',')).sort();
+  assert.ok(all.includes('membrane::Doorbell:chat:at'), 'the chat view\'s doorbell is the one other');
+  const named = all.filter((x) => x !== 'membrane::Doorbell:chat:at');
+  const rows = w.rows().settings.filter((r) => !r.hidden);
+  assert.equal(named.length, rows.length, 'one subscription per visible row, each `current` and nothing else');
+  assert.ok(named.includes('membrane::Setting:chat.max_steps:current') && named.every((x) => x.endsWith(':current')));
+  assert.ok(!named.some((x) => x.includes('map.')), 'a hidden row is not subscribed');
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 2048 steps', 'pending: the last polled value stands');
+  w.f.feed_val('membrane::Setting:chat.max_steps', 'current', JSON.stringify(9000), 1, w.t); w.flush();
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 9000 steps', 'the link\'s value is shown');
+  assert.equal(w.log.filter((x) => x.eid === 'Fetch:settings' && x.prop === 'request').length, reads0, 'and the view asked for nothing');
+  w.f.feed_val('membrane::Setting:chat.max_steps', 'current', JSON.stringify(9500), 2, w.t); w.flush();
+  assert.equal(w.n('chat.max_steps', 'now').text, 'In force: 9500 steps');
+  assert.equal(w.subs.length, all.length, 'a change of value is no new subscription');
 });
 
 console.log(`settings_view: ${n} scenarios ok`);

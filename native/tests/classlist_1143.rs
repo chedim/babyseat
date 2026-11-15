@@ -19,7 +19,7 @@ fn fresh(packs: &[(&str, &str)]) -> Host {
 const PACK: &str = "PACK abc 1\nOwn.text getter: 'own'\nAlpha.text getter: 'alpha'\nBeta.text getter: 'beta'\nAlpha.sa getter: 'a:' + str(this.n)\nBeta.sb getter: 'b:' + str(this.n)\n";
 
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
-const B: &str = "membrane::Banner:owner:main";
+const B: &str = "membrane::Banner:admin:main";
 
 #[test]
 fn writing_parents_to_a_class_with_its_own_text_getter_replaces_the_default_banner_text() {

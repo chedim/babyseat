@@ -1,0 +1,99 @@
+PACK login_view 1
+IMPORT dom 1
+IMPORT fetch 1
+-- THE SIGN-IN SCREEN, A VIEW PACK (#1143, operator 2026-11-14: "the sign-in screen: in c1f, not JS"). A page opened from another machine (a LAN address, a remote name, a loopback Host the door
+-- does not allow) is given no cookie, so its `GET /ui/fieldvm` answers 401. The bootstrap (ui/boot.js) then fetches THIS file (`GET /ui/www/login_view.c1f`: the ONE app pack the door serves without a
+-- token, door.c1f `Request.rel`) and starts the engine with only this pack. It is NOT sent in `/ui/fieldvm`'s `packs` (door_fieldvm.c1f leaves it out): a signed-in page never draws it. It imports only `dom` and `fetch`.
+--   Login:main    {open, token, busy, why, go, seq}: the bootstrap writes `open` once. `token` is what is typed (the box's `value`), kept only until Sign in is pressed: the submit moves it into the request, blanks the
+--                 box and clears `token`; the request is cleared again when the seat has answered. It is never written to a URL, a log line or an attribute; the page keeps no copy (no localStorage).
+--   Fetch:login   `POST /ui/login {"token": ...}` (door.c1f `login_reply`): a 2xx means the seat set the cookie (HttpOnly, SameSite=Strict), so the page is reloaded (the host's `reload` write on a DomNode) and
+--                 now starts as a signed-in page. A 401 shows the seat's own reason beside the form; no answer at all shows 'The seat did not answer'.
+
+Login.open on-setter login-draw:
+  WHEN this.open:
+    ('DomNode:login:root').tag = 'main'
+    ('DomNode:login:root').class = 'login'
+    ('DomNode:login:form').parent = 'DomNode:login:root'
+    ('DomNode:login:form').tag = 'form'
+    ('DomNode:login:form').class = 'login-card'
+    ('DomNode:login:form').aria-label = 'Sign in'
+    ('DomNode:login:title').parent = 'DomNode:login:form'
+    ('DomNode:login:title').tag = 'h1'
+    ('DomNode:login:title').text = 'babyseat'
+    ('DomNode:login:label').parent = 'DomNode:login:form'
+    ('DomNode:login:label').tag = 'label'
+    ('DomNode:login:label').class = 'login-field'
+    ('DomNode:login:labeltext').parent = 'DomNode:login:label'
+    ('DomNode:login:labeltext').tag = 'span'
+    ('DomNode:login:labeltext').text = 'Access token'
+    ('DomNode:login:input').parent = 'DomNode:login:label'
+    ('DomNode:login:input').tag = 'input'
+    ('DomNode:login:input').type = 'password'
+    ('DomNode:login:input').name = 'token'
+    ('DomNode:login:input').aria-label = 'Access token'
+    ('DomNode:login:input').autocomplete = 'off'
+    ('DomNode:login:input').spellcheck = 'false'
+    ('DomNode:login:input').inputmode = 'none'
+    ('DomNode:login:input').value = ''
+    ('DomNode:login:send').parent = 'DomNode:login:form'
+    ('DomNode:login:send').tag = 'button'
+    ('DomNode:login:send').type = 'submit'
+    ('DomNode:login:send').class = 'login-send'
+    ('DomNode:login:send').text = 'Sign in'
+    ('DomNode:login:err').parent = 'DomNode:login:form'
+    ('DomNode:login:err').tag = 'p'
+    ('DomNode:login:err').class = 'login-err'
+    ('DomNode:login:err').role = 'alert'
+    ('DomNode:login:err').aria-live = 'assertive'
+    ('DomNode:login:help').parent = 'DomNode:login:form'
+    ('DomNode:login:help').tag = 'p'
+    ('DomNode:login:help').class = 'login-help'
+    ('DomNode:login:help').text = 'Paste the admin token printed when the seat started, from admin.token in the seat\'s data folder, or one made with `cliffvm token mint`.'
+    ('DomNode:login:input').focused = True
+    this.why = ''
+
+DomNode.value on-setter login-typed:
+  WHEN this.eid == 'DomNode:login:input':
+    ('Login:main').token = this.value
+DomNode.submitted on-setter login-submit:
+  WHEN this.eid == 'DomNode:login:form':
+    ('Login:main').go = (prop('Login:main', 'go') or 0) + 1
+
+-- ONE POST at a time (a second Enter or click while busy does nothing); an empty box says what is missing and sends nothing
+Login.go on-setter login-send:
+  WHEN not this.busy and strip(str(this.token or '')) != '':
+    n = (this.seq or 0) + 1
+    this.seq = n
+    this.why = ''
+    this.busy = True
+    ('Fetch:login').request = {'timeout_s': 15, 'id': 'login-' + str(n), 'url': '/ui/login', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'token': strip(str(this.token))})}
+    this.token = None
+    ('DomNode:login:input').value = ''
+  ELSE WHEN not this.busy:
+    this.why = 'Enter the access token first'
+
+Login.busy on-setter login-lock:
+  ALWAYS:
+    ('DomNode:login:input').disabled = this.busy == True
+    ('DomNode:login:send').disabled = this.busy == True
+    ('DomNode:login:send').text = 'Signing in…' if this.busy == True else 'Sign in'
+    ('DomNode:login:form').aria-busy = 'true' if this.busy == True else 'false'
+    ('DomNode:login:input').focused = this.busy != True
+
+Login.why on-setter login-note:
+  ALWAYS:
+    ('DomNode:login:err').text = this.why or ''
+
+-- the receipt, read once: ok = a 2xx; `why` = the seat's own reason (its error message), else its status; a call that got no answer says so
+Fetch.lg getter:
+  rq = this.request_result
+  bd = json(str(prop(rq, 'body') or ''))
+  jd = bd if bd is Dict else {}
+  hs = prop(rq, 'http_status')
+  {'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'why': ('The seat did not answer' if prop(rq, 'status') != 'ok' else str(prop(prop(jd, 'error'), 'message') or prop(jd, 'error') or ('the seat answered ' + str(hs))))} if rq != None else None
+Fetch.lg on-setter login-receipt:
+  WHEN this.eid == 'Fetch:login' and this.lg != None:
+    this.request = None
+    ('Login:main').busy = False
+    ('Login:main').why = '' if prop(this.lg, 'ok') else prop(this.lg, 'why')
+    ('DomNode:login:root').reload = True if prop(this.lg, 'ok') else None

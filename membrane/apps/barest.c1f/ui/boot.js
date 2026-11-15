@@ -39,13 +39,28 @@ function link_facts(host) {
   wide.addEventListener('change', put);
 }
 
+async function sign_in() {
+  const r = await fetch('/ui/www/login_view.c1f', { credentials: 'same-origin' });
+  if (!r.ok) throw new Error(`the seat's /ui/fieldvm answered 401 and its sign-in screen answered ${r.status}`);
+  const mount = document.createElement('div');
+  mount.id = 'mount';
+  const host = await start(mount);
+  loadPacks(host, { login_view: await r.text() });
+  host.feed('Login:main', 'Login', { open: true }, true);
+  app.replaceChildren(mount);
+  host.run_clock(CLOCK_MS);
+  window.MEMBRANE_PAGE = host;
+}
+
 (async () => {
   const r = await fetch('/ui/fieldvm', { credentials: 'same-origin' });
+  if (r.status === 401) return sign_in();                              // no cookie for this machine: the sign-in screen (login_view.c1f, public), a pack of its own
   if (!r.ok) throw new Error(`the seat's /ui/fieldvm answered ${r.status}`);
   const snap = await r.json();
   const mount = document.createElement('div');
   mount.id = 'mount';
   const host = await start(mount);
+  if (snap.page) host.set_ns(snap.page);                              // the page's name for the engine: ids with another `<ns>::` prefix are the seat's (docs/graph-link.md 15b)
   loadPacks(host, snap.packs || {});
   for (const e of snap.entities || []) host.feed(e.eid, e.cls, e.props, true);
   host.page.set('DomNode:page:html', document.documentElement);     // the theme: the shell writes `data-theme` on it (an allow-listed attribute)
@@ -55,5 +70,6 @@ function link_facts(host) {
   host.feed('Shell:main', 'Shell', { open: true }, true);
   app.replaceChildren(mount);
   host.run_clock(CLOCK_MS);
+  host.start_link();                                                  // the graph link (fieldvm.js `Link`): subscriptions of the seat's values, one frame per flush to /ui/link; it does not start on an engine without the hooks
   window.MEMBRANE_PAGE = host;                                        // for tests and the console
 })().catch((e) => say('The page could not start: ' + (e && e.message ? e.message : e)));

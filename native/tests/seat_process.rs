@@ -338,9 +338,9 @@ fn request_rows_of_an_earlier_run_are_retired_when_the_seat_starts() {
 #[test]
 fn help_topics_are_entities_the_model_lists_and_reads() {
     let (mut run, port) = seat("help", true);
-    let (list, _) = wait("the help topics", || { let (l, e) = call(port, "entity_query", json!({"q": "kind:Help"})); (l.lines().count() == 11).then_some((l, e)) });
-    for t in ["c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
-    for t in ["c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page"] {
+    let (list, _) = wait("the help topics", || { let (l, e) = call(port, "entity_query", json!({"q": "kind:Help"})); (l.lines().count() == 12).then_some((l, e)) });
+    for t in ["c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
+    for t in ["c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment"] {
         let disk = std::fs::read_to_string(repo().join(format!("membrane/apps/barest.c1f/help/{t}.md"))).unwrap();
         let (text, err) = wait("the topic's text", || { let (x, e) = call(port, "entity_read", json!({"spec": format!("Help:{t}"), "prop": "text"})); (x.len() > 100).then_some((x, e)) });
         assert!(!err && text == disk, "Help:{t}.text is the file's text");
@@ -351,7 +351,7 @@ fn help_topics_are_entities_the_model_lists_and_reads() {
 }
 
 // ---- the banner is the model's (#1143) ---------------------------------------------------------------------------------------------------
-fn banner(port: u16) -> String { call(port, "entity_read", json!({"spec": "membrane::Banner:owner:main", "prop": "text"})).0 }
+fn banner(port: u16) -> String { call(port, "entity_read", json!({"spec": "membrane::Banner:admin:main", "prop": "text"})).0 }
 const MINE: &str = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'stops done: ' + str(len([s for s in instances('Stop') if s.done == True]))\n";
 
 #[test]
@@ -386,14 +386,14 @@ fn a_pack_the_model_loads_through_entity_write_replaces_the_banner_completely_an
 fn a_bare_entity_id_names_the_membrane_one_when_only_that_exists() {
     let (mut run, port) = seat("bareid", true);
     wait("the banner", || banner(port).contains("CONVERSATION: main").then_some(()));
-    let (t, _) = call(port, "entity_read", json!({"spec": "Banner:owner:main", "prop": "text"}));
+    let (t, _) = call(port, "entity_read", json!({"spec": "Banner:admin:main", "prop": "text"}));
     assert!(t.contains("CONVERSATION: main"), "{t}");
-    let (w, e) = call(port, "entity_write", json!({"spec": "Banner:owner:main", "prop": "note", "value": "x"}));
+    let (w, e) = call(port, "entity_write", json!({"spec": "Banner:admin:main", "prop": "note", "value": "x"}));
     assert!(!e, "{w}");
-    let (n, _) = call(port, "entity_read", json!({"spec": "membrane::Banner:owner:main", "prop": "note"}));
+    let (n, _) = call(port, "entity_read", json!({"spec": "membrane::Banner:admin:main", "prop": "note"}));
     assert_eq!(n, "x", "the write landed on the membrane:: entity");
-    let (q, _) = call(port, "entity_query", json!({"q": "name~:Banner:owner"}));
-    assert_eq!(q, "0 entity(ies)", "no second Banner:owner:main was made: {q}");
+    let (q, _) = call(port, "entity_query", json!({"q": "name~:Banner:admin"}));
+    assert_eq!(q, "0 entity(ies)", "no second Banner:admin:main was made: {q}");
     assert!(terminate(&mut run));
 }
 
@@ -466,7 +466,7 @@ fn an_entity_carries_two_extra_classes_getters_setters_queries_and_a_restart() {
     w(port, "cls:alpha", "name", json!("Alpha"));          // the ISA parent entities a kind's setter needs
     w(port, "cls:beta", "name", json!("Beta"));
     w(port, "Thing:x", "n", json!(3));
-    w(port, "Thing:x", "parents", json!(["cls:alpha", "cls:beta"]));      // the two kinds, by the one list
+    clifflet(port, "Thing:x.parents = ['cls:alpha', 'cls:beta']");      // the two kinds, by the one list (entity_write refuses it: classes are set at birth; a clifflet is code, like a pack)
     wait("both getters apply", || (read(port, "Thing:x", "sa") == "alpha:3" && read(port, "Thing:x", "sb") == "beta:3").then_some(()));
     w(port, "Thing:x", "go_a", json!(true));
     w(port, "Thing:x", "go_b", json!(true));

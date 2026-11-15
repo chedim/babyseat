@@ -55,14 +55,8 @@ pub fn stamp_born_writer(_cls: &str) -> String { format!("{WRITER}create") }
 /// The class an eid names: after a `namespace::`, up to the next colon (`membrane::Chat:main` is `Chat`).
 pub fn class_of_eid(eid: &str) -> String { crate::vm::class_of_eid(eid) }
 
-/// The writer of the memory sensor's writes (`Host::sense_memory`): an outside writer by its `host:` stamp, but a reading of THIS process is not history, so
-/// the sensor's writes are not journalled (a replay never sees them, and never repeats an unload they caused).
 /// The seat's own namespace for the graph link.
 pub const SEAT_NS: &str = "membrane";
-pub const SENSOR_WRITER: &str = "host:sensor:mem";
-pub const MEM_ENTITY: &str = "Mem:host";
-/// The sensor writes the resident size again only when it moved by this much (1 MiB), so an idle seat is not rewriting a row every second (a threshold, flagged).
-pub const MEM_STEP_BYTES: u64 = 1 << 20;
 
 /// How many lazy rows the warm boot loads in the background by default (the boot fact `warm_rows`; a threshold, flagged for the operator).
 pub const DEFAULT_WARM_ROWS: usize = 1000;
@@ -83,7 +77,7 @@ fn stored_loader(db: Arc<Mutex<Connection>>) -> crate::vm::Loader {
         let db = db.lock().unwrap_or_else(|e| e.into_inner());
         let (body, updated): (String, f64) = db.query_row(&format!("SELECT body, updated FROM {ROWS} WHERE k = ?"), params![eid], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten()?;
         let row: J = serde_json::from_str(&body).ok()?;
-        Some(crate::vm::StoredRow { cls: row["cls"].as_str().unwrap_or("").to_string(), props: row["props"].as_object().cloned().unwrap_or_default(), updated })   // a getter's stored value too: the read is right away
+        Some(crate::vm::StoredRow { cls: row["cls"].as_str().unwrap_or("").to_string(), props: row["props"].as_object().cloned().unwrap_or_default(), updated, born_by: row["born_by"].as_str().map(String::from) })   // a getter's stored value too: the read is right away
     })
 }
 
@@ -96,7 +90,8 @@ pub fn is_outside(stamp: &str) -> bool { !stamp.starts_with(WRITER) }
 /// One line of the journal.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Line {
-    Born { ts: f64, writer: String, eid: String, cls: String, props: Map<String, J> },
+    /// `by`: the cause of the birth (`born_by`), written only for a birth the engine made but a replay cannot recompute (a virtual trigger's); an older journal has none: no cause.
+    Born { ts: f64, writer: String, eid: String, cls: String, props: Map<String, J>, by: Option<String> },
     Write { ts: f64, writer: String, eid: String, prop: String, new: J },
 }
 
@@ -104,7 +99,7 @@ impl Line {
     pub fn writer(&self) -> &str { match self { Line::Born { writer, .. } | Line::Write { writer, .. } => writer } }
     pub fn to_json(&self) -> J {
         match self {
-            Line::Born { ts, writer, eid, cls, props } => json!({"op": "born", "ts": ts, "writer": writer, "eid": eid, "cls": cls, "props": props}),
+            Line::Born { ts, writer, eid, cls, props, by } => { let mut o = json!({"op": "born", "ts": ts, "writer": writer, "eid": eid, "cls": cls, "props": props}); if let Some(b) = by { o["by"] = json!(b); } o }
             Line::Write { ts, writer, eid, prop, new } => json!({"op": "write", "ts": ts, "writer": writer, "eid": eid, "prop": prop, "new": new}),
         }
     }
@@ -112,7 +107,7 @@ impl Line {
         let s = |k: &str| j.get(k).and_then(|v| v.as_str()).map(String::from).ok_or_else(|| format!("journal line: no {k}"));
         let ts = j.get("ts").and_then(|v| v.as_f64()).unwrap_or(0.0);
         match j.get("op").and_then(|v| v.as_str()) {
-            Some("born") => Ok(Line::Born { ts, writer: s("writer")?, eid: s("eid")?, cls: s("cls")?, props: j.get("props").and_then(|p| p.as_object()).cloned().unwrap_or_default() }),
+            Some("born") => Ok(Line::Born { ts, writer: s("writer")?, eid: s("eid")?, cls: s("cls")?, props: j.get("props").and_then(|p| p.as_object()).cloned().unwrap_or_default(), by: j.get("by").and_then(|b| b.as_str()).map(String::from) }),
             Some("write") => Ok(Line::Write { ts, writer: s("writer")?, eid: s("eid")?, prop: s("prop")?, new: j.get("new").cloned().unwrap_or(J::Null) }),
             other => Err(format!("journal line: unknown op {other:?}")),
         }
@@ -157,6 +152,8 @@ pub struct Host {
     eng: Mutex<Engine>,
     db: Arc<Mutex<Connection>>,
     journal: Mutex<Vec<Line>>,
+    /// the key of the NEXT stored journal line: continues from the highest stored key at open (the in-memory `journal` holds this run's lines only), so a restart appends and never replaces
+    journal_next: std::sync::atomic::AtomicU64,
     clock: Box<dyn Fn() -> f64 + Send + Sync>,
     waiter: Option<crate::store::Waiter>,
     /// the last refusal of a Pack entity's text (parse, stale setter, PACK line, import clash): name -> message
@@ -176,18 +173,18 @@ pub struct Host {
     /// the warm boot: how many lazy rows to load in the background (newest `updated` first) and the ones still waiting (docs/cliffvm.md)
     warm_rows: std::sync::atomic::AtomicUsize,
     warm: Mutex<std::collections::VecDeque<String>>,
-    /// the memory sensor (`sense_memory`): its config (the boot facts), the injected reading (tests), the last values written
+    /// the memory policy (`evict_under_pressure`): its config (the boot facts) and the injected reading (tests)
     memory: Mutex<MemoryConfig>,
     rss_reading: Mutex<Option<RssReading>>,
 }
 
-/// The memory sensor's configuration: the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard` (none of them has a default number).
+/// The memory policy's configuration: the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard`, `unload_batch` (none of them has a default number).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct MemoryConfig { pub budget_mb: Option<u64>, pub soft: Option<f64>, pub hard: Option<f64> }
+pub struct MemoryConfig { pub budget_mb: Option<u64>, pub soft: Option<f64>, pub hard: Option<f64>, pub batch: Option<u64> }
 /// A resident-size reading in bytes (None: unreadable): the real one is `process_rss`; a test injects its own.
 pub type RssReading = Box<dyn Fn() -> Option<u64> + Send + Sync>;
 
-struct Pending { row: Option<(String, Map<String, J>, Map<String, J>)>, dirty: bool, updated: f64 }
+struct Pending { row: Option<(String, Map<String, J>, Map<String, J>)>, dirty: bool, updated: f64, by: Option<String> }
 
 /// Holds the round's time for the length of an outside write; the previous one comes back when it ends.
 struct RoundTs<'a> { h: &'a Host, prev: u64 }
@@ -198,7 +195,6 @@ pub struct Txn<'a> { h: &'a Host }
 impl Drop for Txn<'_> { fn drop(&mut self) { self.h.end_txn(); } }
 
 fn dbe(e: rusqlite::Error) -> String { e.to_string() }
-fn props_of(v: J) -> Map<String, J> { v.as_object().cloned().unwrap_or_default() }
 
 /// The ids a live VIRTUAL entity holds as `{"$ref": id}` values (anywhere in its properties).
 fn held_by_virtual(core: &Core, f: &Fields) -> std::collections::HashSet<String> {
@@ -275,6 +271,7 @@ impl Host {
             db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {t} (k TEXT PRIMARY KEY, body TEXT NOT NULL)")).map_err(dbe)?;
         }
         migrate(&db)?;
+        let journal_next = db.query_row(&format!("SELECT MAX(k) FROM {JOURNAL}"), [], |r| r.get::<_, Option<String>>(0)).map_err(dbe)?.and_then(|k| k.parse::<u64>().ok()).map_or(0, |k| k + 1);   // the primary key's index: no scan
         let db = Arc::new(Mutex::new(db));
         let mut core = Core::new();
         core.set_ns(SEAT_NS);   // the graph link: ids under `membrane::` and bare ids are this VM's, any other `ns::` is foreign (docs/graph-link.md, 15b)
@@ -294,7 +291,7 @@ impl Host {
         core.storage = fields.storage_handle();   // the core reads the classes' modes too (`.pinned`)
         fields.inbound_by_host = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
-        Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default(), memory: Default::default(), rss_reading: Default::default() })
+        Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), journal_next: std::sync::atomic::AtomicU64::new(journal_next), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default(), memory: Default::default(), rss_reading: Default::default() })
     }
 
     /// Whether the named pack holds the privilege (exempt from rule B): the packs of the first app (the root of trust, by the host), any other by a
@@ -357,7 +354,9 @@ impl Host {
     // ---- hearing -----------------------------------------------------------------------------------------------------
     /// An outside write: journalled (the engine can not re-derive it), stored, heard by the engine, and what the engine made of it applied.
     pub fn write(&self, eid: &str, prop: &str, new: J, writer: &str) {
-        if prop == crate::vm::UPDATED || prop == crate::vm::PINNED { return; }   // the VM's own, read-only: refused, not journalled
+        // an outside None written to an ENTITY (no property) is its death, the mirror of a birth: journalled as the `retire = true` it is, so a replay destroys it again
+        let (prop, new) = if prop.is_empty() && new.is_null() { ("retire", json!(true)) } else { (prop, new) };
+        if prop == crate::vm::UPDATED || prop == crate::vm::PINNED || prop == crate::vm::BORN_BY { return; }   // the VM's own, read-only: refused, not journalled
         let ts = self.now();
         self.journal_push(Line::Write { ts, writer: writer.into(), eid: eid.into(), prop: prop.into(), new: new.clone() });
         self.inject_write(ts, eid, prop, new, writer, writer);
@@ -366,8 +365,14 @@ impl Host {
     /// An outside birth (a request, the boot's entity): journalled, stored, loaded, its getters run.
     pub fn born(&self, eid: &str, cls: &str, props: Map<String, J>, writer: &str) {
         let ts = self.now();
-        self.journal_push(Line::Born { ts, writer: writer.into(), eid: eid.into(), cls: cls.into(), props: props.clone() });
-        self.inject_born(ts, eid, cls, props, writer, writer);
+        self.journal_push(Line::Born { ts, writer: writer.into(), eid: eid.into(), cls: cls.into(), props: props.clone(), by: None });
+        self.inject_born(ts, eid, cls, props, writer, writer, None);
+    }
+
+    /// The cause of an entity's birth (`<entity>.born_by`): None for one that has none. A stored entity that is not loaded loads first.
+    pub fn born_by(&self, eid: &str) -> Option<String> {
+        if self.eng().0.unloaded.contains_key(eid) { self.ensure_loaded(eid, self.now()); self.settle_loaded(); }
+        self.eng().0.born_by.get(eid).cloned()
     }
 
     fn round_at(&self, ts: f64) -> RoundTs<'_> { RoundTs { h: self, prev: self.round_ts.swap(ts.to_bits(), Ordering::SeqCst) } }
@@ -416,18 +421,19 @@ impl Host {
     /// How many times `instances(<class>)` walked every loaded entity so far (the engine's cache misses): a count of work for the tests.
     pub fn inst_scans(&self) -> u64 { self.eng().0.inst_scans() }
 
-    pub(crate) fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str) {
+    pub(crate) fn inject_born(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, _engine_writer: &str, stamp: &str, by: Option<&str>) {
         let _t = self.txn();
         let _r = self.round_at(ts);
         self.ensure_loaded(eid, ts);
         let props = crate::vm::birth_props(cls, props);   // the eid class is the birth default of the class list (the journal keeps what was said)
-        self.store_born(eid, cls, &props, stamp);
+        self.store_born(eid, cls, &props, stamp, by);
         if let Some(t) = props.get("text") { self.pack_text(eid, t); }
         if let Some(v) = props.get("privileged") { self.note_outside_grant(eid, v, stamp); }
         {
             let mut g = self.eng();
             let (core, f, seq) = &mut *g;
             f.arrive(core, eid.into(), cls.into(), props, ts);
+            if let Some(b) = by { core.born_by.insert(eid.to_string(), b.to_string()); }
             f.settle(core, &NullHost, ts, seq);
         }
         self.drain_apply();
@@ -438,7 +444,7 @@ impl Host {
         for l in lines {
             self.journal_push(l.clone());
             match l {
-                Line::Born { ts, writer, eid, cls, props } => self.inject_born(*ts, eid, cls, props.clone(), writer, writer),
+                Line::Born { ts, writer, eid, cls, props, by } => self.inject_born(*ts, eid, cls, props.clone(), writer, writer, by.as_deref()),
                 Line::Write { ts, writer, eid, prop, new } => {
                     let seen = writer.strip_prefix("host:").unwrap_or(writer);
                     self.inject_write(*ts, eid, prop, new.clone(), seen, writer)
@@ -462,13 +468,12 @@ impl Host {
     }
 
     fn born_at(&self, ts: f64, eid: &str, cls: &str, props: Map<String, J>, writer: &str) {
-        self.journal_push(Line::Born { ts, writer: writer.into(), eid: eid.into(), cls: cls.into(), props: props.clone() });
-        self.inject_born(ts, eid, cls, props, writer, writer);
+        self.journal_push(Line::Born { ts, writer: writer.into(), eid: eid.into(), cls: cls.into(), props: props.clone(), by: None });
+        self.inject_born(ts, eid, cls, props, writer, writer, None);
     }
 
     /// The clock input: armed waits come due.
     pub fn tick(&self) {
-        self.sense_memory();
         {
             let _t = self.txn();
             let now = self.now();
@@ -513,12 +518,17 @@ impl Host {
         let any = !out.is_empty();
         let ts = self.stamp_ts();
         let reactions = self.reactions_of(&out);
+        // the packs whose `text` this batch wrote: the reply tells whether each loaded (#1143, the silent pack: see `pack_reactions`)
+        let text_empty = |w: &J| w["new"].as_str().map_or(true, |t| t.trim().is_empty());
+        let packs_emptied: Vec<String> = out.iter().filter(|w| w["prop"] == "text" && text_empty(w)).filter_map(|w| w["eid"].as_str()).filter_map(|e| e.strip_prefix(PACK_PREFIX)).filter(|n| !n.is_empty()).map(String::from).collect();
+        let packs_written: Vec<String> = out.iter().filter(|w| w["prop"] == "text" && !text_empty(w)).filter_map(|w| w["eid"].as_str()).filter_map(|e| e.strip_prefix(PACK_PREFIX)).filter(|n| !n.is_empty()).map(String::from).collect();
         for w in out {
             if let Some(cls) = w.get("born").and_then(|c| c.as_str()) {
                 let eid = w["eid"].as_str().unwrap_or("").to_string();
                 let stamp = if w.get("virt") == Some(&json!(true)) { stamp_virtual_writer("create") } else { stamp_born_writer(cls) };
-                self.store_born(&eid, cls, &Map::new(), &stamp);
-                if is_outside(&stamp) { self.journal_push(Line::Born { ts, writer: stamp, eid, cls: cls.into(), props: Map::new() }); }
+                let by = w.get("by").and_then(|b| b.as_str()).map(String::from);
+                self.store_born(&eid, cls, &Map::new(), &stamp, by.as_deref());
+                if is_outside(&stamp) { self.journal_push(Line::Born { ts, writer: stamp, eid, cls: cls.into(), props: Map::new(), by }); }
                 continue;
             }
             let (Some(eid), Some(prop)) = (w["eid"].as_str(), w["prop"].as_str()) else { continue };
@@ -531,7 +541,15 @@ impl Host {
         // `retire = true` (any writer): the entity leaves the engine and the store; what read it recalculates. Derived, so never journalled.
         // A parent owns its children by the colon path: retiring `A:1` retires `A:1:x` and `A:1:x:y` (not `A:10`).
         let retired = std::mem::take(&mut self.eng().1.retired);
+        let mut packs_retired: Vec<String> = vec![];
         for eid in &retired {
+            // a Pack entity retired (`retire = true`, or `Pack:<name> = None`) UNLOADS the pack: its definitions leave and the values its getters left are cleared (the layer below shows again)
+            if let Some(name) = eid.strip_prefix(PACK_PREFIX).filter(|n| !n.is_empty()) {
+                { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove_pack_clean(core, &NullHost, name, ts, seq); }
+                self.refusals.lock().unwrap_or_else(|e| e.into_inner()).remove(name);
+                self.packs_dirty.store(true, Ordering::SeqCst);
+                packs_retired.push(name.to_string());
+            }
             let below = format!("{eid}:");
             // a retired `Vm:<ns>` takes the whole namespace `<ns>::` with it (docs/graph-link.md, section 2)
             let ns = Core::namespace_of_vm(eid);
@@ -547,10 +565,9 @@ impl Host {
             if let Some(n) = &ns { self.exec(&db, &format!("DELETE FROM {ROWS} WHERE substr(k, 1, length(?1)) = ?1"), params![n]); }
         }
         let any = any || !retired.is_empty();
-        // `unload = true` (any writer): the entity leaves the engine, its row kept; a pinned one is refused with a receipt. Not journalled, changes no value.
-        let asked = std::mem::take(&mut self.eng().1.unload_asked);
-        let any = any || !asked.is_empty();
-        if !asked.is_empty() { self.unload_entities(&asked, ts); }
+        // THE MEMORY POLICY (docs/cliffvm.md, "Unload"): over the memory budget, the coldest loaded entities leave the engine, their rows kept. The VM's own: nothing a pack or
+        // the model writes names an entity to evict. Not journalled, changes no value.
+        self.evict_under_pressure();
         // THE COLLECTOR (docs/cliffvm.md, "Garbage collection"): the virtual entities nothing holds any more leave the engine at the end of the round. Removing them
         // is a round of its own (what read them recalculates), which drains again.
         let dead = { let g = self.eng(); g.0.gc_dead() };
@@ -559,30 +576,41 @@ impl Host {
         if !dead.is_empty() { self.drain_apply(); }
         // THE REACTIONS of a model's write (docs/cliffvm.md, "The return entity"): each door write is a Request `mc_done` by the setter `mcp-write`; the derived
         // writes of the same round are what it caused. The list goes back on that Request as `reactions` (a derived write, never journalled; a replay drains the same way).
+        packs_retired.extend(packs_emptied);   // an empty text unloads the pack too (pack_text), and the reply says so
+        let reactions = self.pack_reactions(reactions, &packs_written, &packs_retired);
         let any = any || !reactions.is_empty();
         for (req, list) in reactions { self.inject_write(ts, &req, "reactions", list, "reactions", &stamp_writer("reactions")); }
         if self.packs_dirty.swap(false, Ordering::SeqCst) { self.refresh_packs(); self.load_new_residents(); return true; }
         any
     }
 
-    /// Take the asked entities out of the engine, or answer each pinned one with `unload_result` = {status: refused, reason}. Pins: the core's (`Core::pinned_reason`:
-    /// virtual or resident class, a running effect) and what a live VIRTUAL entity holds by `$ref` (a Request that is still being answered holds what it points at). The
-    /// rows are written first: the store is written through, but a reload in this very transaction must read the row as it is.
-    fn unload_entities(&self, asked: &[String], ts: f64) {
+    /// THE MEMORY POLICY (docs/cliffvm.md, "Unload"), run at the end of every drain (so within a long cascade too, like an import) while a memory budget AND a batch are
+    /// set (the boot facts; with either unset nothing is ever evicted). Pressure = the resident size (`process_rss`, or a test's injected reading) at or over `unload_hard` x
+    /// budget (the budget itself when unset), or over `unload_soft` x budget (no soft line when unset). Under pressure ONE pass: the `unload_batch` coldest loaded entities
+    /// leave, coldest = the smallest touch clock (`Ent::touched`: bumped by every read, write and load), so the least recently used or written. Candidates are only stored
+    /// entities that may leave: never a RESIDENT or VIRTUAL class, never one with a running effect, never one a live virtual entity holds by `$ref` (`Core::pinned_reason`
+    /// and `held_by_virtual`). The rows are written first (the store is written through, but a reload in this very transaction must read the row as it is), then the whole
+    /// batch goes with ONE pass over the field's bookkeeping (`Fields::unload_many`: the entity and what the field remembers of it). -> whether any left.
+    fn evict_under_pressure(&self) -> bool {
+        let cfg = self.memory.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let (Some(mb), Some(batch)) = (cfg.budget_mb, cfg.batch) else { return false };
+        if batch == 0 { return false; }
+        let rss = match &*self.rss_reading.lock().unwrap_or_else(|e| e.into_inner()) { Some(f) => f(), None => process_rss() };
+        let Some(rss) = rss else { return false };
+        let b = (mb << 20) as f64;
+        if !(rss as f64 >= b * cfg.hard.unwrap_or(1.0) || cfg.soft.map_or(false, |s| rss as f64 >= b * s)) { return false; }
+        let go: Vec<String> = {
+            let g = self.eng(); let (core, f, _) = &*g;
+            let held = held_by_virtual(core, f);
+            let mut cold: Vec<(u64, &String)> = core.docs.iter().filter(|(k, _)| !held.contains(*k) && core.pinned_reason(k).is_none()).map(|(k, e)| (e.touched.get(), k)).collect();
+            let n = (batch as usize).min(cold.len());
+            if n == 0 { return false; }
+            if n < cold.len() { cold.select_nth_unstable(n - 1); cold.truncate(n); }
+            cold.into_iter().map(|(_, k)| k.clone()).collect()
+        };
         { let db = self.db.lock().unwrap_or_else(|e| e.into_inner()); self.flush(&db); }
-        let held: std::collections::HashSet<String> = { let g = self.eng(); let (core, f, _) = &*g; held_by_virtual(core, f) };
-        let mut go: Vec<String> = vec![];
-        for eid in asked {
-            let reason = { let g = self.eng(); let (core, _, _) = &*g;
-                if !core.docs.contains_key(eid) { continue; }
-                core.pinned_reason(eid).or_else(|| held.contains(eid).then(|| "pinned: held by a live virtual entity's $ref".to_string())) };
-            match reason {
-                None => go.push(eid.clone()),
-                Some(r) => self.inject_write(ts, eid, "unload_result", json!({"status": "refused", "reason": r}), "unload", &stamp_writer("unload")),
-            }
-        }
-        // one pass over the field's bookkeeping for the whole batch (Fields::unload_many)
-        if !go.is_empty() { let mut g = self.eng(); let (core, f, _) = &mut *g; f.unload_many(core, &go); }
+        { let mut g = self.eng(); let (core, f, _) = &mut *g; f.unload_many(core, &go); }
+        true
     }
 
     /// For every `mc_done` the door's `mcp-write` setter wrote in this batch: (the Request, the list of what else the engine wrote in the batch: setters' and
@@ -596,7 +624,8 @@ impl Host {
         let derived = |w: &J| w["writer"].as_str().map_or(false, |x| x.starts_with("field:") && x != "field:mcp-write" && x != "field:cliff-run"
             && !x.ends_with("consumed"));
         let list: Vec<J> = out.iter().enumerate()
-            .filter(|(_, w)| derived(w) && w.get("prop").is_some() && w["eid"].as_str().map_or(false, |e| !e.starts_with("Request:") && !e.starts_with("Return:") && !e.starts_with(PACK_PREFIX)))
+            .filter(|(_, w)| derived(w) && w.get("prop").is_some() && w["prop"] != "parents" &&   // the class list is the engine's, not a property the model sees (operator 2026-11-14)
+                w["eid"].as_str().map_or(false, |e| !e.starts_with("Request:") && !e.starts_with("Return:") && !e.starts_with(PACK_PREFIX)))
             .filter(|(i, w)| !out[i + 1..].iter().any(|x| derived(x) && x["eid"] == w["eid"] && x["prop"] == w["prop"]))   // the last value of each property in the round
             .filter_map(|(_, w)| {
                 let (eid, prop) = (w["eid"].as_str().unwrap_or(""), w["prop"].as_str().unwrap_or(""));
@@ -607,6 +636,22 @@ impl Host {
                 Some(json!({"eid": eid, "prop": prop, "new": w["new"], "by": w["writer"].as_str().unwrap_or("").trim_start_matches("field:"), "why": why, "cls": cls}))
             }).collect();
         asked.into_iter().map(|r| (r, J::Array(list.clone()))).collect()
+    }
+
+    /// A model-written pack that does not load must not be silent in the write's reply (#1143, the delivery-route incident): for each pack whose `text` was written in
+    /// this batch, add the reaction `Pack:<name>.loaded` (new: whether it is active, `why`: the engine's error text, verbatim). The mirror of `loaded`/`error` (refresh_packs)
+    /// is a later round, so the reaction is made from the same state it reads. The door's reply words it (door_tools.c1f, `rx_pack`).
+    fn pack_reactions(&self, reactions: Vec<(String, J)>, written: &[String], retired: &[String]) -> Vec<(String, J)> {
+        if (written.is_empty() && retired.is_empty()) || reactions.is_empty() { return reactions; }
+        let extra: Vec<J> = { let g = self.eng();
+            let refusals = self.refusals.lock().unwrap_or_else(|e| e.into_inner());
+            let mut seen = std::collections::HashSet::new();
+            written.iter().filter(|n| seen.insert(n.as_str())).map(|name| {
+                let active = g.1.pack_active(name) && !refusals.contains_key(name.as_str());
+                let err = refusals.get(name.as_str()).cloned().or_else(|| g.1.pack_errors.get(name.as_str()).cloned());
+                json!({"eid": format!("{PACK_PREFIX}{name}"), "prop": "loaded", "new": active, "by": PACK_WRITER, "why": err.map(J::from).unwrap_or(J::Null), "cls": PACK_CLASS})
+            }).chain(retired.iter().map(|name| json!({"eid": format!("{PACK_PREFIX}{name}"), "prop": "unloaded", "new": true, "by": PACK_WRITER, "why": J::Null, "cls": PACK_CLASS}))).collect() };
+        reactions.into_iter().map(|(r, l)| { let mut v = l.as_array().cloned().unwrap_or_default(); v.extend(extra.iter().cloned()); (r, J::Array(v)) }).collect()
     }
 
     // ---- Pack entities -----------------------------------------------------------------------------------------------
@@ -710,6 +755,7 @@ impl Host {
             if cls.is_empty() || cls == PACK_CLASS { continue; }
             let mut g = self.eng(); let (core, f, _) = &mut *g;
             core.updated.insert(eid.clone(), updated);
+            if let Some(b) = row["born_by"].as_str() { core.born_by.insert(eid.clone(), b.to_string()); }
             f.arrive(core, eid, cls, restore_props(&row), now);
             n += 1;
         }
@@ -753,39 +799,10 @@ impl Host {
     /// The host holds this entity itself (the collector never takes it): the boot's own state, `Boot:seat`, and the boot plan's steps. Call it BEFORE the entity is born.
     pub fn hold(&self, eid: &str) { self.eng().0.host_held.insert(eid.to_string()); }
 
-    /// The memory sensor's configuration (the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard`; none has a default number).
+    /// The memory policy's configuration (the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard`, `unload_batch`; none has a default number).
     pub fn set_memory(&self, c: MemoryConfig) { *self.memory.lock().unwrap_or_else(|e| e.into_inner()) = c; }
-    /// A test's own resident-size reading, consulted by the sensor in place of the process's (`cli.rs` reads it from the env var `MEMBRANE_TEST_RSS`).
+    /// A test's own resident-size reading, consulted by the policy in place of the process's (`cli.rs` reads it from the env var `MEMBRANE_TEST_RSS`).
     pub fn set_rss_reading(&self, r: RssReading) { *self.rss_reading.lock().unwrap_or_else(|e| e.into_inner()) = Some(r); }
-
-    /// THE MEMORY SENSOR (docs/cliffvm.md, "Unload"): at every tick the resident size is read and written on `Mem:host` (born once): `rss` (bytes; written again only
-    /// when it moved by `MEM_STEP_BYTES`), `budget` (bytes, only when `memory_budget_mb` is set) and `level`. The level is `ok` with no budget; else `hard` at or over
-    /// `unload_hard` x budget (the budget itself when unset), `soft` at or over `unload_soft` x budget (no soft level when unset), else `ok`. `level` is written on a change
-    /// AND at every tick while it is not `ok`, so the policy (a setter on it, c1f) gets one pass per tick for as long as the pressure lasts. An outside write like the clock's
-    /// tick, stamped `host:sensor:mem` and never journalled. It runs only when a pack declares the class `Mem` (the barest app's `unload.c1f`).
-    pub fn sense_memory(&self) {
-        if !self.eng().1.owns_class("Mem") { return; }   // no pack declares the class: nothing listens, and a quiet host writes nothing
-        let cfg = self.memory.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let rss = match &*self.rss_reading.lock().unwrap_or_else(|e| e.into_inner()) { Some(f) => f(), None => process_rss() };
-        let Some(rss) = rss else { return };
-        let budget = cfg.budget_mb.map(|m| m << 20);
-        let level = match budget {
-            None => "ok",
-            Some(b) => {
-                let b = b as f64;
-                if rss as f64 >= b * cfg.hard.unwrap_or(1.0) { "hard" } else if cfg.soft.map_or(false, |s| rss as f64 >= b * s) { "soft" } else { "ok" }
-            }
-        };
-        let ts = self.now();
-        let known = self.eng().0.docs.contains_key(MEM_ENTITY);
-        if !known { self.inject_born(ts, MEM_ENTITY, "Mem", props_of(json!({"name": "this process's memory"})), SENSOR_WRITER, SENSOR_WRITER); }
-        let was_rss = self.eng().0.docs.get(MEM_ENTITY).and_then(|e| e.props.get("rss").and_then(|v| v.as_u64()));
-        let was_level = self.eng().0.docs.get(MEM_ENTITY).and_then(|e| e.props.get("level").and_then(|v| v.as_str().map(String::from)));
-        let was_budget = self.eng().0.docs.get(MEM_ENTITY).and_then(|e| e.props.get("budget").and_then(|v| v.as_u64()));
-        if was_rss.map_or(true, |w| w.abs_diff(rss) >= MEM_STEP_BYTES) { self.inject_write(ts, MEM_ENTITY, "rss", json!(rss), SENSOR_WRITER, SENSOR_WRITER); }
-        if let Some(b) = budget { if was_budget != Some(b) { self.inject_write(ts, MEM_ENTITY, "budget", json!(b), SENSOR_WRITER, SENSOR_WRITER); } }
-        if was_level.as_deref() != Some(level) || level != "ok" { self.inject_write(ts, MEM_ENTITY, "level", json!(level), SENSOR_WRITER, SENSOR_WRITER); }
-    }
 
     /// The boot fact `warm_rows`: how many lazy rows load in the background after start (newest `updated` first). Set before `load_stored_entities`.
     pub fn set_warm_rows(&self, n: usize) { self.warm_rows.store(n, Ordering::SeqCst); }
@@ -911,16 +928,18 @@ impl Host {
 
     /// Write back the rows the open transaction changed.
     fn flush(&self, db: &Connection) {
-        let dirty: Vec<(String, (String, Map<String, J>, Map<String, J>), f64)> = {
+        let dirty: Vec<(String, (String, Map<String, J>, Map<String, J>), f64, Option<String>)> = {
             let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
             let Some(m) = g.as_mut() else { return };
-            m.iter_mut().filter(|(_, p)| p.dirty).filter_map(|(k, p)| { p.dirty = false; p.row.clone().map(|r| (k.clone(), r, p.updated)) }).collect()
+            m.iter_mut().filter(|(_, p)| p.dirty).filter_map(|(k, p)| { p.dirty = false; p.row.clone().map(|r| (k.clone(), r, p.updated, p.by.clone())) }).collect()
         };
-        for (eid, (cls, p, w), updated) in dirty { self.write_row(db, &eid, &cls, &p, &w, updated); }
+        for (eid, (cls, p, w), updated, by) in dirty { self.write_row(db, &eid, &cls, &p, &w, updated, by.as_deref()); }
     }
 
-    fn write_row(&self, db: &Connection, eid: &str, cls: &str, props: &Map<String, J>, writers: &Map<String, J>, updated: f64) {
-        let body = json!({"cls": cls, "props": props, "writers": writers}).to_string();
+    fn write_row(&self, db: &Connection, eid: &str, cls: &str, props: &Map<String, J>, writers: &Map<String, J>, updated: f64, by: Option<&str>) {
+        let mut body = json!({"cls": cls, "props": props, "writers": writers});
+        if let Some(b) = by { body["born_by"] = json!(b); }   // one string, only for an entity that has a cause
+        let body = body.to_string();
         // the row, its class and the time of the write are ONE statement of the write's own transaction
         self.exec(db, &format!("INSERT INTO {ROWS} (k, body, cls, updated) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(k) DO UPDATE SET body = excluded.body, cls = excluded.cls, updated = excluded.updated"), params![eid, body, cls, updated]);
     }
@@ -931,11 +950,13 @@ impl Host {
         let got: Option<(String, f64)> = db.query_row(&format!("SELECT body, updated FROM {ROWS} WHERE k = ?"), params![eid], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten();
         let updated = got.as_ref().map_or(0.0, |g| g.1);
         let body = got.map(|g| g.0);
-        let row = body.and_then(|b| serde_json::from_str::<J>(&b).ok()).map(|j| (j["cls"].as_str().unwrap_or("").to_string(), j["props"].as_object().cloned().unwrap_or_default(), j["writers"].as_object().cloned().unwrap_or_default()));
-        if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.insert(eid.into(), Pending { row, dirty: false, updated }); }
+        let parsed = body.and_then(|b| serde_json::from_str::<J>(&b).ok());
+        let by = parsed.as_ref().and_then(|j| j["born_by"].as_str().map(String::from));
+        let row = parsed.map(|j| (j["cls"].as_str().unwrap_or("").to_string(), j["props"].as_object().cloned().unwrap_or_default(), j["writers"].as_object().cloned().unwrap_or_default()));
+        if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.insert(eid.into(), Pending { row, dirty: false, updated, by }); }
     }
 
-    fn store_born(&self, eid: &str, cls: &str, props: &Map<String, J>, stamp: &str) {
+    fn store_born(&self, eid: &str, cls: &str, props: &Map<String, J>, stamp: &str, by: Option<&str>) {
         let ts = self.stamp_ts();
         if self.storage_of(cls) == crate::fields::Storage::Virtual { self.eng().0.updated.insert(eid.to_string(), ts); return; }   // RAM only: no row, but it has its `updated`
         let _t = self.txn();
@@ -944,6 +965,7 @@ impl Host {
         let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         let Some(slot) = g.as_mut().and_then(|m| m.get_mut(eid)) else { return };
         let created = slot.row.is_none();
+        if created { if let Some(b) = by { slot.by = Some(b.to_string()); } }
         let (c, p, w) = slot.row.get_or_insert_with(|| (cls.to_string(), Map::new(), Map::new()));
         let mut changed = slot.dirty || created || c != cls;
         let mut wrote = created || c != cls;
@@ -960,7 +982,6 @@ impl Host {
     /// One property of a row, with the writer that wrote it; a `null` removes it (as a getter's none leaves it absent). A write that changes
     /// nothing (the same value, the same writer or another derived one) leaves the store alone.
     fn store_prop(&self, eid: &str, cls: Option<&str>, prop: &str, new: &J, stamp: &str) {
-        if prop == "unload" { return; }   // the primitive is a request, never a property: the row (and `updated`) stay as they were, so a reload is equal
         let _t = self.txn();
         let known = self.eng().0.docs.get(eid).map(|e| e.cls.clone());
         let ts = self.stamp_ts();
@@ -1012,7 +1033,7 @@ impl Host {
         let mut j = self.journal.lock().unwrap_or_else(|e| e.into_inner());
         let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
         let body = l.to_json().to_string();
-        self.exec(&db, &format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", j.len()), body]);
+        self.exec(&db, &format!("INSERT OR REPLACE INTO {JOURNAL} (k, body) VALUES (?1, ?2)"), params![format!("{:012}", self.journal_next.fetch_add(1, Ordering::SeqCst)), body]);
         // THE IN-MEMORY COPY keeps no huge value: the stored line (c_journal, what a replay reads) is whole, the copy in RAM names its size instead. A query receipt of the history import
         // carries a page of rows (megabytes) and every page was kept here for the life of the process (measured 2026-11-14: ~100 MB of RSS a page). A flagged threshold (JOURNAL_RAM_MAX_BYTES).
         if body.len() > JOURNAL_RAM_MAX_BYTES {
@@ -1070,4 +1091,49 @@ pub fn boot_started(h: &Host, facts: &Map<String, J>, announce: bool) {
     for (k, v) in facts { whole.insert(k.clone(), v.clone()); }
     h.write("Boot:seat", "facts", J::Object(whole), BOOT_WRITER);
     if announce { h.write("Boot:seat", "started", json!(h.now()), BOOT_WRITER); }
+}
+
+/// THE ENVIRONMENT (#1143, operator 2026-11-14: "Environment node that holds envvars as its properties"): at the start the host writes ONE entity, `Environment:host`, whose PROPERTIES ARE the
+/// environment variables (property name = variable name; a variable that is not set is absent). A STORED entity (class `Environment`, RESIDENT, declared by the pack `environment`), written by a
+/// JOURNALLED outside write (`host:environment`), so a replay shows the value the boot saw. THE SECRET RULE: only the names of `ENV_DEFAULT_ALLOW` (plus the launch fact `env_allow`) carry their
+/// value; a variable whose name holds KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL (any case) is published as the fixed text `set` when it is set and non-empty, never its value; every other variable is absent.
+pub const ENV_WRITER: &str = "host:environment";
+pub const ENV_ENTITY: &str = "Environment:host";
+pub const ENV_SET: &str = "set";
+pub const ENV_DEFAULT_ALLOW: [&str; 8] = ["HOME", "USER", "LANG", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "MEMBRANE_DATA_DIR", "CLAUDE_BIN", "TMPDIR"];
+pub const ENV_SECRET_WORDS: [&str; 6] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL"];
+pub fn env_secret_name(name: &str) -> bool { let u = name.to_uppercase(); ENV_SECRET_WORDS.iter().any(|w| u.contains(w)) }
+
+/// The properties of `Environment:host` for this environment and these facts, and the names `env_allow` asked for that the secret rule refused (each as a line that says why; never a value).
+pub fn environment_props(facts: &Map<String, J>, env: &[(String, String)]) -> (Map<String, J>, Vec<String>) {
+    let asked: Vec<String> = match facts.get("env_allow") {
+        Some(J::String(t)) => t.split(|c: char| c == ',' || c.is_whitespace()).filter(|x| !x.is_empty()).map(String::from).collect(),
+        Some(J::Array(a)) => a.iter().filter_map(|v| v.as_str()).map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
+        _ => vec![],
+    };
+    let mut refused = vec![];
+    let mut allow: Vec<String> = ENV_DEFAULT_ALLOW.iter().map(|s| s.to_string()).collect();
+    for n in asked {
+        if env_secret_name(&n) { refused.push(format!("env_allow: {n} is refused: a name with KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL in it never carries its value (the environment shows only that it is set)")); }
+        else { allow.push(n); }
+    }
+    let mut out = Map::new();
+    for (k, v) in env {
+        if v.is_empty() { continue; }
+        if env_secret_name(k) { out.insert(k.clone(), json!(ENV_SET)); }
+        else if allow.contains(k) { out.insert(k.clone(), json!(v)); }
+    }
+    (out, refused)
+}
+
+/// Write `Environment:host` (a quiet host whose packs do not declare the class writes nothing). A property of an earlier run's row that this environment no longer has is cleared (journalled).
+/// -> the refusal lines for the caller to say.
+pub fn boot_environment(h: &Host, facts: &Map<String, J>, env: &[(String, String)]) -> Vec<String> {
+    if !h.eng().1.owns_class("Environment") { return vec![]; }
+    let (props, refused) = environment_props(facts, env);
+    if !h.snapshot().contains_key(ENV_ENTITY) { h.born(ENV_ENTITY, "Environment", Map::new(), ENV_WRITER); }
+    let old: Vec<String> = h.snapshot().get(ENV_ENTITY).and_then(|e| e["props"].as_object().map(|p| p.keys().cloned().collect())).unwrap_or_default();
+    for k in old { if k != "parents" && !props.contains_key(&k) { h.write(ENV_ENTITY, &k, J::Null, ENV_WRITER); } }
+    for (k, v) in &props { h.write(ENV_ENTITY, k, v.clone(), ENV_WRITER); }
+    refused
 }

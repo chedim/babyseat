@@ -311,8 +311,6 @@ pub struct Fields {
     pub out: Vec<J>,
     /// entities a write of `retire = true` asked to remove (any writer): the host removes each (the engine's entity, its stored row) after it drains `out`
     pub retired: Vec<String>,
-    /// entities a write of `unload = true` asked to take out of the engine (any writer): the host checks each against its pins and unloads it (`Host::unload_entity`)
-    pub unload_asked: Vec<String>,
     /// the host takes the door's requests itself (to journal them, then `arrive`): a round leaves them in the store
     pub inbound_by_host: bool,
     /// getters declared in cliffhanger, their levels, and their inputs: (eid, field) read -> instances (eid, getter)
@@ -383,8 +381,13 @@ impl Fields {
         self.trigger_virtual && core.docs.get(eid).map_or(false, |e| self.storage_of(&e.cls) != Storage::Virtual)
     }
     /// The `out` entry of a birth by a setter (the entity is in `core` already).
-    fn born_entry(&self, core: &Core, eid: &str, cls: &str) -> J {
-        let mut o = json!({"eid": eid, "born": cls});
+    /// `by` is the cause: the entity whose setter runs (the writer label that travels with `this`), kept for the entity (`Core::born_by`) and carried in the entry for the store and the journal.
+    /// Who a birth is charged to when the setter of `eid` makes an entity (the VM rule `births_to`): the entity id in the setter entity's own `births_to` property when it holds one, else `eid` itself.
+    fn cause_of(core: &Core, eid: &str) -> String {
+        match core.docs.get(eid).and_then(|e| e.props.get(crate::vm::BIRTHS_TO)) { Some(J::String(s)) if !s.is_empty() => s.clone(), _ => eid.to_string() }
+    }
+    fn born_entry(&self, core: &Core, eid: &str, cls: &str, by: &str) -> J {
+        let mut o = json!({"eid": eid, "born": cls, "by": by});
         if self.from_virtual(core, eid) { o["virt"] = json!(true); }
         o
     }
@@ -395,7 +398,7 @@ impl Fields {
     /// The class table the engine's core reads too (`Core::storage`): one shared map, written by `compose`.
     pub fn storage_handle(&self) -> crate::vm::StorageMap { self.storage.clone() }
     pub fn goalgraph() -> Self {
-        let mut f = Fields { link: Default::default(), setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], unload_asked: vec![], inbound_by_host: false,
+        let mut f = Fields { link: Default::default(), setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
             known: Default::default(), primed: false, fresh: vec![], late: vec![], flips: Default::default(), class_deferred: Default::default(), recon: Default::default(), in_run: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
@@ -1012,6 +1015,7 @@ impl Fields {
     /// plan written entity by entity) must not fire on a half-made state. What references it recalculates live.
     fn birth(&mut self, core: &mut Core, e: &str, now: f64, seq: &mut i64) {
         self.known.insert(e.to_string());
+        self.mark(e, crate::vm::BORN_BY);   // what read its cause while it was not there reads it now
         if let Some(c) = core.docs.get(e).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c)); }
         for gi in self.getters_of(core, e) {
             let v = self.compute(core, None, e, gi, now, seq); self.flush_late(); let Some(v) = v else { continue };
@@ -1450,7 +1454,7 @@ impl Fields {
             for gi in self.getters_of(core, &e) { self.dirty.insert((self.glevel[gi], e.clone(), gi)); }
             for p in keys { self.mark(&e, &p); }
             // what read this eid while it was not there (its `eid`, its class) reads it now
-            for k in ["eid", "cls", crate::vm::UPDATED] { self.mark(&e, k); }
+            for k in ["eid", "cls", crate::vm::UPDATED, crate::vm::BORN_BY] { self.mark(&e, k); }
         }
     }
 
@@ -1573,6 +1577,10 @@ impl Fields {
                 self.construct(core, work, eid, name, pack, target, value, &binds, now, seq);
                 continue;
             }
+            if prop == crate::syntax::KILL {
+                self.kill(core, work, eid, name, pack, target, value, &binds, now, seq);
+                continue;
+            }
             let (vars, extra) = scope(eid, &binds, now);
             // `<target>.[<expr>] = v`: the property's name is computed (non-empty text; anything else writes nothing)
             let dynamic: String;
@@ -1597,6 +1605,10 @@ impl Fields {
             }
             if prop == crate::vm::UPDATED {
                 self.receipt(core, eid, name, format!("refused: `{UPDATED_PROP}` is provided by the VM (the time of the entity's last write) and is read-only: no setter writes it"), J::Null, seq, now);
+                continue;
+            }
+            if prop == crate::vm::BORN_BY {
+                self.receipt(core, eid, name, format!("refused: `{}` is provided by the VM (the entity whose setter was running when the entity was born) and is read-only: no setter writes it", crate::vm::BORN_BY), J::Null, seq, now);
                 continue;
             }
             if prop == crate::vm::PINNED {
@@ -1636,7 +1648,9 @@ impl Fields {
                     }
                 }
                 core.load(tgt.clone(), cls.to_string(), Default::default(), None, now);
-                self.out.push(self.born_entry(core, &tgt, cls));
+                let by = Self::cause_of(core, eid);
+                core.born_by.insert(tgt.clone(), by.clone());
+                self.out.push(self.born_entry(core, &tgt, cls, &by));
                 self.birth(core, &tgt, now, seq);
             }
             if let Err(why) = self.may_write_ent(core, pack, &tgt) {
@@ -1653,6 +1667,27 @@ impl Fields {
             }
         }
         Ok(())
+    }
+
+    /// `<target> = None`: the mirror of a birth (operator, 2026-11-14). Only a PLAIN None destroys: a reasoned null (`pending:`, `absent:`, ...), an Error or any other value is refused
+    /// with a receipt that names it, and nothing is destroyed. It is `<target>.retire = true` once the checks pass (the same ownership rules, the same host removal, a Pack unloads).
+    fn kill(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, name: &str, pack: &str, target: &str, value: &str,
+            binds: &[(String, crate::vm::Item)], now: f64, seq: &mut i64) {
+        let (vars, extra) = scope(eid, binds, now);
+        let tgt = match core.eval_target(target, &vars, &extra) {
+            Ok(t) => t,
+            Err(why) => { self.receipt(core, eid, name, format!("error: {} = {}: {}; nothing was destroyed", target, value, why.strip_prefix("error: ").unwrap_or(&why)), J::Null, seq, now); return; }
+        };
+        match core.eval_value(value, &vars, &extra) {
+            Ok(crate::expr::V::None) => {}
+            Ok(crate::expr::V::Nil(r)) => { self.receipt(core, eid, name, format!("refused: {tgt} = {r}: a null that has a reason is not a plain None; nothing was destroyed (write `{tgt} = None` to destroy it)"), J::Null, seq, now); return; }
+            Ok(crate::expr::V::Error(r)) => { self.receipt(core, eid, name, format!("refused: {tgt} = {r}: an Error never destroys; nothing was destroyed"), J::Null, seq, now); return; }
+            Ok(_) | Err(_) => { self.receipt(core, eid, name, format!("refused: {tgt} = {value}: an entity on the left of `=` takes a constructor (`Class(name: value)`) or a plain `None` (destroy it); nothing was changed"), J::Null, seq, now); return; }
+        }
+        self.ensure(core, &tgt, now);
+        if !core.docs.contains_key(&tgt) { return; }      // nothing there: the death of what does not exist is no news
+        if let Err(why) = self.may_write_ent(core, pack, &tgt) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+        self.emit(core, work, &tgt, "retire", json!(true), name, seq, now);
     }
 
     /// `<target> = Class(name: value, ...)`: the target is the identity. Created by the creation path of a write (the class must be one
@@ -1686,7 +1721,9 @@ impl Fields {
             // the birth default of the class list: the eid's class first, then the constructor's class when it differs (the stamp), then any `parents` argument
             if own != cls && !args.iter().any(|(k, _)| k == "parents") { args.push(("parents".into(), json!([format!("cls:{}", cls.to_lowercase())]))); }
             core.load(tgt.clone(), own.clone(), Default::default(), None, now);
-            self.out.push(self.born_entry(core, &tgt, &own));
+            let by = Self::cause_of(core, eid);
+            core.born_by.insert(tgt.clone(), by.clone());
+            self.out.push(self.born_entry(core, &tgt, &own, &by));
             self.birth(core, &tgt, now, seq);
         } else {
             if let Err(why) = self.may_write_ent(core, pack, &tgt) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
@@ -1721,12 +1758,6 @@ impl Fields {
     fn driver_effect(&mut self, core: &mut Core, work: &mut VecDeque<Write>, w: &Write, now: f64, seq: &mut i64) {
         // `retire = true` on any entity asks the host to remove it (docs/cliffvm.md, "Retiring an entity")
         if w.prop == "retire" && w.new == json!(true) && !self.retired.contains(&w.eid) { self.retired.push(w.eid.clone()); }
-        // `unload = true` on any entity asks the host to take it out of the engine, its row kept (docs/cliffvm.md, "Unload"). The slot is consumed like a verb's, and the
-        // host never stores it, so the entity is the same after a reload
-        if w.prop == "unload" && w.new == json!(true) && !self.unload_asked.contains(&w.eid) {
-            self.unload_asked.push(w.eid.clone());
-            self.emit_unchecked(core, work, &w.eid, "unload", J::Null, "direct:consumed", seq, now);
-        }
         #[cfg(feature = "store")]
         {
             if w.new.is_null() || w.new == json!("") { return; }

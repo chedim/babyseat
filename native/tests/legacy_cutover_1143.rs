@@ -28,7 +28,7 @@ fn ticking() -> Box<dyn Fn() -> f64 + Send + Sync> {
     let n = Arc::new(AtomicU64::new(CLOCK.fetch_add(100_000, Ordering::SeqCst)));
     Box::new(move || 1_800_000_000.0 + n.fetch_add(1, Ordering::SeqCst) as f64)
 }
-const PACKS: &[&str] = &["entity", "boot", "fs", "proc", "fetch", "sql", "store", "door", "semtext", "mentions", "chat", "chat_turn", "door_session", "door_auth", "legacy_import", "legacy_persons", "legacy_cutover", "settings"];
+const PACKS: &[&str] = &["entity", "boot", "fs", "proc", "fetch", "sql", "store", "door", "semtext", "mentions", "chat", "chat_turn", "door_session", "door_auth", "legacy_import", "legacy_persons", "legacy_cutover", "settings", "environment"];
 fn facts_of(d: &std::path::Path, extra: &[(&str, J)]) -> Map<String, J> {
     let mut m = Map::new();
     m.insert("seat_data_dir".into(), json!(d.join(".membrane").to_string_lossy()));
@@ -37,11 +37,14 @@ fn facts_of(d: &std::path::Path, extra: &[(&str, J)]) -> Map<String, J> {
     for (k, v) in extra { m.insert((*k).into(), v.clone()); }
     m
 }
-fn host_with(d: &std::path::Path, extra: &[(&str, J)]) -> Host {
+fn host_with(d: &std::path::Path, extra: &[(&str, J)]) -> Host { host_with_env(d, extra, &[]) }
+/// the same, the seat's environment told as the host tells it at the start (`Environment:host`, before `started`)
+fn host_with_env(d: &std::path::Path, extra: &[(&str, J)], env: &[(&str, String)]) -> Host {
     let h = Host::open({ let mut o = Options::new(Some(store_path(d))); o.clock = ticking(); o }).unwrap();
     for n in PACKS { h.load_pack(n, &pack(n)).unwrap_or_else(|e| panic!("pack {n}: {e}")); }
     h.load_stored_entities();
     h.rebuild();
+    membrane_vm::host::boot_environment(&h, &facts_of(d, extra), &env.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<Vec<_>>());
     membrane_vm::host::boot_started(&h, &facts_of(d, extra), true);
     h.pump();
     h
@@ -93,6 +96,34 @@ fn the_old_store_is_found_in_the_conventional_places_in_the_listed_order_and_dec
         assert_eq!(cut(&h, "state"), json!("done"), "place {k}: {}", cut(&h, "reason"));
         assert_eq!(cut(&h, "path"), json!(d.join(places[k]).to_string_lossy()));
     }
+}
+
+#[test]
+fn the_environments_data_folder_is_searched_right_after_the_named_path_and_before_the_conventional_places() {
+    // MEMBRANE_DATA_DIR names a folder that holds `field.sqlite/field.sqlite3`, outside every conventional place
+    let d = tmp("envdir");
+    let there = d.join("elsewhere");
+    old_store(&d, "elsewhere/field.sqlite/field.sqlite3");
+    old_store(&d, ".membrane/field.sqlite/field.sqlite3");   // a conventional store too: the environment's pointer wins over it
+    let env = [("MEMBRANE_DATA_DIR", there.to_string_lossy().to_string())];
+    let h = host_with_env(&d, &[], &env);
+    finish(&h);
+    assert_eq!(h.get("SqlSource:legacy", "path"), json!(there.join("field.sqlite/field.sqlite3").to_string_lossy()));
+    assert_eq!(cut(&h, "state"), json!("done"), "{}", cut(&h, "reason"));
+    // the named path (the fact) still wins over the environment
+    let d = tmp("envdir-fact");
+    old_store(&d, "elsewhere/field.sqlite/field.sqlite3");
+    let named = old_store(&d, "named/old.sqlite3");
+    let h = host_with_env(&d, &[("legacy_path", json!(named.to_string_lossy()))], &[("MEMBRANE_DATA_DIR", d.join("elsewhere").to_string_lossy().to_string())]);
+    finish(&h);
+    assert_eq!(h.get("SqlSource:legacy", "path"), json!(named.to_string_lossy()));
+    // an environment folder with no store is nothing: the conventional places are looked at
+    let d = tmp("envdir-empty");
+    std::fs::create_dir_all(d.join("empty")).unwrap();
+    let f = old_store(&d, "home/membrane/.membrane/field.sqlite/field.sqlite3");
+    let h = host_with_env(&d, &[], &[("MEMBRANE_DATA_DIR", d.join("empty").to_string_lossy().to_string())]);
+    finish(&h);
+    assert_eq!(h.get("SqlSource:legacy", "path"), json!(f.to_string_lossy()), "the sixth place (home) is still reached");
 }
 
 #[test]
@@ -299,7 +330,11 @@ fn the_import_leaves_what_it_wrote_out_of_memory_so_the_loaded_entities_stay_a_f
     std::fs::create_dir_all(old.parent().unwrap()).unwrap();
     make_big_legacy(&old, 120, 40);   // 160 questions in 41 sessions
     let batch = 5;
+    // the VM's own policy bounds it (no pack, no write): the budget is a boot fact, the reading is the test's (the process is over its budget the whole import), the batch is
+    // what one drain may evict; the import writes rows nobody reads back, so the coldest are always the ones it wrote first
     let h = host_with(&d, &[("legacy_batch", json!(batch))]);
+    h.set_memory(membrane_vm::host::MemoryConfig { budget_mb: Some(100), soft: None, hard: Some(0.9), batch: Some(64) });
+    h.set_rss_reading(Box::new(|| Some(95 << 20)));
     let mut peak = 0usize;
     pump_until(&h, "the end", |h| { peak = peak.max(loaded_message_entities(h)); ended(h) });
     assert_eq!(cut(&h, "state"), json!("done"), "{}", cut(&h, "reason"));
@@ -309,7 +344,8 @@ fn the_import_leaves_what_it_wrote_out_of_memory_so_the_loaded_entities_stay_a_f
     assert!(peak <= bound, "peak loaded message entities {peak} > {bound} ({imported_questions} questions imported)");
     assert!(imported_questions * 5 > 4 * bound, "the store is big enough for the bound to mean something");
     assert!(h.unloaded_count() > imported_questions * 4, "the imported entities left the engine ({} unloaded)", h.unloaded_count());
-    // and they are all still there: a read loads one back
+    // and they are all still there: a read loads one back (the pressure is over: a reading under the lines)
+    h.set_rss_reading(Box::new(|| Some(1 << 20)));
     assert_eq!(h.get("membrane::Chat:session:ses_big:message:1790000000000-00000001", "text"), json!("a question"));
     assert_eq!(h.get("membrane::Legacy:session:ses_big", "rows"), json!(240));
 }

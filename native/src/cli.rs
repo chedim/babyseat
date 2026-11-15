@@ -142,9 +142,9 @@ pub fn run(r: &RunArgs, stop: &AtomicBool) -> i32 { run_with(r, stop, &|_, _| {}
 
 /// `run`, and `on_up(host, port)` once the door is listening (after its line is printed).
 pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i32 {
-    // the owner's token (owner.rs): with a door secret, the secret is made if missing and a fresh owner token is written at every boot; before any thread starts
+    // the admin's token (admin.rs): with a door secret, the secret is made if missing and a fresh admin token is written at every boot; before any thread starts
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-    let owner_facts = match crate::owner::boot(&r.facts, now) { Ok(m) => m, Err(e) => { eprintln!("cliffvm: owner token: {e}"); return 2; } };
+    let admin_facts = match crate::admin::boot(&r.facts, now) { Ok(m) => m, Err(e) => { eprintln!("cliffvm: admin token: {e}"); return 2; } };
     let mut o = Options::new(Some(r.store.clone()));
     o.plain = true;
     o.bind = r.bind.clone();
@@ -158,10 +158,10 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "effect_workers").and_then(|(_, v)| v.as_u64()) { h.set_effect_workers(n.max(1) as usize); }   // the cap on Command / File / Fetch effects running at once (default 4)
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "command_timeout_s").and_then(|(_, v)| v.as_f64()) { h.set_command_timeout(n); }   // the limit of a Command run that states no timeout_s (default 120 s)
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "warm_rows").and_then(|(_, v)| v.as_u64()) { h.set_warm_rows(n as usize); }   // how many lazy rows the warm boot loads in the background (default host::DEFAULT_WARM_ROWS; 0 = none)
-    // the memory sensor (docs/cliffvm.md, "Unload"): the budget and the fractions are the operator's boot facts, none has a default; the policy pack reads `unload_batch` itself
+    // the memory policy (docs/cliffvm.md, "Unload"): the budget, the fractions and the batch are the operator's boot facts, none has a default
     let fact = |n: &str| r.facts.iter().find(|(k, _)| k == n).map(|(_, v)| v);
-    h.set_memory(host::MemoryConfig { budget_mb: fact("memory_budget_mb").and_then(|v| v.as_u64()), soft: fact("unload_soft").and_then(|v| v.as_f64()), hard: fact("unload_hard").and_then(|v| v.as_f64()) });
-    // TEST ONLY: MEMBRANE_TEST_RSS names a file that holds the resident size in bytes; the sensor reads it at every tick instead of the process's own (unreadable: the real one)
+    h.set_memory(host::MemoryConfig { budget_mb: fact("memory_budget_mb").and_then(|v| v.as_u64()), soft: fact("unload_soft").and_then(|v| v.as_f64()), hard: fact("unload_hard").and_then(|v| v.as_f64()), batch: fact("unload_batch").and_then(|v| v.as_u64()) });
+    // TEST ONLY: MEMBRANE_TEST_RSS names a file that holds the resident size in bytes; the policy reads it at every drain instead of the process's own (unreadable: the real one)
     if let Ok(path) = std::env::var("MEMBRANE_TEST_RSS") { h.set_rss_reading(Box::new(move || std::fs::read_to_string(&path).ok().and_then(|t| t.trim().parse().ok()).or_else(host::process_rss))); }
     h.load_stored_packs();                       // the model's own packs, written in an earlier run (Pack:<name>.text)
     h.load_stored_entities();                    // then every other entity the model wrote (banner lines, trips, messages), minus what a getter computed
@@ -191,7 +191,8 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
         if let Err(e) = plan::run(h.engine(), &host::NullHost, steps, false, &mut |_| Outcome::Skipped) { eprintln!("cliffvm: boot stopped: {e}"); return 2; }
     }
     let mut told = facts(r);
-    told.extend(owner_facts);
+    told.extend(admin_facts);
+    for m in host::boot_environment(&h, &told, &std::env::vars().collect::<Vec<_>>()) { eprintln!("cliffvm: {m}"); }   // the environment as an entity (host.rs), before `started` so a setter on it finds it
     host::boot_started(&h, &told, true);
     if let Some(steps) = &steps {
         let _ = plan::run(h.engine(), &host::NullHost, steps, true, &mut |_| Outcome::Skipped);   // the UI is up: the background steps
@@ -225,7 +226,7 @@ usage: cliffvm serve [--port <n>] [--data-dir <dir>] [--bind <addr>] [--store <s
 Starts the barest seat: the packs listed in <root>/apps/barest.packs, and the app <root>/apps/barest.c1f (the page is its ui/ folder), with the claude CLI as the only model.
   --port <n>         the door's port (0 = any free port). Default: the one launcher.c1f says (4096).
   --bind <addr>      the address the door opens on. Default 127.0.0.1 (this machine only); 0.0.0.0 opens it to the network.
-  --data-dir <dir>   the seat's data: its store (seat.sqlite), the door's secret (door.secret, made at the first run, mode 0600) and the owner token (owner.token, new at every start, mode 0600).
+  --data-dir <dir>   the seat's data: its store (seat.sqlite), the door's secret (door.secret, made at the first run, mode 0600) and the admin token (admin.token, new at every start, mode 0600).
                      Default: $XDG_DATA_HOME/membrane, else ~/Library/Application Support/membrane (macOS) or ~/.local/share/membrane.
   --store <sqlite>   the store file, instead of <data-dir>/seat.sqlite.
   --root <dir>       the dist folder (has packs/ apps/). Default: the folder above the one this binary is in (bin/cliffvm); the repo's membrane/ folder has the same shape.
@@ -234,7 +235,7 @@ Starts the barest seat: the packs listed in <root>/apps/barest.packs, and the ap
   --fact <name>=<value>   a Boot fact, after the defaults so it wins (repeatable): JSON when the value parses, else text. Defaults: packs/launcher.c1f.
 
 The chat answers through the claude CLI: CLAUDE_BIN names it, else `claude` on PATH. It authenticates with ANTHROPIC_API_KEY from this environment (the default);
-the CLI's own login is an opt-in: --fact chat_auth=login. A local tool presents the owner token: curl -H \"Authorization: Bearer $(cat <data-dir>/owner.token)\" <url>/global/health";
+the CLI's own login is an opt-in: --fact chat_auth=login. A local tool presents the admin token: curl -H \"Authorization: Bearer $(cat <data-dir>/admin.token)\" <url>/global/health";
 
 #[derive(Debug, PartialEq, Default)]
 pub struct ServeArgs { pub port: Option<u16>, pub bind: Option<String>, pub data_dir: Option<String>, pub store: Option<String>, pub root: Option<String>, pub legacy: Option<String>, pub facts: Vec<(String, J)> }
@@ -312,16 +313,16 @@ pub fn serve_plan(s: &ServeArgs, exe: &std::path::Path, env: &dyn Fn(&str) -> Op
     Ok(ServePlan { run: RunArgs { apps, store, port: s.port, bind: s.bind.clone(), ui_dir: None, facts }, data, notes })
 }
 
-/// `serve`: tell what was found, run the seat, and once the door is up tell the URL and how a local tool uses the owner token.
+/// `serve`: tell what was found, run the seat, and once the door is up tell the URL and how a local tool uses the admin token.
 pub fn serve(s: &ServeArgs, exe: &std::path::Path, stop: &AtomicBool) -> i32 {
     let plan = match serve_plan(s, exe, &|k| std::env::var(k).ok()) { Ok(p) => p, Err(e) => { eprintln!("cliffvm serve: {e}"); return 2; } };
     for n in &plan.notes { println!("{n}"); }
-    println!("cliffvm serve: data {} (the door's secret and the owner token are made here)", plan.data);
-    let token = format!("{}/owner.token", plan.data);
+    println!("cliffvm serve: data {} (the door's secret and the admin token are made here)", plan.data);
+    let token = format!("{}/admin.token", plan.data);
     run_with(&plan.run, stop, &|host, port| {
         let url = format!("http://{host}:{port}/");
         println!("cliffvm serve: open {url}");
-        println!("cliffvm serve: a localhost peer is not the owner: a local tool sends the owner token, written (mode 600, new at every start) to {token}");
+        println!("cliffvm serve: a localhost peer is not the admin: a local tool sends the admin token, written (mode 600, new at every start) to {token}");
         println!("cliffvm serve: curl -H \"Authorization: Bearer $(cat {token})\" {url}global/health");
         use std::io::Write; let _ = std::io::stdout().flush();
     })

@@ -107,7 +107,7 @@ own or import (`compose` refuses it, tested).
   person) are never subject to rule B or to this check.
 - **Rule B follows the class list.** A pack may write an existing entity when ANY class of the entity's list (`parents`; the eid class when
   there is none) is one the pack owns or imports, or when no class of it has an owner; otherwise the write is refused for the nearest owned
-  class. A write of `parents` itself is a write like any other (same check, against the list the entity has at that moment). The rule guards a
+  class. A write of `parents` itself is a write like any other for a pack (same check, against the list the entity has at that moment); the model's `entity_write` refuses it (operator 2026-11-14: the list is the engine's, the model tests a class with `x is Class`, and the tool replies leave `parents` out). The rule guards a
   pack's own mistakes; the seat has no security by decision (outside writes and privileged packs are exempt). `classlist_1143.rs`.
 - **Provenance.** The host mirrors `Pack:<name>.granted_by` as a derived, non-journalled write (like `loaded`, `error`): `pack:<pack>:<setter>`
   for a setter's grant, the outside writer's name (`person`, `host`) otherwise; never from the pack's own text. A grant persists until a

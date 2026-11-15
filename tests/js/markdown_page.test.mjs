@@ -34,7 +34,7 @@ if prompt == "tools":
     out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu1", "content": [{"type": "text", "text": "the result"}]}]}})
     out({"type": "result", "subtype": "success", "is_error": False, "result": "Used two tools.", "num_turns": 2, "duration_ms": 10, "total_cost_usd": 0, "usage": {}, "session_id": "fake-1"})
     sys.exit(0)
-answer = open(os.path.join(here, "answer.md")).read()
+answer = open(os.path.join(here, "answer." + (prompt if prompt in ("wide", "big") else "md"))).read()
 out({"type": "result", "subtype": "success", "is_error": False, "result": answer, "num_turns": 1, "duration_ms": 10, "total_cost_usd": 0, "usage": {}, "session_id": "fake-1"})
 `;
 const tagOf = (p) => [...p].map((c) => (/[A-Za-z0-9]/.test(c) ? c : '_')).join('').slice(0, 40);
@@ -146,6 +146,8 @@ console.log(1)
 [evil](javascript:window.__pwned=3) done`;
 const seat = startSeat({});
 writeFileSync(path.join(seat.dir, 'answer.md'), MD_ANSWER);
+writeFileSync(path.join(seat.dir, 'answer.wide'), '```text\n' + 'x'.repeat(300) + '\n```\n\n| ' + Array.from({ length: 12 }, (_, i) => 'column ' + i).join(' | ') + ' |\n|' + '---|'.repeat(12) + '\n| ' + Array.from({ length: 12 }, (_, i) => 'value number ' + i).join(' | ') + ' |\n');
+writeFileSync(path.join(seat.dir, 'answer.big'), Array.from({ length: 400 }, (_, i) => `Paragraph number ${i} of a very long answer.`).join('\n\n'));
 const b = await browser();
 const ans = '[data-key$=":ans:md"]';
 const count = (sel) => b.ev(`document.querySelectorAll(${JSON.stringify(sel)}).length`);
@@ -191,13 +193,34 @@ try {
   assert.equal(await b.ev(`document.documentElement.scrollWidth <= window.innerWidth`), true, 'no horizontal scroll at phone width');
   await b.size(1000, 900);
 
-  // 3. Copy: the browser's writeText is stubbed to record the text
-  await b.ev(`window.__copied = []; Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.__copied.push(t); return Promise.resolve(); } }, configurable: true })`);
-  await b.ev(`document.querySelectorAll('${ans} .md-copy')[0].dispatchEvent(new MouseEvent('click', {bubbles: true}))`);
+  // 3. Copy: the browser's writeText is stubbed to record the text; the answer is the button's text AND a polite live region; it goes back after a while; a refusal is visible text
+  await b.ev(`window.__copied = []; window.__refuse = false; Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => window.__refuse ? Promise.reject(new Error('no')) : (window.__copied.push(t), Promise.resolve()) }, configurable: true }); document.execCommand = () => false`);
+  const copyBtn = `document.querySelectorAll('${ans} .md-copy')[0]`, liveEl = `document.querySelectorAll('${ans} .md-live')[0]`;
+  assert.equal(await b.ev(`${copyBtn}.getAttribute('aria-label')`), 'Copy code'); assert.equal(await b.ev(`${liveEl}.getAttribute('aria-live') + '/' + ${liveEl}.getAttribute('role')`), 'polite/status');
+  await b.ev(`${copyBtn}.dispatchEvent(new MouseEvent('click', {bubbles: true}))`);
   await b.until(`window.__copied.length === 1`, 'the clipboard got the text');
   assert.deepEqual(await b.ev(`window.__copied`), ['def hello():\n    return "world"']);
-  assert.equal(await b.ev(`document.querySelectorAll('${ans} .md-copy')[0].textContent`), 'Copied');
+  await b.until(`${copyBtn}.textContent === 'Copied' && ${liveEl}.textContent === 'Copied'`, 'Copied is shown and announced');
   assert.equal(await b.ev(`document.querySelectorAll('${ans} .md-copy')[1].textContent`), 'Copy', 'only that block');
+  await b.shot('copied');
+  await b.until(`${copyBtn}.textContent === 'Copy' && ${liveEl}.textContent === ''`, 'it goes back to Copy and the announcement is cleared', 8000);
+  await b.ev(`window.__refuse = true`);
+  await b.ev(`${copyBtn}.dispatchEvent(new MouseEvent('click', {bubbles: true}))`);
+  await b.until(`${copyBtn}.textContent === 'Copy failed' && /^Copy failed: /.test(${liveEl}.textContent)`, 'a refusal is visible text and announced');
+  await b.shot('copy-failed');
+  await b.until(`${copyBtn}.textContent === 'Copy'`, 'and goes back', 8000);
+  await b.ev(`window.__refuse = false`);
+
+  // (b) shrinking: the nodes of a text that shrank are gone (the same count and markup as before it grew)
+  const mdEl = `document.querySelector('${ans}')`;
+  const eid = await b.ev(`'Md:' + ${mdEl}.closest('li').getAttribute('data-key').replace('DomNode:chat:row:', '') + ':ans'`);
+  const html0 = await b.ev(`${mdEl}.innerHTML`), n0 = await b.ev(`${mdEl}.querySelectorAll('*').length`), src0 = await b.ev(`window.MEMBRANE_PAGE.get(${JSON.stringify(eid)}).src`);
+  const GROW = '\n\n- more\n  - deeper\n\n> q\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n' + '`'.repeat(3) + 'js\nx\n' + '`'.repeat(3) + '\n\ntail';
+  await b.ev(`window.MEMBRANE_PAGE.write(${JSON.stringify(eid)}, 'src', ${JSON.stringify(src0 + GROW)})`);
+  await b.until(`${mdEl}.querySelectorAll('*').length > ${n0} + 15`, 'it grew');
+  await b.ev(`window.MEMBRANE_PAGE.write(${JSON.stringify(eid)}, 'src', ${JSON.stringify(src0)})`);
+  await b.until(`${mdEl}.querySelectorAll('*').length === ${n0}`, 'it is back to the same number of elements');
+  assert.equal(await b.ev(`${mdEl}.innerHTML.replace(/ aria-live="polite"/g, '')`), html0.replace(/ aria-live="polite"/g, ''), 'and the same markup');
 
   // 4. Stop
   assert.equal(await b.ev(`${Q(K('DomNode:chat:stop'))}.hidden`), true, 'idle: no Stop');
@@ -206,14 +229,21 @@ try {
   const pid = Number(await (async () => { for (let i = 0; i < 100; i++) { try { return readFileSync(path.join(seat.dir, 'pid.hang'), 'utf8'); } catch { await sleep(100); } } })());
   const alive = (p) => { try { process.kill(p, 0); return true; } catch { return false; } };
   assert.equal(alive(pid), true, 'the child runs');
+  assert.equal(await b.ev(`${Q(K('DomNode:chat:stop'))}.getAttribute('aria-label')`), 'Stop the answer');
+  //   keyboard: the composer's tab order is the box, Send, Stop (visible focus ring from the global :focus-visible rule)
+  await b.ev(`${Q(K('DomNode:chat:input'))}.focus()`); await b.key('Tab', 'Tab', 9); await b.key('Tab', 'Tab', 9);
+  assert.equal(await b.ev(`document.activeElement.getAttribute('data-key')`), 'DomNode:chat:stop', 'Stop is reachable by Tab, after Send');
+  assert.notEqual(await b.ev(`getComputedStyle(document.activeElement).outlineStyle`), 'none', 'a visible focus ring');
   await b.shot('stop-visible');
   const stopPosts0 = b.calls.filter((c) => /POST \/membrane\/chat\/message\/.*\/abort/.test(c)).length;
-  await b.ev(click(K('DomNode:chat:stop')));
+  await b.key('Enter', 'Enter', 13, '\r');   // the keyboard stops it
   await b.until(`${Q(K('DomNode:chat:stop'))}.hidden`, 'Stop goes when the turn has ended', 30000);
   assert.equal(b.calls.filter((c) => /POST \/membrane\/chat\/message\/.*\/abort/.test(c)).length - stopPosts0, 1, 'one stop');
   const last = await b.ev(`[...document.querySelectorAll('[data-key$=":ans"]')].pop().textContent`);
   assert.ok(last.includes('starting the work') && last.includes('(stopped from the page)'), `the answer so far is kept and says stopped: ${last}`);
-  assert.equal(await b.ev(`[...document.querySelectorAll('[data-key$=":ans"]')].pop().className`), 'bubble note');
+  assert.equal(await b.ev(`[...document.querySelectorAll('[data-key$=":ans"]')].pop().className`), 'bubble seat stopped', 'a stopped turn is not an error');
+  assert.equal(await b.ev(`document.activeElement.getAttribute('data-key')`), 'DomNode:chat:input', 'the composer has the focus back');
+  assert.equal(await b.ev(`getComputedStyle([...document.querySelectorAll('[data-key$=":ans"]')].pop()).backgroundColor === getComputedStyle(document.querySelector('[data-key$=":ans"]')).backgroundColor`), true, 'the same neutral colour as an answer');
   for (let i = 0; i < 50 && alive(pid); i++) await sleep(100);
   assert.equal(alive(pid), false, 'the child process is gone');
   await b.shot('stopped');
@@ -221,11 +251,54 @@ try {
   // 5. the tool rows
   await b.type('tools'); await b.enter();
   await b.until(`[...document.querySelectorAll('details.tools-run')].some((d) => !d.hidden)`, 'a turn with tools shows its row');
-  assert.equal(await b.ev(`[...document.querySelectorAll('details.tools-run')].filter((d) => !d.hidden).map((d) => d.querySelector('summary').textContent)`).then((x) => x.join('|')), '2 tools');
+  assert.equal(await b.ev(`[...document.querySelectorAll('details.tools-run')].filter((d) => !d.hidden).map((d) => d.querySelector('summary').textContent)`).then((x) => x.join('|')), '2 tool calls');
   assert.deepEqual(await b.ev(`[...document.querySelectorAll('details.tools-run:not([hidden]) li')].map((l) => l.textContent.trim())`), ['entity_read {"spec":"Command:probe"}', 'Bash ls -la /tmp']);
   assert.equal(await b.ev(`document.querySelector('details.tools-run:not([hidden])').open`), false, 'collapsed by default');
+  await b.ev(`document.querySelector('details.tools-run:not([hidden]) summary').focus()`); await b.key('Enter', 'Enter', 13, '\r');
+  assert.equal(await b.ev(`document.querySelector('details.tools-run:not([hidden])').open`), true, 'Enter on the summary opens it');
+  await b.key('Enter', 'Enter', 13, '\r');
+  assert.equal(await b.ev(`document.querySelector('details.tools-run:not([hidden])').open`), false, 'and closes it');
+  await b.ev(`document.querySelector('details.tools-run:not([hidden])').open = true`);
   await b.shot('tools');
 
+  // 6. accessibility of the new elements: a wide code block and a wide table scroll as labelled, focusable regions; nothing makes the page scroll sideways
+  await b.size(390, 900, true);
+  await b.type('wide'); await b.enter();
+  await b.until(`document.querySelectorAll('.md-tablewrap').length >= 1 && [...document.querySelectorAll('[data-key$=":ans"]')].pop().textContent.includes('value number 11')`, 'the wide answer');
+  const lastAns = `[...document.querySelectorAll('[data-key$=":ans:md"]')].pop()`;
+  assert.deepEqual(await b.ev(`(() => { const c = ${lastAns}.querySelector('.md-codebody'), t = ${lastAns}.querySelector('.md-tablewrap'); return [c.getAttribute('tabindex'), c.getAttribute('role'), c.getAttribute('aria-label'), c.scrollWidth > c.clientWidth, t.getAttribute('tabindex'), t.getAttribute('role'), t.getAttribute('aria-label'), t.scrollWidth > t.clientWidth]; })()`),
+    ['0', 'region', 'text code', true, '0', 'region', 'table', true], 'both scroll sideways inside themselves and are keyboard focusable, labelled');
+  assert.equal(await b.ev(`document.documentElement.scrollWidth <= window.innerWidth`), true, 'the page itself does not scroll sideways at phone width');
+  await b.ev(`${lastAns}.querySelector('.md-codebody').focus()`);
+  assert.equal(await b.ev(`document.activeElement.className`), 'md-codebody', 'the code block takes the focus');
+  assert.equal(await b.ev(`getComputedStyle(document.activeElement).outlineStyle !== 'none' && document.activeElement.matches(':focus-visible')`), true, 'with a visible ring');
+  await b.shot('wide-phone');
+  await b.size(1000, 900);
+  //   reduced motion: the slide-over panel's transitions and any smooth scroll are off
+  await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  assert.equal(await b.ev(`getComputedStyle(document.querySelector('.panel')).transitionDuration`), '0s', 'prefers-reduced-motion: reduce turns transitions off');
+  await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+
+  // 7. a long message: "Show all (N more characters)" is a real button, reachable and operable by the keyboard, and expands in place (the scroll position stays)
+  await b.type('big'); await b.enter();
+  await b.until(`!!document.querySelector('.md-showall')`, 'the long answer is cut with a Show all button');
+  assert.equal(await b.ev(`document.querySelector('.md-showall').tagName + '/' + document.querySelector('.md-showall').getAttribute('type')`), 'BUTTON/button');
+  assert.match(await b.ev(`document.querySelector('.md-showall').textContent`), /^Show all \(\d+ more characters\)$/);
+  await b.ev(`document.querySelector('.md-showall').scrollIntoView({block: 'center'})`);
+  const top0 = await b.ev(`document.querySelector('[data-key="DomNode:chat:log"]').scrollTop`);
+  assert.ok(top0 > 0, 'the log is scrolled');
+  await b.shot('showall-before');
+  await b.ev(`document.querySelector('.md-showall').focus()`); await b.key('Enter', 'Enter', 13, '\r');
+  await b.until(`!document.querySelector('.md-showall')`, 'the button is gone: everything is there');
+  assert.equal(await b.ev(`[...document.querySelectorAll('[data-key$=":ans:md"]')].pop().textContent.includes('Paragraph number 399 of a very long answer.')`), true, 'the whole answer is parsed in place');
+  assert.equal(await b.ev(`document.querySelector('[data-key="DomNode:chat:log"]').scrollTop`), top0, 'the scroll position did not move');
+  await b.shot('showall-after');
+
+  //   the stopped note and the tool row, in dark, light and at phone width
+  await b.ev(`document.querySelector('.bubble.stopped').scrollIntoView({block: 'center'})`);
+  await b.ev(`document.documentElement.setAttribute('data-theme', 'dark')`); await b.shot('stopped-dark');
+  await b.ev(`document.documentElement.setAttribute('data-theme', 'light')`); await b.shot('stopped-light');
+  await b.size(390, 800, true); await b.ev(`document.querySelector('.bubble.stopped').scrollIntoView({block: 'center'})`); await b.shot('stopped-phone');
   assert.deepEqual(b.errors, [], 'no script error in the page');
   console.log('markdown page: ok');
 } finally { await b.close(); seat.stop(); }

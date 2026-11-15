@@ -13,7 +13,10 @@ The host loads the text at once: its classes, getters and setters are live for t
 - `Pack:lamps.error` is the loader's message (the line and what it found);
 - `Pack:lamps.good_text` is the last text that loaded. A refused text leaves the running pack as it was.
 
-Write the whole text again to change the pack (it reloads in place). Write an empty text to remove it. An optional first line
+The reply of the write says it too, on its first lines: `pack <name> loaded`, or `pack <name> did not load: <the loader's message>`. Read that line (or `Pack:<name>.state`, `.error`)
+after every pack you write: a pack that did not load does nothing, whatever you meant it to do.
+
+Write the whole text again to change the pack (it reloads in place). To remove it write a plain null to the entity (`entity_write {spec: "Pack:lamps", value: null}`, no prop; or `Pack:lamps.retire = true`, or an empty `text`): its getters and setters go, what its getters left is cleared, a pack below it shows again, and the reply says `pack lamps unloaded`. An optional first line
 `PACK lamps 1` names the pack (the name must be the id) and `IMPORT <pack> <major>` lines name the packs whose classes you use.
 Comments start with `--`.
 
@@ -61,7 +64,15 @@ Packs stack in the order they were loaded; a pack loaded later is above the ones
 - getters: the arms of all layers form one list, the top layer's first; the first `WHEN` that holds wins, and an `ELSE:` arm in an
   upper layer ends the search there;
 - setters: every setter on a property fires, the top layer first; a setter with the SAME NAME as a lower one replaces it;
-- a layer overrides only what it imports (`IMPORT` the pack whose getter or setter you replace);
+- a layer overrides only what it imports: to change a getter or setter another pack defines, `IMPORT` that pack. Without it the pack does not load and says which pack it collides with
+  (`add IMPORT notes 1`). Example: `notes` defines `Note.line`; a second pack that wants a different `Note.line` is
+
+```
+PACK notes2 1
+IMPORT notes 1
+Note.line getter: 'note: ' + this.title + '!'
+```
+
 - the banner: a pack that imports `default_banner` and defines `Banner.text` replaces the banner you start with (`Help:banner`).
 
 ```c1f
@@ -98,9 +109,6 @@ Lamp.brightness getter WHEN this.watts > 40: 'bright'
 Fixture.label getter: 'fixture'
 Fixture.brightness getter: 'dim'
 ```
-
-Writing `parents` is also the second way to replace your banner: give a class of your own a `text` getter and write `parents: ["cls:<yourclass>"]`
-on `Banner:owner:main` (`Help:banner`).
 
 ## Storage: stored and loaded on demand, resident, or only in memory
 
@@ -142,6 +150,23 @@ VIRTUAL Command
 Every entity also has `updated`, read-only and provided by the VM: the time of its last write (seconds since 1970), stamped with the write; reading it causes no recompute, writing it is refused:
 `Note:a.updated`.
 
+Every entity also remembers what birthed it: `born_by`, read-only and provided by the VM, is the id of the CAUSE of its birth, the entity whose setter was running when it was made. It is fixed at the birth and never changes, and writing it is refused. An entity that was loaded, or born by the seat itself, has no cause: it reads as an absent null. A setter's entity may say where its births are charged: when it has a `births_to` holding an id, what its setter makes says that id in `born_by` instead. A tool call does this with the chat message it belongs to, so what a call made says the message, for good, and which things a message made is a plain query over `born_by`; a call that names no message is the cause itself (its request).
+
+```c1f
+PACK maker 1
+Box.go on-setter make:
+  ALWAYS:
+    Thing:t1 = Thing(n: 1)
+Thing.cause getter: this.born_by
+Box.made getter: [x.eid for x in instances('Thing') if x.born_by == this.eid]
+-- given Box:a {}
+-- write Box:a.go = 1
+-- reads Thing:t1.cause = "Box:a"
+-- reads Box:a.made = ["Thing:t1"]
+```
+
+`Box.made` is how to ask which things one cause made. With `-- given Box:a {"births_to": "Note:m"}` the thing would say `Note:m`.
+
 ### How long a virtual entity lives
 
 A `VIRTUAL` entity is collected as soon as NOTHING HOLDS IT: at the end of the round, no write retires it. What holds it:
@@ -150,10 +175,11 @@ A `VIRTUAL` entity is collected as soon as NOTHING HOLDS IT: at the end of the r
 - a REFERENCE: a live entity has it as a value, which is stored as `{"$ref": "<id>"}`. Write an entity as a value (`this.keep = Req:made`, or inside a list or dict) and it holds; write the value away and it is released. A stored entity is always live; two virtual entities that only hold each other are collected together;
 - an IN-FLIGHT driver: a request's open connection (until its reply is sent, an event stream until `end`), an effect running on it, a command's chunks while the command runs.
 
-A plain read holds nothing (`prop(x, 'k')`, a getter that peeks, an entity literal). A read of a collected entity is a null with a reason, `collected: nothing held it`. Only virtual classes are collected: a stored entity keeps its `retire` write, and a stored one that is not touched for a while may leave the engine by `unload = true` (docs/cliffvm.md).
+A plain read holds nothing (`prop(x, 'k')`, a getter that peeks, an entity literal). A read of a collected entity is a null with a reason, `collected: nothing held it`. Only virtual classes are collected: a stored entity keeps its `retire` write, and a stored one that is not touched for a while may leave the engine (the VM decides, nothing to write: docs/cliffvm.md).
 
 ## Habits that keep packs working
 
-- Load, then read `Pack:<name>.state`; fix `error` before anything else.
+- Load, then read the reply's first lines or `Pack:<name>.state`; fix `error` before anything else.
+- Extend a pack you wrote by importing it instead of writing a second independent pack on the same getter.
 - Give each class getter a reading of its real source, so reading the entity returns the world as it is now.
 - Keep one idea per getter; name a part of a computation as a getter or a local.

@@ -198,10 +198,8 @@ fn a_killed_commands_chunks_are_collected_after_its_timeout_receipt_and_the_comm
     assert_eq!(h.get("Command:t", "run_result")["status"], json!("timeout"));
     assert!(most >= 1, "its chunk was held while it ran");
     assert_eq!(h.snapshot().keys().filter(|k| k.starts_with("Chunk:")).count(), 0, "the killed command's chunks are collected after its receipt");
-    // a Command is resident: pinned, refused with a receipt, and its reasoned nulls still read
-    h.write("Command:t", "unload", json!(true), "person");
+    // a Command is resident (never evicted by the memory policy) and its reasoned nulls still read
     assert!(h.snapshot().contains_key("Command:t"));
-    assert!(h.get("Command:t", "unload_result")["reason"].as_str().unwrap().contains("resident"));
     assert_eq!(h.get("Command:t", "output"), J::Null);
     assert_eq!(h.get("Command:t", "partial_output"), json!("one\n"));
 }

@@ -1,4 +1,7 @@
-# The c1f standard library (design, 2026-11-12)
+# The c1f standard library: the contracts and the builtins
+
+Status: the contracts below are built and pinned by `native/tests/contracts.rs`; the builtin list is the one in `native/src/expr.rs` (`RESERVED`, kept in step with `call` by a test). Older design text about proposals that
+were never added has been cut. Spec files: `tests/specs/*.json`.
 
 c1f has no functions and no macros. A pack is getters and setters over entities, so a "library" can only be **data contracts and
 shared getters on a class** that every pack imports. The standard library is therefore the contract of the classes the OS is
@@ -12,7 +15,7 @@ built on, plus a small set of builtins. Principles:
 
 ## The Request contract (`membrane/packs/door.c1f` is the library for the class `Request`)
 A request is an entity `Request:<n>`. A family pack `IMPORT door 1` and defines, for its family `<f>` (`models decisions state voice
-session self tools map fieldvm`):
+session self tools map fieldvm settings link`):
 
 | getter | meaning | required |
 |---|---|---|
@@ -20,19 +23,17 @@ session self tools map fieldvm`):
 | `Request.r_<f>` | the reply `{status, headers?, body?\|file?}`; None while an effect has not landed | yes |
 | `Request.m_<f>` | the allowed methods, a list, e.g. `['GET', 'POST']`; the door answers 405 + `allow` for any other | no (without it the family checks its own) |
 
-Shared getters a family may read (all on `Request`): `method path query headers body peer`, `is_read`, `authed`, `sub`, `person`
-(the verified name), `entrant`, `https`, `facts` (the launcher's facts dict), `jbody` (the body parsed as JSON, `{}` when it is
+Shared getters a family may read (all on `Request`): `method path query headers body peer`, `is_read`, `authed`, `sub` and `who`
+(the verified caller: always `admin`), `entrant`, `https`, `facts` (the launcher's facts dict), `jbody` (the body parsed as JSON, `{}` when it is
 not), `qpairs` (the query as `[[k, v], ...]`), `ms` (now in epoch milliseconds, whole). Per-request outbound work is a per-request
 entity: `('Fetch:' + this.conn).request = {...}` and read its `request_result`.
 
 ## Boot facts
 The launcher writes each fact as a property of `Boot:seat` and also the whole set as the dict `facts`; a pack reads
 `prop(this.facts, 'seat_name')` instead of a comprehension over `instances('Boot')`.
-They are assembled by ONE pure function, `fields_live.seat_facts(env, settings, srv, known)` (tests/test_seat_facts.py): a missing
-source leaves its fact out (never None); `door_port` exists only when `MEMBRANE_DOOR_PORT` is set (no door by default);
-`door_secret_file` is a path, never the secret. The router's facts (`router_on`, `cloud_models`, `minds`) are only known after the
-router step: they are added then (`boot_started(..., announce=False)`), after `started` was said, so a setter on `started` sees
-them empty (see the router pack's `router-rungs` / `router-minds`).
+`cliffvm` builds them (`native/src/cli.rs` `facts`, `serve_plan`, then `launcher.c1f`): a missing source leaves its fact out (never None); `door_port` comes from `--port`;
+`door_secret_file` is a path, never the secret; `anthropic_key_set` is a yes or no, never the key. `membrane/packs/facts.json` is the registry (name, `wired`, `why`): a fact a pack reads must be there,
+and a fact marked `wired` must be written by the launcher (cli.rs, host.rs, `scripts/seat` or `launcher.c1f`). Facts the router adds after the boot (`router_on`, `cloud_models`, `minds`) come with `launcher.c1f`'s setters on `Boot.started`.
 
 `tail(text, n)` (added with the reply cap, #1143) is the mirror of `head`: a text's last n characters, a list's last n.
 
@@ -45,14 +46,11 @@ It is INTERNAL: only the SemText pack (`membrane/packs/semtext.c1f`) calls it, a
 There is no `slice` builtin: a span's `text` is already cut, and `head(tail(t, len(t) - start), end - start)` cuts by offsets when a
 pack holds only the offsets.
 
-## Builtins proposed (each needs the operator's approval; none is added yet)
-| builtin | why a pack cannot work around it |
-|---|---|
-| `int(x)` | truncating a float is `words(replace(str(x), '.', ' '))[0]` today: wrong for negatives and exponents |
-| `dict(rows)` | build `{k: v}` from `[[k, v], ...]` (query params, grouped stats): c1f can only write a dict with fixed keys |
-| `merge(a, b)` | one dict from two: a reply's headers, a family's extra fields |
-| `keys(d)` | enumerate a dict (listing a settings object) |
-| `urldecode(s)` | `%20` and `+` in a query value: no string primitive can say it |
+## The builtins (`native/src/expr.rs`, `RESERVED`)
+Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit abs min max fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
+lists and dicts `sort_by pluck distinct group_by concat`; time `ago epoch localtime num`; the field `instances referencing prop why`; host functions `jsonl listdir read sql stat recall rerank pronoun`.
+There is NO `int()`, `dict()`, `merge`, `keys` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
+A new builtin needs the operator's approval; it is an arm of `call` and a name in `RESERVED`, with a Rust test.
 
 ## Conventions (the traps that bit)
 - There is no size cap on an expression (the old 64-node / 400-character caps are gone). Name a part with a LOCAL (below) when it
@@ -69,7 +67,7 @@ pack holds only the offsets.
   `[1] * N` is the vector `[N]` (not N ones) and `[x + 1 for x in [1] * N]` is `[N + 1.0]`; lengths that do not match (neither 1)
   are an error. There is no list repetition and no `range`: no construct builds a list of N copies (open decision).
   Pinned by `native/tests/vector_arith_1143.rs`, shown in `Help:c1f`.
-- `concat` joins lists (`+` is vector addition); there is no `int()` yet; `clock` is epoch seconds.
+- `concat` joins lists (`+` is vector addition); there is no `int()`; `clock` is epoch seconds.
 - A class a shipped pack declares is owned: other packs `IMPORT` it.
 
 ## Blocks and locals (getters and setters)
@@ -154,8 +152,7 @@ is written after the birth, and the entity is born again for the getters. A SETT
 (`cls:voice`): a setter on a kind reaches only entities whose parent chain holds that entity; write the setter on the class instead.
 
 ## Limits: the step budget (a dial); time limits nothing
-The old caps (an expression at most 64 nodes / 400 characters) are removed from the native VM; `membrane/ch.py` keeps them for its own
-triggers (parity for the caps is intentionally dropped). Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is an Error `budget exceeded (N steps)` (a getter's
+The old caps (an expression at most 64 nodes / 400 characters) are removed. Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is an Error `budget exceeded (N steps)` (a getter's
 `Why` shows it, a receipt says where), never a hang or a panic. The default is 100,000 steps (`DEFAULT_EVAL_BUDGET`), overridden by the env
 `MEMBRANE_EVAL_BUDGET`. `VEC_MAX` (8192) stays. Structural limits that are not size caps: expressions nest at most 64 deep and
 evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All accounting lives in `expr::Budget`.
@@ -178,7 +175,7 @@ is injectable (`expr::set_clock`) for tests.
 `native/tests/contracts.rs` fails when a contract is broken: every shipped pack loads together (view packs that import `dom` are
 the browser's); a route family pack imports door, defines both `o_<f>` and `r_<f>`, is a reserved family, and does not redefine the
 door's getters; every Boot fact a pack reads is in `membrane/packs/facts.json` (with a `why`), and a fact marked `wired` is written
-by the launcher. `wired: false` entries are the launcher's to-do list for the cutover. A new fact = a registry entry; a new family =
+by the launcher. A new fact = a registry entry; a new family =
 a reserved name in `FAMILIES` and in the door's chain.
 
 ## The surface snapshot: a pack as a black box
@@ -225,8 +222,6 @@ writes, findings`); `native/tests/contracts.rs` compares it and `TYPES_UPDATE=1 
 
 An append write for lists (several producers adding to one list in a round) is a design note, not built: `docs/append-write.md`.
 
-## Order of work
-1. This document and the Request contract's shared getters with specs (`tests/specs/door_std.json`): `facts`, `jbody`, `qpairs`,
-   `person`, and the declarative method gate `m_<f>`.
-2. The builtins above, one at a time, each with a Rust test, after approval.
-3. Migrate the families the agents wrote to the contract (drop their own 405 checks, fact comprehensions and JSON parses).
+## Order of work (done)
+1. The Request contract's shared getters with specs (`tests/specs/door_std.json`): `facts`, `jbody`, `qpairs`, and the declarative method gate `m_<f>`. Built. (`person` is gone with the users: docs/auth.md.)
+2. The families of the release are on the contract (no own 405 checks, fact comprehensions or JSON parses).

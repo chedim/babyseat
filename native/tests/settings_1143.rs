@@ -1,7 +1,7 @@
 //! The settings window's server side (#1143, docs/settings-groups.md): the `Setting:<group>.<key>` entities of `membrane/packs/settings.c1f`. One row per setting: its descriptor
-//! (label, help, kind, limits, default, live) is data, `current` is a getter over the one owner of the value, `set` is the one write door (it validates, then writes the owner, or
+//! (label, help, kind, limits, default, live) is data, `current` is a getter over the one source of the value, `set` is the one write door (it validates, then writes the source, or
 //! writes `refused = <reason>` and nothing else). The seat is the shipped one (barest.packs + the app) with a fake `claude`; the writes go through `POST /mcp entity_write`, the
-//! door the window uses (owner-checked). Every wait has a timeout and the child is always reaped.
+//! door the window uses (one door for every valid token). Every wait has a timeout and the child is always reaped.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -38,7 +38,7 @@ fn setup(tag: &str) -> Dir {
     { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     Dir(d)
 }
-/// the shipped barest seat on the folder's store (a second launch on the same folder is a restart); `secret` gives it a door secret and owner token (a strict door)
+/// the shipped barest seat on the folder's store (a second launch on the same folder is a restart); `secret` gives it a door secret and admin token (a strict door)
 fn start(dir: &Dir, secret: bool, facts: &[&str]) -> Run {
     for _ in 0..4 { if let Some(r) = try_start(dir, secret, facts) { return r; } std::thread::sleep(Duration::from_millis(500)); }
     try_start(dir, secret, facts).unwrap_or_else(|| panic!("the door came up: {}", std::fs::read_to_string(dir.0.join("err.log")).unwrap_or_default()))
@@ -95,7 +95,7 @@ fn full(port: u16, eid: &str) -> J {
     let (_, t) = rpc(port, None, "entity_read", json!({"spec": eid}));
     serde_json::from_str(t.split_once(") ").map(|x| x.1).unwrap_or("null")).unwrap_or(J::Null)
 }
-fn owner_token(dir: &Dir) -> String { wait("the owner token", || std::fs::read_to_string(dir.0.join("owner.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())) }
+fn admin_token(dir: &Dir) -> String { wait("the admin token", || std::fs::read_to_string(dir.0.join("admin.token")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())) }
 fn person_token(dir: &Dir, sub: &str) -> String {
     let secret = wait("the secret", || std::fs::read_to_string(dir.0.join("door.secret")).ok().filter(|t| !t.trim().is_empty()));
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
@@ -103,16 +103,16 @@ fn person_token(dir: &Dir, sub: &str) -> String {
 }
 
 /// (id, kind, live): the rows of the design after the operator's answers
-const ROWS: [(&str, &str, &str); 32] = [
+const ROWS: [(&str, &str, &str); 30] = [
     ("model.chat", "text", "live"), ("model.default", "readonly", "restart"), ("model.list", "readonly", "restart"), ("model.cloud", "readonly", "restart"),
     ("model.signin", "readonly", "restart"), ("model.cli", "readonly", "restart"),
-    ("chat.max_steps", "number", "live"), ("chat.timeout", "number", "live"),
+    ("chat.name", "text", "live"), ("chat.max_steps", "number", "live"), ("chat.timeout", "number", "live"),
     ("map.hidden", "list", "live"), ("map.hidden_prefix", "list", "live"), ("map.window", "number", "live"), ("map.poll_ms", "number", "live"),
     ("map.fade_s", "readonly", "restart"),
     ("home.allow", "allowlist", "live"),
-    ("import.sources", "readonly", "restart"), ("import.history", "readonly", "restart"), ("import.page", "readonly", "restart"),
-    ("access.owner", "readonly", "restart"), ("access.token_life", "readonly", "restart"), ("access.token_file", "readonly", "restart"), ("access.mode", "readonly", "restart"),
-    ("access.people", "readonly", "restart"), ("access.port", "readonly", "restart"),
+    ("import.sources", "readonly", "restart"), ("import.history", "readonly", "restart"),
+    ("access.token_life", "readonly", "restart"), ("access.token_file", "readonly", "restart"), ("access.mode", "readonly", "restart"),
+    ("access.port", "readonly", "restart"),
     ("limits.command_timeout_s", "readonly", "restart"), ("limits.effect_workers", "readonly", "restart"), ("limits.warm_rows", "readonly", "restart"),
     ("limits.memory_budget_mb", "readonly", "restart"), ("limits.unload_soft", "readonly", "restart"), ("limits.unload_hard", "readonly", "restart"), ("limits.unload_batch", "readonly", "restart"),
     ("limits.eval_stats", "readonly", "restart"), ("limits.eval_stats_window_s", "readonly", "restart"),
@@ -178,7 +178,7 @@ fn a_valid_write_is_current_at_once_and_clears_an_earlier_refusal() {
     assert_eq!(cur(run.port, "chat.timeout"), json!(90));
     assert_eq!(refused(run.port, "chat.timeout"), "", "a good write clears the reason");
     assert!(get(run.port, "Setting:chat.timeout", "applied").as_f64().is_some(), "and says when it was applied");
-    // the model's name: the owner is the chat's own `Minds:seat.loops`
+    // the model's name: the source is the chat's own `Minds:seat.loops`
     set(run.port, "model.chat", json!("has a space"));
     assert!(refused(run.port, "model.chat").contains("model name"), "{}", refused(run.port, "model.chat"));
     set(run.port, "model.chat", json!("claude-agent:sonnet"));
@@ -255,7 +255,7 @@ fn the_field_feed_honours_a_new_window_and_hidden_lists_as_they_are_written() {
     assert_eq!(j["hidden"], json!(["Zed", "Setting"]));
     set(run.port, "map.hidden_prefix", json!(["Qux:"]));
     assert!(!ids(&feed("?m=50")).iter().any(|i| i.starts_with("Qux:")), "a hidden prefix takes effect at once too");
-    // the page's snapshot carries the window and the poll period it reads (the same owner)
+    // the page's snapshot carries the window and the poll period it reads (the same source)
     set(run.port, "map.poll_ms", json!(1500));
     let snap = http(run.port, "GET", "/ui/fieldvm", None, "").1;
     assert!(snap.contains("\"field_window\":3") && snap.contains("\"field_poll_ms\":1500"), "{snap}");
@@ -289,33 +289,37 @@ fn the_settings_survive_a_restart_on_the_same_store() {
 }
 
 #[test]
-fn a_person_who_is_not_the_owner_gets_the_403_text_and_the_owner_writes() {
-    let dir = setup("owner");
+fn a_token_with_any_sub_writes_a_setting_it_is_the_admin() {
+    let dir = setup("admin");
     let run = start(&dir, true, &[]);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     let ann = person_token(&dir, "ann");
     let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_write", "arguments": {"spec": "Setting:chat.timeout", "prop": "set", "value": 5}}}).to_string();
     let (st, b) = http(run.port, "POST", "/mcp", Some(&ann), &body);
-    assert_eq!((st, serde_json::from_str::<J>(&b).unwrap()), (403, json!({"type": "error", "error": {"message": "for the owner"}})));
+    assert_eq!(st, 200, "ann is the admin: {b}");
     let rd = |tok: &str| rpc(run.port, Some(tok), "entity_read", json!({"spec": "Setting:chat.timeout", "prop": "current"})).1;
-    assert_eq!(rd(&ann), "21600", "a person reads it");
-    let (st, _) = http(run.port, "POST", "/mcp", Some(&own), &body);
+    assert_eq!(rd(&ann), "5", "ann's write is in force");
+    let body2 = body.replace("\"value\":5", "\"value\":7");
+    assert_ne!(body, body2);
+    let (st, _) = http(run.port, "POST", "/mcp", Some(&own), &body2);
     assert_eq!(st, 200);
-    assert_eq!(rd(&own), "5");
+    assert_eq!(rd(&own), "7");
+    let (st, _) = http(run.port, "POST", "/mcp", None, &body);
+    assert_eq!(st, 401, "no token is refused");
 }
 
 #[test]
 fn no_row_holds_or_shows_a_secret_only_the_names_of_environment_variables() {
     let dir = setup("secret");
     let run = start(&dir, true, &["cloud_models=[{\"name\":\"gpt\",\"backend\":\"openai\",\"base_url\":\"https://user:hunter2pw@example.test/v1\",\"api_key_env\":\"OTHER_PROVIDER_KEY\"}]"]);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     let secret = std::fs::read_to_string(dir.0.join("door.secret")).unwrap();
     let (_, all) = rpc(run.port, Some(&own), "entity_query", json!({"q": "kind:Setting", "full": true, "k": 100}));
     for s in [KEY, secret.trim(), own.as_str(), "hunter2pw"] { assert!(!all.contains(s), "a setting shows a secret ({}...)", &s[..6]); }
     assert!(all.contains("OTHER_PROVIDER_KEY"), "the variable's NAME is shown: {all}");
     assert_eq!(rpc(run.port, Some(&own), "entity_read", json!({"spec": "Setting:model.signin", "prop": "current"})).1, "api_key");
     let f = rpc(run.port, Some(&own), "entity_read", json!({"spec": "Setting:access.token_file", "prop": "current"})).1;
-    assert!(f.contains("owner.token") && f != own, "the token file's PATH only: {f}");
+    assert!(f.contains("admin.token") && f != own, "the token file's PATH only: {f}");
 }
 
 #[test]
@@ -343,7 +347,7 @@ fn the_home_allow_list_is_written_through_the_row_and_an_entry_left_out_is_retir
 fn the_view_feed_lists_every_row_in_group_and_order_with_its_current_value_and_no_secret() {
     let dir = setup("feedview");
     let run = start(&dir, true, &["cloud_models=[{\"name\":\"gpt\",\"backend\":\"openai\",\"base_url\":\"https://user:hunter2pw@example.test/v1\",\"api_key_env\":\"OTHER_PROVIDER_KEY\",\"api_key\":\"sk-feed-leak\"}]"]);
-    let own = owner_token(&dir);
+    let own = admin_token(&dir);
     let feed = |tok: &str| -> (u16, J) { let (st, b) = http(run.port, "GET", "/ui/settings", Some(tok), ""); (st, serde_json::from_str(&b).unwrap_or(J::Null)) };
     let set = |id: &str, v: J| { rpc(run.port, Some(&own), "entity_write", json!({"spec": format!("Setting:{id}"), "prop": "set", "value": v})); };
     let (st, j) = feed(&own);
@@ -363,7 +367,7 @@ fn the_view_feed_lists_every_row_in_group_and_order_with_its_current_value_and_n
     assert_eq!(by("chat.max_steps")["default"], json!(2048));
     assert!(by("limits.command_timeout_s")["how"].as_str().unwrap().contains("--fact command_timeout_s"), "a restart row carries its launch line");
     assert_eq!(by("model.cloud")["current"][0]["api_key_env"], json!("OTHER_PROVIDER_KEY"));
-    // the answer is the owner's data and holds no secret: the key, the door secret, the owner key, the url's password, the provider's key
+    // the answer is the seat's data and holds no secret: the key, the door secret, the admin key, the url's password, the provider's key
     let (_, raw) = http(run.port, "GET", "/ui/settings", Some(&own), "");
     let secret = std::fs::read_to_string(dir.0.join("door.secret")).unwrap();
     for s in [KEY, secret.trim(), own.as_str(), "hunter2pw", "sk-feed-leak"] { assert!(!raw.contains(s), "the feed shows a secret ({}...)", &s[..6]); }
@@ -376,7 +380,7 @@ fn the_view_feed_lists_every_row_in_group_and_order_with_its_current_value_and_n
     let r = by_id(&feed(&own).1, "chat.timeout");
     assert_eq!((r["current"].clone(), r["refused"].clone()), (json!(90), json!("")));
     assert!(r["applied"].as_f64().is_some(), "{r}");
-    // a person who is not the owner reads it too (the write is the owner's door, not this one); no token at all is the door's own refusal
+    // a token with another sub reads it too (the write is the /mcp door, not this one); no token at all is the door's own refusal
     assert_eq!(feed(&person_token(&dir, "ann")).0, 200);
     assert_eq!(http(run.port, "GET", "/ui/settings", None, "").0, 401);
     assert_eq!(http(run.port, "POST", "/ui/settings", Some(&own), "{}").0, 405, "read only");

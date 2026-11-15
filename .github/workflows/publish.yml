@@ -1,156 +1,144 @@
 name: publish
 
-# THE PYPI LANE (2026-10-13, the operator set the PYPI_TOKEN repo secret):
-# publishing a release's packages was done by hand from the operator's Mac --
-# now the lane runs itself: the tag's package builds in CI and uploads with
-# the secret, no credentials on any machine or in any checkout. A GitHub
-# release going published triggers it; workflow-dispatch covers the catch-up
-# case (a version released before the lane existed).
-#
-# MERGING THE RELEASE PR IS THE RELEASE (operator 2026-11-11): a push to main
-# or a release-* patch branch that changes pyproject.toml's version, with no
-# tag for that version yet, runs the whole lane: check, wheels, PyPI, then the
-# tag + the GitHub release (notes = the version's CHANGELOG section; Zenodo
-# archives it) + the Docker image. A push that leaves the version alone, or
-# whose version is already tagged, does nothing. Releases and dispatches keep
-# working as before (catch-ups, re-runs; PyPI skips what exists).
+# THE OPERATOR'S PUBLISH LINE (#1143, 2026-11-14): nothing here runs by itself. No push, no release event and no schedule starts it: it is a manual dispatch (the operator's `!` line) that names
+# the tag to publish AND types a confirmation, and it refuses a tag that is not the package's version. It publishes, in this order:
+#   1. PyPI: the platform wheels of `babyseat` (wheels.yml: built from release-binaries.yml's payloads, each smoke-tested), the sdist (carries no binary and fails loudly on a platform without a wheel),
+#      and the last `membrane-seat` shim (same version, pins babyseat==version, carries the launcher files so `pip install -U membrane-seat` ends with both commands in place);
+#   2. only after PyPI: when `github_release` is ticked, the GitHub release of the tag (notes from membrane/CHANGELOG.md) with the release tarballs and their .sha256 files (what install.sh downloads and checks).
+# The Docker image is a separate dispatch (docker.yml). No credentials live in this file: PYPI_TOKEN is the repo secret the operator set (read only by the one upload step).
+#   gh workflow run publish.yml --ref v0.7.60 -f tag=v0.7.60 -f confirm="publish v0.7.60" [-f github_release=true]
 
 on:
-  push:
-    branches: [main, "release-*"]
-    paths: [pyproject.toml]
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "the tag to publish (e.g. v0.3.4)"
+        description: "the tag to publish (e.g. v0.7.60): it must be pyproject.toml's version"
         required: true
+      confirm:
+        description: 'type exactly: publish <tag>   (e.g. "publish v0.7.60")'
+        required: true
+      github_release:
+        description: "after PyPI, also create the GitHub release of the tag with the release tarballs"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 jobs:
-  # which tag this run publishes, from what ref, and whether to run at all
+  # the dispatch is the operator's: nothing runs unless the confirmation says the tag
   detect:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.d.outputs.tag }}
-      ref: ${{ steps.d.outputs.ref }}
-      go: ${{ steps.d.outputs.go }}
     steps:
-      - uses: actions/checkout@v4
       - id: d
+        env:
+          TAG: ${{ inputs.tag }}
+          CONFIRM: ${{ inputs.confirm }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            ver=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
-            tag="v$ver"
-            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-              echo "$tag is already tagged: nothing to release"; go=false
-            else
-              echo "a new version on ${{ github.ref_name }}: releasing $tag"; go=true
-            fi
-            ref="${{ github.sha }}"
-          else
-            tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-            ref="$tag"; go=true
-          fi
-          { echo "tag=$tag"; echo "ref=$ref"; echo "go=$go"; } >> "$GITHUB_OUTPUT"
+          [ "$CONFIRM" = "publish $TAG" ] || { echo "the confirmation is '$CONFIRM', not 'publish $TAG': nothing published"; exit 1; }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   check:
     needs: detect
-    if: needs.detect.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.detect.outputs.ref }}
+          ref: ${{ needs.detect.outputs.tag }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      # THE TAG IS THE VERSION (2026-10-15): v0.4.2 was released with
-      # pyproject.toml still at 0.4.1 -- the lane built 0.4.1 again and PyPI
-      # refused it. A tag that is not the package's version stops here.
+      # THE TAG IS THE VERSION (2026-10-15): v0.4.2 was released with pyproject.toml still at 0.4.1 -- the lane built 0.4.1 again and PyPI refused it.
+      # A tag that is not the package's version stops here.
       - name: the tag is the package's version
+        env:
+          TAG: ${{ needs.detect.outputs.tag }}
         run: |
-          tag="${{ needs.detect.outputs.tag }}"
+          tag="$TAG"
+          # the binaries are built from the commit this run was dispatched on: it must be the tag's (gh workflow run publish.yml --ref <tag> ...)
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ] || { echo "this run is on $GITHUB_SHA, the tag $tag is $(git rev-parse HEAD): dispatch with --ref $tag"; exit 1; }
           ver=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           [ "${tag#v}" = "$ver" ] || { echo "tag $tag is not the package version $ver: bump pyproject.toml before releasing"; exit 1; }
-          # the shim is the same version and pins exactly it (#303); a tag cut
-          # before the shim existed (a catch-up dispatch) has none to check
-          if [ -f shim/membrane-seat/pyproject.toml ]; then
-            shim=$(python -c "import tomllib; print(tomllib.load(open('shim/membrane-seat/pyproject.toml', 'rb'))['project']['version'])")
-            [ "$shim" = "$ver" ] || { echo "shim/membrane-seat is $shim, not $ver: bump it with pyproject.toml"; exit 1; }
-            deps=$(python -c "import tomllib; print(' '.join(tomllib.load(open('shim/membrane-seat/pyproject.toml', 'rb'))['project']['dependencies']))")
-            [ "$deps" = "babyseat==$ver" ] || { echo "the shim depends on '$deps', not babyseat==$ver"; exit 1; }
-          fi
+          native=$(sed -n 's/^version = "\(.*\)"$/\1/p' native/Cargo.toml | head -1)
+          [ "$native" = "$ver" ] || { echo "native/Cargo.toml is $native, not $ver: the binary would carry another version than the wheel"; exit 1; }
+          # the shim is the same version and pins exactly it (#303)
+          shim=$(python -c "import tomllib; print(tomllib.load(open('shim/membrane-seat/pyproject.toml', 'rb'))['project']['version'])")
+          [ "$shim" = "$ver" ] || { echo "shim/membrane-seat is $shim, not $ver: bump it with pyproject.toml"; exit 1; }
+          deps=$(python -c "import tomllib; print(' '.join(tomllib.load(open('shim/membrane-seat/pyproject.toml', 'rb'))['project']['dependencies']))")
+          [ "$deps" = "babyseat==$ver" ] || { echo "the shim depends on '$deps', not babyseat==$ver"; exit 1; }
 
-  # babyseat itself: one compiled wheel per platform (the field engine inside) + the sdist (wheels.yml)
+  # babyseat itself: the platform wheels + the sdist (wheels.yml builds the binaries, packs the wheels, smoke-tests each)
   wheels:
     needs: [detect, check]
     uses: ./.github/workflows/wheels.yml
     with:
-      ref: ${{ needs.detect.outputs.ref }}
+      ref: ${{ needs.detect.outputs.tag }}
 
-  # the membrane-seat shim, while shim/ carries it (delete the directory to stop publishing it). It ships the same
-  # module as babyseat (see shim/membrane-seat/pyproject.toml for why), copied in here; it pins babyseat==version,
-  # whose wheel carries the compiled engine
+  # the membrane-seat shim: the same version, pinning babyseat==version, shipping the launcher's three files (never the data) for the RECORD-overlap trick (shim/membrane-seat/pyproject.toml)
   shim:
     needs: [detect, check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.detect.outputs.ref }}
+          ref: ${{ needs.detect.outputs.tag }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: pip install build
       - run: |
-          mkdir -p dist
-          if [ -d shim/membrane-seat ]; then
-            cp -R membrane shim/membrane-seat/membrane
-            python -m build shim/membrane-seat --outdir dist
-          fi
+          mkdir -p dist shim/membrane-seat/membrane
+          cp membrane/__init__.py membrane/launcher.py membrane/__main__.py shim/membrane-seat/membrane/
+          python -m build shim/membrane-seat --outdir dist
       - uses: actions/upload-artifact@v4
         with:
           name: shim
           path: dist/*
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   publish:
     needs: [wheels, shim]
     runs-on: ubuntu-latest
     steps:
+      # only the wheels, the sdist and the shim: not the release tarballs (dist-*) or the binary payloads (wheel-payload-*)
       - uses: actions/download-artifact@v4
         with:
+          pattern: "{wheel-linux-*,wheel-macos-*,sdist,shim}"
           path: dist
           merge-multiple: true
       - run: ls -l dist
-      # PyPI FIRST, then the GitHub release (2026-10-15): HACS users update
-      # from the release, and their HA then pip-installs the pinned seat --
-      # the package must already be there. The release re-runs this lane on
-      # an upload that exists; skip it (the tag check above still guards).
+      # PyPI FIRST, then the GitHub release: a HACS user updates from the release and the packages must already be there
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_TOKEN }}
           packages-dir: dist
           skip-existing: true
 
-  # MERGE = RELEASE (2026-11-11): after PyPI, tag the merged commit and publish the GitHub release from the version's
-  # CHANGELOG section. A release made with the workflow token starts no other workflow, so the Docker image is
-  # dispatched explicitly (a dispatch does start one). A patch line (release-*) is never marked latest.
+  # the GitHub release of the tag (only when asked): notes from the version's CHANGELOG section, and the release tarballs + their .sha256 (install.sh's downloads)
   release:
     needs: [detect, publish]
-    if: github.event_name == 'push' && needs.detect.outputs.go == 'true'
+    if: inputs.github_release
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ needs.detect.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.detect.outputs.ref }}
+          ref: ${{ needs.detect.outputs.tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "dist-*"
+          path: tarballs
+          merge-multiple: true
       - name: notes and title from the CHANGELOG
         run: |
           python3 - <<'PY'
@@ -164,15 +152,11 @@ jobs:
           nxt = re.search(r"^## v", rest, re.M)
           body = (rest[:nxt.start()] if nxt else rest).strip() + "\n"
           head = m.group(1)
-          name = head.split("\u2014", 1)[1].strip() if "\u2014" in head else ""
+          name = head.split("—", 1)[1].strip() if "—" in head else ""
           open("notes.md", "w", encoding="utf-8").write(body)
-          open("title.txt", "w", encoding="utf-8").write(f"{tag} \u2014 {name}" if name else tag)
+          open("title.txt", "w", encoding="utf-8").write(f"{tag} — {name}" if name else tag)
           PY
-      - name: tag + GitHub release
+      - name: the release with its tarballs
         run: |
-          latest=true
-          case "${{ github.ref_name }}" in release-*) latest=false ;; esac
-          gh release create "$TAG" --target "${{ needs.detect.outputs.ref }}" --title "$(cat title.txt)" \
-            --notes-file notes.md --latest="$latest"
-      - name: the Docker image
-        run: gh workflow run docker.yml -f tag="$TAG"
+          ls -l tarballs
+          gh release create "$TAG" tarballs/* --verify-tag --title "$(cat title.txt)" --notes-file notes.md

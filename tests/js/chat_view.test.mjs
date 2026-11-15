@@ -21,7 +21,7 @@ function world(facts) {
   f.set_pack('dom', DOM); f.set_pack('fetch', FETCH); f.set_pack('markdown', read('../../membrane/apps/barest.c1f/markdown.c1f')); f.set_pack('shell_view', read('../../membrane/apps/barest.c1f/shell_view.c1f')); f.set_pack('chat_view', PACK);
   assert.deepEqual(JSON.parse(f.pack_errors()), {}, 'chat_view loads once dom and fetch are there');
   const w = { f, t: T0, log: [] };
-  w.flush = () => { const o = JSON.parse(f.drain()); w.log.push(...o.writes); return o.writes; };
+  w.subs = []; w.flush = () => { const o = JSON.parse(f.drain()); w.log.push(...o.writes); w.subs.push(...(o.subs || [])); return o.writes; };
   w.get = (e) => JSON.parse(f.get(e));
   w.write = (e, p, v) => { f.write(e, p, JSON.stringify(v ?? null), w.t); return w.flush(); };
   w.feed = (e, cls, props) => { if (f.get(e) === 'null') f.load(e, cls, '{}'); for (const [k, v] of Object.entries(props)) f.write(e, k, JSON.stringify(v ?? null), w.t); w.flush(); };
@@ -81,7 +81,7 @@ scenario('a page of turns is drawn as the legacy chat draws it', () => {
   assert.equal(row(w, d, ':who').text, 'queued'); assert.equal(w.text(`DomNode:chat:row:${d}:ans`), 'Waiting for a turn…'); assert.equal(row(w, d, ':ans').class, 'bubble seat pending');
   // the tools folded under the answer: a count, then each tool's name and its input shortened to 90
   assert.equal(row(w, a, ':tools').tag, 'details'); assert.equal(row(w, a, ':tools').class, 'tools-run');
-  assert.equal(row(w, a, ':tools:sum').text, '2 tools');
+  assert.equal(row(w, a, ':tools:sum').text, '2 tool calls');
   const names = w.log.filter((e) => e.prop === 'text' && /:tools:t:.*:name$/.test(e.eid)).map((e) => e.new);
   assert.deepEqual(names, ['mcp__membrane__entity_read', 'Bash']);
   const ins = w.log.filter((e) => e.prop === 'text' && /:tools:t:.*:in$/.test(e.eid)).map((e) => e.new);
@@ -181,6 +181,62 @@ scenario('polls: list period, active period, no overlap, and again after a send'
   w.write('DomNode:chat:input', 'key', { key: 'Enter', shift: false, ctrl: false, time: 1 });
   w.reply('send', 202, { id: '3000-1' });
   w.tick(0.1); assert.equal(w.reqs('history').length, 4, 'a poll right after a send');
+});
+
+// 5b. THE DOORBELL (#1143, the graph link slice 2, docs/graph-link.md decision 10): with the link up the view subscribes ONE value, `membrane::Doorbell:chat.at`, and reads the history route ONLY when it changed:
+// no 700 ms / 3 s timer. (The test plays the link: the foreign entity is fed as a local one, which every engine reads and never subscribes.) Counted in requests, never time.
+scenario('with the link up the history is read only when the doorbell rings: no timer, one read per ring, none while hidden, the poll timers return when the link is down', () => {
+  const w = world(); w.open();
+  w.feed('Link:page', 'Link', { up: true });
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));               // a running turn: the active timer would poll at 700 ms
+  const reads = () => w.reqs('history').length;
+  assert.equal(reads(), 1);
+  for (let i = 0; i < 400; i++) w.tick(0.1);                       // 40 s of ticks
+  assert.equal(reads(), 1, 'no timer poll, running turn or not');
+  w.feed('membrane::Doorbell:chat', 'Doorbell', { at: 100 });      // the first value of the bell: one read (a message may have come between the load and the subscription)
+  w.tick(0.1); assert.equal(reads(), 2, 'a ring is one read'); assert.equal(w.asked('history').url, '/membrane/chat/messages?limit=10');
+  w.feed('membrane::Doorbell:chat', 'Doorbell', { at: 101 });
+  w.tick(0.1); assert.equal(reads(), 2, 'a ring while a read is out is not a second request');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  w.tick(0.1); assert.equal(reads(), 3, 'the ring that came meanwhile is read once the first is answered');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  for (let i = 0; i < 200; i++) w.tick(0.1);
+  assert.equal(reads(), 3, 'quiet again');
+  w.feed('Conn:page', 'Conn', { hidden: true });
+  w.feed('membrane::Doorbell:chat', 'Doorbell', { at: 102 });
+  w.tick(5); assert.equal(reads(), 3, 'hidden: nothing is read');
+  w.feed('Conn:page', 'Conn', { hidden: false });
+  w.tick(0.1); assert.equal(reads(), 4, 'visible again: the ring that was owed is read once');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  // a send reads at once (the person's own message), link or not
+  w.write('DomNode:chat:input', 'value', 'go');
+  w.write('DomNode:chat:input', 'key', { key: 'Enter', shift: false, ctrl: false, time: 1 });
+  w.reply('send', 202, { id: '3000-1' });
+  w.tick(0.1); assert.equal(reads(), 5, 'a read right after a send');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  // the link goes down: the timers are back (the active period while a turn runs)
+  w.feed('Link:page', 'Link', { up: false });
+  w.tick(0.8); assert.equal(reads(), 6, 'no link: the poll timers are the fallback');
+});
+
+// 5c. THE REAL ENGINE PATH: the engine names ONE subscription, the doorbell's `at`, and a value the link feeds rings it (the same counts as 5b, with the hooks instead of a local entity)
+scenario('the engine subscribes only the doorbell, and a value fed by the link is one read of the history', () => {
+  const w = world(); w.f.set_ns('pAAAAAAAA'); w.open();
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  assert.equal(w.subs.length, 0, 'link not up: nothing subscribed');
+  w.feed('Link:page', 'Link', { up: true });
+  assert.deepEqual(w.subs, [{ eid: 'membrane::Doorbell:chat', props: ['at'] }], 'the chat view reads one value of the seat\'s and nothing else (never Chat:)');
+  const reads = () => w.reqs('history').length;
+  for (let i = 0; i < 100; i++) w.tick(0.1);
+  assert.equal(reads(), 1, 'pending: no read, no timer');
+  w.f.feed_val('membrane::Doorbell:chat', 'at', '100.5', 1, w.t); w.flush();
+  w.tick(0.1); assert.equal(reads(), 2, 'a ring is one read');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  for (let i = 0; i < 100; i++) w.tick(0.1);
+  assert.equal(reads(), 2, 'quiet');
+  w.f.feed_val('membrane::Doorbell:chat', 'at', '101.5', 2, w.t); w.flush();
+  w.tick(0.1); assert.equal(reads(), 3);
+  assert.equal(w.subs.length, 1, 'no further subscription');
 });
 
 // 6. "Load older turns": the button, `before`, the older rows ABOVE the loaded ones
@@ -297,7 +353,7 @@ scenario('the import line is shown while the history is imported and goes away w
   w.write('DomNode:chat:older:btn', 'clicked', 2);
   assert.equal(w.asked('older').url, '/membrane/chat/messages?limit=20&before=1002-3', 'the same cursor');
   w.reply('older', 200, { ...page([MSGS[0], MSGS[1]], false, null), import: LINE });
-  assert.equal(row(w, '1000-1', ':me').text, 'hello', 'the older turns that arrived are drawn');
+  assert.equal(w.text('DomNode:chat:row:1000-1:me'), 'hello', 'the older turns that arrived are drawn');
   // a poll after the end of the import: no line
   w.tick(3.5);
   w.reply('history', 200, { ...page([MSGS[2], MSGS[3]], false, null), import: null });
@@ -320,7 +376,7 @@ scenario('no View entity, nothing happens', () => {
 // STOP: shown only while a turn runs; one click is one POST to the abort route of the running message; the receipt is read; a refusal is said in text
 scenario('Stop: shown while a turn runs, one POST, errors as text, gone when idle', () => {
   const w = world(); w.open();
-  assert.equal(w.n('stop').tag, 'button'); assert.equal(w.n('stop').type, 'button'); assert.equal(w.n('stop').text, 'Stop');
+  assert.equal(w.n('stop').tag, 'button'); assert.equal(w.n('stop').type, 'button'); assert.equal(w.n('stop').text, 'Stop'); assert.equal(w.n('stop')['aria-label'], 'Stop the answer', 'a name for a screen reader');
   assert.equal(w.n('stop').hidden, true, 'nothing runs: no Stop');
   w.reply('history', 200, page([MSGS[0], MSGS[1]]));          // 1001-2 is running
   assert.equal(w.n('stop').hidden, false, 'a running turn: Stop');
@@ -336,10 +392,25 @@ scenario('Stop: shown while a turn runs, one POST, errors as text, gone when idl
   w.write('DomNode:chat:stop', 'clicked', 3);
   w.reply('stop:1001-2', 200, true);
   assert.equal(w.n('note:bubble').text, '', 'a good stop clears the note');
+  assert.equal(w.n('input').focused, true, 'after a stop the composer has the focus back');
   w.tick(1000); w.reply('history', 200, page([{ ...MSGS[1], state: 'error', response: 'half an answer\n\n(stopped from the page)', turn: { state: 'error', started: 110, ended: 120 } }]));
   assert.equal(w.n('stop').hidden, true, 'the turn ended: no Stop');
   assert.match(w.text('DomNode:chat:row:1001-2:ans'), /half an answer/); assert.match(w.text('DomNode:chat:row:1001-2:ans'), /\(stopped from the page\)/);
-  assert.equal(row(w, '1001-2', ':ans').class, 'bubble note', 'the stopped turn is shown as a note');
+  assert.equal(row(w, '1001-2', ':ans').class, 'bubble seat stopped', 'the stopped turn is neutral, not an error');
 });
 
+
+scenario('tool calls: a clear label, singular for one, collapsible by the keyboard (details/summary), name and a short input', () => {
+  const w = world(); w.open();
+  w.reply('history', 200, page([{ id: '3000-1', text: 'x', state: 'done', response: 'ok', turn: { state: 'done', started: 1, ended: 2 }, tools: ['Bash'], tool_calls: [{ id: 't1', name: 'Bash', input: 'ls' }] },
+    { id: '3001-2', text: 'y', state: 'done', response: 'ok', turn: { state: 'done', started: 1, ended: 2 }, tools: [], tool_calls: Array.from({ length: 12 }, (_, i) => ({ id: 'u' + i, name: 'Read', input: 'f' + i })) }]));
+  assert.equal(row(w, '3000-1', ':tools:sum').text, '1 tool call'); assert.equal(row(w, '3001-2', ':tools:sum').text, '12 tool calls');
+  assert.equal(row(w, '3001-2', ':tools:sum').tag, 'summary'); assert.equal(row(w, '3001-2', ':tools').tag, 'details');
+});
+scenario('a turn the person stopped is a neutral note, an error stays an error', () => {
+  const w = world(); w.open();
+  w.reply('history', 200, page([{ id: '4000-1', text: 'x', state: 'error', response: 'half\n\n(stopped from the page)', turn: { state: 'error', started: 1, ended: 2 }, tools: [], tool_calls: [] },
+    { id: '4001-2', text: 'y', state: 'error', response: 'claude failed (rc 3)', turn: { state: 'error', started: 1, ended: 2 }, tools: [], tool_calls: [] }]));
+  assert.equal(row(w, '4000-1', ':ans').class, 'bubble seat stopped'); assert.equal(row(w, '4001-2', ':ans').class, 'bubble note');
+});
 console.log(`chat_view: ok (${n} scenarios)`);

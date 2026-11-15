@@ -1,4 +1,4 @@
-"""The seat's use of Home Assistant (#1143, slice 2): the model writes a `HaCall` on the seat, this component PULLS the pending ones over its own session (the owner's token, the one
+"""The seat's use of Home Assistant (#1143, slice 2): the model writes a `HaCall` on the seat, this component PULLS the pending ones over its own session (the admin's token, the one
 it already talks to the seat with), runs them with Home Assistant's own services and states, and writes the receipt back. The seat holds no Home Assistant secret. Home Assistant's own
 line stays here: only what the person exposed to Assist (Settings -> Voice assistants -> Expose) is in the catalog, can be read, or can be named by a call. What the model MAY call is the
 seat's allow-list (`HaAllow`, default deny; membrane/packs/ha.c1f), checked on the seat before a call is ever offered."""
@@ -14,7 +14,7 @@ from homeassistant.core import Context, HomeAssistant, SupportsResponse
 from homeassistant.exceptions import Unauthorized
 
 from . import const
-from .seat_client import SeatAuthError, SeatClient, SeatError, SeatForbidden
+from .seat_client import SeatAuthError, SeatClient, SeatError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,7 +58,6 @@ class House:
         self.hass = hass
         self.client = client
         self.entry = entry                      # keeps the hidden user's id (data `ha_user_id`); None: found by name only
-        self.forbidden = False                  # the seat said the token is not the owner's: nothing to pull
         self._digest: str | None = None         # of the catalog the seat has
         self.last_catalog: dict = {"entities": [], "services": []}
 
@@ -146,14 +145,10 @@ class House:
     # ---- the pull ------------------------------------------------------------------------------------------------------------------------------
 
     async def pump_once(self) -> int:
-        """Ask for the pending calls, run each one the seat lets this component claim, answer it. -> how many were answered. A seat that is down or says the token is not the
-        owner's is an empty pull (the health poll owns the reauth)."""
+        """Ask for the pending calls, run each one the seat lets this component claim, answer it. -> how many were answered. A seat that is down or refuses the token
+        is an empty pull (the health poll owns the reauth)."""
         try:
             pending = await self.client.calls()
-            self.forbidden = False
-        except SeatForbidden:
-            self.forbidden = True
-            return 0
         except SeatAuthError:
             return 0
         except SeatError as e:

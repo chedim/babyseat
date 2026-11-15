@@ -48,7 +48,7 @@ fn start_env(tag: &str, names: &[&str], extra: &[&str], env: &[(&str, &str)]) ->
 }
 
 thread_local! {
-    /// the bearer this test thread's requests carry (a seat with a door secret: the owner token file's); none = a bare caller
+    /// the bearer this test thread's requests carry (a seat with a door secret: the admin token file's); none = a bare caller
     static BEARER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -278,7 +278,8 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert!(after("--system-prompt").contains("Modify your banner to help you maintain continuity."), "the system prompt carries the doctrine");
     assert!(!after("--system-prompt").to_lowercase().contains("history reaches"), "the prompt never says what the model lacks (it makes Claude panic)");
     assert!(after("--mcp-config").contains(&format!("127.0.0.1:{port}/mcp")));
-    assert!(!after("--mcp-config").contains("headers"), "the barest seat has no secret: the MCP config names no header");
+    assert!(!after("--mcp-config").contains("Authorization"), "the barest seat has no secret: the MCP config names no token header");
+    assert!(after("--mcp-config").contains("X-Turn"), "the config names the turn (the message's id) for the link of what a call creates");
     assert_eq!(args[args.len() - 2], "--", "the options end before the prompt");
     assert_eq!(args[args.len() - 1], "what is up", "the prompt is the message alone");
     assert!(!args.iter().any(|x| x == "--bare" || x == "--resume" || x == "--continue"), "{args:?}");
@@ -855,8 +856,8 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
     let (t, e) = cliff(port, "[e.n for e in instances('Note') if e.n > 0 and len([1 for f in instances('Note')]) > 0]");
     assert!(e && t.contains("budget exceeded"), "{t}");
     assert_eq!(call(port, "entity_read", json!({"spec": "Note:r3", "prop": "n"})).0, "3", "the seat is up");
-    // scratch entities and packs do not accumulate (the three Pack entities are the boot's grants: door_tools, unload and settings): the same count after 20 calls of every shape
-    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "3 entity(ies)").then_some(()));
+    // scratch entities and packs do not accumulate (the two Pack entities are the boot's grants: door_tools and settings): the same count after 20 calls of every shape
+    wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "2 entity(ies)").then_some(()));
     cliff(port, "Note:acc.n = 0");
     wait("settled", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)").then_some(()));
     let before = count_all(port);
@@ -867,10 +868,10 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
     let (mut a, mut b, mut c) = (String::new(), String::new(), String::new());
     while t0.elapsed() < Duration::from_secs(30) {
         (a, b, c) = (count_all(port), call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0, call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0);
-        if a == before && b == "0 entity(ies)" && c == "3 entity(ies)" { break; }
+        if a == before && b == "0 entity(ies)" && c == "2 entity(ies)" { break; }
         std::thread::sleep(Duration::from_millis(300));
     }
-    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "3 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
+    assert_eq!((a, b, c), (before, "0 entity(ies)".to_string(), "2 entity(ies)".to_string()), "entities, scratch, packs after 20 calls");
     assert!(terminate(&mut run));
 }
 
@@ -918,7 +919,7 @@ fn a_clifflet_reads_eid_cls_and_parents_and_lists_the_same_packs_as_entity_query
     put(port, "Pack:boxes", "text", json!(BOXES));
     wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:boxes", "prop": "state"})).0 == "loaded").then_some(()));
     put(port, "Box:1", "n", json!(4));
-    put(port, "Box:1", "parents", json!(["cls:box", "cls:thing"]));
+    cliff(port, "Box:1.parents = ['cls:box', 'cls:thing']");   // (entity_write refuses it: classes are set at birth; a clifflet is code, like a pack)
     // eid, cls and parents are readable on any entity (parents is the entity's class list when it has one)
     let (t, e) = cliff(port, "b = instances('Box')[0]\n[b.eid, b.cls, b.parents]");
     assert!(!e, "{t}");
@@ -1557,7 +1558,7 @@ fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_
     assert!(terminate(&mut run));
 }
 
-// ---- the chat turn on a seat with a door secret (#1143): the CLI reaches /mcp with the owner's token, never through argv ----------------------------
+// ---- the chat turn on a seat with a door secret (#1143): the CLI reaches /mcp with the admin's token, never through argv ----------------------------
 /// the fake as the real CLI behaves with an MCP server's `headers`: `${VAR}` in a value is the environment's; it records the config's header text, what it sent, and its argv
 fn fake_with_headers(sent: &str) -> String {
     FAKE.replace("url = cfg[\"mcpServers\"][\"membrane\"][\"url\"]", &format!(r#"url = cfg["mcpServers"]["membrane"]["url"]
@@ -1568,25 +1569,26 @@ json.dump({{"raw": raw_headers, "sent": hdrs, "argv": argv}}, open(os.path.join(
         .replace("headers={\"Content-Type\": \"application/json\"}", "headers=dict({\"Content-Type\": \"application/json\"}, **hdrs)")
 }
 
-/// a seat with a door secret in its own folder (made at boot), the fake as its CLI; the test thread carries the owner's token afterwards
-fn owner_seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
+/// a seat with a door secret in its own folder (made at boot), the fake as its CLI; the test thread carries the admin's token afterwards
+fn admin_seat(tag: &str, script: &str) -> (Run, u16, std::path::PathBuf) {
     let (run, port, dir) = fake_seat_script(tag, &["--fact", "door_secret_file=door.secret", "--fact", "seat_data_dir=."], &[], script);
-    let tok = std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string();
+    let tok = std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string();
     BEARER.with(|b| *b.borrow_mut() = Some(tok));
     (run, port, dir)
 }
 
 #[test]
-fn the_turns_cli_reaches_the_mcp_door_with_the_owner_token_from_its_environment_and_never_through_argv() {
-    let (mut run, port, dir) = owner_seat("chatowner", &fake_with_headers(""));
-    let tok = std::fs::read_to_string(dir.join("owner.token")).unwrap().trim().to_string();
+fn the_turns_cli_reaches_the_mcp_door_with_the_admin_token_from_its_environment_and_never_through_argv() {
+    let (mut run, port, dir) = admin_seat("chatadmin", &fake_with_headers(""));
+    let tok = std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string();
     let id = send(port, "with a token");
     let v = finish(port, &dir, &id, "with a token");
     assert_eq!(v["state"], "done", "the seat accepted the token the CLI sent: {v}");
     assert_eq!(v["tools"], json!(["entity_write", "entity_read"]));
     let h: J = serde_json::from_str(&std::fs::read_to_string(dir.join("mcp_headers.json")).unwrap()).unwrap();
-    assert_eq!(h["raw"], json!({"Authorization": "Bearer ${MEMBRANE_OWNER_TOKEN}"}), "the config names the variable, not the token");
-    assert_eq!(h["sent"]["Authorization"], format!("Bearer {tok}"), "what the CLI sent is the owner's token");
+    assert_eq!(h["raw"]["Authorization"], json!("Bearer ${MEMBRANE_ADMIN_TOKEN}"), "the config names the variable, not the token");
+    assert!(h["raw"]["X-Turn"].as_str().map_or(false, |t| t.starts_with("membrane::Chat:")), "and the turn: {h}");
+    assert_eq!(h["sent"]["Authorization"], format!("Bearer {tok}"), "what the CLI sent is the admin's token");
     assert!(!h["argv"].to_string().contains(&tok), "the token is not in argv (a process listing shows argv)");
     assert!(!std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("with a token")))).unwrap().contains(&tok));
     // the token is in no row of the field either: not in the message's view, not in the command entity
@@ -1598,7 +1600,7 @@ fn the_turns_cli_reaches_the_mcp_door_with_the_owner_token_from_its_environment_
 
 #[test]
 fn a_turn_whose_cli_sends_a_wrong_token_fails_visibly() {
-    let (mut run, port, dir) = owner_seat("chatwrongtoken", &fake_with_headers("hdrs = {'Authorization': 'Bearer not-the-owners-token'}"));
+    let (mut run, port, dir) = admin_seat("chatwrongtoken", &fake_with_headers("hdrs = {'Authorization': 'Bearer not-the-admins-token'}"));
     let id = send(port, "wrong token");
     let v = finish(port, &dir, &id, "wrong token");
     assert_eq!(v["state"], "error", "{v}");
@@ -1885,4 +1887,44 @@ fn the_history_route_does_work_for_the_page_only_not_for_the_whole_store() {
     assert_eq!((texts(&h3), h3["more"].clone(), h3["next"].clone()), ((0..5).map(|i| format!("m{i:02}")).collect::<Vec<_>>(), json!(false), J::Null), "{h3}");
     assert_eq!(http(port, "GET", "/membrane/chat/messages?before=nope", "").0, 404);
     assert!(terminate(&mut run2));
+}
+
+// ---- the class list is not the model's property (operator 2026-11-14): the model has `is`, packs keep `parents` ----------------------------------------------------------
+const RECLASS: &str = "PACK reclass 1\nIMPORT boxes 1\nBox.reclass on-setter reclass-box:\n  ALWAYS:\n    this.parents = ['cls:thing', 'cls:box']\n";
+
+#[test]
+fn the_model_tools_never_list_parents_and_a_write_of_it_is_refused_and_is_answers_the_class_test() {
+    let (mut run, port) = start("noparents", MCP_PACKS, &[]);
+    for (n, t) in [("boxes", BOXES), ("reclass", RECLASS)] {
+        put(port, &format!("Pack:{n}"), "text", json!(t));
+        wait("the pack", || (call(port, "entity_read", json!({"spec": format!("Pack:{n}"), "prop": "state"})).0 == "loaded").then_some(()));
+    }
+    // born with a class list by a constructor, as a pack says it
+    let (t, e) = cliff(port, "Box:2 = Box(n: 7, parents: ['cls:thing'])");
+    assert!(!e, "{t}");
+    let (r, _) = call(port, "entity_read", json!({"spec": "Box:2"}));
+    assert!(r.starts_with("Box:2 (Box) ") && r.contains("\"n\":7") && !r.contains("parents"), "the header keeps the class, the list is not a property: {r}");
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:Box", "full": true}));
+    assert!(q.contains("Box:2 (Box)") && !q.contains("parents"), "{q}");
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:Thing"}));
+    assert!(q.contains("Box:2"), "the kind query still follows the class list: {q}");
+    let (r, _) = call(port, "entity_read", json!({"spec": "Box:2", "prop": "parents"}));
+    assert!(r.contains("has no parents"), "reading it by name finds nothing: {r}");
+    // `is` follows the list
+    let (t, e) = cliff(port, "[Box:2 is Thing, Box:2 is Box, Box:2 is Task]");
+    assert!(!e && t.replace(' ', "") == "[true,true,false]", "{t}");
+    // a write of it through the tool is refused with the reason, and changes nothing
+    let (t, _) = put(port, "Box:2", "parents", json!(["cls:task"]));
+    assert!(t.contains("refused") && t.contains("classes are set at birth with a constructor"), "{t}");
+    let (t, _) = cliff(port, "Box:2 is Task");
+    assert_eq!(t.to_lowercase(), "false", "the class list did not move");
+    // a pack that writes it still can, and the reply's reactions do not list the property
+    let (t, e) = put(port, "Box:2", "reclass", json!(1));
+    assert!(!e && !t.contains("parents"), "reactions leave the list out: {t}");
+    let (t, _) = cliff(port, "Box:2 is Thing");
+    assert_eq!(t.to_lowercase(), "true", "the pack's write took effect");
+    // a clifflet's own reply does not list it either
+    let (t, e) = cliff(port, "Box:2.n = 8");
+    assert!(!e && !t.contains("parents"), "{t}");
+    assert!(terminate(&mut run));
 }

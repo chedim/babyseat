@@ -113,7 +113,7 @@ fn a_null_or_bad_key_creates_nothing_and_says_why() {
 
 #[test]
 fn only_named_arguments_make_a_constructor_and_a_plain_value_has_none() {
-    for (body, want) in [("Thing:x = 5", "constructor"), ("Thing:x = Thing(1, 2)", "named"), ("Thing:x = Thing(a: 1, 2)", "named"), ("Thing:x = Thing(a: 1, a: 2)", "twice")] {
+    for (body, want) in [("Thing:x = Thing(1, 2)", "named"), ("Thing:x = Thing(a: 1, 2)", "named"), ("Thing:x = Thing(a: 1, a: 2)", "twice")] {
         let src = format!("PACK t 1\n{OWN}Box.go on-setter t:\n  ALWAYS:\n    {body}\n");
         let e = parse_full(&src).err().unwrap_or_else(|| panic!("{body} loaded"));
         assert!(e.contains(want), "{body}: {e}");

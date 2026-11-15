@@ -9,9 +9,9 @@
 
 ## Method (fixed before the run)
 
-System under test: the barest app as shipped (default doctrine `docs/doctrine-barest-draft.md`, default banner, Help entities, the tools), the real `claude` CLI through the operator's login (`--fact chat_auth=login`; `ANTHROPIC_API_KEY` removed from the seat's environment), an EMPTY store, no Throwy packs, no edit of doctrine or banner. Binary: release `cliffvm` built from this worktree. Private seat, `--port 0`, one real turn at a time. Only guard: the per-turn timeout (`chat_turn_timeout_s=1800`, the pack's own fact; its default is 21600). A login/limit-like error would have stopped the run; none occurred.
+System under test: the barest app as shipped (default doctrine `docs/doctrine-barest.md`, default banner, Help entities, the tools), the real `claude` CLI through the operator's login (`--fact chat_auth=login`; `ANTHROPIC_API_KEY` removed from the seat's environment), an EMPTY store, no Throwy packs, no edit of doctrine or banner. Binary: release `cliffvm` built from this worktree. Private seat, `--port 0`, one real turn at a time. Only guard: the per-turn timeout (`chat_turn_timeout_s=1800`, the pack's own fact; its default is 21600). A login/limit-like error would have stopped the run; none occurred.
 
-Script: `scripts/bench_system.py` (usage in its docstring; templates at its top). Raw logs (live-updated JSONL, one line per turn): `<scratch>/sysbench/{locomo,lme}/{ingest,questions}.jsonl`, scratch = `/private/tmp/claude-504/-Users-dmitrii-chechetkin-projects-membrane/dfe53dac-fdac-441e-bf76-5b5fc6fd3d70/scratchpad/`; also there: `post_ingest.sqlite` and `empty_baseline.sqlite` per set, and `report-all.md` (the script's own report).
+Script: `scripts/bench_system.py` (usage in its docstring; templates at its top). Raw logs (live-updated JSONL, one line per turn): `<scratch>/sysbench/{locomo,lme}/{ingest,questions}.jsonl`, scratch = `<scratch>/`; also there: `post_ingest.sqlite` and `empty_baseline.sqlite` per set, and `report-all.md` (the script's own report).
 
 Templates (exact):
 - Ingest, LoCoMo, one chat message per session: `Below is session {n} of a conversation between {A} and {B} on {date}. Remember what will matter for answering questions about it later; you will not see this text again.` + blank line + lines `speaker: text` (an image caption goes after the text as `[image: caption]`).
@@ -48,7 +48,7 @@ Write side (model-written memory):
 |---|---|---|
 | model-written rows | 20: 19 `Session:N` + the banner | 54: 53 `Note:sessionN` + the banner |
 | bytes | 45.8 KB (entities 24.1 KB; banner text 21.7 KB) | 65.1 KB (banner text 2.1 KB) |
-| sample titles | `Session:1` ... `Session:19`, `membrane::Banner:owner:main` | `Note:session1` ... `Note:session9`, banner |
+| sample titles | `Session:1` ... `Session:19`, `membrane::Banner:admin:main` | `Note:session1` ... `Note:session9`, banner |
 | gold key tokens all present (answerable, n=24 / 1) | 14/24 (58%) | 1/1 (read by hand: both "an hour" and "about two hours" are in Notes 3 and 14) |
 | at least half the key tokens | 22/24 (92%) | 1/1 |
 | no `Keep` entities, no packs | the model used neither; it wrote entities of its own classes | same |

@@ -1,5 +1,7 @@
 # Porting brief (read this first if you are porting a piece to c1f / Rust)
 
+Status: the Python seat is gone (docs/python-to-c1f.md); the rules below are the ones that still bind new c1f and Rust work. Lines that name Python-hosted tests or helpers describe the old way and no longer apply.
+
 End state (operator, 2026-11-12): Python is the package wrapper and launcher only. Everything that decides is `.c1f`; Rust stays
 minimal (sockets, files, token checks, SQLite, vectors). The HTTP door is Rust and a request is an entity a pack answers. No
 forwarding to Python. Master doc: `docs/python-to-c1f.md`; tracking issue #1143; state notes in the repo's memory.
@@ -43,8 +45,6 @@ review the diff it prints, then regenerate `membrane/packs/surface.json` with `S
 - A class must be declared by a pack to be mirrored into the engine: give it at least one getter.
 - `x[i]` works on lists/dicts/entities (miss -> none), no slices; `+` on lists is vector addition: use `concat`; no `int()`:
   `words(replace(str(n), '.', ' '))[0]` truncates; `clock` is epoch seconds.
-- Python-hosted tests need a fresh library: `rm -f membrane/membrane_vm.so && sh native/build.sh`; a test calling the door over
-  HTTP needs `@pytest.mark.tokenless`; helpers like `_until` that return on any non-None treat `False` as done.
 - `cmd | tail` hides the exit code of `cmd`: read the output. Count a Rust run from every `test result:` line (`cargo test` stops at the first failing binary, so a partial count is not a pass).
 - A mutation script that restores the original file must `touch` it afterwards: cargo trusts modification times, and a restored copy with an old time keeps running the last mutated build (a false red).
 

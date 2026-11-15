@@ -40,7 +40,7 @@ fn db(d: &std::path::Path) -> std::path::PathBuf {
     put("membrane::Config:voice:in:dmitrii-chechetkin", json!({"person": "Dmitrii Chechetkin", "on": true, "mode": "addressed", "device": "phone", "session": "ses_1",
         "heard": [{"ts": 1.0, "text": "hey memo", "session": "ses_1"}], "last_heard": "hey memo"}));
     put("membrane::Config:voice:out:dmitrii-chechetkin", json!({"person": "Dmitrii Chechetkin", "on": false, "device": "phone", "said": [{"ts": 2.0, "text": "hello"}]}));
-    put("membrane::Config:voice:in:owner", json!({"on": true, "mode": "ptt"}));
+    put("membrane::Config:voice:in:admin", json!({"on": true, "mode": "ptt"}));
     for (k, p) in voice_ents() { put(k, p); }
     put("membrane::Config:voice:in:old-one", json!({"person": "Old One", "on": false}));                      // made before the kind stamp
     put("membrane::Config:voice:out:old-one", json!({"person": "Old One", "on": false}));
@@ -134,25 +134,25 @@ fn a_person_with_no_voice_entities_reads_empty_state_and_logs() {
 
 #[test]
 fn a_caller_with_no_token_is_refused_even_from_this_machine() {
-    // a localhost peer is not the owner (#842): the body's `person` no longer names anyone for a caller with no token
+    // a localhost peer is not the admin (#842): the body's `person` no longer names anyone for a caller with no token
     let d = dir();
-    let r = ask(&d, "/membrane/voice", "{\"person\": \"owner\"}", None);
+    let r = ask(&d, "/membrane/voice", "{\"person\": \"admin\"}", None);
     assert_eq!(r["status"], 401, "{r}");
 }
 
 #[test]
 fn the_verified_person_wins_over_a_name_in_the_body() {
     let d = dir();
-    let r = ask(&d, "/membrane/voice", "{\"person\": \"owner\"}", Some("Nobody"));
+    let r = ask(&d, "/membrane/voice", "{\"person\": \"admin\"}", Some("Nobody"));
     assert_eq!(r["body"]["in"]["mode"], J::Null, "{r}");
 }
 
 #[test]
 fn the_page_log_appends_one_line_per_post_and_answers_204() {
     let d = dir();
-    let r = ask(&d, "/ui/log", "{\"t\": 1,\n \"heard\": \"hey\"}", Some("owner"));
+    let r = ask(&d, "/ui/log", "{\"t\": 1,\n \"heard\": \"hey\"}", Some("admin"));
     assert_eq!(r["status"], 204, "{r}");
-    let r = ask(&d, "/ui/log", "{\"t\": 2}", Some("owner"));
+    let r = ask(&d, "/ui/log", "{\"t\": 2}", Some("admin"));
     assert_eq!(r["status"], 204);
     assert_eq!(std::fs::read_to_string(d.join("page-voice.log")).unwrap(), "{\"t\": 1,  \"heard\": \"hey\"}\n{\"t\": 2}\n");
 }
@@ -161,7 +161,7 @@ fn the_page_log_appends_one_line_per_post_and_answers_204() {
 fn a_log_over_two_megabytes_is_moved_aside_before_the_next_line() {
     let d = dir();
     std::fs::write(d.join("page-voice.log"), vec![b'x'; 2_000_001]).unwrap();
-    let r = ask(&d, "/ui/log", "{\"t\": 3}", Some("owner"));
+    let r = ask(&d, "/ui/log", "{\"t\": 3}", Some("admin"));
     assert_eq!(r["status"], 204, "{r}");
     assert_eq!(std::fs::metadata(d.join("page-voice.log.old")).unwrap().len(), 2_000_001);
     assert_eq!(std::fs::read_to_string(d.join("page-voice.log")).unwrap(), "{\"t\": 3}\n");
@@ -170,7 +170,7 @@ fn a_log_over_two_megabytes_is_moved_aside_before_the_next_line() {
 #[test]
 fn a_line_that_is_not_json_is_not_logged() {
     let d = dir();
-    let r = ask(&d, "/ui/log", "not json", Some("owner"));
+    let r = ask(&d, "/ui/log", "not json", Some("admin"));
     assert_eq!(r["status"], 204);
     assert!(!d.join("page-voice.log").exists());
 }

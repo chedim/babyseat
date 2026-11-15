@@ -15,6 +15,7 @@ RESIDENT Pack
 --                                     joined with `&`; k rows (default 20, at most 100) from row `offset` (default 0); full=true adds each row's stored properties
 --   entity_read  {spec, prop}         an entity's stored properties, or one property in full (a getter's value too)
 --   entity_write {spec, prop, value}  set one property; what reacts to the write runs (a setter, a driver verb: `Command:x.run = {id, args}`)
+--   run_cliff    {block}              run a small block of c1f in one call (Help:cliff): a value, or writes
 -- `spec` is an entity id as the field spells it (`Command:build`, `membrane::Chat:main`). A write is a write like any pack's: the class
 -- must be one this pack owns or imports (door, fs, proc, fetch, sql, store), or one no pack owns yet, UNLESS this pack is privileged: boot.c1f
 -- grants it at start (docs/c1f-layers.md, "Privilege"), so a write here may also reach, and create, a class a model's pack owns. A refusal is in the reply. An effect's
@@ -39,9 +40,9 @@ Request.mc_method getter: str(prop(this.mc_rpc, 'method') or '')
 Request.mc_params getter: prop(this.mc_rpc, 'params') or {}
 Request.mc_args getter: prop(this.mc_params, 'arguments') or {}
 Request.mc_tool getter: prop(this.mc_params, 'name')
--- THE WRITING TOOLS ARE THE OWNER'S (persons, door.c1f `owner`): a call of `entity_write` (a pack is written by it too: `Pack:<name>.text`) or `run_cliff` by any other verified
--- person is the 403 of door.c1f and runs nothing; the reads and the tool list stay open to every verified person.
-Request.mc_deny getter: this.mc_method == 'tools/call' and this.mc_tool in ['entity_write', 'run_cliff'] and not this.owner
+-- THE WRITING TOOLS NEED A VERIFIED TOKEN (no users in this release: every verified token is the admin, door.c1f): a call of `entity_write` (a pack is written by it too:
+-- `Pack:<name>.text`) or `run_cliff` with no verified token runs nothing (the door's 401 is the reply; a setter would run whatever the reply is, so the writers read this too).
+Request.mc_anon getter: this.mc_method == 'tools/call' and this.mc_tool in ['entity_write', 'run_cliff'] and not this.entrant
 Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity_write', 'run_cliff']
 
 -- ---- the tools' list -----------------------------------------------------------------------------------------------------------------------
@@ -50,18 +51,34 @@ Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate ent
 -- ---- entity_write: a write by name (a computed property name) -------------------------------------------------------------------------------
 Request.mc_w_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
 Request.mc_w_prop getter: strip(str(prop(this.mc_args, 'prop') or ''))
--- A bare id names the `membrane::` one when only that exists: the chat's own entities (Chat:main, Banner:owner:main, ...) are spelled with that
+-- A bare id names the `membrane::` one when only that exists: the chat's own entities (Chat:main, Banner:admin:main, ...) are spelled with that
 -- namespace in their packs, and a bare spelling of one of them reaches it instead of creating a second entity. An id that already has a row,
 -- or has no `membrane::` twin, is used as written.
 Request.mc_w_id getter: ('membrane::' + this.mc_w_spec) if prop('membrane::' + this.mc_w_spec, 'eid') != None and prop(this.mc_w_spec, 'eid') == None else this.mc_w_spec
-Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop' if this.mc_w_spec == '' or this.mc_w_prop == '' else None
-Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None and not this.mc_deny else None
+-- DEATH BY NULL (operator, 2026-11-14): `entity_write {spec: 'Stop:3', value: null}` with NO prop destroys the entity, the mirror of a birth (`Stop:3 = None`); a Pack unloads. The key
+-- `value` must be there and null: a call that merely forgets the prop is still refused.
+Request.mc_w_kill getter: this.mc_w_prop == '' and 'value' in this.mc_args and prop(this.mc_args, 'value') == None
+Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop (or value: null with no prop, to remove the entity)' if this.mc_w_spec == '' or (this.mc_w_prop == '' and not this.mc_w_kill) else ('refused: `parents` is not written by the model: classes are set at birth with a constructor (`x is Class` tests one)' if this.mc_w_prop == 'parents' else None)
+Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None and not this.mc_anon else None
 Request.mc_write on-setter mcp-write:
-  WHEN this.mc_write != None:
+  WHEN this.mc_write != None and this.mc_w_kill:
+    (prop(this.mc_write, 'spec')) = None
+    this.mc_done = True
+  ELSE WHEN this.mc_write != None:
     this.mc_w_t0 = clock
     this.mc_w_old = prop(prop(this.mc_write, 'spec'), prop(this.mc_write, 'prop') + '_result')
     (prop(this.mc_write, 'spec')).[prop(this.mc_write, 'prop')] = prop(this.mc_write, 'value')
     this.mc_done = True
+
+-- THE TURN'S LINK (operator 2026-11-14): the turn's MCP config carries `X-Turn: <the message's id>` (chat_turn.c1f). Every entity says what birthed it (`born_by`, the VM's own): for a thing a call
+-- created, that is the call's Request, and the Request names the message it belongs to here (`mc_message`: the header's value when it names an existing chat message, nothing otherwise).
+Request.mc_turn getter: prop(this.headers, 'x-turn')
+Request.mc_message getter:
+  WHEN this.mc_turn != None and startswith(str(this.mc_turn), 'membrane::Chat:') and prop(this.mc_turn, 'eid') != None: this.mc_turn
+  ELSE: None
+-- Whatever a call creates is charged to the message when there is one (the VM rule `births_to`, docs/cliffvm.md): the new entity's `born_by` is then the message, which outlives the call's Request;
+-- with no message it is the Request. `run_cliff` hands the same to the scratch entity whose setter runs the block (`cl_se`, `cliff-run`).
+Request.births_to getter: this.mc_message or this.eid
 
 -- ---- what a write returns (docs/cliffvm.md, "The return entity") -------------------------------------------------------------------------------
 -- A write that starts an effect (a driver's verb) has a RECEIPT: the property `<prop>_result` of the same entity. The reply carries the receipt when it is
@@ -92,7 +109,7 @@ Return.state getter: 'pending' if this.result_prop != None and this.receipt == N
 -- THE RETURN ENTITY IS TRANSIENT (operator, 2026-11-13): it carries the reply and is never retired by a write: the Request HOLDS it (`mc_w_returned` is a reference to it, a
 -- `$ref` value), and a Request is held by its open connection until the reply is delivered, so both are collected together (docs/cliffvm.md, "Garbage collection"). The
 -- receipt stays where it always lived, `<prop>_result` on the target.
-Request.mc_w_head getter: 'wrote ' + this.mc_w_id + '.' + this.mc_w_prop
+Request.mc_w_head getter: ('removed ' + this.mc_w_id) if this.mc_w_kill else ('wrote ' + this.mc_w_id + '.' + this.mc_w_prop)
 -- THE REPLY'S SIZE (operator, 2026-11-13: the Claude CLI refuses a tool result over its MCP limit and the model then gets nothing): the reply carries the first
 -- and the last `mc_w_cap` characters (8192, about 8 KB) of each stream, with its total size in bytes (`stdout_bytes`); a stream of at most twice the cap comes whole
 -- (`stdout`). The FULL text stays on the Command: `Command:x.output` (stdout), `Command:x.errors` (stderr): read it with entity_read or cut it with run_cliff.
@@ -117,7 +134,12 @@ Request.mc_w_rcpt getter:
 -- THE SIZE OF THE REACTIONS (design B2 of docs/reply-size.md, operator 2026-11-14): the model-facing reply lists IN FULL the reactions on the WRITTEN entity (the write's target)
 -- and its direct children (`<eid>:...`; for run_cliff the ones set by the block's own setter `run`), and every reaction that carries a reason (a null with `why`, an Error: its
 -- `failed` map), whatever the entity; every other reaction is one count per `<Class>.<prop>` (`cls` is the host's exact class field, no values). `reactions` itself is unchanged.
-Request.rx_marked getter: [{'r': r, 'full': (this.mc_tool == 'entity_write' and (prop(r, 'eid') == this.mc_w_id or startswith(str(prop(r, 'eid')), this.mc_w_id + ':'))) or (this.mc_tool == 'run_cliff' and prop(r, 'by') == 'run') or prop(r, 'why') != None or prop(r, 'prop') == 'failed'} for r in (this.reactions or [])]
+-- A PACK THE MODEL WROTE SAYS WHETHER IT LOADED (the delivery-route incident, 2026-11-14): the host adds the reaction `Pack:<name>.loaded` (new: loaded or not, why: the engine's error text,
+-- verbatim) for each pack text written in the round; the reply words it on its first lines, after the head, and it is not repeated in the `reactions:` list.
+Request.rx_pack getter: [r for r in (this.reactions or []) if prop(r, 'prop') == 'loaded' and startswith(str(prop(r, 'eid')), 'Pack:')]
+Request.rx_unloaded getter: [('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' unloaded') for r in (this.reactions or []) if prop(r, 'prop') == 'unloaded' and startswith(str(prop(r, 'eid')), 'Pack:')]
+Request.rx_pack_lines getter: concat(this.rx_unloaded, concat([('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' loaded') for r in this.rx_pack if prop(r, 'new') == True], concat([('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' did not load: ' + str(prop(r, 'why') or 'it waits for something it imports') + '\n' + ('to fix: a layer overrides only what it imports, so IMPORT the pack the error names (the text above says how); ' if 'IMPORT' in str(prop(r, 'why')) else '') + 'read ' + str(prop(r, 'eid')) + '.loaded and ' + str(prop(r, 'eid')) + '.error to check; the old text of this pack, if it had loaded before, still runs') for r in this.rx_pack if prop(r, 'new') != True], [])))
+Request.rx_marked getter: [{'r': r, 'full': (this.mc_tool == 'entity_write' and (prop(r, 'eid') == this.mc_w_id or startswith(str(prop(r, 'eid')), this.mc_w_id + ':'))) or (this.mc_tool == 'run_cliff' and prop(r, 'by') == 'run') or prop(r, 'why') != None or prop(r, 'prop') == 'failed'} for r in (this.reactions or []) if not (prop(r, 'prop') == 'loaded' and startswith(str(prop(r, 'eid')), 'Pack:'))]
 Request.rx_full getter: [m['r'] for m in this.rx_marked if m['full']]
 Request.rx_rest getter: [{'k': str(prop(m['r'], 'cls')) + '.' + str(prop(m['r'], 'prop'))} for m in this.rx_marked if not m['full']]
 Request.rx_groups getter: [str(g['key']) + ' x' + str(len(g['rows'])) for g in group_by(this.rx_rest, 'k')]
@@ -127,7 +149,7 @@ Request.mc_w_text getter:
   ELSE WHEN this.mc_done != True: None
   ELSE WHEN this.refused != None: 'refused: ' + str(this.refused)
   ELSE WHEN this.mc_w_returned == None: None
-  ELSE: join(concat(concat([this.mc_w_head], this.mc_w_rcpt), this.rx_lines), '\n')
+  ELSE: join(concat(concat(concat([this.mc_w_head], this.rx_pack_lines), this.mc_w_rcpt), this.rx_lines), '\n')
 
 -- ---- run_cliff: a clifflet, one call (docs/cliffvm.md, "run_cliff") ------------------------------------------------------------------------------
 -- The block is loaded as two scratch packs at once, `cliffg<n>` (the block as a getter: a value) and `cliffs<n>` (the block as an on-setter body: writes; privileged,
@@ -137,7 +159,7 @@ Request.mc_w_text getter:
 -- (docs/c1f-stdlib.md; time limits nothing): a runaway block answers with that reason and the seat stays up. A write's reactions come from the host like entity_write's.
 Request.cl_code getter: str(prop(this.mc_args, 'code') or '')
 Request.cl_bad getter: 'run_cliff needs code (a block of lines; the last one is the value)' if this.mc_tool == 'run_cliff' and strip(this.cl_code) == '' else None
-Request.cl_on getter: this.mc_tool == 'run_cliff' and this.cl_bad == None and not this.mc_deny
+Request.cl_on getter: this.mc_tool == 'run_cliff' and this.cl_bad == None and not this.mc_anon
 Request.cl_n getter: replace(this.eid, 'Request:', '')
 Request.cl_gp getter: 'Pack:cliffg' + this.cl_n
 Request.cl_sp getter: 'Pack:cliffs' + this.cl_n
@@ -165,6 +187,7 @@ Request.cl_mode on-setter cliff-run:
   WHEN this.cl_mode == 'value':
     (this.cl_ge).seed = True
   ELSE WHEN this.cl_mode == 'write':
+    (this.cl_se).births_to = this.births_to
     (this.cl_se).go = True
     this.mc_done = True
 Request.cl_shown getter: prop(this.cl_ge, 'shown') if this.cl_mode == 'value' else None
@@ -175,7 +198,7 @@ Request.cl_out getter:
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'why') != None: {'text': 'null: ' + str(prop(this.cl_shown, 'why')), 'err': False}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'v') == None: {'text': 'null', 'err': False}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None: {'text': str(prop(this.cl_shown, 'v')), 'err': False}
-  ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': 'ran the writes of the block\n' + join(this.rx_lines, '\n') + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}
+  ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': join(concat(['ran the writes of the block'], concat(this.rx_pack_lines, this.rx_lines)), '\n') + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}
   ELSE: None
 Request.cl_out on-setter cliff-finish:
   WHEN this.cl_out != None and this.cl_final == None and this.cl_mode == 'error':
@@ -202,8 +225,8 @@ Request.mc_r_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
 Request.mc_r_prop getter: prop(this.mc_args, 'prop')
 Request.mc_r_id getter: ('membrane::' + this.mc_r_spec) if prop('membrane::' + this.mc_r_spec, 'eid') != None and prop(this.mc_r_spec, 'eid') == None else this.mc_r_spec
 Request.mc_r_bad getter: 'entity_read needs spec (the entity\'s id)' if this.mc_r_spec == '' else None
-Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json_patch(json_remove(json_extract(body, \'$.props\'), \'$.failed\'), COALESCE((SELECT json_group_object(key, \'Error: \' || value) FROM json_each(json_extract(body, \'$.props.failed\'))), \'{}\')) AS props FROM c_field WHERE k = ?', this.mc_r_id) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else None
-Request.mc_r_val getter: prop(this.mc_r_id, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None else None
+Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json_patch(json_remove(json_extract(body, \'$.props\'), \'$.failed\', \'$.parents\'), COALESCE((SELECT json_group_object(key, \'Error: \' || value) FROM json_each(json_extract(body, \'$.props.failed\'))), \'{}\')) AS props FROM c_field WHERE k = ?', this.mc_r_id) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else None
+Request.mc_r_val getter: prop(this.mc_r_id, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None and this.mc_r_prop != 'parents' else None
 Request.mc_r_text getter:
   WHEN this.mc_tool != 'entity_read' or this.mc_r_bad != None: None
   ELSE WHEN this.mc_r_prop != None and this.mc_r_val is Error: 'Error: ' + str(why(this.mc_r_val))
@@ -226,7 +249,7 @@ Request.mc_q_off getter: max(num(prop(this.mc_args, 'offset')) or 0, 0)
 Request.mc_q_k getter: min(max(num(prop(this.mc_args, 'k')) or 20, 1), 100)
 Request.mc_q_bad getter: 'entity_query: unsupported term ' + this.mc_q_other[0] + ' (kind:<Class>, kind!:<Class> and name~:<eid prefix>, joined with &)' if len(this.mc_q_other) > 0 else None
 Request.mc_q_on getter: this.mc_tool == 'entity_query' and this.mc_q_bad == None
-Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls, CASE WHEN ? = 1 THEN json_patch(json_remove(json_extract(body, \'$.props\'), \'$.failed\'), COALESCE((SELECT json_group_object(key, \'Error: \' || value) FROM json_each(json_extract(body, \'$.props.failed\'))), \'{}\')) END AS props FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?', 1 if prop(this.mc_args, 'full') == True else 0, this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
+Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls, CASE WHEN ? = 1 THEN json_patch(json_remove(json_extract(body, \'$.props\'), \'$.failed\', \'$.parents\'), COALESCE((SELECT json_group_object(key, \'Error: \' || value) FROM json_each(json_extract(body, \'$.props.failed\'))), \'{}\')) END AS props FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?', 1 if prop(this.mc_args, 'full') == True else 0, this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
 Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name) if this.mc_q_on and prop(this.mc_args, 'count') == True else None
 Request.mc_q_text getter:
   WHEN not this.mc_q_on: None
@@ -261,6 +284,5 @@ Request.r_tools getter:
   ELSE WHEN not this.mc_ok: {'status': 400, 'body': {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32600, 'message': 'invalid request'}}}
   ELSE WHEN this.mc_id == None: {'status': 202}
   ELSE WHEN not this.mc_known_method: {'status': 200, 'body': {'jsonrpc': '2.0', 'id': this.mc_id, 'error': {'code': -32601, 'message': 'method not found: ' + this.mc_method}}}
-  ELSE WHEN this.mc_deny: this.forbidden
   ELSE WHEN this.mc_result == None: None
   ELSE: {'status': 200, 'body': {'jsonrpc': '2.0', 'id': this.mc_id, 'result': this.mc_result}}

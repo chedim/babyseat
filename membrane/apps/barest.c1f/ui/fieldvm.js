@@ -34,7 +34,7 @@ export const FETCH_PACK = "PACK fetch 1\nRESIDENT Fetch\n-- THE OUTBOUND HTTP DR
 export const DOM_ALLOW = {
   tags: 'div span p ul ol li h1 h2 h3 h4 h5 h6 button a section header footer small strong em code pre table thead tbody tr td th label details summary input textarea select option form blockquote hr',   // blockquote hr h5 h6: the markdown view (markdown.c1f); a decision, 2026-11-14
   svgTags: 'svg g circle line path text rect',                       // made in the SVG namespace
-  attrs: 'class title role hidden alt href aria-label value placeholder disabled type name for tabindex rows checked selected multiple target rel',   // target rel: a link opens in a new tab (decision, 2026-11-14)
+  attrs: 'class title role hidden alt href aria-label value placeholder disabled type name for tabindex rows checked selected multiple target rel autocomplete spellcheck inputmode',   // target rel: a link opens in a new tab (decision, 2026-11-14); autocomplete spellcheck inputmode: the sign-in box (login_view.c1f)
   svgAttrs: 'cx cy r x y x1 y1 x2 y2 d width height viewBox points fill stroke stroke-width transform',
   prefixes: ['aria-', 'data-'],
   // never written to the element, each with its reason (a decision: `style`, `href`'s scheme, `src`)
@@ -119,6 +119,115 @@ export async function start(root, { packs = {}, wasm } = {}) {
   return host;
 }
 
+/**
+ * THE GRAPH LINK, the host's part (#1143, docs/graph-link.md "Slice 2: built"). The engine names what the page reads of the seat (`drain()` `subs` / `unsubs`, 15b); this takes those notices,
+ * posts ONE frame per flush to `/ui/link` and feeds what the seat answers (`feed_vals`, `feed_refused`). It decides nothing: the seat (packs/link_route.c1f) owns the values, the policy and the caps.
+ *   - ONE frame per flush: notes are queued and sent when the schedule runs (a microtask: every flush of one task is one frame). A frame carries `n` (its counter), `ack` (the highest seat frame it applied),
+ *     `hidden`, `epoch` (the seat's, last seen), `subs` / `unsubs` as [[eid, prop], ...], and `resync: true` when the page comes back from hidden.
+ *   - the LONG POLL: a frame with no news is the poll, held by the seat up to its hold (25 s) and answered at once when a value is due: one request in flight while idle (the keepalive is the hold running out);
+ *     news while a poll is held is a second request (the seat releases the old one with `superseded`).
+ *   - a HIDDEN page sends ONE frame (`hidden: true`) and nothing more; visible again, one frame with `resync` and everything the engine named meanwhile.
+ *   - a changed epoch, or a reply with `reset` (the seat does not know this page: a restart, an expired lease): `link_reset()`, ack 0, the engine announces every live subscription again.
+ *   - a failed POST is sent again (the SAME frame: the seat drops a duplicate by `n`) after a jitter of 0 to 3 s, growing to 30 s while it keeps failing (decision 24).
+ *   - 500 replicas a page (decision 8): the 501st entity the seat sends is refused here, never fed.
+ * `Link:page.up` (a page-local fact) is true while the last request was answered and the engine has the hooks; the views read it to fall back to their polls when it is not.
+ * Without the engine hooks (an older wasm) the link does not start.
+ */
+export class Link {
+  constructor(host, o = {}) {
+    this.host = host; this.ns = o.ns; this.url = o.url || '/ui/link';
+    this.fetch = o.fetch || ((...a) => globalThis.fetch(...a));
+    this.schedule = o.schedule || ((fn) => queueMicrotask(fn));
+    this.after = o.after || ((fn, ms) => setTimeout(fn, ms));
+    this.random = o.random || Math.random;
+    this.cap = o.max_replicas ?? 500;
+    this.n = 0; this.ack = 0; this.epoch = null; this.hidden = false; this.changed = false; this.resync = false;
+    this.subs = []; this.unsubs = []; this.inflight = 0; this.fails = 0; this.waiting = false; this.soon = false;
+    this.started = false; this.held = new Set(); this.upState = undefined;
+  }
+
+  hooks() { const f = this.host.f; return ['feed_vals', 'feed_refused', 'link_reset'].every((k) => typeof f[k] === 'function'); }
+
+  start() { if (!this.hooks()) return false; this.started = true; this.later(); return true; }
+
+  /** The engine's notices of one drain: queued, sent with the next frame. */
+  note(out) {
+    for (const s of out.subs || []) this.subs.push(s);
+    for (const s of out.unsubs || []) this.unsubs.push(s);
+    if (this.started && ((out.subs || []).length || (out.unsubs || []).length)) this.later();
+  }
+
+  /** The page's visibility: hidden sends one frame and then nothing; visible sends one frame that asks for a resync. */
+  visibility(hidden) {
+    if (hidden === this.hidden) return;
+    this.hidden = hidden;
+    if (!this.started) return;
+    this.changed = true; if (!hidden) this.resync = true;
+    this.later();
+  }
+
+  later() { if (this.soon) return; this.soon = true; this.schedule(() => { this.soon = false; this.kick(); }); }
+
+  kick() {
+    if (!this.started || this.waiting) return;
+    if (this.hidden && !this.changed) return;
+    const news = this.subs.length || this.unsubs.length || this.changed || this.resync;
+    if (news || this.inflight === 0) this.send();
+  }
+
+  send() {
+    const flat = (l) => l.flatMap((s) => (s.props || []).map((p) => [s.eid, p]));
+    const frame = { v: 1, ns: this.ns, n: ++this.n, ack: this.ack, hidden: this.hidden, epoch: this.epoch ?? '', subs: flat(this.subs), unsubs: flat(this.unsubs) };
+    if (this.resync) frame.resync = true;
+    this.subs = []; this.unsubs = []; this.changed = false; this.resync = false;
+    this.post(frame);
+  }
+
+  async post(frame) {
+    this.inflight++;
+    let ok = false;
+    try {
+      const r = await this.fetch(this.url, { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(frame) });
+      if (!r.ok) throw new Error(`the seat answered ${r.status}`);
+      const rep = await r.json();
+      this.fails = 0; this.mark(true); this.apply(rep); ok = true;
+    } catch (e) {
+      this.fails++; this.mark(false);
+      const cap = Math.min(30000, 3000 * 2 ** (this.fails - 1)), lo = this.fails > 1 ? 3000 : 0;
+      this.waiting = true;
+      this.after(() => { this.waiting = false; this.post(frame); }, lo + this.random() * (cap - lo));
+    } finally { this.inflight--; }
+    if (ok && this.inflight === 0) this.kick();
+  }
+
+  mark(up) { if (up === this.upState) return; this.upState = up; this.host.feed('Link:page', 'Link', { up }, true); }
+
+  apply(rep) {
+    if (rep.dup || rep.superseded) return;
+    if (rep.refused) { this.host.feed('Link:page', 'Link', { note: rep.refused }, true); return; }
+    const f = this.host.f, now = this.host.now();
+    if (rep.reset || (this.epoch !== null && rep.epoch !== this.epoch)) {
+      this.epoch = rep.epoch ?? this.epoch; this.ack = 0; this.held.clear();
+      f.link_reset(); this.host.flush();
+      return;
+    }
+    this.epoch = rep.epoch ?? this.epoch;
+    const rev = rep.n, groups = new Map();
+    for (const v of rep.vals || []) {
+      if (typeof v.refused === 'string') { f.feed_refused(v.id, v.refused, rev, now); continue; }
+      if (!this.held.has(v.id)) {
+        if (this.held.size >= this.cap) { f.feed_refused(v.id, `refused: too many replicas (${this.cap} per page)`, rev, now); continue; }
+        this.held.add(v.id);
+      }
+      if (!groups.has(v.id)) groups.set(v.id, {});
+      groups.get(v.id)[v.prop] = v.value;
+    }
+    for (const [id, props] of groups) f.feed_vals(id, JSON.stringify(props), rev, now);
+    if (rev > this.ack) this.ack = rev;
+    this.host.flush();
+  }
+}
+
 class Host {
   constructor(f, root, errors) {
     this.f = f; this.root = root; this.nodes = new Map(); this.pending = []; this.frame = 0;
@@ -144,13 +253,23 @@ class Host {
 
   /** The page's visibility as a fact: `Conn:page.hidden` (bool), written now and on every `visibilitychange`. Returns the function that stops it. */
   track_hidden(doc = document) {
-    const put = () => { const h = !!doc.hidden; if ((this.get('Conn:page') || {}).hidden !== h) this.feed('Conn:page', 'Conn', { hidden: h }, true); };
+    const put = () => { const h = !!doc.hidden; if ((this.get('Conn:page') || {}).hidden !== h) this.feed('Conn:page', 'Conn', { hidden: h }, true); if (this.graph) this.graph.visibility(h); };
     put();
     doc.addEventListener('visibilitychange', put);
     return () => doc.removeEventListener('visibilitychange', put);
   }
 
   now() { return Date.now() / 1000; }
+
+  /** The page's name for the engine (`Link:page.ns` of the snapshot): told once, before any pack runs (the engine needs it to know which ids are the seat's). An older engine has no such call. */
+  set_ns(ns) { this.ns = ns; if (typeof this.f.set_ns === 'function') this.f.set_ns(ns); }
+
+  /** Start the graph link (the `Link` above): returns false when the engine has no link hooks. The page's visibility is read now; `track_hidden` keeps it after. */
+  start_link(opts = {}) {
+    this.graph = new Link(this, { ns: this.ns, ...opts });                // (`link(top)` below is the DOM link, an older name)
+    if ((this.get('Conn:page') || {}).hidden) this.graph.visibility(true);
+    return this.graph.start();
+  }
 
   /** An entity arrives: made empty, then each field written, so the views' setters see it. */
   feed(eid, cls, props = {}, mirror = false) {
@@ -189,9 +308,9 @@ class Host {
     const provides = Object.entries(facts).map(([n, f]) => ({ pack: n, major: f.major, requires: f.imports, closure: closure(n, facts) }));
     return {
       protocol: 1, encodings: ['json'],
-      frames: [{ frame: 'write-request', over: 'POST /mcp entity_write' }, { frame: 'poll', over: 'GET' }],
+      frames: [{ frame: 'write-request', over: 'POST /mcp entity_write' }, { frame: 'poll', over: 'GET' }, { frame: 'link', over: 'POST /ui/link (long poll)' }],
       dom: dom_allow_report(), provides, sizes, classes: JSON.parse(this.f.classes()),
-      limits: { max_frame: 'none yet', subscriptions: 'none yet' }, host_version: WASM_VERSION,
+      limits: { max_frame: 262144, subscriptions: 500, max_value: 65536 }, host_version: WASM_VERSION,
     };
   }
 
@@ -199,6 +318,7 @@ class Host {
     for (;;) {
       const out = JSON.parse(this.f.drain());
       this.pending.push(...out.writes);
+      if (this.graph && ((out.subs && out.subs.length) || (out.unsubs && out.unsubs.length))) this.graph.note(out);   // the link (docs/graph-link.md 15b): what the page now reads of the seat
       this.fetches(out.writes);                                   // W2: a write of Fetch:<x>.request / .abort
       const gone = out.writes.filter(w => w.prop === 'retire' && w.new === true).map(w => w.eid);
       for (const eid of gone) this.retire(eid);                   // the seat's engine removes a retired entity (docs/cliffvm.md): so does the page's; what that changes is drained again
@@ -310,14 +430,14 @@ class Host {
     }
   }
 
-  /** The clipboard, for a pack's `copy` write: the text only (a string, at most 1 MB), by the async clipboard where the page may use it, else a hidden textarea and execCommand. A failure is not silent: it is written as `Conn:page.copy_error`. */
-  copy(v) {
+  /** The clipboard, for a pack's `copy` write {text, at}: the text only (a string, at most 1 MB), by the async clipboard where the page may use it, else a hidden textarea and execCommand. The answer is written back on the same node as `copy_result` {ok, why?, at}: a failure is text a pack can show, never silent. */
+  copy(eid, v) {
     const text = v && typeof v === 'object' && typeof v.text === 'string' ? v.text.slice(0, 1_000_000) : null;
     if (text === null) return;
+    const done = (ok, why) => { this.f.write(eid, 'copy_result', JSON.stringify(ok ? { ok: true, at: this.now() } : { ok: false, why, at: this.now() }), this.now()); this.flush(); };
     const fallback = () => { const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); let ok = false; try { ok = document.execCommand('copy'); } catch {} t.remove(); return ok; };
-    const fail = (why) => { if (this.f.get('Conn:page') === 'null') this.f.load('Conn:page', 'Conn', '{}'); this.f.write('Conn:page', 'copy_error', JSON.stringify(String(why)), this.now()); };
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => { if (!fallback()) fail('the browser refused the clipboard'); });
-    else if (!fallback()) fail('the browser has no clipboard');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => { if (fallback()) done(true); else done(false, 'the browser refused the clipboard'); });
+    else if (fallback()) done(true); else done(false, 'the browser has no clipboard');
   }
 
   /** A name or tag the allow-list refuses: the reason is written on the DomNode and marked on the element. */
@@ -333,7 +453,8 @@ class Host {
     if (prop === 'text') el.textContent = v == null ? '' : String(v);
     else if (prop === 'parent') this.attach(el, v, (this.get(eid) || {}).before);
     else if (prop === 'before') { if (!(this.made && this.made.has(eid))) this.attach(el, (this.get(eid) || {}).parent, v, true); }   // a node made this round is already in place
-    else if (prop === 'copy') this.copy(v);                       // a pack's `copy` {text, at}: the text goes to the clipboard (the Copy button of a code block); `at` makes a second click a new value
+    else if (prop === 'reload') { if (v === true) globalThis.location.reload(); }   // a pack's `reload = True`: the page is loaded again (the sign-in and sign-out screens: the seat has set or cleared the cookie)
+    else if (prop === 'copy') this.copy(eid, v);                       // a pack's `copy` {text, at}: the text goes to the clipboard (the Copy button of a code block); `at` makes a second click a new value
     else if (prop === 'focused') {                                // a pack's focus(): the event that follows is no write (same value)
       if (v && document.activeElement !== el) el.focus(); else if (!v && document.activeElement === el) el.blur();
     }
@@ -363,7 +484,7 @@ class Host {
   // ---- W2: the page's `Fetch` entity (#1143). A pack writes `Fetch:<x>.request = {id, url, method?, headers?, body?, timeout_s?}`; this
   // makes ONE fetch() and writes `request_result` back in the seat's shape (native/src/drivers.rs + fetch.rs: {id, status, rc, head,
   // http_status, headers, body, started, finished, ms}; a failure is {id, status:'error', rc, head: the reason, started, finished, ms}).
-  // Same origin only, credentials same-origin (the owner cookie), never authorization or cookie. `abort = true` aborts the one in flight.
+  // Same origin only, credentials same-origin (the admin cookie), never authorization or cookie. `abort = true` aborts the one in flight.
   // No timeout unless the request carries `timeout_s`. W3: with `stream: true` the body is read as SSE; each frame's `data` is a page-local
   // entity `Chunk:<fetch eid>:<n>` ({fetch, id, n, data, done}, the seat's Fetch Chunk), n from 1, a last `done: true` Chunk (n+1, `error` on
   // a failure or abort), then the receipt without a body. Chunks are fed as mirrors: never fetched, never sent anywhere.

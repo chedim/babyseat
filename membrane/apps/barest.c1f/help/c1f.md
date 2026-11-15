@@ -131,8 +131,8 @@ V.summed getter: [1, 2] + [3, 4]
 V.joined getter: concat([1, 2], [3])
 ```
 
-Builtins: `len abs min max lower strip replace startswith lines words join head sort_by before after pluck distinct concat json str num
-prop why instances referencing`, plus the readers `sql read listdir stat`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
+Builtins: `len abs min max lower strip replace startswith lines words spans join head tail sort_by before after pluck distinct group_by concat json str num plain
+unspeak dot norm distance unit fit clip ago epoch localtime prop why instances referencing`, plus the readers `sql read listdir stat jsonl`. The operators `//`, `%`, `**`, `@`, `is` and `lambda` are
 refused when the pack loads:
 
 ```c1f-error
@@ -152,6 +152,15 @@ Box.rest getter: this.a % 2
 -- reads Tally:t.count = 2
 Tally.biggest getter: max([b.w for b in instances('Box')])
 Tally.count getter: len(instances('Box'))
+```
+
+`x is Class` tests an entity's class (`b is Box`; `b is (Box, Fixture)` needs all of them): it follows the entity's classes, nearest first, so a test never needs the list itself:
+
+```c1f
+-- given Box:a {}
+-- given Tally:t {}
+-- reads Tally:t.is_box = true
+Tally.is_box getter: Box:a is Box
 ```
 
 An entity written without quotes is an entity: `Goal:board`, `app::Config:voice:in`. A quoted name works the same way:
@@ -204,7 +213,7 @@ Shelf.add on-setter add-book:
     Book:copy[slug] = Book(title: this.add)
 ```
 
-`target.[expr] = value` writes the property whose NAME the expression gives. `this.retire = True` removes an entity.
+`target.[expr] = value` writes the property whose NAME the expression gives. `this.retire = True` removes an entity; so does writing a plain None to it, the mirror of a birth: `Stop:3 = None` (a computed identity: `('Stop:' + this.n) = None`; the tool: `entity_write {spec: "Stop:3", value: null}` with no prop). Only a plain `None` destroys: a null that has a reason, an Error or any other value is refused with its reason and nothing is destroyed.
 
 ## Effects are writes
 

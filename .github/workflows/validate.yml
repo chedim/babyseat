@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
   # The release's own gates (#1143): the Rust seat is what ships, so its suites run here. Added BEFORE the Python
-  # jobs below are removed (docs/python-retirement.md step 2): nothing may be deleted while it is the only gate.
+  # jobs below are removed: nothing may be deleted while it is the only gate.
   cargo:
     strategy:
       fail-fast: false
@@ -93,5 +93,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install pytest
+      - run: pip install pytest build setuptools
+      # the packaging scripts and the installer: parse-clean and shellcheck-clean
+      - run: shellcheck -S warning install.sh scripts/dist/*.sh docker/docker-entrypoint.sh
+      # the wrapper's tests: the launcher, the versions, the wheel (built from a fake payload), install.sh (a file:// release), the Dockerfile and the workflows
       - run: pytest -q -p no:cacheprovider tests/wrapper

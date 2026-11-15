@@ -1,4 +1,4 @@
-//! The dist folder (#1143, docs/packaging-plan.md): `scripts/dist/build.sh` assembles `dist/<version>/{bin/cliffvm, packs/, apps/, help/, VERSION, MANIFEST.sha256}` from a release
+//! The dist folder (#1143, docs/packaging-plan.md): `scripts/dist/build.sh` assembles `dist/<version>/{bin/cliffvm, packs/, apps/, VERSION, MANIFEST.sha256}` from a release
 //! build, and `cliffvm serve` run from THAT folder (the repo is not named to it) comes up. Built here from the test binary (a release build is CI's step).
 #![cfg(feature = "bin")]
 use std::io::{BufRead, BufReader, Read, Write};
@@ -48,7 +48,13 @@ fn the_build_makes_the_version_stamped_tree_with_a_manifest_that_lists_every_fil
     let list = std::fs::read_to_string(repo().join("membrane/apps/barest.packs")).unwrap();
     for name in list.lines().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')) { assert!(out.join("packs").join(format!("{name}.c1f")).is_file(), "pack {name}"); }
     assert!(out.join("packs/boot.json").is_file() && out.join("apps/barest.packs").is_file() && out.join("apps/barest.c1f/help.c1f").is_file());
-    assert!(out.join("apps/barest.c1f/ui/index.html").is_file() && out.join("apps/barest.c1f/ui/fieldvm_core_bg.wasm").is_file() && out.join("help/blurp.md").is_file(), "the page (with its wasm) and the help");
+    assert!(out.join("apps/barest.c1f/ui/index.html").is_file() && out.join("apps/barest.c1f/ui/fieldvm_core_bg.wasm").is_file(), "the page (with its wasm)");
+    // ONLY what the barest seat loads: no Python-era pack, no help folder, and exactly the listed packs + launcher + boot.json
+    assert!(!out.join("help").exists() && !out.join("packs/banner.c1f").is_file() && !out.join("packs/door_voice.c1f").is_file() && !out.join("packs/facts.json").is_file());
+    let mut want: Vec<String> = list.lines().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| format!("{n}.c1f")).collect();
+    want.push("launcher.c1f".into()); want.push("boot.json".into()); want.sort(); want.dedup();
+    let mut have: Vec<String> = std::fs::read_dir(out.join("packs")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect(); have.sort();
+    assert_eq!(have, want, "the packs folder holds exactly what the seat loads");
     assert!(!out.join("ui").exists(), "the old shared ui folder is gone");
     assert!(!out.join("apps/field.c1f").exists(), "the full seat's app is not in the barest dist");
     // the manifest: every file but itself, a sha256 each, sorted; the stamp's file is in it
@@ -98,7 +104,7 @@ fn serve_from_the_built_folder_finds_its_packs_there_and_not_in_the_repo() {
     let mut port = 0u16;
     while let Some(Ok(l)) = lines.next() { if l.starts_with("cliffvm: door listening on") { port = l.rsplit(':').next().unwrap().trim().parse().unwrap(); break; } }
     assert!(port != 0 && port != 4096, "the dist's own launcher.c1f was read: {port}");
-    let tok = std::fs::read_to_string(data.join("owner.token")).unwrap();
+    let tok = std::fs::read_to_string(data.join("admin.token")).unwrap();
     let (h, b) = get(port, "/global/health", &format!("Authorization: Bearer {}\r\n", tok.trim()));
     assert!(h.starts_with("HTTP/1.1 200") && b.contains("healthy"), "{h} {b}");
     let (h, b) = get(port, "/", "");
@@ -118,7 +124,7 @@ fn the_wheel_payload_is_the_dist_without_a_version_folder_and_names_its_interfac
     // the wrapper packages `payload/` as `membrane/dist/` (package-data `dist/**`): bin/cliffvm, packs, apps, help at the top, executable bit kept, the stamp and manifest beside them
     use std::os::unix::fs::PermissionsExt;
     assert!(std::fs::metadata(payload.join("dist/bin/cliffvm")).unwrap().permissions().mode() & 0o111 != 0);
-    for d in ["packs", "apps", "help"] { assert!(payload.join("dist").join(d).is_dir(), "{d}"); }
+    for d in ["packs", "apps"] { assert!(payload.join("dist").join(d).is_dir(), "{d}"); }
     assert_eq!(std::fs::read_to_string(payload.join("dist/VERSION")).unwrap().trim(), VERSION);
     let v = Command::new("sh").arg(repo().join("scripts/dist/verify.sh")).arg(payload.join("dist")).output().unwrap();
     assert!(v.status.success(), "{}", String::from_utf8_lossy(&v.stderr));

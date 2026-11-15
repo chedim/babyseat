@@ -162,10 +162,10 @@ try {
   await b.type('while the seat was away'); await b.enter();
   await b.until(`${answers}.length === 4`, 'the fourth turn is shown');
   seat.go('while the seat was away');
-  await b.until(`/did not answer the last read of the turns/.test(${textOf('.pollnote')})`, 'a failed read is said in text');
+  await b.until(`/did not answer the last read of the turns/.test(${textOf(K('DomNode:chat:pollnote'))})`, 'a failed read is said in text');
   b.hook = null;
   await b.until(`${answers}[3] === 'Final answer to: while the seat was away'`, 'the finished turn is shown once the reads come back');
-  await b.until(`${Q('.pollnote')}.hidden`, 'the failure line goes');
+  await b.until(`${Q(K('DomNode:chat:pollnote'))}.hidden`, 'the failure line goes');
   //    (b) a read that HANGS (never answered): the host's timeout aborts it, the poll is armed again, the answer is shown
   b.hook = (key) => (key.startsWith('GET /membrane/chat/messages') ? 'hold' : undefined);
   await b.type('hung read'); await b.enter();
@@ -177,7 +177,7 @@ try {
   await b.until(`/^connected · idle$/.test(${status})`, 'idle');
   b.hook = (key) => (key.startsWith('GET /membrane/chat/messages') ? 'hold' : undefined);
   await sleep(2500);                                                 // polls are held now: each is aborted by its 2 s timeout, and the line says so
-  await b.until(`/timeout after 2 s/.test(${textOf('.pollnote')})`, 'a hung read is aborted by its timeout and said in text', 15000);
+  await b.until(`/timeout after 2 s/.test(${textOf(K('DomNode:chat:pollnote'))})`, 'a hung read is aborted by its timeout and said in text', 15000);
   b.hook = null; await b.release();
 
   // 6. ONE chat: no sessions column, no New session; the history is every turn of the seat, the thread keeps its 5 turns

@@ -205,12 +205,16 @@
     "writes": {
       "Chat.mention": "Bool",
       "Chat.queued": "Bool",
+      "Doorbell.at": "Num",
       "Request.cm_at": "Num",
       "Request.cm_id": "Text?",
       "Request.end": "Dict",
       "Request.send": "Dict"
     },
-    "findings": []
+    "findings": [],
+    "resident": [
+      "Doorbell"
+    ]
   },
   "chat_oai": {
     "getters": {
@@ -295,10 +299,14 @@
   "chat_turn": {
     "getters": {
       "Boot.interrupted": "List(Text)",
+      "ChatMessage.admin_env": "Dict?",
+      "ChatMessage.admin_file": "Any",
       "ChatMessage.answer": "Text?",
       "ChatMessage.argv": "List(Any)?",
       "ChatMessage.auth": "Any",
       "ChatMessage.auth_env": "List(Text)?",
+      "ChatMessage.banner_main": "Any",
+      "ChatMessage.banner_more": "List(Any)?",
       "ChatMessage.banner_slot": "Any",
       "ChatMessage.banner_text": "Any",
       "ChatMessage.bin": "Any",
@@ -322,8 +330,6 @@
       "ChatMessage.note": "Text?",
       "ChatMessage.oai_acc": "Text",
       "ChatMessage.over": "Bool",
-      "ChatMessage.owner_env": "Dict?",
-      "ChatMessage.owner_file": "Any",
       "ChatMessage.partial_text": "Text",
       "ChatMessage.partial_tools": "List(Text)",
       "ChatMessage.pick_default": "Bool",
@@ -334,6 +340,7 @@
       "ChatMessage.rlines": "List(Text)",
       "ChatMessage.rr": "Any",
       "ChatMessage.sdk_model": "Any",
+      "ChatMessage.seat_name": "Text?",
       "ChatMessage.spent": "Bool",
       "ChatMessage.spoken": "Text",
       "ChatMessage.sys": "Text?",
@@ -483,7 +490,6 @@
       "Request.family": "Dict?",
       "Request.family_checked": "Dict?",
       "Request.file": "Text?",
-      "Request.forbidden": "Dict",
       "Request.found": "Any",
       "Request.fwd": "Bool",
       "Request.fwdh": "Text",
@@ -499,6 +505,7 @@
       "Request.login_cookie": "Text?",
       "Request.login_has": "Bool",
       "Request.login_ok": "Bool",
+      "Request.login_pack": "Bool",
       "Request.login_reply": "Dict?",
       "Request.login_shape": "Bool",
       "Request.login_token": "Any",
@@ -508,8 +515,6 @@
       "Request.ms": "Num?",
       "Request.own_routes": "Dict?",
       "Request.owned": "Bool",
-      "Request.owner": "Bool",
-      "Request.owner_sub": "Text",
       "Request.parts": "List(Text)",
       "Request.path_body": "Dict",
       "Request.person": "Any",
@@ -531,7 +536,7 @@
       "Request.static_reply": "Dict?",
       "Request.ui_path": "Text?",
       "Request.ui_root": "Any",
-      "Request.ui_roots": "List(Any)",
+      "Request.ui_roots": "Any",
       "Request.ui_served": "Bool",
       "Request.unauthorized": "Dict",
       "Request.who": "Dict?"
@@ -551,21 +556,18 @@
   },
   "door_auth": {
     "getters": {
-      "Person.owner": "Bool",
-      "Request.owner_ask": "Dict?",
-      "Request.owner_page": "Bool",
-      "Request.owner_ttl": "Int",
+      "Request.admin_ask": "Dict?",
+      "Request.admin_page": "Bool",
+      "Request.admin_ttl": "Int",
+      "Request.host": "Text",
+      "Request.host_allowed": "List(Text)",
+      "Request.host_extra": "Any",
+      "Request.host_ok": "Bool",
       "Request.page": "Bool",
       "Request.page_cookie": "Text?",
-      "Request.page_hold": "Bool?",
-      "Request.person_eid": "Text?",
-      "Request.person_seen": "Dict?"
+      "Request.page_hold": "Bool?"
     },
     "writes": {
-      "*.first_seen": "Any",
-      "*.last_seen": "Any",
-      "*.name": "Any",
-      "*.sub": "Any",
       "Request.mint": "Dict?"
     },
     "findings": [],
@@ -920,14 +922,12 @@
       "Request.m1_rows": "Any",
       "Request.m_session": "List(Text)",
       "Request.ml_all": "List(Dict)?",
-      "Request.ml_ask": "Bool",
       "Request.ml_assts": "List(Dict)",
       "Request.ml_before": "Text?",
       "Request.ml_cut": "Any",
       "Request.ml_cut_id": "Text",
       "Request.ml_flat": "List(Any)",
       "Request.ml_hi": "Text?",
-      "Request.ml_lazy": "Bool",
       "Request.ml_limit": "Num",
       "Request.ml_on": "Bool",
       "Request.ml_prefix": "Text?",
@@ -1052,6 +1052,7 @@
   "door_tools": {
     "getters": {
       "Pack.state": "Text",
+      "Request.births_to": "Any",
       "Request.cl_bad": "Text?",
       "Request.cl_code": "Text",
       "Request.cl_ge": "Text",
@@ -1069,15 +1070,16 @@
       "Request.cl_start": "Text?",
       "Request.cl_stext": "Text",
       "Request.m_tools": "List(Text)",
+      "Request.mc_anon": "Bool",
       "Request.mc_args": "Any",
       "Request.mc_bad": "Text?",
       "Request.mc_call": "Dict?",
-      "Request.mc_deny": "Bool",
       "Request.mc_id": "Any",
       "Request.mc_init": "Dict",
       "Request.mc_is_err": "Bool",
       "Request.mc_known": "Bool",
       "Request.mc_known_method": "Bool",
+      "Request.mc_message": "Any",
       "Request.mc_method": "Text",
       "Request.mc_ok": "Bool",
       "Request.mc_params": "Any",
@@ -1108,12 +1110,14 @@
       "Request.mc_text": "Any",
       "Request.mc_tool": "Any",
       "Request.mc_tools": "List(Dict)",
+      "Request.mc_turn": "Any",
       "Request.mc_w_bad": "Text?",
       "Request.mc_w_cap": "Int",
       "Request.mc_w_cls": "Text?",
       "Request.mc_w_effect": "Bool",
       "Request.mc_w_head": "Text",
       "Request.mc_w_id": "Text",
+      "Request.mc_w_kill": "Bool",
       "Request.mc_w_n": "Text",
       "Request.mc_w_new": "Any",
       "Request.mc_w_perr": "Dict?",
@@ -1137,13 +1141,17 @@
       "Request.rx_groups": "List(Text)",
       "Request.rx_lines": "List(Text)",
       "Request.rx_marked": "List(Dict)",
+      "Request.rx_pack": "List(Any)",
+      "Request.rx_pack_lines": "List(Text)",
       "Request.rx_rest": "List(Dict)",
+      "Request.rx_unloaded": "List(Text)",
       "Return.kind": "Text",
       "Return.receipt": "Any",
       "Return.state": "Text"
     },
     "writes": {
       "*.[prop(this.mc_write, 'prop')]": "Any",
+      "*.births_to": "Any",
       "*.go": "Bool",
       "*.privileged": "Bool",
       "*.retire": "Bool",
@@ -1232,6 +1240,14 @@
     },
     "writes": {},
     "findings": []
+  },
+  "environment": {
+    "getters": {},
+    "writes": {},
+    "findings": [],
+    "resident": [
+      "Environment"
+    ]
   },
   "fetch": {
     "getters": {
@@ -1401,11 +1417,13 @@
       "LegacySeat.cx_cwd": "Text",
       "LegacySeat.cx_data": "Text",
       "LegacySeat.cx_declared": "Any",
+      "LegacySeat.cx_env": "Text",
       "LegacySeat.cx_f0": "Any",
       "LegacySeat.cx_f1": "Any",
       "LegacySeat.cx_f2": "Any",
       "LegacySeat.cx_f3": "Any",
       "LegacySeat.cx_f4": "Any",
+      "LegacySeat.cx_f5": "Any",
       "LegacySeat.cx_fact": "Text?",
       "LegacySeat.cx_home": "Text",
       "LegacySeat.cx_named": "Any",
@@ -1418,6 +1436,7 @@
       "LegacySeat.cx_s2": "Any",
       "LegacySeat.cx_s3": "Any",
       "LegacySeat.cx_s4": "Any",
+      "LegacySeat.cx_s5": "Any",
       "LegacySeat.cx_state": "Any"
     },
     "writes": {
@@ -1437,7 +1456,6 @@
   },
   "legacy_import": {
     "getters": {
-      "LegacySeat.beat": "Num?",
       "LegacySeat.chat_agents": "List(Text)",
       "LegacySeat.converter": "Int",
       "LegacySeat.hbad": "Text?",
@@ -1450,7 +1468,6 @@
       "LegacySeat.pgq": "Any",
       "LegacySeat.pgrows": "Any",
       "LegacySeat.run_left": "Any",
-      "LegacySeat.waiting": "List(Text)",
       "LegacySeat.want": "Text",
       "LegacySession.kind": "Text"
     },
@@ -1461,7 +1478,6 @@
       "*.reason": "Text?",
       "*.rows": "Any",
       "*.state": "Text",
-      "*.unload": "Bool",
       "Legacy.cur": "None",
       "Legacy.queue": "List(Never)",
       "Legacy.running": "Bool",
@@ -1473,13 +1489,12 @@
       "LegacySeat.refused": "Text?",
       "LegacySeat.run_done": "Num?",
       "LegacySeat.run_error": "Num?",
-      "LegacySeat.run_total": "Num?",
+      "LegacySeat.run_total": "Int",
       "LegacySeat.running": "Bool",
       "LegacySeat.tick": "Num",
       "SqlQuery.run": "Dict",
       "SqlQuery.source": "Text",
-      "SqlQuery.sql": "Text",
-      "membrane.open": "Any"
+      "SqlQuery.sql": "Text"
     },
     "findings": [],
     "resident": [
@@ -1497,15 +1512,28 @@
   },
   "link": {
     "getters": {
+      "Boot.lk_epoch": "Text?",
+      "Boot.lk_hold": "Num?",
+      "Boot.lk_lease": "Num?",
+      "Boot.lk_lease_hidden": "Num?",
+      "Boot.lk_max_frame": "Num?",
+      "Boot.lk_max_links": "Num?",
+      "Boot.lk_max_subs": "Num?",
+      "Boot.lk_max_value": "Num?",
+      "Boot.lk_window": "Num?",
       "Boot.old_vms": "Any",
       "Page.ns": "Text",
+      "Vm.hidden": "Any",
       "Vm.kind": "Text",
+      "Vm.last": "Any",
+      "Vm.lease_s": "Num?",
+      "Vm.peer_heard": "Any",
       "Vm.silent": "Num?",
-      "Vm.stale_s": "Num?",
       "Vm.state": "Text?"
     },
     "writes": {
       "*.retire": "Bool",
+      "Boot.lk_since": "Num",
       "Vm.connected_at": "Any",
       "Vm.page": "Entity(Page)",
       "Vm.seen": "Num"
@@ -1516,6 +1544,94 @@
     ],
     "resident": [
       "Vm"
+    ]
+  },
+  "link_route": {
+    "getters": {
+      "LinkPeer.allowed": "Bool?",
+      "LinkPeer.due": "Bool",
+      "LinkPeer.dues": "List(Dict)?",
+      "LinkPeer.gone": "Bool",
+      "LinkPeer.lease": "Num?",
+      "LinkPeer.maxf": "Num?",
+      "LinkPeer.maxv": "Num?",
+      "LinkPeer.mine": "List(Entity(LinkPeer))?",
+      "LinkPeer.row": "Dict?",
+      "LinkPeer.sig": "Text?",
+      "LinkPeer.silent": "Num?",
+      "LinkPeer.size": "Int",
+      "LinkPeer.snap": "Bool?",
+      "LinkPeer.val": "Any",
+      "LinkPeer.veto": "Text?",
+      "LinkPeer.why": "Text?",
+      "LinkPeer.window": "Num?",
+      "Request.lk_ack": "Any",
+      "Request.lk_big": "Bool",
+      "Request.lk_draft": "Dict?",
+      "Request.lk_dues": "Any",
+      "Request.lk_epoch": "Text?",
+      "Request.lk_fresh": "List(Dict)",
+      "Request.lk_hidden": "Bool",
+      "Request.lk_hold": "Num?",
+      "Request.lk_maxl": "Num?",
+      "Request.lk_n": "Any",
+      "Request.lk_ns": "Text",
+      "Request.lk_ns_ok": "Bool",
+      "Request.lk_over": "List(Dict)",
+      "Request.lk_pairs": "List(List(Any))",
+      "Request.lk_peer": "Text",
+      "Request.lk_plan": "Dict?",
+      "Request.lk_ready": "Bool",
+      "Request.lk_room": "Num?",
+      "Request.lk_shape": "Bool",
+      "Request.lk_subs": "List(Dict)",
+      "Request.lk_take": "List(Dict)",
+      "Request.lk_unkeys": "List(Text?)",
+      "Request.lk_unpairs": "List(List(Any))",
+      "Request.m_link": "List(Text)",
+      "Request.o_link": "Bool",
+      "Request.r_link": "Dict?"
+    },
+    "writes": {
+      "*.ackd": "Any",
+      "*.capped": "Bool",
+      "*.live": "Bool",
+      "*.ns": "Any",
+      "*.retire": "Bool",
+      "*.sent_n": "Any",
+      "*.sent_sig": "Any",
+      "*.sid": "Any",
+      "*.sprop": "Any",
+      "*.wid": "Any",
+      "LinkAllow.done": "Bool",
+      "LinkAllow.prefixes": "List(Text)",
+      "LinkPeer.ack": "Any",
+      "LinkPeer.cur": "Any",
+      "LinkPeer.heard": "Num",
+      "LinkPeer.hidden": "Any",
+      "LinkPeer.last_n": "Any",
+      "LinkPeer.ns": "Any",
+      "LinkPeer.out_n": "Any",
+      "LinkPeer.up": "Bool",
+      "LinkPeer.ver": "Num?",
+      "Request.lk_at": "Num",
+      "Request.lk_dup": "Bool",
+      "Request.lk_full": "Bool",
+      "Request.lk_now": "Any",
+      "Request.lk_out": "Dict?",
+      "Request.lk_reset": "Any",
+      "Request.lk_took": "Bool",
+      "Vm.connected_at": "Any",
+      "Vm.heard": "Any",
+      "Vm.peer": "Entity(LinkPeer)",
+      "Vm.was_hidden": "Bool"
+    },
+    "findings": [],
+    "virtual": [
+      "LinkPeer"
+    ],
+    "resident": [
+      "LinkAllow"
     ]
   },
   "mcp": {
@@ -1817,7 +1933,7 @@
       "Setting.fact_val": "Any"
     },
     "writes": {
-      "*.[this.owner_prop]": "Any",
+      "*.[this.source_prop]": "Any",
       "*.retire": "Bool",
       "HaAllow.entities": "Any",
       "HaAllow.services": "Any",

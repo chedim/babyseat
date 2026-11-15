@@ -99,7 +99,7 @@ fn a_missing_file_a_traversal_and_a_post_are_refused() {
                           ("GET /nowhere HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer TOKEN\r\n\r\n", "404"),
                           ("GET /nowhere HTTP/1.1\r\nHost: t\r\n\r\n", "401")] {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-        let tok = membrane_vm::jwt::mint(b"0123456789abcdef0123456789abcdef", "owner", "owner", 3600.0, now).unwrap();
+        let tok = membrane_vm::jwt::mint(b"0123456789abcdef0123456789abcdef", "admin", "admin", 3600.0, now).unwrap();
         let (head, _) = split(&get(&mut c, &mut f, port, &raw.replace("TOKEN", &tok)));
         assert!(head.starts_with(&format!("HTTP/1.1 {status}")), "{raw}: {head}");
     }
@@ -126,4 +126,24 @@ fn an_upper_layers_file_shadows_the_lower_and_a_file_only_below_falls_through() 
     }
     let (head, _) = split(&get(&mut c, &mut f, port, "GET /ui/www/nowhere.js HTTP/1.1\r\nHost: t\r\n\r\n"));
     assert!(head.starts_with("HTTP/1.1 404"), "{head}");
+}
+
+#[test]
+fn the_sign_in_pack_is_public_and_no_other_app_pack_is() {
+    // a page with no cookie must be able to fetch the sign-in screen (login_view.c1f, from the app folder itself): the door's own secret is set, the caller has NO token
+    let app = format!("{}/../membrane/apps/barest.c1f", env!("CARGO_MANIFEST_DIR"));
+    let (mut c, mut f, port) = world_with(json!({"app_dirs": [app.clone()], "ui_dir": ui_dir()}));
+    let (head, body) = split(&get(&mut c, &mut f, port, "GET /ui/www/login_view.c1f HTTP/1.1\r\nHost: t\r\n\r\n"));
+    assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+    assert_eq!(body, std::fs::read(format!("{app}/login_view.c1f")).unwrap(), "the pack's bytes");
+    // every other pack of the app folder stays behind the token: not served at all (a file of ui/ only), whatever the spelling
+    for p in ["shell_view.c1f", "chat_view.c1f", "settings_view.c1f", "link_view.c1f", "markdown.c1f", "../chat_view.c1f", "ui/../chat_view.c1f", "%2e%2e/chat_view.c1f", "login_view.c1f/../chat_view.c1f"] {
+        let (head, _) = split(&get(&mut c, &mut f, port, &format!("GET /ui/www/{p} HTTP/1.1\r\nHost: t\r\n\r\n")));
+        assert!(head.starts_with("HTTP/1.1 404"), "{p}: {head}");
+    }
+    let (head, _) = split(&get(&mut c, &mut f, port, "POST /ui/www/login_view.c1f HTTP/1.1\r\nHost: t\r\nContent-Length: 0\r\n\r\n"));
+    assert!(head.starts_with("HTTP/1.1 405"), "{head}");
+    // and the page's pack list (`/ui/fieldvm`) never carries it, so a signed-in page never draws the card: see tests/js/login_view.test.mjs and fieldvm_snapshot.test.mjs
+    let (head, _) = split(&get(&mut c, &mut f, port, "GET /ui/fieldvm HTTP/1.1\r\nHost: t\r\n\r\n"));
+    assert!(head.starts_with("HTTP/1.1 401"), "the fieldvm route itself still needs a token: {head}");
 }

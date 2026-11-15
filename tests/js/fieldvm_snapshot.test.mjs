@@ -21,7 +21,7 @@ const seat = spawn('sh', [path.join(repo, 'scripts/seat'), '--data-dir', path.jo
 try {
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/`)).ok) break; } catch {} await sleep(200); }
   let token = '';
-  for (let i = 0; i < 50 && !token; i++) { try { token = readFileSync(path.join(data, 'd/owner.token'), 'utf8').trim(); } catch { await sleep(100); } }
+  for (let i = 0; i < 50 && !token; i++) { try { token = readFileSync(path.join(data, 'd/admin.token'), 'utf8').trim(); } catch { await sleep(100); } }
   const r = await fetch(`http://127.0.0.1:${port}/ui/fieldvm`, { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(r.status, 200);
   const snap = await r.json();

@@ -14,10 +14,12 @@ Request.is_read getter: this.method == 'GET' or this.method == 'HEAD'
 -- THE FILES OF AN APP are data at their path (docs/c1f-layers.md): Boot:seat.app_dirs is the apps' folders, the UPPER layer first, and an
 -- app's files are under its `ui/`; Boot:seat.ui_dir (--ui-dir) is the lowest layer. The first folder that holds the file wins, so an
 -- upper layer's file shadows the lower one's. The files are /, /index.html, /membrane (the page),
--- /favicon.ico and /ui/www/<file>; a path with '..', a percent, a backslash, a leading '/' or a second /ui/www/ is refused.
+-- /favicon.ico and /ui/www/<file> (and /ui/www/login_view.c1f, the sign-in pack, from the app folder itself); a path with '..', a percent, a backslash, a leading '/' or a second /ui/www/ is refused.
 Request.ui_root getter: ([b.ui_dir for b in instances('Boot') if b.ui_dir != None] or [''])[0]
 Request.app_dirs getter: ([b.app_dirs for b in instances('Boot') if b.app_dirs != None] or [[]])[0]
-Request.ui_roots getter: concat([d + '/ui' for d in this.app_dirs], [this.ui_root] if this.ui_root != '' else [])
+-- the ONE app pack served from the app folder itself (not its `ui/`): the sign-in screen, which a page with no cookie must be able to fetch (login_view.c1f); no other pack is reachable this way
+Request.login_pack getter: this.rel == 'login_view.c1f'
+Request.ui_roots getter: this.app_dirs if this.login_pack else concat([d + '/ui' for d in this.app_dirs], [this.ui_root] if this.ui_root != '' else [])
 Request.rel getter:
   WHEN this.route == '/' or this.route == '/index.html' or this.route == '/membrane': 'index.html'
   ELSE WHEN this.route == '/favicon.ico': 'favicon.svg'
@@ -39,7 +41,7 @@ Request.file getter: this.cand if this.hit == True else None
 Request.parts getter: concat([''], words(replace(this.rel or '', '.', ' ')))
 Request.ext getter: this.parts[len(this.parts) - 1]
 Request.ctype getter: {'html': 'text/html; charset=utf-8', 'js': 'application/javascript; charset=utf-8', 'mjs': 'application/javascript; charset=utf-8', 'wasm': 'application/wasm', 'gz': 'application/gzip', 'json': 'application/json', 'css': 'text/css; charset=utf-8', 'png': 'image/png', 'svg': 'image/svg+xml', 'ico': 'image/x-icon', 'woff2': 'font/woff2'}[this.ext] or 'application/octet-stream'
--- (`page_hold` and `page_cookie` are door_auth.c1f's: the page fetched from this machine is given its owner cookie; none = no cookie)
+-- (`page_hold` and `page_cookie` are door_auth.c1f's: the page fetched from this machine is given its admin cookie; none = no cookie)
 -- none until the file's stat has come back (an asynchronous read): the reply waits for it
 Request.static getter:
   WHEN this.rel == None: 'no'
@@ -59,19 +61,16 @@ Request.static_reply getter:
 
 -- ---- /ui/conf: the page's config -------------------------------------------------------------------------------------------
 -- The launcher tells the facts (Boot:seat.seat_name, .seat_named, .seat_aliases, .seat_stt, .seat_voice_out, .seat_language,
--- .seat_blurp, .build_id). WHO comes from the door's verified token (`authed`, `sub`, `claims`). A localhost peer is NOT the owner (operator, #842):
--- once the door has a secret, a request with no token, from loopback or anywhere, is refused; the owner's token is the file the seat writes at boot
+-- .seat_blurp, .build_id). WHO comes from the door's verified token (`authed`, `sub`, `claims`). A localhost peer is NOT the admin (operator, #842):
+-- once the door has a secret, a request with no token, from loopback or anywhere, is refused; the admin's token is the file the seat writes at boot
 -- (docs/auth.md). A token that is sent and bad is refused the same way. A door with no secret at all (the barest seat) is open by decision.
 Request.loop getter: startswith(this.peer or '', '127.0.0.1:') or startswith(this.peer or '', '[::1]:')
 Request.fwd getter: prop(this.headers, 'x-forwarded-for') != None or prop(this.headers, 'forwarded') != None or prop(this.headers, 'x-real-ip') != None
 Request.entrant getter: this.authed == True
--- THE OWNER (#1143, persons): the person whose sub is the fact `operator` (the released MEMBRANE_OPERATOR), else `owner`: the sub of the token `cliffvm run` writes at boot.
--- The barest seat (no secret, `open`) has no one to tell apart: its caller is the owner.
-Request.owner_sub getter: str(prop(this.facts, 'operator') or 'owner')
-Request.owner getter: this.authed == True and (this.open == True or this.sub == this.owner_sub)
--- the 403 of a verified person who is not the owner: the released error shape (server.py `_json_err`, the one 403 of the JWT seat)
-Request.forbidden getter: {'status': 403, 'body': {'type': 'error', 'error': {'message': 'for the owner'}}}
-Request.who getter: {'sub': this.sub, 'name': prop(this.claims, 'name') or this.sub} if this.authed == True else None
+-- NO USERS (#1143, operator 2026-11-14): every request that carries a VALID token (or the page cookie) is THE ADMIN, whatever the token's `sub` says: the host's door
+-- replaces `sub` and `name` by `admin` after it has verified the token, so no pack reads a sub as an identity. There is no second person, no non-admin tier and nothing
+-- to refuse a verified caller: the gate of every route is `authed` (the 401 below). The barest seat (no secret, `open`) has no one to tell apart: its caller is the admin.
+Request.who getter: {'sub': 'admin', 'name': 'admin'} if this.authed == True else None
 Request.boots getter: [b for b in instances('Boot')]
 Request.c_stt getter: 'server' if startswith(str(([b.seat_stt for b in this.boots] or [''])[0] or ''), 'http') else 'browser'
 Request.c_name getter: ([b.seat_name for b in this.boots] or [None])[0]
@@ -119,12 +118,12 @@ Request.login_reply getter:
   ELSE WHEN this.login_ask == None: this.unauthorized
   ELSE WHEN this.verify_result == None: None
   ELSE WHEN not this.login_ok: this.unauthorized
-  ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.login_cookie}, 'body': {'ok': True, 'who': {'sub': prop(prop(this.verify_result, 'claims'), 'sub'), 'name': prop(prop(this.verify_result, 'claims'), 'name') or prop(prop(this.verify_result, 'claims'), 'sub')}}}
+  ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.login_cookie}, 'body': {'ok': True, 'who': {'sub': 'admin', 'name': 'admin'}}}
 Request.logout_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
   ELSE: {'status': 200, 'headers': {'cache-control': 'no-store', 'set-cookie': this.cookie_name + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict' + this.secure}, 'body': {'ok': True}}
 
--- THE 401, in the RELEASED shape (jwtauth.py `send_unauthorized`, the shape the TUI, Home Assistant and curl scripts read): one message for a
+-- THE 401, in the RELEASED shape (jwtauth.py `send_unauthorized`, the shape Home Assistant and curl scripts read): one message for a
 -- missing and a refused token alike (a refusal never says which), under `error.message`, and `WWW-Authenticate: Bearer realm="membrane"`.
 Request.unauthorized getter: {'status': 401, 'headers': {'www-authenticate': 'Bearer realm="membrane"'}, 'body': {'error': {'message': 'missing or invalid token', 'type': 'unauthorized'}}}
 
@@ -142,12 +141,12 @@ Request.ms getter: num(words(replace(str(clock * 1000), '.', ' '))[0])
 Request.path_body getter: {'home': this.f_home, 'state': this.f_home + '/.local/state/opencode', 'config': this.f_home + '/.config/opencode', 'worktree': this.f_cwd, 'directory': this.f_cwd}
 Request.project_body getter: {'id': this.f_project, 'worktree': this.f_cwd, 'vcs': 'git', 'time': {'created': this.ms, 'updated': this.ms}, 'sandboxes': []}
 -- THE AGENT LIST (server.py `_agent_shapes`, tests/golden/boot/agent.json): the rows the chat's agent picker and the attached TUI read. With NO primary agent
--- the TUI's Enter does nothing, so `build` and `plan` are primary. The released list also appends the seat's live minds (the loop workers, the thinker,
+-- (opencode's TUI is not in this release) Enter does nothing there, so `build` and `plan` are primary. The released list also appends the seat's live minds (the loop workers, the thinker,
 -- the dreamer, with their claims) when it has them: those need the Python loop pool and are not here (the page's mind strip stays empty).
 Request.ag_allow getter: [{'permission': '*', 'pattern': '*', 'action': 'allow'}]
 Request.ag_body getter: [{'name': 'build', 'native': True, 'mode': 'primary', 'description': 'The default agent. Executes tools based on configured permissions.', 'permission': this.ag_allow, 'options': {}}, {'name': 'plan', 'native': True, 'mode': 'primary', 'description': 'Plan mode.', 'permission': this.ag_allow, 'options': {}}, {'name': 'general', 'native': True, 'mode': 'subagent', 'description': 'General-purpose subagent.', 'permission': this.ag_allow, 'options': {}}, {'name': 'explore', 'native': True, 'mode': 'subagent', 'description': 'Exploration subagent.', 'permission': this.ag_allow, 'options': {}}, {'name': 'watch', 'native': True, 'mode': 'subagent', 'description': 'A watch-trigger thinking loop: reacts or ignores one fired watch event through the membrane tools (the event\'s entity id rides the session title).', 'permission': this.ag_allow, 'options': {}}]
 
--- THE CONFIG (opencode.py writes the released one at launch; the page reads `model` of it, the TUI the provider): the one provider is membrane's own /v1
+-- THE CONFIG (opencode.py writes the released one at launch; the page reads `model` of it, opencode's TUI the provider): the one provider is membrane's own /v1
 -- on this door, serving the seat's default model (Boot fact `minds.seat_default`, the model the launcher picked: claude is the only one in the first swap).
 -- No model picked: no `model` keys and no models, the released config's shape without a model.
 Request.cf_model getter: str(prop(([b.minds for b in instances('Boot') if b.minds != None] or [None])[0], 'seat_default') or '')   -- the fact `minds`, or the launcher pack's default (a default is a write at `started`, so it is not in the `facts` dict)
@@ -180,9 +179,9 @@ Request.probe_reply getter:
 -- ---- route families (the porting areas): a family pack IMPORTs door 1 and defines two getters on Request --------------------------
 --   Request.o_<family> : True when the path is the family's          Request.r_<family> : the reply ({status, headers?, body?}),
 --                        or None while it is still being worked out (an effect has not landed). The reserved families:
---   models  decisions  state  voice  session  self  tools  map  fieldvm  settings
+--   models  decisions  state  voice  session  self  tools  map  fieldvm  settings  link
 -- A family that owns the path answers it, before the shipped routes; the gate still comes first.
-Request.owned getter: this.o_models == True or this.o_decisions == True or this.o_state == True or this.o_voice == True or this.o_session == True or this.o_self == True or this.o_tools == True or this.o_fieldvm == True or this.o_settings == True
+Request.owned getter: this.o_models == True or this.o_decisions == True or this.o_state == True or this.o_voice == True or this.o_session == True or this.o_self == True or this.o_tools == True or this.o_fieldvm == True or this.o_settings == True or this.o_link == True
 Request.family getter:
   WHEN this.o_models == True: this.r_models
   ELSE WHEN this.o_decisions == True: this.r_decisions
@@ -192,6 +191,7 @@ Request.family getter:
   ELSE WHEN this.o_self == True: this.r_self
   ELSE WHEN this.o_fieldvm == True: this.r_fieldvm
   ELSE WHEN this.o_settings == True: this.r_settings
+  ELSE WHEN this.o_link == True: this.r_link
   ELSE: this.r_tools
 
 -- ---- the standard getters on Request (docs/c1f-stdlib.md): shared, so a family never restates them ------------------------------------
@@ -219,6 +219,7 @@ Request.allow getter:
   ELSE WHEN this.o_tools == True: this.m_tools
   ELSE WHEN this.o_fieldvm == True: this.m_fieldvm
   ELSE WHEN this.o_settings == True: this.m_settings
+  ELSE WHEN this.o_link == True: this.m_link
   ELSE: None
 Request.method_ok getter: this.allow == None or this.method in this.allow
 Request.family_checked getter: {'status': 405, 'headers': {'allow': join(this.allow, ', ')}, 'body': {'error': 'method not allowed'}} if not this.method_ok else this.family
