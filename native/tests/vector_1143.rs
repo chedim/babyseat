@@ -222,14 +222,15 @@ fn an_outside_write_is_journalled_compact_and_a_replay_restores_the_same_f16_val
 }
 
 #[test]
-fn a_rule_that_writes_v_is_a_derived_write_nothing_is_journalled_for_it() {
+fn a_rule_that_writes_v_is_journalled_compact_anyway_because_the_class_is_mapped() {
     let h = host_with(None);
     h.load_pack("copy", "PACK copy 1\nIMPORT vector 1\nSrc.go on-setter copy:\n  ALWAYS:\n    Vector:d.v = this.nums\n").unwrap();
     h.born("Src:1", "Src", Map::new(), "test");
     h.write("Src:1", "nums", json!([1.0, 2.0, 3.0]), "test");
     h.write("Src:1", "go", json!(1), "test");
     assert_eq!(h.get("Vector:d", "v"), json!("[3 numbers, f16]"));
-    assert!(!h.journal().iter().any(|l| matches!(l, Line::Write { eid, prop, .. } if eid == "Vector:d" && prop == "v")), "derived: a replay of the cause writes it again");
+    let line = h.journal_stored().unwrap().into_iter().find_map(|l| match l { Line::Write { eid, prop, new, .. } if eid == "Vector:d" && prop == "v" => Some(new), _ => None }).expect("a MAPPED class's derived write is journalled (the cause may not replay)");
+    assert!(line["$f16"].is_string(), "compact: {line}");
 }
 
 #[test]
@@ -387,4 +388,91 @@ fn a_class_whose_last_vector_leaves_forgets_its_dimension_before_and_after_a_res
         put(&h, "z", &[1.0, 2.0, 3.0]);
         assert_eq!(h.get("Vector:z", "v"), json!("[3 numbers, f16]"), "after a restart (clear={clear})");
     }
+}
+
+// ---- a MAPPED class's entities are journalled whole, so a replay with no drivers restores the vectors (#1143, operator 2026-11-14) -----------------------------------------------
+const FETCHER: &str = "PACK fetcher 1
+IMPORT vector 1
+RESIDENT Fetch
+Fetch.request_result on-setter vec:
+  WHEN this.request_result != None:
+    Vector:r.of = 'Body:1'
+    Vector:r.start = 17
+    Vector:r.v = json(str(prop(this.request_result, 'body')))
+";
+
+fn fetch_host(file: Option<&str>, effects: bool) -> Host {
+    let mut o = Options::new(file.map(String::from)); o.effects = effects;
+    let h = Host::open(o).unwrap();
+    h.load_pack("vector", &vector_pack()).unwrap();
+    h.load_pack("fetcher", FETCHER).unwrap();
+    h.load_pack("probe", PROBE).unwrap();
+    h.rebuild();
+    h
+}
+
+#[test]
+fn a_vector_a_rule_made_from_a_receipt_replays_from_the_journal_alone_with_its_props() {
+    let file = tmpfile("fetch-replay");
+    let h = fetch_host(Some(&file), true);
+    h.born("Fetch:f", "Fetch", Map::new(), "test");
+    // what the Fetch driver does when a request ends: it notes the receipt, the engine's next round writes it (derived; the receipt is NOT journalled)
+    { let g = h.engine().lock().unwrap(); g.0.store.as_ref().unwrap().note_receipt("Fetch:f", "request", json!({"id": "embed:1", "status": "ok", "rc": 0, "body": "[1.0, 2.0, 3.0]"})); }
+    h.pump();
+    assert_eq!(h.get("Vector:r", "v"), json!("[3 numbers, f16]"), "the live host made the vector");
+    let lines = h.journal_stored().unwrap();
+    assert!(!lines.iter().any(|l| matches!(l, Line::Write { eid, .. } if eid == "Fetch:f")), "the receipt stays derived");
+    for p in ["of", "start", "v"] { assert!(lines.iter().any(|l| matches!(l, Line::Write { eid, prop, .. } if eid == "Vector:r" && prop == p)), "a journal line for Vector:r.{p}"); }
+    assert!(lines.iter().any(|l| matches!(l, Line::Born { eid, .. } if eid == "Vector:r")), "and for its birth");
+    // a fresh host that replays only the journal, no drivers
+    let h2 = fetch_host(None, false);
+    h2.replay(&lines);
+    for p in ["of", "start", "v"] { assert_eq!(h2.get("Vector:r", p), h.get("Vector:r", p), "{p}"); }
+    assert_eq!(h2.get("Vector:r", "of"), json!("Body:1"));
+    for hh in [&h, &h2] { hh.born("Probe:p", "Probe", props(json!({"q": [1.0, 2.0, 3.0], "k": 1})), "test"); }
+    assert_eq!(h2.get("Probe:p", "top"), h.get("Probe:p", "top"), "near answers identically");
+    // replaying the same lines again changes nothing (the birth line and the write lines do not double-apply)
+    h2.replay(&lines);
+    assert_eq!(h2.get("Probe:p", "top"), h.get("Probe:p", "top"));
+    assert_eq!(h2.get("Vector:r", "start"), json!(17));
+    // the getter's own value is derived, not journalled: it is computed again
+    assert!(!lines.iter().any(|l| matches!(l, Line::Write { eid, prop, .. } if eid == "Vector:r" && prop == "dim")));
+    assert_eq!(h2.get("Vector:r", "dim"), json!(3));
+}
+
+#[test]
+fn other_derived_writes_stay_derived() {
+    let h = fetch_host(None, false);
+    h.load_pack("other", "PACK other 1\nDst.y getter: 1\nSrc.go on-setter g:\n  ALWAYS:\n    Dst:1.x = 5\n").unwrap();
+    h.born("Src:1", "Src", Map::new(), "test");
+    h.write("Src:1", "go", json!(1), "test");
+    assert_eq!(h.get("Dst:1", "x"), json!(5));
+    assert!(!h.journal_stored().unwrap().iter().any(|l| matches!(l, Line::Write { eid, .. } | Line::Born { eid, .. } if eid == "Dst:1")), "a class that is not MAPPED keeps its derived writes derived");
+}
+
+#[test]
+fn an_old_journal_without_these_lines_replays_as_it_did() {
+    let old = vec![Line::Born { ts: 1.0, writer: "test".into(), eid: "Vector:o".into(), cls: "Vector".into(), props: Map::new(), by: None },
+                   Line::Write { ts: 2.0, writer: "test".into(), eid: "Vector:o".into(), prop: "of".into(), new: json!("Body:9") }];
+    let h = fetch_host(None, false);
+    h.replay(&old);
+    assert_eq!(h.get("Vector:o", "of"), json!("Body:9"));
+    assert_eq!(h.get("Vector:o", "v"), J::Null);
+}
+
+/// A measurement (`-- --ignored --nocapture`): the journal bytes of one vector a rule made from a receipt (birth + props + v), and what the RAM copy keeps of them.
+#[test]
+#[ignore]
+fn measure_the_journal_bytes_of_one_made_vector() {
+    let h = fetch_host(Some(&tmpfile("bytes")), true);
+    h.born("Fetch:f", "Fetch", Map::new(), "test");
+    let mut s = 21u64;
+    let body: Vec<f64> = (0..1024).map(|_| rng(&mut s)).collect();
+    { let g = h.engine().lock().unwrap(); g.0.store.as_ref().unwrap().note_receipt("Fetch:f", "request", json!({"id": "embed:1", "status": "ok", "rc": 0, "body": json!(body).to_string()})); }
+    h.pump();
+    let lines: Vec<Line> = h.journal_stored().unwrap().into_iter().filter(|l| match l { Line::Write { eid, .. } | Line::Born { eid, .. } => eid == "Vector:r" }).collect();
+    let total: usize = lines.iter().map(|l| l.to_json().to_string().len()).sum();
+    eprintln!("MEASURE lines for Vector:r: {} , total bytes {total}", lines.len());
+    let ram: usize = h.journal().iter().filter(|l| match l { Line::Write { eid, .. } | Line::Born { eid, .. } => eid == "Vector:r" }).map(|l| l.to_json().to_string().len()).sum();
+    eprintln!("MEASURE RAM copy bytes for Vector:r: {ram}");
 }

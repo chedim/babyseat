@@ -47,6 +47,10 @@ pub fn stamp_writer(engine_writer: &str) -> String {
     format!("{WRITER}{w}")
 }
 
+/// The stamp of a derived write to an entity of a MAPPED class: OUTSIDE, so it is journalled (a replay of the journal alone, with no drivers, must restore the vectors a rule made from a
+/// receipt; the receipt is not journalled). An already outside stamp stays as it is.
+fn mapped_stamp(stamp: &str) -> String { if is_outside(stamp) { stamp.to_string() } else { format!("host:mapped:{}", stamp.trim_start_matches(WRITER)) } }
+
 /// The store stamp of what a setter wrote while triggered by a VIRTUAL entity: OUTSIDE (journalled), since the trigger is not in the journal and a replay could not
 /// derive the write again (`host:` stamps).
 pub fn stamp_virtual_writer(engine_writer: &str) -> String { format!("host:virtual:{}", engine_writer.trim_start_matches("field:")) }
@@ -617,6 +621,7 @@ impl Host {
             if let Some(cls) = w.get("born").and_then(|c| c.as_str()) {
                 let eid = w["eid"].as_str().unwrap_or("").to_string();
                 let stamp = if w.get("virt") == Some(&json!(true)) { stamp_virtual_writer("create") } else { stamp_born_writer(cls) };
+                let stamp = if self.eng().0.is_mapped(&class_of_eid(&eid)) { mapped_stamp(&stamp) } else { stamp };   // a MAPPED class's entities are journalled whole (docs/cliffvm.md)
                 let by = w.get("by").and_then(|b| b.as_str()).map(String::from);
                 self.store_born(&eid, cls, &Map::new(), &stamp, by.as_deref());
                 if is_outside(&stamp) { self.journal_push(Line::Born { ts, writer: stamp, eid, cls: cls.into(), props: Map::new(), by }); }
@@ -624,6 +629,7 @@ impl Host {
             }
             let (Some(eid), Some(prop)) = (w["eid"].as_str(), w["prop"].as_str()) else { continue };
             let stamp = if w.get("virt") == Some(&json!(true)) { stamp_virtual_writer(w["writer"].as_str().unwrap_or("")) } else { stamp_writer(w["writer"].as_str().unwrap_or("")) };
+            let stamp = if !is_getter_write(&stamp) && self.mapped_class(eid).is_some() { mapped_stamp(&stamp) } else { stamp };   // likewise: what a rule writes to a MAPPED class's entity is journalled (a getter's value is computed again)
             let row = self.vector_row(eid, prop, &w["new"]);   // a MAPPED `v`: the table takes the bytes, the row keeps the summary; the journal line below keeps the compact form
             self.store_prop(eid, None, prop, &row, &stamp);
             if prop == "text" { self.pack_text(eid, &w["new"]); }
