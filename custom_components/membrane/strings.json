@@ -2,20 +2,67 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to a seat",
+        "title": "babyseat (membrane)",
+        "description": "Where does the seat run?",
+        "menu_options": {
+          "inside": "Run a seat inside Home Assistant",
+          "connect": "Connect to a seat I run"
+        }
+      },
+      "inside": {
+        "title": "Run a seat inside Home Assistant",
+        "description": "Home Assistant downloads the seat of this release from GitHub (its sha256 and every file are checked), keeps its data in the membrane folder of your configuration folder and runs it on this machine. Which model should it think with? Anthropic: Claude with an API key. OpenAI-compatible: any endpoint that speaks the OpenAI chat API (OpenAI, LM Studio, a local server). Ollama: an Ollama server on your network.",
+        "data": {
+          "provider": "Provider"
+        }
+      },
+      "anthropic": {
+        "title": "Anthropic (Claude)",
+        "description": "An API key from the Claude Console (Settings, API keys), scoped to a workspace. The seat calls Anthropic's OpenAI-compatible endpoint with it. The key is kept in Home Assistant's configuration and handed to the seat in its environment only.",
+        "data": {
+          "anthropic_api_key": "Anthropic API key",
+          "model": "Model",
+          "seat_name": "Seat name (optional: the seat asks for one otherwise)"
+        }
+      },
+      "openai": {
+        "title": "OpenAI-compatible endpoint",
+        "description": "The endpoint's root address (the seat adds /v1/chat/completions), the model it is asked for, and its key when it needs one.",
+        "data": {
+          "base_url": "Endpoint address (its root, without /v1)",
+          "model": "Model",
+          "api_key": "API key (optional)",
+          "seat_name": "Seat name (optional: the seat asks for one otherwise)"
+        }
+      },
+      "ollama": {
+        "title": "Ollama",
+        "description": "The Ollama server the seat thinks with and a model it has pulled. When Home Assistant has its own Ollama integration, its server and model are filled in.",
+        "data": {
+          "ollama_url": "Ollama URL (e.g. http://192.168.1.10:11434)",
+          "model": "Model",
+          "seat_name": "Seat name (optional: the seat asks for one otherwise)"
+        }
+      },
+      "connect": {
+        "title": "Connect to a seat I run",
         "description": "The address of a seat you run (cliffvm) and its admin token. The token is the file admin.token in the seat's data folder, and the seat prints its path when it starts. Or make one on the seat's machine with: cliffvm token mint --ttl 30d --secret-file SEAT-FOLDER/door.secret (SEAT-FOLDER is the data folder that holds door.secret). Every valid token is the admin: Assist, the seat's calls into the house, its sensors and its model select all work with it. See docs/home-assistant.md.",
         "data": {
           "serve_url": "Seat URL (e.g. http://192.168.1.20:4096)",
           "serve_pass": "Token"
         }
       },
-      "user_ollama": {
-        "title": "Connect to a seat",
+      "connect_ollama": {
+        "title": "Connect to a seat I run",
         "description": "The address of a seat you run (cliffvm) and its admin token. The token is the file admin.token in the seat's data folder, and the seat prints its path when it starts. Or make one on the seat's machine with: cliffvm token mint --ttl 30d --secret-file SEAT-FOLDER/door.secret (SEAT-FOLDER is the data folder that holds door.secret). Every valid token is the admin: Assist, the seat's calls into the house, its sensors and its model select all work with it. See docs/home-assistant.md. Home Assistant's Ollama integration uses the server {ollama_url} with the model {ollama_model}. To have the seat think with the same server, start it with --fact seat_backend={ollama_url} and pick {ollama_model} in its model select.",
         "data": {
           "serve_url": "Seat URL (e.g. http://192.168.1.20:4096)",
           "serve_pass": "Token"
         }
+      },
+      "reauth_inside": {
+        "title": "Restart the seat",
+        "description": "The seat Home Assistant runs refused Home Assistant's token (its key was changed or removed). Submit to restart it: at its start the seat writes a new token, and Home Assistant reads it."
       },
       "reauth_confirm": {
         "title": "The seat needs a new token",
@@ -25,8 +72,8 @@
         }
       },
       "reauth_no_seat": {
-        "title": "The seat moved out of Home Assistant",
-        "description": "This entry ran the seat inside Home Assistant. The seat no longer runs inside Home Assistant: install the babyseat add-on (Home Assistant OS or Supervised), or run cliffvm serve on a machine Home Assistant can reach (Container or Core), then enter its address and token here. The token is the seat's admin token: the file admin.token in the seat's data folder (its path printed at start), or one made with cliffvm token mint --ttl 30d --secret-file DATA-FOLDER/door.secret; with the add-on it is in the add-on's log, and the add-on's discovery fills this in by itself. Your chat history carries over; entities, goals, settings, model setup, tokens and allow-lists do not. More: {docs_url}",
+        "title": "This entry has no seat",
+        "description": "This entry ran the seat inside Home Assistant, but its old settings did not say which Ollama server and model it used, so it cannot be started again by itself. Either remove the integration and add it again, choosing Run a seat inside Home Assistant (your chat history is found again), or enter the address and token of a seat that runs elsewhere here. The token is the seat's admin token: the file admin.token in the seat's data folder (its path printed at start), or one made with cliffvm token mint --ttl 30d --secret-file DATA-FOLDER/door.secret. More: {docs_url}",
         "data": {
           "serve_url": "Seat URL (e.g. http://192.168.1.20:4096)",
           "serve_pass": "Token"
@@ -44,7 +91,8 @@
     "error": {
       "cannot_connect": "The seat didn't answer at that address.",
       "invalid_auth": "The seat refused the token (wrong, expired, or from another seat).",
-      "invalid_url": "That is not an http:// or https:// address."
+      "invalid_url": "That is not an http:// or https:// address.",
+      "required": "This is needed."
     },
     "abort": {
       "already_configured": "Membrane is already set up (the add-on's discovery updated its token if it changed).",
@@ -52,7 +100,8 @@
       "cannot_connect": "The seat didn't answer at the address the add-on gave.",
       "invalid_auth": "The seat refused the token the add-on gave.",
       "invalid_discovery": "The add-on's announcement had no host, port or token.",
-      "already_in_progress": "This seat is already being set up."
+      "already_in_progress": "This seat is already being set up.",
+      "unsupported_platform": "The seat cannot run on this machine: {reason}"
     }
   },
   "services": {
@@ -83,6 +132,64 @@
           "description": "A name for the conversation; the same name continues the same seat session (default `service`)."
         }
       }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "The seat's model",
+        "description": "Change the provider, the model or the key. The seat restarts with them.",
+        "data": {
+          "provider": "Provider"
+        }
+      },
+      "anthropic": {
+        "title": "Anthropic (Claude)",
+        "description": "Leave the key empty to keep the one Home Assistant has.",
+        "data": {
+          "anthropic_api_key": "Anthropic API key",
+          "model": "Model",
+          "seat_name": "Seat name (optional: the seat asks for one otherwise)"
+        }
+      },
+      "openai": {
+        "title": "OpenAI-compatible endpoint",
+        "description": "Leave the key empty to keep the one Home Assistant has.",
+        "data": {
+          "base_url": "Endpoint address (its root, without /v1)",
+          "model": "Model",
+          "api_key": "API key (optional)",
+          "seat_name": "Seat name (optional: the seat asks for one otherwise)"
+        }
+      },
+      "ollama": {
+        "title": "Ollama",
+        "description": "The Ollama server the seat thinks with and a model it has pulled.",
+        "data": {
+          "ollama_url": "Ollama URL (e.g. http://192.168.1.10:11434)",
+          "model": "Model",
+          "seat_name": "Seat name (optional: the seat asks for one otherwise)"
+        }
+      }
+    },
+    "error": {
+      "required": "This is needed.",
+      "invalid_url": "That is not an http:// or https:// address."
+    }
+  },
+  "selector": {
+    "provider": {
+      "options": {
+        "anthropic": "Anthropic (Claude, API key)",
+        "openai": "OpenAI-compatible endpoint",
+        "ollama": "Ollama"
+      }
+    }
+  },
+  "issues": {
+    "seat_stopped": {
+      "title": "The seat inside Home Assistant stopped",
+      "description": "The seat Home Assistant runs kept exiting, so it is not restarted any more. Its last words: {reason}. Check the provider's key, model or address (Settings, Devices and services, babyseat, Configure), then reload the integration to start it again."
     }
   }
 }

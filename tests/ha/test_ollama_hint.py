@@ -86,20 +86,20 @@ def test_without_ollama_the_confirm_is_the_plain_one(ha, run):
 def test_the_manual_form_carries_the_hint_too_and_submits_the_same(ha, run):
     pkg, hass = ha
     first = _flow(hass)
-    plain = run(first.async_step_user())
-    assert plain["step_id"] == "user" and "ollama_url" not in plain["description_placeholders"]
+    plain = run(first.async_step_connect())
+    assert plain["step_id"] == "connect" and "ollama_url" not in plain["description_placeholders"]
     hass.config_entries.flow_abort(first)              # closed: Home Assistant keeps one manual flow in progress at a time
     _ollama(hass, data={"url": "http://ollama.lan:11434", "model": "llama3.2"})
     f = _flow(hass)
-    form = run(f.async_step_user())
-    assert form["step_id"] == "user_ollama"
+    form = run(f.async_step_connect())
+    assert form["step_id"] == "connect_ollama"
     assert form["description_placeholders"] == {"ollama_url": "http://ollama.lan:11434", "ollama_model": "llama3.2"}
     assert set(form["data_schema"].fields()) == {"serve_url", "serve_pass"}
 
     async def go():
         async with FakeSeat("tok-1") as seat, aiohttp.ClientSession() as s:
             hass.session = s
-            return await f.async_step_user_ollama({"serve_url": seat.url, "serve_pass": "tok-1"})
+            return await f.async_step_connect_ollama({"serve_url": seat.url, "serve_pass": "tok-1"})
     assert run(go())["type"] == "create_entry"
 
 
@@ -111,9 +111,9 @@ def _flow(hass):
 
 def test_the_hint_texts_hold_both_placeholders_and_the_plain_texts_none():
     st = json.loads(STRINGS.read_text())["config"]["step"]
-    for k in ("hassio_confirm_ollama", "user_ollama"):
+    for k in ("hassio_confirm_ollama", "connect_ollama"):
         assert "{ollama_url}" in st[k]["description"] and "{ollama_model}" in st[k]["description"], k
-    for k in ("hassio_confirm", "user"):
+    for k in ("hassio_confirm", "connect"):
         assert "ollama" not in st[k]["description"].lower(), k
-    assert st["user_ollama"]["data"] == st["user"]["data"]
+    assert st["connect_ollama"]["data"] == st["connect"]["data"]
     assert "add-on" in st["hassio_confirm_ollama"]["description"]

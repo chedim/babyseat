@@ -170,7 +170,7 @@ def test_the_migration_removes_the_old_sensors_binary_sensor_and_select_and_keep
     e = fakeha.FakeConfigEntry(minor_version=3, data={"serve_url": "http://x", "serve_user": "opencode", "serve_pass": "t"})
     assert asyncio.run(pkg.async_migrate_entry(hass, e)) is True
     assert sorted(hass.registry.entries) == ["conversation.membrane", "sensor.someone_elses"]
-    assert e.minor_version == 4
+    assert e.minor_version == 5
     # and once: a second run finds nothing to do and leaves the registry alone
     hass.registry.add("sensor.membrane_model", "e1_model", "e1")
     asyncio.run(pkg.async_migrate_entry(hass, e))
@@ -183,7 +183,7 @@ def test_an_entry_from_before_the_connect_only_move_is_migrated_through_both_ste
     e = fakeha.FakeConfigEntry(minor_version=2, data={"mode": "connect", "serve_url": "http://a.lan:4096", "serve_user": "u", "serve_pass": "p"},
                                options={"seats": [], "ha_access": True})
     asyncio.run(pkg.async_migrate_entry(hass, e))
-    assert e.minor_version == 4 and e.data["serve_url"] == "http://a.lan:4096" and hass.registry.entries == {}
+    assert e.minor_version == 5 and e.data["serve_url"] == "http://a.lan:4096" and hass.registry.entries == {}
 
 
 def test_no_two_entities_of_one_entry_share_a_display_name(ha, real_seat):

@@ -143,7 +143,7 @@ def _strings():
     return json.loads((Path(__file__).resolve().parents[2] / "custom_components" / "membrane" / "strings.json").read_text())
 
 
-def test_an_entry_that_ran_the_seat_inside_home_assistant_is_told_where_the_seat_went(ha, run):
+def test_an_entry_with_no_seat_and_nothing_to_run_is_told_its_two_ways_back(ha, run):
     pkg, hass = ha
     e = fakeha.FakeConfigEntry(data={"serve_url": "", "serve_user": "opencode", "serve_pass": ""})
     form = run(_reauth_flow(pkg, hass, e).async_step_reauth(dict(e.data)))
@@ -151,8 +151,8 @@ def test_an_entry_that_ran_the_seat_inside_home_assistant_is_told_where_the_seat
     assert form["description_placeholders"]["docs_url"] == DOCS
     step = _strings()["config"]["step"]["reauth_no_seat"]
     text = step["description"]
-    for words in ("no longer runs inside Home Assistant", "add-on", "Home Assistant OS", "Supervised", "cliffvm serve", "Container",
-                  "Core", "address and token", "{docs_url}"):
+    # 2026-11-15: an inside entry with its Ollama URL and model comes back by itself (test_inside.py); this form is for one whose settings say nothing
+    for words in ("did not say which Ollama server", "Run a seat inside Home Assistant", "chat history", "address and token", "admin.token", "{docs_url}"):
         assert words in text, words
     assert set(step["data"]) == {"serve_url", "serve_pass"}
 

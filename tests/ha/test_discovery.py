@@ -192,7 +192,9 @@ def test_an_ignored_seat_stays_ignored_and_the_manual_form_is_still_offered(ha, 
     f = importlib.import_module("cc_membrane.config_flow").MembraneConfigFlow()
     f.hass, f.context = hass, {"source": "user"}
     form = run(_flow_result(lambda: f.async_step_user()))
-    assert form["type"] == "form" and form["step_id"] == "user"
+    assert form["type"] == "menu" and form["step_id"] == "user"
+    form = run(_flow_result(lambda: f.async_step_connect()))
+    assert form["type"] == "form" and form["step_id"] == "connect"
 
 
 def test_the_manifest_needs_no_discovery_key_for_the_supervisor():

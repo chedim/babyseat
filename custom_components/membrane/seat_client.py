@@ -54,7 +54,12 @@ class SeatClient:
     def __init__(self, session: aiohttp.ClientSession, url: str, token: str, user: str = DEFAULT_SERVE_USER) -> None:
         self._s = session
         self.url = str(url or "").strip().rstrip("/")
-        self._headers = {"Authorization": "Basic " + base64.b64encode(f"{user or DEFAULT_SERVE_USER}:{token or ''}".encode()).decode()}
+        self._user = user or DEFAULT_SERVE_USER
+        self.set_token(token)
+
+    def set_token(self, token: str) -> None:
+        """The token every call sends from now on (a seat run inside Home Assistant hands its client a fresh one now and then)."""
+        self._headers = {"Authorization": "Basic " + base64.b64encode(f"{self._user}:{token or ''}".encode()).decode()}
 
     async def _call(self, method: str, path: str, timeout: float, json=None):
         """-> (status, parsed body or None). 401 raises SeatAuthError; a failure to talk raises SeatUnreachable."""

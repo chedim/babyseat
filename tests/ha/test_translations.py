@@ -41,9 +41,10 @@ def test_the_token_texts_name_the_admin_token_file_and_no_role_wording():
         texts = dict(_strings(json.loads((ROOT / name).read_text())))
         for path, text in texts.items():
             assert not re.search(r"owner|--sub|operator", text, re.I), f"{name}{path}: {text}"
-        form = next(t for p, t in texts.items() if "/user/description" in p or p.endswith("/step/user/description"))
-        reauths = [t for p, t in texts.items() if "reauth" in p and p.endswith("description")]
-        assert len(reauths) == 2, reauths                     # the refused token, and the entry that ran the seat inside Home Assistant
+        form = texts["/config/step/connect/description"]
+        reauths = [t for p, t in texts.items() if "reauth" in p and "reauth_inside" not in p and p.endswith("description")]
+        assert len(reauths) == 2, reauths                     # the refused token, and the entry with no seat (an old inside entry with nothing to run)
+        assert "admin.token" not in texts["/config/step/reauth_inside/description"]   # the seat Home Assistant runs: a restart, no token to paste
         for t in (form, *reauths):
             assert "admin.token" in t and "door.secret" in t, t
 
