@@ -2,7 +2,7 @@
 
 ## Why
 
-A message used to be `membrane::Chat:message:<ms>-<n>` with its session as a property in a ~160 KB body (and again in a ~1 KB `:turn` row). "The messages of
+A message used to be `membrane::Chat:message:<ms>-<n>` with its session as a property in a large body (and again in a small `:turn` row). "The messages of
 session X" then needed a body read (`json_extract`), or the turn-row workaround, and the step budget grew with the store. Now the session is part of the
 key, so the question is a key-prefix range of the `(cls, k)` index: index-only, no body, bounded by the page.
 
@@ -31,7 +31,7 @@ new mechanism (one extra tiny entity per message); it is the cheapest one that k
 
 ## Who builds, parses or matches a message eid
 
-- packs/chat.c1f: the constructors (`cm_at` setters), `cp` / `mid` / `sid` getters (`cp` = the key below `membrane::Chat:`, `mid` = the id, `sid` read from the key and never stored), the one-message GET (`/membrane/chat/message/<id>[?sid=<sid>]`: the id is inside its chat), the history (`hs_*`).
+- packs/chat.c1f: the constructors (`cm_at` setters; each also makes the message's `:body` SemText and writes `mention` and `embed` on it, docs/semtext-and-legs.md), `cp` / `mid` / `sid` getters (`cp` = the key below `membrane::Chat:`, `mid` = the id, `sid` read from the key and never stored), the one-message GET (`/membrane/chat/message/<id>[?sid=<sid>]`: the id is inside its chat), the history (`hs_*`).
 - packs/chat_turn.c1f, chat_oai.c1f: every write below a message is `membrane::Chat[this.cp]:turn...`; `Command:chat:<cp>`, `Fetch:oai:<cp>:...` are named by `cp`. `Boot.interrupted` reads the turn keys.
 - packs/door_session.c1f: the session list, create, delete, status (the sid is cut out of the running turns' KEYS), the message POST, `GET /session/<sid>/message` (`ml_*`), the one row, abort, the event producers.
 - packs/legacy_import.c1f: writes `membrane::Chat:session[this.cur]:message[id]` directly (the sid needs no filter) and the time row.
@@ -47,12 +47,9 @@ SELECT k FROM c_field WHERE cls = 'Chat' AND k >= ?1 AND k < ?2
 ```
 `?1` the prefix, `?2` the end of the prefix range or the cursor key, `?3` page + 1. The `instr` leg skips the message's children (they share the range). EXPLAIN QUERY PLAN: `SEARCH c_field USING COVERING INDEX c_field_cls (cls=? AND k>? AND k<?)`, no temp b-tree, no table (body) access. The step work is the page's.
 
-## Existing stores (decision, nothing built)
+## Stores on the old key form
 
-Native seats on the OLD key form are dev seats only (Throwy 4096, the Memo demo 4097, tests). Options:
-1. Fresh stores: start a new store and let the lazy importer rebuild the history from the previous store (read-only). Cost: native messages on the dev seats (test chatter) are lost. Nothing to build. RECOMMENDED.
-2. A one-off migration pass (SQL over `c_field`: rewrite each old key, the `message` prop of turns, the time rows; run with the seat stopped). Cost: a script to write and prove, and journals/`last_turn` references to rewrite too.
-3. The seat reads BOTH forms. Cost: every route and setter carries two shapes forever.
+The seat reads and writes only the key form above. A native store written with the old `Chat:message:<ms>-<n>` keys (test and development seats only) is not read: start a fresh store, and the importer rebuilds the history from the previous store (read-only). Nothing converts old keys.
 
 ## Measured (private seat, fresh store, 200 sessions opened through the lazy importer from the read-only previous store; release build, shared machine, medians of 5, ms)
 

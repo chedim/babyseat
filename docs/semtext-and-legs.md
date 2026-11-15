@@ -1,6 +1,6 @@
-# SemText and legs: how code builds the graph (design, 2026-11-13; built in part: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges)
+# SemText and legs: how code builds the graph (built: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges, sentence vectors, the recall banner part, Memory)
 
-A conversation between the operator and the assistant, written down. The first slice is built (see "Built: the first slice" at the end); vectors, the recall index, the field engine's use of the legs and everything under "Not built" there are not. It is the shape the semantic field
+A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "Recall in the banner", "Memory"); the field engine's use of the legs and everything under "Not built" is not. It is the shape the semantic field
 takes in the barest seat: ONE graph (the VM's entities), with the semantic state an opt-in component of an entity, and code (c1f
 packs) building the graph from text.
 
@@ -18,13 +18,13 @@ packs) building the graph from text.
 1. A message arrives. The MESSAGE PACK creates its body explicitly, never implicitly:
    `membrane::Chat:message[id]:body = SemText(text: …)`.
 2. A native tokenizer in a core pack (Unicode-aware: normalisation and segmentation tables compiled into the binary) produces the
-   sentence, word, identifier and path spans. It replaces the Python spaCy pass for single words and identifiers; phrases wait.
-3. Embeddings for the sentence spans come from a local Ollama over `Fetch`. The receipt of each call is a journalled outside write, so
+   sentence, word, identifier and path spans. It covers single words and identifiers; phrases wait.
+3. Embeddings for the sentence spans come from the local model server over `Fetch` (`packs/embed.c1f`). The receipt of each call is a journalled outside write, so
    replay is exact.
 4. Mention rules (c1f, in a pack the model can layer over) create `Word:<normalised surface>`, `File:<path>` and the like by
    constructor and link them to the spans (mention edges). An entity is OWNED by its mentions: it lives while one mention exists, so
    forgetting a message tidies the graph. The recall index holds weak references.
-5. The field engine (the Rust port, against the golden fixtures in `tests/golden/efield/`) moves entity states by the sentence vectors.
+5. Not built: a field engine that moves entity states by the sentence vectors (the golden fixtures for it are in `tests/golden/efield/`).
 
 ## The model builds more legs
 A leg is just a SemText, so any pack the model writes can make one: a command's output
@@ -33,16 +33,15 @@ are its senses. The model can also add or override mention rules in a layer abov
 
 ## Origin is the graph
 There is no `origin` property. The owner chain says where a leg came from: `Chat:main › message › body` for the conversation,
-`Command:tests › output` for a sensor. The per-stream statistics the old field kept (a background per origin, boilerplate frequency)
-are keyed by that chain (the owner's class or the path prefix), so a noisy command's legs never mix with the conversation's.
+`Command:tests › output` for a sensor. Per-stream statistics (a background per origin, boilerplate frequency) are not built; they would be keyed by that chain (the owner's class or the path prefix), so a noisy command's legs never mix with the conversation's.
 
 Lexicon (synonyms, broader/narrower terms, idioms, base forms from WordNet, read in place): design note `docs/lexicon-design.md` (not built).
 
 ## Decisions to bring to the operator before building (each is a threshold or a rule)
 - Which spans get vectors: sentences only (words take their position from the legs that mention them).
-- When a word becomes an entity: pending mention edges until K distinct sentences, then the entity (the old nursery). K is a threshold.
+- When a word becomes an entity: pending mention edges until K distinct sentences, then the entity (a nursery). K is a threshold.
   Nothing is judged by quality ("nothing is junk in language"), only by count and dormancy.
-- Which spans become entities by default: words, identifiers, file paths. The old `WORD_MIN_LEN = 4` ("dust") counts characters and is
+- Which spans become entities by default: words, identifiers, file paths. A minimum word length counted in characters would be
   Latin-biased: count grapheme clusters, be script-aware, or drop it for the existing frequency gate.
 - A budget for embedding calls (a cap per minute), so a runaway sensor cannot stall the seat.
 - Untrusted legs: a fetched page or a file is not the person's words; the owner chain lets recall show where a thing came from.
@@ -105,7 +104,7 @@ What landed, where, and what it changed against the design above. Packs: `membra
   entity: `Word:lemma:<lemma>`, `Identifier:name:<text>`, `Path:path:<text>`. When every span is classified one setter makes the entities by constructor and writes each entity's
   `mentioned_in` (`[{text: <SemText eid>, sentence: <n>}]`, no copy of any text, one write per entity per mention so two spans never write the same target in a cascade) and the text's
   `mentions` (a list of `$ref`s to the entities). The spans are then held by nothing and collected. Writing `mention` again replaces the text's own entries (no duplicates).
-  The entity ids carry a literal word before the key (`Word:lemma:cat`) because an entity literal with a computed key needs one; the old Python seat's `Word:<x>` ids are not reused. A path
+  The entity ids carry a literal word before the key (`Word:lemma:cat`) because an entity literal with a computed key needs one; bare `Word:<x>` ids are not used. A path
   is a `Path`, not a `File`: a `File` entity reads the disk and is RESIDENT.
 - **The message body.** `chat.c1f` makes `membrane::Chat:message:<id>:body` and asks for its mentions; `chat_turn.c1f` makes `...:turn:response:body` when the turn ends without an
   error. `text` on the message is unchanged (the page's API). Tool results are not tokenized.
@@ -132,7 +131,7 @@ reasoned null); the step budget of a getter or setter applies to the mention set
 `membrane/packs/embed.c1f`. Every sentence of a SemText that is asked gets a vector from the local Ollama, through the Fetch driver, stored as `Vector:of:<key>:s:<start>` (`of`, `start`, `v`; the class is the
 vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (the Span key rule). The ask is `embed = true` on the SemText (the chat writes it on a message body and on an answer's body, next to
 `mention`; a tool's result is not asked). The model server is the boot fact `seat_backend`, the model the fact `embed_model` (default `mxbai-embed-large`, set in `launcher.c1f`); the call is `POST <seat_backend>/api/embed
-{model, input: [...]}` with a 120 s limit. The numbers are the old Python field's: at most 64 sentences a request, a pass of 256 sentences, a same-pass cache of 64 entries (a sentence said twice in a pass makes no second request).
+{model, input: [...]}` with a 120 s limit. The limits: at most 64 sentences a request, a pass of 256 sentences, a same-pass cache of 64 entries (a sentence said twice in a pass makes no second request).
 - THE QUEUE is `Embed:queue` (`state` idle | working | paused | stuck, `reason`, `line`, `inflight`, `landed`, `cache`, `pass_n`, `hold`). ONE request at a time, one text per request: within the existing worker limit (`effect_workers`), no
   second limit. A request is sent only while no chat turn is running (each turn of any chat or session, when it becomes `running`, makes a small `Embed:turn:<key>` of this pack's resident class, and retires it when it is done or an error; the queue reads those, never lists `Chat`; a pointer of a dead run is not counted); one in flight finishes, then the queue waits for the turn to end and goes on by itself (the sender is a getter that reads the turns). An `Embed:ask:<key>` is retired when its text has all
   its vectors; a text is marked `embedded = true` and counts its sentences done in `emb_n` (a restart goes on where it stopped).
@@ -151,5 +150,10 @@ mention rules for urls and numbers (they have spans, no entities), re-mentioning
 
 **Cost notes (w36, #1143).** `SemText.related` reads each entity's cached `edge_rows` (a getter of Word / Identifier / Path: the entity's edges as JSON rows, rebuilt when its `mentioned_in` changes) instead of rebuilding every edge's text on every ask; the asking text's own rows are dropped after the grouping. `mention_done` reads the spans the mention setter listed (`mention_spans`) and waits for their `forms`. `group_by` finds a text key's group through a hash. The rest of the cost of `related` is linear in the edges walked; a cut on the edges of a very common word is an open operator decision (nothing is cut).
 
+## Recall in the banner (#1143)
+`Banner:recall` (`membrane/apps/barest.c1f/recall.c1f`, a `RecallPart`) is a banner part: its `words` are the lines recalled for the message a turn is answering, shown after the main banner (the turn's banner is every non-empty `Banner:*`, `Banner:admin:main` first, then the others oldest update first; the banner block and the user's words are two text blocks of one stdin message, `chat_turn.c1f`). Two lanes, each a ranked list of sentences:
+the edge lane (`SemText.related` of the ask's body, above) and the cosine lane (`near(<the ask's vector>, 'Vector', pool)` over the sentence vectors; the ask's vector is one `Fetch:recall:ask` embedding call with a 10 s limit; the lane is absent while there is no vector). The lanes are fused by reciprocal rank (score = sum of 1 / (`rrf_k` + rank)), ties by key, then the first `rerank_top` rows are reranked by the fitted logistic weights over the cosine score, the fused place and the entity overlap. Each line is clipped and says whose words it is (the person's, with the message and its time, or "NOT the person's words" with the source). The dials are the entity `recall:dials` (`banner_n`, `pool`, `entity_pool_max`, `rrf_k`, `rerank`, `rerank_top`, `fact_chars`, `header`, `weights`; loaded from `native/packs/recall-policy.json`). A turn waits for its own ask's embedding (`recall_wait`) and no longer than the call's limit.
+Like the main banner the part is the model's: it can reassign `parents` to a class of its own (`Help:banner`).
+
 ## Memory: what a note reminds of (#1143)
-`Memory:<id>.text = "..."` makes a SemText for the model's own note (the old Python-era seat node of the same name, `memory.c1f`, was removed for this), mentions it at once (`related_n` is on), and the write's reply carries `associations`, read from the ONE source getter `SemText.assoc_source` (today the edge lane `related`; the fused edge + cosine result replaces that line). See `docs/reply-size.md` and `Help:semtext`.
+`Memory:<id>.text = "..."` makes a SemText for the model's own note, mentions it at once (`related_n` is on), and the write's reply carries `associations`, read from the ONE source getter `SemText.assoc_source` (today the edge lane `related`; the fused edge + cosine result replaces that line). See `docs/reply-size.md` and `Help:semtext`.
