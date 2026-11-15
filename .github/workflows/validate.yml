@@ -18,6 +18,7 @@ jobs:
   # unknown keys, keys set to their default value and `watchdog`). The add-on's scripts are shellchecked and its pure parts tested in the wrapper job (tests/wrapper/test_ha_addon.py).
   addon:
     runs-on: ubuntu-latest
+    continue-on-error: true     # non-blocking until its first green run (operator 2026-11-15)
     steps:
       - uses: actions/checkout@v4
       - uses: frenck/action-app-linter@v2.21.2

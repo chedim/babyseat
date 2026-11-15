@@ -56,17 +56,51 @@ def facts(argv):
     return {k: json.loads(v) for k, v in (x.split("=", 1) for x in rest[1::2])}
 
 
-def test_empty_options_are_the_seats_own_defaults(tmp_path):
-    argv, env, _ = applied(tmp_path, {})
-    assert facts(argv) == {}
-    assert "ANTHROPIC_API_KEY" not in env and "CLAUDE_BIN" not in env and "OPENAI_API_KEY" not in env
+ANTHROPIC_ENTRY = {"backend": "anthropic", "base_url": "https://api.anthropic.com", "api_key_env": "ANTHROPIC_API_KEY"}
+
+
+def test_the_default_provider_is_anthropic_and_without_a_key_it_is_refused(tmp_path):
+    # operator 2026-11-15: Home Assistant users use Claude through an Anthropic API key, the default provider; no key = a clear refusal
+    for opts in ({}, {"provider": "anthropic"}, {"provider": "anthropic", "anthropic_api_key": ""}):
+        r = plan(tmp_path, opts)
+        assert r.returncode != 0 and r.stdout == "", opts
+        assert r.stderr.startswith("babyseat add-on:") and "anthropic_api_key" in r.stderr and "Claude Console" in r.stderr
+
+
+def test_anthropic_is_one_cloud_models_entry_on_the_openai_compatible_endpoint_and_the_key_only_in_the_environment(tmp_path):
+    argv, env, r = applied(tmp_path, {"anthropic_api_key": CLAUDE_KEY, "api_key": KEY})
+    f = facts(argv)
+    # the model's default is claude-sonnet-5-5; base_url has no /v1: chat_oai.c1f appends chat_path (default /v1/chat/completions)
+    assert f["cloud_models"] == [{"name": "claude-sonnet-5-5", **ANTHROPIC_ENTRY}]
+    assert f["minds"] == {"loops": "claude-sonnet-5-5", "cortex": "claude-sonnet-5-5", "workers": "claude-sonnet-5-5", "seat_default": "claude-sonnet-5-5",
+                          "loops_auth": "chat", "cortex_auth": "chat", "workers_auth": "chat", "think": "auto"}
+    assert env["ANTHROPIC_API_KEY"] == CLAUDE_KEY and "OPENAI_API_KEY" not in env and "CLAUDE_BIN" not in env
+    assert CLAUDE_KEY not in r.stdout + r.stderr and all(CLAUDE_KEY not in a for a in argv)
+
+
+def test_the_chat_rung_appends_v1_chat_completions_and_sends_the_key_as_bearer():
+    # the add-on's base_url https://api.anthropic.com (no /v1) is right only while chat_oai.c1f builds <root without one trailing /> + (chat_path or /v1/chat/completions)
+    # and hands the key's variable to the Fetch as bearer_env (Authorization: Bearer, native/src/fetch.rs): Anthropic's documented endpoint and auth
+    t = (ROOT / "membrane" / "packs" / "chat_oai.c1f").read_text()
+    assert "ChatMessage.oai_root getter: head(this.oai_base, len(this.oai_base) - 1) if tail(this.oai_base, 1) == '/' else this.oai_base" in t
+    assert "'url': this.oai_root + str(prop(this.oai_entry, 'chat_path') or '/v1/chat/completions')" in t
+    assert "'bearer_env': prop(this.oai_entry, 'api_key_env')" in t
+    assert "chat_oai" in (ROOT / "membrane" / "apps" / "barest.packs").read_text().split()
+
+
+def test_anthropic_takes_the_model_option(tmp_path):
+    argv, _, _ = applied(tmp_path, {"provider": "anthropic", "model": "claude-opus-5-5", "anthropic_api_key": CLAUDE_KEY})
+    assert facts(argv)["cloud_models"] == [{"name": "claude-opus-5-5", **ANTHROPIC_ENTRY}]
 
 
 def test_the_name_is_a_json_string_fact(tmp_path):
-    argv, _, _ = applied(tmp_path, {"seat_name": "Blurp 'the' \"seat\""})
-    assert facts(argv) == {"seat_name": "Blurp 'the' \"seat\""}
-    argv, _, _ = applied(tmp_path, {"seat_name": "42"})          # a name that looks like a number stays text
-    assert facts(argv) == {"seat_name": "42"}
+    k = {"anthropic_api_key": CLAUDE_KEY}
+    argv, _, _ = applied(tmp_path, {"seat_name": "Blurp 'the' \"seat\"", **k})
+    assert facts(argv)["seat_name"] == "Blurp 'the' \"seat\""
+    argv, _, _ = applied(tmp_path, {"seat_name": "42", **k})          # a name that looks like a number stays text
+    assert facts(argv)["seat_name"] == "42"
+    argv, _, _ = applied(tmp_path, k)
+    assert "seat_name" not in facts(argv)
 
 
 def test_openai_becomes_one_cloud_models_entry_and_the_key_an_environment_variable(tmp_path):
@@ -91,18 +125,18 @@ def test_ollama_becomes_seat_backend_and_no_key(tmp_path):
     assert "cloud_models" not in f and "OPENAI_API_KEY" not in env
 
 
-def test_claude_takes_the_users_executable_and_key_by_environment(tmp_path):
+def test_claude_cli_takes_the_users_executable_and_key_by_environment(tmp_path):
     exe = tmp_path / "claude"
     exe.write_text("#!/bin/sh\n")
     exe.chmod(0o755)
-    argv, env, r = applied(tmp_path, {"provider": "claude", "claude_path": str(exe), "anthropic_api_key": CLAUDE_KEY, "api_key": KEY})
+    argv, env, r = applied(tmp_path, {"provider": "claude_cli", "claude_path": str(exe), "anthropic_api_key": CLAUDE_KEY, "api_key": KEY})
     assert facts(argv) == {}
     assert env["CLAUDE_BIN"] == str(exe) and env["ANTHROPIC_API_KEY"] == CLAUDE_KEY and "OPENAI_API_KEY" not in env
     assert CLAUDE_KEY not in r.stdout + r.stderr and all(CLAUDE_KEY not in a for a in argv)
 
 
-def test_claude_without_an_executable_still_starts_and_says_what_is_missing(tmp_path):
-    argv, env, r = applied(tmp_path, {"provider": "claude"})
+def test_claude_cli_without_an_executable_still_starts_and_says_what_is_missing(tmp_path):
+    argv, env, r = applied(tmp_path, {"provider": "claude_cli"})
     assert facts(argv) == {} and "CLAUDE_BIN" not in env
     assert "claude_path" in r.stderr
 
@@ -114,8 +148,9 @@ def test_claude_without_an_executable_still_starts_and_says_what_is_missing(tmp_
     ({"provider": "openai", "base_url": "https://x"}, "model"),
     ({"provider": "ollama", "ollama_url": "", "model": "m"}, "ollama_url"),
     ({"provider": "ollama", "ollama_url": "http://h:11434"}, "model"),
-    ({"provider": "claude", "claude_path": "claude"}, "claude_path"),
-    ({"provider": "claude", "claude_path": "/nonexistent/claude"}, "claude_path"),
+    ({"provider": "claude", "anthropic_api_key": "k"}, "provider"),     # the old name is gone: claude_cli
+    ({"provider": "claude_cli", "claude_path": "claude"}, "claude_path"),
+    ({"provider": "claude_cli", "claude_path": "/nonexistent/claude"}, "claude_path"),
 ])
 def test_bad_values_are_refused_with_the_option_named(tmp_path, opts, says):
     r = plan(tmp_path, opts)
@@ -383,7 +418,8 @@ def test_options_and_schema_and_translations_agree(config):
         assert SCHEMA_TYPE.match(str(t)), (k, t)
         if not str(t).endswith("?"):
             assert k in options, f"{k} is required and has no default"
-    assert schema["provider"] == "list(claude|openai|ollama)"
+    assert schema["provider"] == "list(anthropic|openai|ollama|claude_cli)"
+    assert options["provider"] == "anthropic" and options["model"] == "claude-sonnet-5-5"
     for k in ("api_key", "anthropic_api_key"):
         assert schema[k].startswith("password"), k
     tr = yaml_map((ADDON / "translations" / "en.yaml").read_text())

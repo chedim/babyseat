@@ -5,7 +5,10 @@
 #   NAME=$(jq -r '.<option>' '<options.json>'); export NAME      (a secret: the line names the option, the value is read when run.sh evals it, so it is never in this output, a log or argv)
 # The options (config.yaml `schema`; DOCS.md says what each does):
 #   seat_name             -> --fact seat_name="<name>"  (empty: not told, so the cutover may carry the 0.7 seat's name over)
-#   provider claude       -> CLAUDE_BIN=<claude_path> (an executable the user supplies: the image has no claude CLI), ANTHROPIC_API_KEY=<anthropic_api_key>; the seat's own defaults (launcher.c1f)
+#   provider anthropic    -> (the DEFAULT, operator 2026-11-15) Anthropic's OpenAI-compatible endpoint: --fact cloud_models=[{name: <model, default claude-sonnet-5-5>, backend: anthropic,
+#                            base_url: https://api.anthropic.com, api_key_env: ANTHROPIC_API_KEY}] + --fact minds={... <model> ...}; ANTHROPIC_API_KEY=<anthropic_api_key> (REQUIRED)
+#                            (no /v1 in base_url: chat_oai.c1f appends chat_path, default /v1/chat/completions, and sends the key as Authorization: Bearer)
+#   provider claude_cli   -> CLAUDE_BIN=<claude_path> (an executable the user supplies: the image has no claude CLI), ANTHROPIC_API_KEY=<anthropic_api_key>; the seat's own defaults (launcher.c1f)
 #   provider openai       -> --fact cloud_models=[{name: <model>, backend: openai, base_url: <base_url>, api_key_env: OPENAI_API_KEY}] + --fact minds={... <model> ...}; OPENAI_API_KEY=<api_key>
 #   provider ollama       -> --fact seat_backend=<ollama_url> + --fact minds={... <model> ...}; no key
 # A bad value is refused on stderr ("babyseat add-on: ..."), exit 2, nothing on stdout. Needs jq (in every Home Assistant base image).
@@ -31,7 +34,7 @@ is_url() { case $1 in http://?*|https://?*) return 0 ;; *) return 1 ;; esac; }
 minds() { jq -cn --arg m "$1" '{loops: $m, cortex: $m, workers: $m, seat_default: $m, loops_auth: "chat", cortex_auth: "chat", workers_auth: "chat", think: "auto"}'; }
 
 provider=$(get provider)
-[ -n "$provider" ] || provider=claude
+[ -n "$provider" ] || provider=anthropic
 model=$(get model)
 args=""
 exports=""
@@ -40,7 +43,15 @@ name=$(get seat_name)
 [ -z "$name" ] || args="$args$(fact seat_name "$(jq -cn --arg v "$name" '$v')")"
 
 case $provider in
-  claude)
+  anthropic)
+    [ -n "$model" ] || model=claude-sonnet-5-5
+    has_value anthropic_api_key || die "provider anthropic needs anthropic_api_key: a Claude API key from the Claude Console (https://platform.claude.com/settings/keys), scoped to a workspace"
+    entry=$(jq -cn --arg n "$model" '[{name: $n, backend: "anthropic", base_url: "https://api.anthropic.com", api_key_env: "ANTHROPIC_API_KEY"}]')
+    args="$args$(fact cloud_models "$entry")$(fact minds "$(minds "$model")")"
+    exports="$exports$(secret_line ANTHROPIC_API_KEY anthropic_api_key)
+"
+    ;;
+  claude_cli)
     path=$(get claude_path)
     if [ -n "$path" ]; then
       case $path in /*) ;; *) die "claude_path must be an absolute path inside the add-on (e.g. /config/claude/claude), got: $path" ;; esac
@@ -48,7 +59,7 @@ case $provider in
       exports="${exports}CLAUDE_BIN=$(q "$path"); export CLAUDE_BIN
 "
     else
-      printf '%s\n' "babyseat add-on: provider claude without claude_path: the seat starts, and the chat answers with how to supply the claude CLI (or pick provider openai or ollama)" >&2
+      printf '%s\n' "babyseat add-on: provider claude_cli without claude_path: the seat starts, and the chat answers with how to supply the claude CLI (or pick provider anthropic, openai or ollama)" >&2
     fi
     ! has_value anthropic_api_key || exports="$exports$(secret_line ANTHROPIC_API_KEY anthropic_api_key)
 "
@@ -74,7 +85,7 @@ case $provider in
     [ -n "$model" ] || die "provider ollama needs model (a model the Ollama server has pulled, e.g. llama3.2)"
     args="$args$(fact seat_backend "$(jq -cn --arg v "$url" '$v')")$(fact minds "$(minds "$model")")"
     ;;
-  *) die "provider must be claude, openai or ollama, got: $provider" ;;
+  *) die "provider must be anthropic, openai, ollama or claude_cli, got: $provider" ;;
 esac
 
 printf 'set -- /opt/babyseat/bin/cliffvm serve --port 4096 --bind 0.0.0.0 --data-dir /data%s\n' "$args"

@@ -30,10 +30,10 @@ decisions; it is in git history. Nothing is published by any workflow; publishin
 - **The Home Assistant add-on** (`repository.yaml`, `addon/`; the user's guide is `addon/DOCS.md`): for Home Assistant OS and Supervised, the same repository is an add-on repository. The Supervisor builds `addon/Dockerfile`
   on the device: the Home Assistant Alpine base image plus the release's MUSL tarball of the add-on's `version` (pinned to pyproject's by `tests/wrapper/test_versions.py`), checked against its `.sha256` and the
   folder's `MANIFEST.sha256` (`addon/install-dist.sh`; `addon/dist/` takes local tarballs for a local build). `addon/run.sh` turns `/data/options.json` into the launch line (`addon/options.sh`: `seat_name`, and the chat model as
-  `provider` openai = one `cloud_models` entry + `minds`, ollama = `seat_backend` + `minds`, claude = a `claude_path` the user supplies; keys only as environment variables), execs
+  `provider` anthropic (the default: Anthropic's OpenAI-compatible endpoint, one `cloud_models` entry with base_url `https://api.anthropic.com` and key `ANTHROPIC_API_KEY`) or openai = one `cloud_models` entry + `minds`, ollama = `seat_backend` + `minds`, claude_cli = a `claude_path` the user supplies; keys only as environment variables), execs
   `cliffvm serve --port 4096 --bind 0.0.0.0 --data-dir /data`, and in the background (`addon/announce.sh`) waits for the door with this start's admin token and POSTs the Supervisor discovery
   `{service: membrane, config: {host, port, token}}` at every start. Home Assistant's config folder is mapped read-only at `/config`, where the cutover finds the 0.7 store. NOT verified here: a real Supervisor, the image build
-  (no Docker daemon answered), the musl binary. Tests: `tests/wrapper/test_ha_addon.py`; CI: the `addon` job of `validate.yml` (the add-on linter) and the shellcheck line.
+  (no Docker daemon answered), the musl binary. Tests: `tests/wrapper/test_ha_addon.py`; CI: the `addon` job of `validate.yml` (the add-on linter, non-blocking until its first green run) and the shellcheck line.
 
 ## Open (not decided; listed so they are not forgotten)
 

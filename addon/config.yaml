@@ -25,11 +25,12 @@ ports_description:
 webui: "http://[HOST]:[PORT:4096]/"
 # no `watchdog`: the add-on linter (frenck/action-app-linter) refuses it as obsolete in favour of the image's Docker HEALTHCHECK (addon/Dockerfile)
 options:
-  provider: claude
+  provider: anthropic
+  model: "claude-sonnet-5-5"
   ollama_url: "http://homeassistant.local:11434"
 schema:
   seat_name: "str?"
-  provider: "list(claude|openai|ollama)"
+  provider: "list(anthropic|openai|ollama|claude_cli)"
   model: "str?"
   base_url: "url?"
   api_key: "password?"
