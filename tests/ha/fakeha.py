@@ -288,9 +288,6 @@ class ConfigFlow:
     def _async_current_entries(self, include_ignore=None):
         return self.hass.config_entries.async_entries(self.domain)
 
-    def _set_confirm_only(self):
-        self.confirm_only = True
-
     def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None, last_step=None):
         return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {},
                 "description_placeholders": description_placeholders or {}}

@@ -8,6 +8,7 @@ CONF_SERVE_URL = "serve_url"
 CONF_SERVE_USER = "serve_user"
 CONF_SERVE_PASS = "serve_pass"
 DEFAULT_SERVE_USER = "opencode"
+DEFAULT_PORT = 4096              # `cliffvm serve`'s port, when the add-on's announcement names none
 DOCS_URL = "https://github.com/chedim/membrane/blob/main/docs/home-assistant.md"   # the forms' link (a placeholder: hassfest refuses a URL in a string)
 
 POLL_S = 60                      # the seat's health, as often as the old component polled the seat (decision 11 of docs/hass-plan.md)
