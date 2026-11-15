@@ -15,9 +15,8 @@ Anything in progress says so on its page and names its branch. The README at the
 | page | what it is |
 |---|---|
 | [auth.md](auth.md) | who may talk to the seat: no users, every valid token is the admin, the secret and token files, the page cookie and its host check, the claude credential |
-| [cliffvm.md](cliffvm.md) | the reference: `cliffvm serve` and `run`, facts, the data folder, the dist folder, the door's routes, the chat turn, storage modes, packs the model loads |
+| [cliffvm.md](cliffvm.md) | the reference: `cliffvm serve` and `run`, facts, the data folder, the dist folder, the door's routes, the chat turn, storage modes, packs the model loads, the history cutover |
 | [settings-groups.md](settings-groups.md) | the Settings window: every row, the one write door, what is launch-only |
-| [migration-design.md](migration-design.md) | the history cutover from a 0.7 Python seat: what is imported, the ledgers, a manual import and rollback |
 | [release-verification.md](release-verification.md) | the auth checklist: what was proved by which test |
 | [packaging-plan.md](packaging-plan.md) | packaging and the launcher: what is decided, built and in progress (wheels, installer, image) |
 
@@ -26,17 +25,15 @@ Anything in progress says so on its page and names its branch. The README at the
 | page | what it is |
 |---|---|
 | [porting-brief.md](porting-brief.md) | the rules for c1f and Rust work (read first) |
-| [python-to-c1f.md](python-to-c1f.md) | the migration that made Python a launcher only (done); the reasoning behind the split |
 | [c1f-layers.md](c1f-layers.md) | apps and layers, trust by position, privilege, class ownership, storage-mode header lines |
 | [c1f-stdlib.md](c1f-stdlib.md) | the Request contract, boot facts, the builtins, locals, entity literals, constructors, the step budget, the contract tests |
 | [c1f-error.md](c1f-error.md) | the `Error` value kind: a failure that is not a null |
 | [cliffhanger-fields.md](cliffhanger-fields.md) | the field language's design: getters, setters, packs, the browser VM's host API (section 9) |
-| [semtext-and-legs.md](semtext-and-legs.md) | SemText: how text becomes graph entities (the tokenizer and spans are built; legs are design) |
+| [semtext-and-legs.md](semtext-and-legs.md) | SemText: how text becomes graph entities (the tokenizer, spans, mentions, sentence vectors, the Memory class and the banner recall are built; legs are design) |
 | [chat-keys.md](chat-keys.md) | the session id in the message's key: why and how |
-| [doctrine-barest.md](doctrine-barest.md) | the model's whole system text, and what it promises |
+| [doctrine-barest.md](doctrine-barest.md) | the doctrine (the system prompt), the banner and the message: what the model gets, and what it promises |
 | [ui-rebuild-plan.md](ui-rebuild-plan.md) | the page as c1f view packs: status per slice, the shell and view-pack contract, markdown and Stop |
-| [graph-link.md](graph-link.md) | joining the page's graph and the seat's: slice 1 built (the page reports), the rest design |
-| [field-view-plan.md](field-view-plan.md) | the 3D field view: built, disabled in the release |
+| [graph-link.md](graph-link.md) | joining the page's graph and the seat's: slices 1 and 2 built (the page reports, the engine hooks), the rest design |
 
 ## Measurements and design notes (dated; not part of the release surface)
 

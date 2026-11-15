@@ -8,7 +8,7 @@ IMPORT door 1
 IMPORT door_session 1
 RESIDENT Legacy
 -- (`RESIDENT Legacy`: the seat and the ledgers are always loaded, a getter lists them with `instances`: the lazy path below.)
--- THE CHAT HISTORY IMPORT (#1143, migration phase 1, operator 2026-11-14; docs/migration-design.md "Phase 1"). The ONLY thing migrated from the previous store is its chat history:
+-- THE CHAT HISTORY IMPORT (#1143, migration phase 1, operator 2026-11-14). The ONLY thing migrated from the previous store is its chat history:
 -- sessions and messages. Nothing else is converted; the previous store is kept as the read-only source `SqlSource:legacy` (the launch fact `sql_sources`, packs/sql.c1f) that the model
 -- reads on demand (Help:legacy). No model runs during the import: the messages are born finished, `queued` is never written, no turn starts.
 --   Legacy:seat            {source: 'legacy', converter: 1 (this pack's version stamp), running, import, list, run_* and counts}

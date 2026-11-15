@@ -10,7 +10,7 @@ IMPORT door 1
 --   Not carried over: the pause refusal of writes (reads the presence entity: the state family's) and an admin-only check
 --   (there is none: every verified token is the admin).
 -- DEGRADED (w46): GET /membrane/self/recent answers `{lines: []}`, the released answer of a seat with no self record (server.py:4577); nothing here keeps one.
--- NOT PORTED (each answers 501 and names why; the boundary is in docs/python-to-c1f.md): the character sheet and the record's
+-- NOT PORTED (each answers 501 and names why): the character sheet and the record's
 --   feed (self_loop's file, energy.report and the supervisor: live Python state), the toybox (toys are files with locks, clocks
 --   and a burst schedule: toybox.py, 1366 lines of domain logic), the seat's JS (jsexec.py: a registry of open tabs in the
 --   seat's memory and a run that waits for the browser's answer: a round trip with a Python waiter).

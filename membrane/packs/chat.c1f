@@ -16,7 +16,7 @@ RESIDENT Doorbell
 -- `membrane::Chat:session:<sid>:message:<id>` (a session), the kind ChatMessage (its eid names the class Chat, as the constructor rule says). The session id is IN the key, so
 -- "the messages of session X" is a key-prefix range of the `(cls, k)` index (no body read). `<id>` is `<ms>-<n>` with n padded to 8 digits, so key order is time order inside a chat.
 -- A sid holds no `:` (a message or a history request that names one with a colon is refused). EVERY message also has a TIME ROW `membrane::Chat:main:time:<id>:<where>`
--- (<where> = `main` or `session:<sid>`; the kind ChatLine, no properties): the keys of all the chats in ONE time order, for the history that reads every turn (no `sid`).
+-- (<where> = `main` or `session:<sid>`; the kind ChatLine, with the `chat` property): the keys of all the chats in ONE time order, for the history that reads every turn (no `sid`).
 -- THE TURN is the entity under it, `<message>:turn` (ChatTurn {status: queued/running/done/error (a getter over `state`), started, ended, queued_at, message}),
 -- the one run of the model that answers the message. It OWNS, by the colon path, its answer `...:turn:response` (ChatResponse {text, error})
 -- and each tool the model ran `...:turn:tool:<tool id>` (ChatTool {name, input, result}): retiring the turn (`retire = true`) retires them.

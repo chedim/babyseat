@@ -5,7 +5,7 @@ IMPORT legacy_import 1
 -- THE AUTOMATIC HISTORY CUTOVER (#1143, operator 2026-11-14: "history cutover: automatic"). A user who upgrades from the Python seat (0.7.x) starts this seat once and finds all the history in the one chat,
 -- doing nothing. At the seat's start this pack FINDS the old store, declares it as the read-only `SqlSource:legacy`, and runs the history import (packs/legacy_import.c1f) in the BACKGROUND: the newest
 -- session first, and inside a session the newest questions first, so the page shows the recent history at once and the older turns appear as the import goes on. Nothing is converted but the chat
--- history (docs/migration-design.md "Phase 1"). Written in c1f; no builtin and no host hook.
+-- history (docs/cliffvm.md, history cutover). Written in c1f; no builtin and no host hook.
 --   Legacy:cutover   the LEDGER {state: importing | done | absent | error, path, reason, started, checked} and what it says: `total`, `done`, `batch`, `line` (the plain text the chat view shows while
 --                    importing, or the reason of an error; none when there is nothing to say), `history` (the Settings row's text)
 -- THE SEARCH ORDER (first hit wins; a place holds `field.sqlite/field.sqlite3`, the Python seat's own layout; the stat of each is asked, a file is a hit):

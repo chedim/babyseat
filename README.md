@@ -93,7 +93,7 @@ user, so Home Assistant's own permissions decide what the model may touch. Detai
 
 Start the new seat once. At its start it looks for the old store (`field.sqlite3` in the places the 0.7 seat used: the new seat's own data folder and its `.membrane` subfolder, `./.membrane`, `~/membrane/.membrane`,
 Home Assistant's `/config/membrane/.membrane`), opens it read-only and imports the chat history in the background, newest session first. Nothing else is converted; the old field stays a
-read-only source the model can pull from (`Help:legacy`). To name the old store yourself: `cliffvm serve --legacy <path to field.sqlite3, or its folder>`. Details: [docs/migration-design.md](docs/migration-design.md).
+read-only source the model can pull from (`Help:legacy`). To name the old store yourself: `cliffvm serve --legacy <path to field.sqlite3, or its folder>`. Details: [docs/cliffvm.md](docs/cliffvm.md), "The history cutover".
 Your old data directory is never written. To stay on the Python line: `pip install babyseat==0.7.53` (the source is the tag `python-seat-last`).
 
 ## macOS
