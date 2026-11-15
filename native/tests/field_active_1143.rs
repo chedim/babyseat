@@ -1,6 +1,6 @@
 //! The field view's feed (#1143): `GET /ui/fieldvm/active?m=<n>` answers the `m` most recently ACTIVE entities (by the `updated` column), the hidden classes left out,
 //! each with the owner it sits under (the eid's colon prefix) when that owner is in the window too. It reads COLUMNS of `c_field` (`k`, `cls`, `updated`) and never a body,
-//! so an entity nobody loaded stays unloaded (docs/field-view-plan.md section 4). The seat is the shipped one (barest.packs + the app), no real `claude`, an ephemeral port.
+//! so an entity nobody loaded stays unloaded (the route is described in the header of membrane/packs/door_fieldvm.c1f). The seat is the shipped one (barest.packs + the app), no real `claude`, an ephemeral port.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};

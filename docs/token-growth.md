@@ -1,8 +1,8 @@
 # Why input tokens per turn grow on Throwy's real turns
 
 Trace only, no behaviour change (#1143). Data: a fresh copy of Throwy's store, 111 turns that carry `usage`
-(11-13 12:23 to 11-14 01:10, local time of the store). Re-run: `python3 -I scripts/token_growth.py <copy of seat.sqlite> --repo .`
-(read-only, stdlib only). Labels: **MEASURED** = read from the store or an exact fit; **INFERRED** = modelled, the
+(11-13 12:23 to 11-14 01:10, local time of the store). Re-run on a fresh copy of a seat's store (`<data dir>/seat.sqlite`; never the live file): `sqlite3 <data dir>/seat.sqlite ".backup <scratch>/seat.sqlite"`, then
+`python3 -I scripts/token_growth.py <scratch>/seat.sqlite --repo .` (read-only, stdlib only; the numbers below are of the 11-13/11-14 store, not of yours). Labels: **MEASURED** = read from the store or an exact fit; **INFERRED** = modelled, the
 constants are at the top of the script.
 
 ## Important first

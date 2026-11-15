@@ -1,6 +1,6 @@
 # Packaging and the launcher: decided, built, in progress
 
-Status (2026-11-14): the dist folder, the launcher, the per-platform binary workflow, the wheels, the installer, the Docker image and the publish workflows are BUILT (the last group on branch `w118-wheels`, run locally for macOS arm64 only; no workflow has run on a runner). The first draft of this file was a scoping note with rounds and 17 open
+Status (2026-11-14): the dist folder, the launcher, the per-platform binary workflow, the wheels, the installer, the Docker image and the publish workflows are BUILT and on this tree (run locally for macOS arm64 only; no workflow has been run on a runner from here). The first draft of this file was a scoping note with rounds and 17 open
 decisions; it is in git history. Nothing is published by any workflow; publishing is the operator's own step.
 
 ## Decided (operator, 2026-11-14)
@@ -34,7 +34,7 @@ decisions; it is in git history. Nothing is published by any workflow; publishin
 - Signing and notarization of the macOS binary (a downloaded binary may be quarantined by Gatekeeper).
 - A patch line for 0.7.5x: patches of the Python line are `0.7.54+` and the wrapper is `0.7.60`, so `pip install -U babyseat` picks `0.7.60` everywhere a wheel exists; users of the Python line pin `babyseat==0.7.5N`.
 
-## Wheels, installer, image and publish lanes (branch `w118-wheels`, built locally, nothing pushed)
+## Wheels, installer, image and publish lanes (built; checked locally for macOS arm64 only)
 
 | piece | where | state |
 |---|---|---|

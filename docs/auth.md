@@ -9,8 +9,8 @@ the door replaces `sub` and `name` by `admin` after it has verified the token, s
 answers a verified caller `403`: the one refusal is the `401` of a request with no valid token. A non-human credential that must be limited (an ESP32, an integration) is a separate design
 (the `ns` claim of docs/graph-link.md); nothing is built for it. The word `owner` survives only for graph ownership (a class is owned by its pack: docs/c1f-layers.md).
 
-**One chat, many sessions.** There are no per-person chats (the 0.7 seat's one-chat-per-person rule is gone). The chat is one entity, `Chat:main`; the page's sessions are chats of their own
-(`POST /session` always makes a new one). The history of an older seat comes in through the cutover (docs/migration-design.md).
+**One chat, many sessions.** There are no per-person chats. The chat is one entity, `Chat:main`; the page's sessions are chats of their own
+(`POST /session` always makes a new one). The history of an earlier seat comes in through the cutover (docs/cliffvm.md, "The previous seat's chat history").
 
 ## The rule: an address is not a credential
 
@@ -30,7 +30,7 @@ The key travels like the admin token: the run's `env_from` hands the launcher's 
 ## The files `cliffvm serve` makes (the data folder, `--data-dir`)
 
 - `door.secret`: 64 hex characters from `/dev/urandom`, mode 0600, made at the first start and kept. A missing or empty file is made; one shorter than 32 bytes, unreadable, or a folder REFUSES the start (the seat never
-  replaces a secret it cannot read: that would log everyone out). A second seat started on a copy of the file accepts the first's tokens (an old Python seat's secret is accepted too).
+  replaces a secret it cannot read: that would log everyone out). A second seat started on a copy of the file accepts the first's tokens.
 - `admin.token`: an admin JWT minted at EVERY start (`sub` `admin`; life = the fact `admin_token_ttl_s`, default 2592000 s = 30 days), mode 0600, a temp file renamed over the old one. The path is the Boot fact `admin_token_file`.
   Rotation is the restart; the old token stays valid until its own `exp` (only a new secret revokes it).
 - The token's value is held nowhere else but the process's environment (`MEMBRANE_ADMIN_TOKEN`): it is in no property, row, journal line, log line or reply.
@@ -43,7 +43,7 @@ The key travels like the admin token: the run's `env_from` hands the launcher's 
   a loopback peer, no `X-Forwarded-For` / `Forwarded` / `X-Real-IP` header, and a `Host` that is `localhost`, `127.0.0.1`, `[::1]` or a name in the launch fact `host_names` (a JSON list or comma text; port ignored, case-insensitive).
   The host check stops a hostile site that points its own name at `127.0.0.1` (DNS rebinding) from being handed the cookie. A page reached through the LAN address or a proxy gets no cookie and its calls are `401`; the page says so in text.
   `POST /ui/login {"token": "<jwt>"}` turns any valid token into the same cookie (JSON only: 415 for a form, 401 for a bad token; `Secure` behind https; `/ui/logout` clears it).
-  A sign-in screen in the page that uses this route is in progress (branch `w120-signin`); until it lands, a page on another machine cannot get in without a cookie set by that route.
+  The page's sign-in screen (above) uses this route.
 - **Home Assistant** sends the token as the Basic password; paste `admin.token` (or any minted token) in the form (docs/home-assistant.md).
 - **The chat turn.** The `claude` CLI the turn starts calls the seat's `/mcp`. Its MCP config (`chat_turn.c1f`, `mcp_json`) carries `"headers": {"Authorization": "Bearer ${MEMBRANE_ADMIN_TOKEN}"}` and the run's `env_from` hands the
   seat's value to the child's environment, so the token is never in `argv` (a process listing shows `argv`) or a row. A turn whose CLI sends a wrong token fails visibly: the `401` is in the answer.
