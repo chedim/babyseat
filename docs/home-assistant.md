@@ -86,7 +86,7 @@ A failed turn is spoken as an error with the seat's own cause, for example `The 
 
 ## Where things are
 
-The entry is `{serve_url, serve_user, serve_pass}`; `serve_pass` holds the token. The component has no files of its own on disk and starts no process (one background task per entry pulls the seat's calls). The old component's seat directory `<config>/membrane/` (data of a seat it started) is left alone; the old field in it is the history cutover's input when you start a new seat (docs/migration-design.md).
+The entry is `{serve_url, serve_user, serve_pass}`; `serve_pass` holds the token. The component has no files of its own on disk and starts no process (one background task per entry pulls the seat's calls). The old component's seat directory `<config>/membrane/` (data of a seat it started) is left alone; a new seat finds its chat history by itself (`<data>/.membrane`, `/config/membrane/.membrane`, or `cliffvm serve --legacy <path>`; docs/cliffvm.md, "The history cutover").
 
 ## Tests
 

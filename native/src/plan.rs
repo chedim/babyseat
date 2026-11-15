@@ -1,7 +1,7 @@
-//! THE BOOT PLAN, native (docs/python-to-c1f.md, piece 1): the boot's order and policy are data -- `packs/boot.json` (the
+//! THE BOOT PLAN, native (#1143): the boot's order and policy are data -- `packs/boot.json` (the
 //! steps, their edges, which one stops the boot, which run in the background once the UI is up) and `packs/boot.c1f`
 //! (when a step is ready) -- on the field engine. This file only walks it: ask the field which step is ready, run it
-//! through the bridge, write its state back (running, done, failed + its error, skipped). No Python decides anything.
+//! through the bridge, write its state back (running, done, failed + its error, skipped). Nothing outside the field decides.
 use std::sync::Mutex;
 
 use serde_json::{json, Map, Value as J};

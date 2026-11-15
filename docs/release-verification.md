@@ -32,7 +32,7 @@ Tests: `native/tests/release_verify_1143.rs` (Rust, real processes), `tests/js/r
 | B3 | Bypasses, paths and methods: 12 protected routes x 24 spellings (`..`, `//`, `/./`, trailing `/` and `//`, upper case, `%2f..`, `%00`, `;x=1`, `?x=/ui/www/`, `#`, the `/ui/serve` prefix with `//`, `/ui/www/../`, `/ui/www/%2e%2e/`, `/ui/login/../`, `/index.html/../`, `/favicon.ico/../`) x 8 methods (GET HEAD OPTIONS POST PUT DELETE PATCH TRACE): over 2000 requests, never an answer but 401 (or a 404/405 for the public shell's lookalikes); a request with no token is never given `/membrane/ha/*` by any spelling | `path_tricks_methods_and_headers_never_open_...` | PASS (after fix 6) |
 | B4 | A request with NO token changes nothing: 22 write attempts (sessions, messages, the chat, abort, the seat controls, quota, HA catalog and claim, models, options, `/mcp` writes, login) all answer 401 AND leave every entity, session title, model and message as it was | `a_request_with_no_token_changes_nothing_whatever_it_answers` | PASS (after fix 1) |
 | B5 | A proxied request is not this machine: `X-Forwarded-For`, `Forwarded`, `X-Real-IP` each: the shell is served, no cookie | `a_request_through_a_proxy_is_not_this_machine_whichever_header_says_so` | PASS (after fix 2) |
-| B6 | The admin's held connection (the page's event stream) is a live `Request` entity; any other token that reads it with `entity_read` must not get the admin's token | `an_open_connection_of_the_owner_does_not_hand_its_credentials_...` | PASS (after fix 3) |
+| B6 | The admin's held connection (the page's event stream) is a live `Request` entity; any other token that reads it with `entity_read` must not get the admin's token | `an_open_connection_of_the_admin_does_not_hand_its_credentials_...` | PASS (after fix 3) |
 | B7 | Host header (DNS rebinding): the page cookie is given only when `Host` (port cut off, case-insensitive, `[::1]` bracketed) is `localhost`, `127.0.0.1`, `[::1]` or a name of the launch fact `host_names`; a loopback request with any other Host (or none) gets NO cookie and the protected routes are 401; a bearer token works with any Host; the LAN case (no cookie) is unchanged; the browser test gets its cookie through 127.0.0.1 | `the_page_cookie_is_given_only_for_a_host_name_of_this_machine_and_a_rebinding_page_gets_none`, `the_host_names_fact_adds_names_for_the_cookie_and_nothing_else` | PASS (was GAP, decision 3; the refusal is NO COOKIE, not a 421: see decision below) |
 
 ## Defects found and fixed (each with its red test first)
@@ -48,21 +48,21 @@ Tests: `native/tests/release_verify_1143.rs` (Rust, real processes), `tests/js/r
 3. **A verified person could read the admin's token** (privilege escalation): the page keeps `GET /event` open, its `Request` entity is alive while it is held and carried the `authorization` and
    `cookie` headers; `entity_read {spec: "Request:<n>", prop: "headers"}` is any verified person's tool. Fix: the door (http.rs) removes `authorization`, `cookie` and `proxy-authorization` from the
    Request's headers after it verified them (no pack reads them).
-4. **The verifier was weaker than the old seat's** (jwtauth.py): a header with `crit`, a token with an `aud` (scoped to someone else) and a non-numeric `nbf`/`iat` were accepted. Fix: jwt.rs refuses each.
+4. **The verifier was weaker than the retired Python seat's** (its `jwtauth.py`, no longer in the tree): a header with `crit`, a token with an `aud` (scoped to someone else) and a non-numeric `nbf`/`iat` were accepted. Fix: jwt.rs refuses each.
    (Only a holder of the secret can sign one, so this is parity, not an open door.)
 5. **An unreadable secret file was silently replaced**: `ensure_secret` treated every read error as "missing", removed the file and made a new secret: every token, cookie and the Home Assistant entry die
    silently after a permissions slip. Fix (admin.rs): only a missing or empty file is made; any other read error (or a folder) refuses to start, naming the file.
 6. **A HEAD to a family route held its connection for ever** (no answer, no close) for a verified caller: the families' replies are written for the methods they list. Fix: door.c1f `method_ok` no longer
    treats a HEAD as a GET: a HEAD to a family route is a 405 with `allow`; the probes and the page's files still answer it.
 
-Docs honest in the same change: docs/auth.md (cliffvm section) says the above; the Python-seat section is unchanged.
+Docs honest in the same change: docs/auth.md says the above.
 
 ## Documented behaviour (not defects)
 
 - **Secret reuse:** a seat's secret is a file of at least 32 bytes of text (trimmed). A second seat started with a COPY of the first's file accepts the first's tokens and cookies and the first accepts
   the second's (the admin token is signed by the same key). Two seats on one host with one secret also share the cookie NAME (cookies are per host, not per port): harmless, the value verifies on both.
   To reuse the Python seat's login, point `door_secret_file` at its `jwt.secret`: it is a text file of 64 url-safe characters and is kept as it is.
-- **Two Authorization headers:** the last one wins (the door keeps one value per header name); the old seat refused two. It never mixes them to the better token.
+- **Two Authorization headers:** the last one wins (the door keeps one value per header name); the retired Python seat refused two. It never mixes them to the better token.
 - **A cookie with an Authorization header that is not `Bearer`/`Basic`** (e.g. `Token x`) is ignored and the cookie decides. A bad Bearer never falls back.
 - **`--fact door_secret_file=` (empty)** is the open barest seat by name; the page's config says `auth: none`.
 - **Home Assistant over the LAN:** the door opens on 127.0.0.1; a seat for another machine is `cliffvm serve --bind <addr>` (docs/home-assistant.md).
@@ -72,5 +72,5 @@ Docs honest in the same change: docs/auth.md (cliffvm section) says the above; t
 1. **DECIDED 2026-11-14: everyone with access is the admin.** No users in this release: a valid token's `sub` is no identity, no `Person` is made, every route takes any verified token, and a message of any token starts a turn whose CLI carries the admin's token. A non-human credential that must be limited later (an ESP32, an integration) is a FUTURE design (docs/graph-link.md, the `ns` claim); nothing is built.
 2. **Sign-in screen.** DONE (item 2d): a c1f card, not JS; `boot.js` only fetches the public pack on a 401.
 3. **DECIDED 2026-11-14: the Host check (row B7).** Built as proposed: the cookie only for `localhost`, `127.0.0.1`, `[::1]` and the fact `host_names` (no other default). A wrong Host gets NO cookie (the shell stays 200 with its plain text); a 421/400 on the shell was not added: the shell is static and public, a refusal protects nothing a missing cookie does not, and it would break a proxy name the operator forgot to list.
-4. **Duplicate headers and `aud`/`crit` parity.** Two Authorization headers: last wins (old seat: refused). Keep, or refuse (one line in http.rs)?
-5. **32 bytes** is the minimum secret (carried from jwtauth.py, jwt.rs `MIN_SECRET`); a threshold the operator never set on this seat. Keep?
+4. **Duplicate headers and `aud`/`crit` parity.** Two Authorization headers: last wins (the retired Python seat refused two). Keep, or refuse (one line in http.rs)?
+5. **32 bytes** is the minimum secret (carried from the retired Python seat, jwt.rs `MIN_SECRET`); a threshold the operator never set on this seat. Keep?

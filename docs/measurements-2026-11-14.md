@@ -9,25 +9,25 @@
 
 ## 1. Records found (read-only), each labelled
 
-Label: M = MEASURED with a stated method, R = RECALLED (a note, no method), U = UNVERIFIED (named in the brief, no source on disk). "mem/" = `~/.claude/projects/<project>/memory/`.
+Label: M = MEASURED with a stated method, R = RECALLED (a note, no method), U = UNVERIFIED (named in the brief, no source on disk). "mem/" = the operator's private notes, which are not in this repository: those rows are recalled, and cannot be re-checked from here.
 
 | # | record | where | label |
 |---|---|---|---|
-| R1 | door up 50,000 rows: 6.8 s / 388 MB before lazy load, 0.33 s / 26 MB after; real repro store (470 rows, 18 MB): 4.5 s / 184 MB before, 0.37 s / 40 MB at the door, 72 MB after warm boot | docs/cliffvm.md:175 | M (release build, synthetic Note rows, one machine) |
+| R1 | door up 50,000 rows: 6.8 s / 388 MB before lazy load, 0.33 s / 26 MB after; real repro store (470 rows, 18 MB): 4.5 s / 184 MB before, 0.37 s / 40 MB at the door, 72 MB after warm boot | docs/cliffvm.md (the lazy-load numbers) | M (release build, synthetic Note rows, one machine) |
 | R2 | empty store, all 33 packs: healthy in 0.84 s, RSS 13.9 MB | the parity inventory (removed; git history) | M |
-| R3 | burst of 2 parallel 1500-chunk messages + 1 MB output: 122 MB to about 2 GB, after the fix peak about 0.2 GB | docs/cliffvm.md:132 | M (synthetic; not re-run here) |
-| R4 | idle RAM 90-211 MB; history route of 20 turns about 0.1 s | the brief only; nothing in docs/, mem/ or git messages | U |
-| R5 | reply sizes (Keep idle 12,613 B; 3 running 87,793; 10 running 264,467; mention 61,992-96,656; others under 1.5 KB) | docs/reply-size.md:5, :11-:19 | M (private seat, copy of Throwy's store, fake claude, `242948c1`) |
+| R3 | burst of 2 parallel 1500-chunk messages + 1 MB output: 122 MB to about 2 GB, after the fix peak about 0.2 GB | docs/cliffvm.md ("Memory of the seat") | M (synthetic; not re-run here) |
+| R4 | idle RAM 90-211 MB; history route of 20 turns about 0.1 s | the brief only; nothing in docs/, the notes or git messages | U |
+| R5 | reply sizes (Keep idle 12,613 B; 3 running 87,793; 10 running 264,467; mention 61,992-96,656; others under 1.5 KB) | docs/reply-size.md | M (private seat, copy of Throwy's store, fake claude, `242948c1`) |
 | R6 | old Python seat, live, through 2026-10-15: 3,840 turns, 10.8K avg / 1.55K median tokens per turn, 4.9 calls per turn, 39.5% cache read | the 0.7 token-economics page (removed; git history) | M (`membrane stats --baseline`) |
-| R7 | map-mode Memo about 18.9k input-equivalent per answer (was about 40k, long ones 111k) | mem/map-mode-breakthrough.md:20 | R |
-| R8 | "Throwy median about 18k input, 76% cache reads", "recall 22/53" | the brief; mem/MEMORY.md:67 names "recall 22/53" only | U |
-| R9 | membrane counts total prompt about 3,700/turn flat, cached_tokens 0 (opencode bench) | mem/benchmark-token-accounting.md:26 | R |
-| R10 | LoCoMo, 10 conversations, 1,535 questions, held-out readers: vote @1 single 0.47 / multi 0.39 / temporal 0.57 / open 0.35 (after memspeak); fitted vote 0.48 / 0.40 / 0.62 / 0.28 | mem/recall-findings-2026-11-07.md:13, :15 | R (bench arms not on disk) |
-| R11 | LoCoMo doc arm, old seat, all 10 convs, categories 1-4: hit@8 0.651, hit@20 0.769, ask mean 166-1153 ms by category; per question file lets conv 0-1 be recomputed (233 questions: hit@8 0.648, hit@20 0.764) | `~/projects/membrane-bench/locomo/results/doc-2026-10-28/{summary,per_question}.json`, method `locomo/README.md` | M |
-| R12 | conv 0-1 hit@8: main 106 to 148 (of 230), seed scorer 169-173, bge rerank 179-180; warm ask 0.7-2.3 s live | mem/state-2026-10-28.md:32, :35, :36, :38, :41 | R |
-| R13 | `Stats:eval.slow` flag = an evaluation over the former 10 ms allowance | docs/cliffvm.md:318 | M (definition) |
+| R7 | map-mode Memo about 18.9k input-equivalent per answer (was about 40k, long ones 111k) | private note "map-mode breakthrough" | R |
+| R8 | "Throwy median about 18k input, 76% cache reads", "recall 22/53" | the brief; the notes' index names "recall 22/53" only | U |
+| R9 | membrane counts total prompt about 3,700/turn flat, cached_tokens 0 (opencode bench) | private note "benchmark token accounting" | R |
+| R10 | LoCoMo, 10 conversations, 1,535 questions, held-out readers: vote @1 single 0.47 / multi 0.39 / temporal 0.57 / open 0.35 (after memspeak); fitted vote 0.48 / 0.40 / 0.62 / 0.28 | private note "recall findings 2026-11-07" | R (bench arms not on disk) |
+| R11 | LoCoMo doc arm, old seat, all 10 convs, categories 1-4: hit@8 0.651, hit@20 0.769, ask mean 166-1153 ms by category; per question file lets conv 0-1 be recomputed (233 questions: hit@8 0.648, hit@20 0.764) | the operator's bench folder (`locomo/results/doc-2026-10-28/{summary,per_question}.json`, method in its `locomo/README.md`; not in this repository) | M |
+| R12 | conv 0-1 hit@8: main 106 to 148 (of 230), seed scorer 169-173, bge rerank 179-180; warm ask 0.7-2.3 s live | private note "state 2026-10-28" | R |
+| R13 | `Stats:eval.slow` flag = an evaluation over the former 10 ms allowance | docs/cliffvm.md ("Eval accounting") | M (definition) |
 
-Rule from mem/state-2026-10-28.md:34 and :38: no public LoCoMo claims. This page is internal.
+Rule from the private note "state 2026-10-28": no public LoCoMo claims. This page is internal.
 
 ## 2. Measured now, next to the record
 
@@ -44,7 +44,7 @@ Machine: Mac, load average 3-6 during the runs (another session ran `cargo test`
 | `entity_read` of the biggest entity (2.4 MB) whole / one prop | 57 ms / 24 ms | none | | no record |
 | `related` on 20 real SemTexts, `related_n=5` write | median 27 ms, p95 53 ms; 2 of 20 answer null (text never mentioned) | none | | no record |
 | `related` evaluation self time (Stats:eval, per ask) | median 7.6 ms; 12/20 under 10 ms, 6/20 had an evaluation over 10 ms | allowance 10 ms (R13) | | 60% inside the old allowance |
-| `related` steps per ask | median 22,093, max 62,342 | step budget 100,000 (mem/ note, eval limits) | max 0.62 of budget | inside |
+| `related` steps per ask | median 22,093, max 62,342 | step budget 100,000 (a private note on the eval limits; `MEMBRANE_EVAL_BUDGET`, docs/c1f-stdlib.md) | max 0.62 of budget | inside |
 | `mention` write reply (21 words) | 3,271 B | 61,992-96,656 B (R5) | 0.03-0.05x | better (B2) |
 | Keep write reply, idle | 472 B | 12,613 B (R5) | 0.04x | better |
 | Keep write reply, 5 running turns (sleeping fake) | 541 B | 87,793 (3 running), 264,467 (10 running) | 0.006x vs 3 | better |
@@ -123,13 +123,13 @@ Misses are mostly paraphrases with no shared word (Agatha = "liveaboard", "what 
 - Tokens of the most recent real turns (the copy has only 110 turns with usage and ends before the newest).
 - Recall @1/3 like-for-like: needs the old per-question rank lists for @1/@3, or the same conversations through the 11-07 vote.
 - All 10 conversations (this run: 2; about 15 min), LongMemEval, a reranker comparison (cliffvm has none).
-- The 2 GB burst (R3) and the 50,000-row synthetic boot (R1): re-run with `native/tests` or `benchmark/` harnesses.
+- The 2 GB burst (R3) and the 50,000-row synthetic boot (R1): re-run with the `native/tests` harnesses.
 - Idle evaluations without the stats window's own cost.
 
 ## 5. Re-run (the operator will bench again after the paraphrase ladder)
 
 ```
-cd <worktree> && (cd native && cargo build --release --features bin --bin cliffvm)
+cd <checkout> && (cd native && cargo build --release --no-default-features --features bin)
 S=<scratch>; sqlite3 <live store> ".backup $S/seat.sqlite"          # a COPY; never the live store
 python3 -I scripts/measure_speed.py  $PWD $PWD/native/target/release/cliffvm $S/seat.sqlite $S/speed   > $S/speed.json    # ~7 min
 python3 -I scripts/measure_usage.py  $S/seat.sqlite                                                                        # seconds
@@ -166,5 +166,5 @@ Private seat, release build, imported 1,605 session headers + 200 sessions (27,3
 | `GET /` | 50 | 25 |
 | evaluation self time of 11 requests (`Stats:eval.total_ms`) | 302 | 16 |
 
-What it was: (1) `/session/status` ran, per session, a subquery over every `Chat` row with `json_extract` of each turn's body (sessions x turns: 41 M row visits); it now lists the running turns once (`IN (SELECT ...)`: 1.94 M sqlite steps at 300 sessions became 16 k; `native/tests/status_work_1143.rs` counts the steps and asks that doubling the store does not quadruple them). While it ran the single sql thread was busy, so every other query waited. (2) Every request is a born `Request` entity, and a birth dropped EVERY kept `instances(<class>)` answer: the 30-40 getters of a request that read `instances('Boot')` (`ui_root`, `cookie_name`, `fv_seat`, `ha_pending`, `wg_all`, ... on the live seat, 6-25 ms per nine requests each) each walked all loaded entities again. An entity's arrival now drops only the answers it can be in (`Core::inst_touch`); `native/tests/instances_cost_1143.rs` counts walks (30 `Request` births: 30 walks before, 0 now). (3) The "idle" 100% CPU of the demo seat was not idle: its Firefox tab holds six connections and polls `/session/status` (`panel.js`) and the history routes; every poll was a request that cost the two things above, and a 51 s status poll queued the next ones (the `/` at 3.5 s and the 404 at 12 s were waiting in that queue, not slow themselves). A seat with no page open idles at 0% CPU and 20 evaluations per ten seconds (the banner's clock).
+What it was: (1) `/session/status` ran, per session, a subquery over every `Chat` row with `json_extract` of each turn's body (sessions x turns: 41 M row visits); it now lists the running turns once (`IN (SELECT ...)`: 1.94 M sqlite steps at 300 sessions became 16 k; `native/tests/status_work_1143.rs` counts the steps and asks that doubling the store does not quadruple them). While it ran the single sql thread was busy, so every other query waited. (2) Every request is a born `Request` entity, and a birth dropped EVERY kept `instances(<class>)` answer: the 30-40 getters of a request that read `instances('Boot')` (`ui_root`, `cookie_name`, `fv_seat`, `ha_pending`, `wg_all`, ... on the live seat, 6-25 ms per nine requests each) each walked all loaded entities again. An entity's arrival now drops only the answers it can be in (`Core::inst_touch`); `native/tests/instances_cost_1143.rs` counts walks (30 `Request` births: 30 walks before, 0 now). (3) The "idle" 100% CPU of the demo seat was not idle: its Firefox tab holds six connections and polls `/session/status` (the old page's `panel.js`, since removed) and the history routes; every poll was a request that cost the two things above, and a 51 s status poll queued the next ones (the `/` at 3.5 s and the 404 at 12 s were waiting in that queue, not slow themselves). A seat with no page open idles at 0% CPU and 20 evaluations per ten seconds (the banner's clock).
 
