@@ -29,6 +29,12 @@ class TestTheVersionIsOneVersion(unittest.TestCase):
         ver = lambda v: tuple(int(x) for x in v.split("."))
         self.assertGreaterEqual(ver(man["version"]), ver(_pyproject_version()))
 
+    def test_the_ha_add_on_is_this_version(self):
+        # the add-on (addon/config.yaml) installs the release tarballs of its own `version`: it must be the package's
+        m = re.search(r'(?m)^version: "([0-9.]+)"$', (ROOT / "addon" / "config.yaml").read_text())
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), _pyproject_version())
+
     def test_the_ha_domain_stays_membrane(self):
         man = json.loads((ROOT / "custom_components" / "membrane" / "manifest.json").read_text())
         self.assertEqual(man["domain"], "membrane")

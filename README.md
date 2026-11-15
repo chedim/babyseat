@@ -43,6 +43,7 @@ macOS and Linux (x86_64 and arm64); there is no Windows build. The macOS binarie
 | installer | `curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh \| sh` (installs `~/.local/share/membrane-app/<version>` and a `~/.local/bin/babyseat` link; `--version X.Y.Z` picks one) | at the 0.7.60 release |
 | Docker | `docker run -p 127.0.0.1:4096:4096 -v babyseat-data:/data -e ANTHROPIC_API_KEY -v /path/to/linux/claude:/opt/claude:ro -e CLAUDE_BIN=/opt/claude chedim/babyseat` (the image has no `claude`; the admin token: `docker exec <container> cat /data/admin.token`) | at the 0.7.60 release |
 | binary | the GitHub release's `babyseat-0.7.60-<target>.tar.gz` and its `.sha256` (targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`): check the sha256, unpack, run `bin/cliffvm serve` | at the 0.7.60 release |
+| Home Assistant add-on | Home Assistant OS / Supervised: add the repository `https://github.com/chedim/membrane` in the add-on store, install **babyseat**; it announces itself to the integration ([addon/DOCS.md](addon/DOCS.md)) | at the next release |
 | from source | the next section | works today |
 
 `babyseat` and `membrane` are one command: it starts `cliffvm serve` and nothing else. The old subcommands (`opencode`, `store`, `ingest`, ...) are gone.

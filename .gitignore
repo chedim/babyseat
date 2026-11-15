@@ -77,3 +77,7 @@ dist/
 membrane/dist/
 # the release dist folder (scripts/dist/build.sh) is build output; the scripts that make it are source
 !scripts/dist/
+
+# the add-on's local build tarballs (addon/dist/README.md)
+addon/dist/*.tar.gz
+addon/dist/*.sha256

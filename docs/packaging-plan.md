@@ -27,6 +27,13 @@ decisions; it is in git history. Nothing is published by any workflow; publishin
   The old subcommands (`opencode review ingest backfill move toybox self shadow store connect auth doctor bench codegraph erase-field install`) say they are not in this release and point at `pip install babyseat==0.7.53`. Tests: `tests/wrapper/`.
 - **The binary workflow** (`.github/workflows/release-binaries.yml`): on a tag `v*` or by hand, builds the six targets, assembles the dist folder, smoke-tests it (macOS x86_64 under Rosetta), uploads the `babyseat-<version>-<target>.tar.gz` and the wheel payload as workflow artifacts; publishes nothing.
 - **Home Assistant**: the component installs no package and starts no process; HACS ships it from the repository (`hacs.json`; docs/home-assistant.md).
+- **The Home Assistant add-on** (`repository.yaml`, `addon/`; the user's guide is `addon/DOCS.md`): for Home Assistant OS and Supervised, the same repository is an add-on repository. The Supervisor builds `addon/Dockerfile`
+  on the device: the Home Assistant Alpine base image plus the release's MUSL tarball of the add-on's `version` (pinned to pyproject's by `tests/wrapper/test_versions.py`), checked against its `.sha256` and the
+  folder's `MANIFEST.sha256` (`addon/install-dist.sh`; `addon/dist/` takes local tarballs for a local build). `addon/run.sh` turns `/data/options.json` into the launch line (`addon/options.sh`: `seat_name`, and the chat model as
+  `provider` openai = one `cloud_models` entry + `minds`, ollama = `seat_backend` + `minds`, claude = a `claude_path` the user supplies; keys only as environment variables), execs
+  `cliffvm serve --port 4096 --bind 0.0.0.0 --data-dir /data`, and in the background (`addon/announce.sh`) waits for the door with this start's admin token and POSTs the Supervisor discovery
+  `{service: membrane, config: {host, port, token}}` at every start. Home Assistant's config folder is mapped read-only at `/config`, where the cutover finds the 0.7 store. NOT verified here: a real Supervisor, the image build
+  (no Docker daemon answered), the musl binary. Tests: `tests/wrapper/test_ha_addon.py`; CI: the `addon` job of `validate.yml` (the add-on linter) and the shellcheck line.
 
 ## Open (not decided; listed so they are not forgotten)
 

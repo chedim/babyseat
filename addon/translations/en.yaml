@@ -1,0 +1,25 @@
+configuration:
+  seat_name:
+    name: "Seat name"
+    description: "The model's name. Leave empty to keep the name the seat already has (or the old 0.7 seat's name, carried over once)."
+  provider:
+    name: "Chat model provider"
+    description: "openai: any OpenAI-compatible endpoint (base URL, model, API key). ollama: an Ollama server (its URL and a model it has pulled). claude: the claude CLI, which is NOT in the add-on: you supply the executable (Claude path) and an Anthropic API key."
+  model:
+    name: "Model"
+    description: "The model id for the openai and ollama providers (e.g. gpt-4o-mini, llama3.2)."
+  base_url:
+    name: "Base URL (openai)"
+    description: "The endpoint's root, e.g. https://api.openai.com. The seat calls <base URL>/v1/chat/completions."
+  api_key:
+    name: "API key (openai)"
+    description: "The endpoint's key. Leave empty for an endpoint that needs none. It reaches the seat only through an environment variable."
+  ollama_url:
+    name: "Ollama URL (ollama)"
+    description: "The Ollama server, e.g. http://192.168.1.10:11434. homeassistant.local may not resolve inside an add-on: use the address if it does not."
+  claude_path:
+    name: "Claude path (claude)"
+    description: "The absolute path of a Linux (musl) claude CLI executable visible in the add-on, e.g. /config/claude/claude (the Home Assistant config folder is mounted read-only at /config)."
+  anthropic_api_key:
+    name: "Anthropic API key (claude)"
+    description: "The key the claude CLI uses. It reaches the seat only through an environment variable."
