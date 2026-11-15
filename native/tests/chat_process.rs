@@ -1257,6 +1257,8 @@ fn three_tools() -> String {
     QUICK.replace(
         r#"out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tq1", "name": "mcp__membrane__entity_read", "input": {"spec": "Q:" + prompt}}]}})"#,
         r#"out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tz3", "name": "mcp__membrane__entity_read", "input": {"n": 1}}, {"type": "tool_use", "id": "tz1", "name": "mcp__membrane__entity_query", "input": {"n": 2}}, {"type": "tool_use", "id": "tz2", "name": "mcp__membrane__entity_write", "input": {"n": 3}}]}})"#)
+        // the result belongs to a tool the script announces (a result for an unannounced id is a row with no name, listed as a tool called "None")
+        .replace(r#""tool_use_id": "tq1""#, r#""tool_use_id": "tz1""#)
 }
 
 #[test]
