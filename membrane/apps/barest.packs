@@ -19,6 +19,7 @@ chat
 chat_turn
 vector
 embed
+field
 door_session
 legacy_import
 legacy_cutover

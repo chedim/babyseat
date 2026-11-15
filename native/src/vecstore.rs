@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, HashMap};
 pub const COMPACT_KEY: &str = "$f16";
 /// The only dtype so far (a header change later: `MAPPED Vector <dtype>`).
 pub const DTYPE: &str = "f16";
+/// The word after the dtype on a MAPPED line that keeps what a RULE writes to the class DERIVED: stored and restored at a restart, never journalled (`MAPPED FieldState f16 derived`).
+pub const DERIVED: &str = "derived";
 
 /// f32 -> f16 bits, round to nearest even. None when the value does not fit (infinite, NaN, or beyond 65504).
 pub fn f32_to_f16(x: f32) -> Option<u16> {

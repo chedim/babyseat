@@ -1,6 +1,6 @@
 # SemText and legs: how code builds the graph (built: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges, sentence vectors, the shared recall, the recall banner part, Memory)
 
-A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "Recall in the banner", "Memory"); the field engine's use of the legs and everything under "Not built" is not. It is the shape the semantic field
+A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "The field", "Recall in the banner", "Memory"); recall's use of the field and everything under "Not built" is not. It is the shape the semantic field
 takes in the barest seat: ONE graph (the VM's entities), with the semantic state an opt-in component of an entity, and code (c1f
 packs) building the graph from text.
 
@@ -24,7 +24,7 @@ packs) building the graph from text.
 4. Mention rules (c1f, in a pack the model can layer over) create `Word:<normalised surface>`, `File:<path>` and the like by
    constructor and link them to the spans (mention edges). An entity is OWNED by its mentions: it lives while one mention exists, so
    forgetting a message tidies the graph. The recall index holds weak references.
-5. Not built: a field engine that moves entity states by the sentence vectors (the golden fixtures for it are in `tests/golden/efield/`).
+5. The field (`packs/field.c1f`, "The field" below) moves entity states by the sentence vectors as they land and logs each move on the text. Recall does not read it yet.
 
 ## The model builds more legs
 A leg is just a SemText, so any pack the model writes can make one: a command's output
@@ -135,7 +135,7 @@ vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (th
 - THE QUEUE is `Embed:queue` (`state` idle | working | paused | stuck, `reason`, `line`, `inflight`, `landed`, `cache`, `pass_n`, `hold`). ONE request at a time, one text per request: within the existing worker limit (`effect_workers`), no
   second limit. A request is sent only while no chat turn is running (each turn of any chat or session, when it becomes `running`, makes a small `Embed:turn:<key>` of this pack's resident class, and retires it when it is done or an error; the queue reads those, never lists `Chat`; a pointer of a dead run is not counted); one in flight finishes, then the queue waits for the turn to end and goes on by itself (the sender is a getter that reads the turns). An `Embed:ask:<key>` is retired when its text has all
   its vectors; a text is marked `embedded = true` and counts its sentences done in `emb_n` (a restart goes on where it stopped).
-- THE BACKLOG: the chat bodies nobody asked for (the imported history, messages from before) are found in the store (`sql`, 64 texts a page, newest first, a page at a time: the query holds the engine while it runs) and go through the same queue once
+- THE BACKLOG: the chat bodies nobody asked for (the imported history, messages from before) are found in the store (`sql`, 64 texts a page, OLDEST first by the message id, a page at a time: the query holds the engine while it runs; the waiting asks go first, oldest first too, so the vectors land in text order for the field, `packs/field.c1f`) and go through the same queue once
   the model server answers. The Settings row `import.embeddings` ("Sentence vectors", read-only) shows `Embed:queue.line`: done of total texts, or why the queue waits. While a history import runs the total is approximate (it never shows less than done plus the texts known
   to be waiting; the next start counts exactly); a page of the backlog is asked again at a chat event or at the import's next page, so the very last page of an import is found at the next chat event or start.
 - WHEN IT FAILS (no model server, the model not installed (the reason says `ollama pull <model>`), a timeout, a wrong answer): `fail`/`reason`/`line`/`state: stuck` say why, the sentences stay pending, and the queue is held until the next
@@ -143,8 +143,32 @@ vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (th
 - REPLAY: the Fetch driver's receipt is a derived write (`driver:request`), but a write to a MAPPED class (`Vector`) is journalled whole and compact, so a replay of the journal remakes the vectors (docs/cliffvm.md, "MAPPED").
 - Tests: `native/tests/embed_1143.rs` (in-process, receipts written by the test, one end-to-end test against a tiny model server in the test) and `native/tests/embed_process_1143.rs` (the real seat, a closed port).
 
+### The field (#1143, step 3; `membrane/packs/field.c1f`, tests `native/tests/field_1143.rs`)
+The old membrane's entity field, in SemText terms. When a text's sentence vectors land (the embed queue writes its `emb_n`), every Word / Identifier / Path entity a landed sentence mentions moves:
+`state <- unit(state + GAIN (x - state))`, x the sentence's unit vector. The step `|GAIN (x - state before)|` is the MOVE, written on the text as a row of `field_moves` (`{e, s, m}`: the entity, the
+sentence number, the move); `field_n` on the text counts the sentences applied.
+- **Which entities**: identifiers and paths get a state (`FieldState:<entity eid>`, `v` f16, `n` the mentions applied) at their first mention; a word waits in a NURSERY (`field_pend` on the Word: the
+  landed sentences that mentioned it) until 3 distinct sentences, then materialises: its state starts at its seed and the waiting mentions are replayed in order, and their moves are written then, on the
+  texts that made them; a word of 1-3 letters never gets a state or a move.
+- **Seeds**: the bare term's own embedding, `FieldSeed:<entity eid>`, asked once per entity when it materialises: a `FieldTerm:<entity eid>` SemText (the term as its text) is asked through the
+  embed queue like any text, and its one vector is written to `FieldSeed` (declared by the vector pack, because the embed queue writes it), never to `Vector`, so the cosine lane never returns a seed.
+  A text whose entities need a seed waits (its moves apply when the seed lands; the seed asks go before the backlog).
+- **Background**: `FieldBg:all.v`, the running mean of every sentence vector of a mentioned text (`n` counts them).
+- **Episodes** (identifiers and paths, from the 40th mention on): every 5 mentions the open run (`run_k`, `run_acc` on the state) closes as `FieldEpisode:<entity eid>:<i>` (its centroid, `n`); the
+  list is `eps` on the state; past 48 the two most alike neighbours merge (one merge per landing).
+- **The mean** is not stored: `n` is, and a reader recomputes the mean from the sentence vectors for the few candidates it reads.
+- **The constants** are getters on SemText that a model's layer can override: `field_gain` 0.5, `field_k_mat` 3, `field_word_min` 4, `field_ep_run` 5, `field_ep_max` 48, `field_mature` 40 (all carried from
+  the old seat, each awaiting the operator's yes).
+- **Stored, not replayed**: the classes are `MAPPED ... f16 derived` (docs/cliffvm.md): the states, seeds, episodes and the background are stored rows, restored at a restart like any entity, never journalled
+  and never recomputed at start; the move log and the nursery are ordinary stored properties written by rules (derived). **A replay of the journal alone does not rebuild the field.**
+- **Order**: the moves apply when the vectors land, and the queue sends the waiting asks and the backlog oldest first, so they land in text order (a live message asked while the backlog runs lands
+  before older history: that history then moves the states after it).
+- **How**: c1f has no loop with an accumulator, so one landing is one cascade: a setter makes a VIRTUAL `FieldStep` per (entity, mention), each chained to the previous mention of the same entity; their
+  getters compute the walk; when every chain is computed, one setter writes each state, each text's moves, the nursery, the episodes and the background. The steps are collected when the round ends.
+- Recall does not read the field yet (steps 4-6: the move log voter, entity recall over `near(q, 'FieldState', k)` centred on the background, the vote).
+
 ### Not built
-A backlog of stored texts that are not chat bodies (the backlog query reads chat bodies only; any other text is asked when its text is written), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, the field engine's use of the legs, a collection of stored Word entities, the
+A backlog of stored texts that are not chat bodies (the backlog query reads chat bodies only; any other text is asked when its text is written), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, recall's use of the field (the move log voter, entity recall over the states, the vote), a collection of stored Word entities, the
 mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).
 
 

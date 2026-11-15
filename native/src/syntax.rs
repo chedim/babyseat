@@ -207,7 +207,8 @@ pub struct Pack {
     /// `VIRTUAL <Class>` / `RESIDENT <Class>` header lines: the classes this pack declares RAM-only / always loaded (docs/cliffvm.md, "Storage modes")
     pub virtuals: Vec<String>,
     pub residents: Vec<String>,
-    /// `MAPPED <Class> <dtype>` header lines: the classes this pack declares MAPPED, their `v` kept in the native vector store as that dtype (`f16` only; vecstore.rs)
+    /// `MAPPED <Class> <dtype> [derived]` header lines: the classes this pack declares MAPPED, their `v` kept in the native vector store as that dtype (`f16` only; vecstore.rs);
+    /// the second item is the dtype, then ` derived` when what a rule writes to the class stays derived (stored, not journalled)
     pub mapped: Vec<(String, String)>,
     pub setters: Vec<OnSet>,
     pub getters: Vec<Getter>,
@@ -260,11 +261,14 @@ pub fn parse_full(src: &str) -> Result<Pack, String> {
             let mut it = line.split_whitespace().skip(1);
             let class = it.next().ok_or(format!("line {}: MAPPED needs a class name and a dtype (`MAPPED Vector f16`)", n + 1))?;
             let dtype = it.next().ok_or(format!("line {}: MAPPED {} needs a dtype (`MAPPED {} f16`: the only dtype so far)", n + 1, class, class))?;
-            if it.next().is_some() { return Err(format!("line {}: MAPPED takes one class and one dtype: `MAPPED {} {}`", n + 1, class, dtype)); }
+            // an optional third word `derived`: what a rule writes to the class stays a DERIVED write (stored, restored at a restart, never journalled); without it a rule's writes are journalled whole
+            let derived = match it.next() { None => false, Some(w) if w == crate::vecstore::DERIVED => true, Some(w) => return Err(format!("line {}: MAPPED {} {} {}: the only word after the dtype is `derived` (a rule's writes are stored, not journalled)", n + 1, class, dtype, w)) };
+            if it.next().is_some() { return Err(format!("line {}: MAPPED takes one class, one dtype and at most `derived`: `MAPPED {} {}`", n + 1, class, dtype)); }
             if !class.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { return Err(format!("line {}: MAPPED {}: a class name is letters, digits and underscores", n + 1, class)); }
             if dtype != crate::vecstore::DTYPE { return Err(format!("line {}: MAPPED {} {}: the dtype `{}` is not supported (only `{}`)", n + 1, class, dtype, dtype, crate::vecstore::DTYPE)); }
             reserved_class(class, n + 1, false)?;
-            if !pack.mapped.iter().any(|(c, _)| c == class) { pack.mapped.push((class.to_string(), dtype.to_string())); }
+            let mode = if derived { format!("{dtype} {}", crate::vecstore::DERIVED) } else { dtype.to_string() };
+            if !pack.mapped.iter().any(|(c, _)| c == class) { pack.mapped.push((class.to_string(), mode)); }
             body.push('\n');
         } else {
             body.push_str(raw);
