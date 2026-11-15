@@ -957,6 +957,8 @@ impl Core {
     /// The engine's own built-ins that need the Core: `sql(query, args...)` (the store driver, store.rs). None: not one.
     /// Whether a class keeps its `v` in the native vector store (its owner pack declared it `MAPPED`).
     pub fn is_mapped(&self, cls: &str) -> bool { self.mapped.read().unwrap_or_else(|e| e.into_inner()).contains_key(cls) }
+    /// Whether what a RULE writes to an entity of a MAPPED class is journalled (stamped outside): yes, unless its line says `derived` (`MAPPED <Class> f16 derived`).
+    pub fn is_mapped_journalled(&self, cls: &str) -> bool { self.mapped.read().unwrap_or_else(|e| e.into_inner()).get(cls).map_or(false, |m| !m.ends_with(crate::vecstore::DERIVED)) }
 
     /// A write of `v` to an entity of a MAPPED class, checked and put in its COMPACT form (`{"$f16": base64}`), the one form the engine, the journal and a replay carry.
     /// Ok(None): the very same f16 values are stored already. Err: the reason it is refused (a text for the receipt). A null (clearing) passes. Nothing is stored here: `hear` does.

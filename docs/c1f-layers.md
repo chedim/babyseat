@@ -44,7 +44,7 @@ A pack's header is its first lines (anywhere before the code, one per line): `PA
 |---|---|
 | `VIRTUAL <Class>` | the class lives in memory only: never stored, restored or journalled |
 | `RESIDENT <Class>` | stored and always loaded; the default, with no line, is stored and loaded on demand |
-| `MAPPED <Class> <dtype>` | a lazy class whose property `v` (one big list of numbers) lives in the native vector store (`f16` is the only dtype); `near(...)` searches it (`membrane/packs/vector.c1f` declares `Vector`) |
+| `MAPPED <Class> <dtype> [derived]` | a lazy class whose property `v` (one big list of numbers) lives in the native vector store (`f16` is the only dtype); `near(...)` searches it (`membrane/packs/vector.c1f` declares `Vector`). With `derived` (awaiting the operator's approval) what a rule writes to it stays a derived write: stored and restored at a restart, never journalled (`membrane/packs/field.c1f`) |
 
 Rule A applies: only the OWNER of a class declares its mode (a storage line claims a class no pack owns yet, like a getter does); any other pack, imported or not, is refused with a text naming both packs ("pack b: RESIDENT X: pack a owns X (it declares it VIRTUAL) and only the
 owner of a class declares its storage mode"). One class per line; a class that is both `VIRTUAL` and `RESIDENT` in one pack is a parse error. The surface and types snapshots (`surface.json`, `types.json`) list a pack's `virtual` and `resident` classes.
