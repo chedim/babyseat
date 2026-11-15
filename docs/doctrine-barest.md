@@ -15,7 +15,7 @@ Modify your banner to help you maintain continuity. Keep it fresh: when you see 
 |---|---|
 | the model's tools: `entity_query`, `entity_read`, `entity_write`, `run_cliff` | built (`door_tools.c1f`); the whole tool surface is field operations |
 | Command / File / Fetch / Sql entities act by writes | the drivers are in the VM; each is reached through `entity_write` and its receipt is read back (`<prop>_result`) |
-| the banner is the model's entity | built (`membrane/apps/barest.c1f/default_banner.c1f`, `Help:banner`): `Banner.text` is a live getter; the model replaces it with a pack that imports `default_banner` and defines `Banner.text` (the class list is not the model's: `entity_write` refuses `parents`, classes are set at birth); the seat never segments or joins it |
+| the banner is the model's entity | built (`membrane/apps/barest.c1f/default_banner.c1f`, `Help:banner`): `Banner.text` is a live getter; the model replaces it with a pack that imports `default_banner` and defines `Banner.text` (the class list is not the model's: `entity_write` refuses `parents`, classes are set at birth); the seat never edits it; a turn shows every `Banner:*` instance together, the main one first, then the others oldest update first |
 | write a `.c1f` pack | built: `entity_write {spec: 'Pack:<name>', prop: 'text', value: <c1f>}` loads or reloads it; read `Pack:<name>.state` / `.error`. The tools pack is privileged (granted by boot), the model's own packs are not: docs/cliffvm.md, "Pack entities" |
 | Help entities | built: eleven topics (`Help:c1f`, `packs`, `upgrade`, `banner`, `cliff`, `semtext`, `sql`, `legacy`, `ha`, `settings`, `page`) |
 | recall brings facts | not in this release: the banner is built from the entity map the model keeps |

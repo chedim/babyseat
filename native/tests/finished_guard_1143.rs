@@ -27,7 +27,7 @@ fn seat(store: Option<&str>, before: impl Fn(&Host)) -> Host {
     h.pump();
     h
 }
-const DERIVED: [&str; 9] = ["banner_text", "banner_slot", "sys", "argv", "mcp_json", "bin", "port", "max_turns", "note"];
+const DERIVED: [&str; 11] = ["banner_main", "banner_more", "banner_text", "banner_slot", "sys", "argv", "mcp_json", "bin", "port", "max_turns", "note"];
 
 /// the live shapes: the class of the eid's namespace (Chat), the kind in `parents`; the turn's state lives on the `:turn` entity
 fn message(h: &Host, n: u32, state: Option<&str>) {
