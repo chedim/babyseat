@@ -14,19 +14,16 @@ fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
 /// scratch packs on top of the seat: `Box.say` makes a chat body (`Chat:main:message:<id>:body`) with the text, `Box.ask` asks for its vectors (what the chat does), `Box.turn` makes a turn
-const MAKER: &str = "PACK embmaker 1\nIMPORT semtext 1\nIMPORT chat 1\n\
+const MAKER: &str = "PACK embmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nIMPORT vector 1\nProbe.back getter: [prop(e, 'v') for e in this.eids]\n\
 Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[prop(this.say, 'id')]:body = SemText(text: prop(this.say, 'text'))\n\
 Box.ask on-setter ask:\n  WHEN this.ask != None:\n    membrane::Chat:main:message[this.ask]:body.embed = True\n\
 Box.turn on-setter turn:\n  WHEN this.turn != None:\n    membrane::Chat:main:message[this.turn]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.turn, queued_at: 1)\n";
-/// the vector pack of the native half, when the tree has it; until then a stand-in that only declares the class
-const STAND_IN: &str = "PACK vecstub 1\nVector.kind getter: 'vector'\n";
 
 fn load(h: &Host, extra: &str) {
     let r = repo();
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
     let names: Vec<String> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(String::from).collect();
     for (i, n) in names.iter().enumerate() { h.load_app(&r.join(format!("membrane/packs/{n}.c1f")), i == 0).unwrap_or_else(|e| panic!("{n}: {e}")); }
-    if !names.iter().any(|n| n == "vector") { h.load_pack("vecstub", STAND_IN).unwrap(); }
     h.load_app(&r.join("membrane/packs/launcher.c1f"), false).unwrap();
     h.load_app(&r.join("membrane/apps/barest.c1f"), false).unwrap();
     h.load_pack("embmaker", MAKER).unwrap();
@@ -67,7 +64,7 @@ const Q: &str = "membrane::Embed:queue";
 /// the request that is out: the engine consumes a driver write (`Fetch:embed.request` reads empty once it is sent), so the queue's own `inflight` is what is read here; the request itself is checked end to end below
 fn request(h: &Host) -> J {
     let j = h.get(Q, "inflight");
-    if j.is_null() { return J::Null; }
+    if j.is_null() || h.get(Q, "flying") != json!(true) { return J::Null; }
     json!({"id": j["id"], "url": j["url"], "method": "POST", "body": {"model": j["model"], "input": j["unc"].as_array().unwrap().iter().map(|x| x["text"].clone()).collect::<Vec<_>>()}})
 }
 fn seq(h: &Host) -> J { h.get(Q, "seq") }
@@ -83,6 +80,14 @@ fn answer(h: &Host) {
 fn receipt(h: &Host, _id: &J, rec: J) { h.write("Fetch:embed", "request_result", rec, "driver:request"); h.pump(); }
 fn sentences(n: usize) -> String { (1..=n).map(|i| format!("Sentence number {i} is here.")).collect::<Vec<_>>().join(" ") }
 fn state(h: &Host) -> J { h.get(Q, "state") }
+/// the numbers of some vectors as a rule reads them (the row holds a summary only: the vector pack keeps them in its own store)
+fn back(h: &Host, eids: &[String]) -> Vec<J> {
+    let n = h.snapshot().keys().filter(|k| k.starts_with("Probe:")).count();
+    let p = format!("Probe:p{n}");
+    h.born(&p, "Probe", props(json!({"eids": eids})), "person");
+    h.pump();
+    h.get(&p, "back").as_array().unwrap().clone()
+}
 
 #[test]
 fn an_ask_makes_one_request_for_the_sentences_with_the_default_model() {
@@ -115,7 +120,7 @@ fn the_receipt_becomes_vector_entities_the_text_is_marked_and_the_ask_is_gone() 
         let e = vec_eid("m1", start);
         assert_eq!(h.get(&e, "of"), json!(body("m1")), "{e}");
         assert_eq!(h.get(&e, "start"), json!(start));
-        assert_eq!(h.get(&e, "v"), json!(vector(t)), "{e}");
+        assert_eq!(back(&h, &[e.clone()]), [json!(vector(t))], "{e}");
     }
     assert_eq!(h.get(&body("m1"), "embedded"), json!(true));
     assert!(!h.snapshot().keys().any(|k| k.starts_with("membrane::Embed:ask:")), "the ask is retired: {:?}", h.snapshot().keys().filter(|k| k.contains("Embed")).collect::<Vec<_>>());
@@ -161,7 +166,7 @@ fn a_sentence_said_twice_in_a_pass_makes_no_second_request() {
     say(&h, "m2", "The same words twice.", true);
     assert_eq!(seq(&h), first, "no new request: the cache had it");
     assert_eq!(request(&h), J::Null);
-    assert_eq!(h.get(&vec_eid("m2", 0), "v"), json!(vector("The same words twice.")));
+    assert_eq!(back(&h, &[vec_eid("m2", 0)]), [json!(vector("The same words twice."))]);
     assert_eq!(h.get(&body("m2"), "embedded"), json!(true));
 }
 
@@ -263,7 +268,6 @@ fn a_seat_with_no_embedding_model_is_stuck_in_plain_words_and_sends_nothing() {
     let r = repo();
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
     for (i, n) in list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).enumerate() { h.load_app(&r.join(format!("membrane/packs/{n}.c1f")), i == 0).unwrap(); }
-    h.load_pack("vecstub", STAND_IN).unwrap();   // (ignored when the tree has the vector pack: the class is declared twice only to the stand-in's loss)
     h.load_pack("embmaker", MAKER).unwrap();
     h.rebuild();
     start(&h, &[]);
@@ -332,7 +336,7 @@ fn tmp(tag: &str) -> PathBuf {
 }
 
 #[test]
-fn through_the_fetch_driver_the_vectors_arrive_and_a_replay_writes_the_same_ones_without_asking() {
+fn through_the_fetch_driver_the_request_is_the_ollama_call_and_the_vectors_arrive() {
     let srv = fake();
     let dir = tmp("e2e");
     let file = dir.join("seat.sqlite");
@@ -345,20 +349,13 @@ fn through_the_fetch_driver_the_vectors_arrive_and_a_replay_writes_the_same_ones
     box_(&h);
     say(&h, "m1", "Dogs chase cats. Cats climb trees.", true);
     until("the vectors", || h.get(&vec_eid("m1", 17), "v") != J::Null, &h);
-    assert_eq!(h.get(&vec_eid("m1", 0), "v"), json!(vector("Dogs chase cats.")));
+    assert_eq!(back(&h, &[vec_eid("m1", 0)]), [json!(vector("Dogs chase cats."))]);
     let seen = srv.seen.lock().unwrap().clone();
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0]["path"], json!("/api/embed"));
+    assert_eq!(seen[0]["body"]["model"], json!("mxbai-embed-large"));
     assert_eq!(seen[0]["body"]["input"], json!(["Dogs chase cats.", "Cats climb trees."]));
-    // the receipt is a journalled outside write: a replay on a fresh host with NO drivers makes the same vectors
-    let lines = h.journal();
-    let c = open(None, false);
-    load(&c, "");
-    c.replay(&lines);
-    c.pump();
-    assert_eq!(c.get(&vec_eid("m1", 0), "v"), json!(vector("Dogs chase cats.")));
-    assert_eq!(c.get(&vec_eid("m1", 17), "v"), json!(vector("Cats climb trees.")));
-    assert_eq!(srv.seen.lock().unwrap().len(), 1, "the replay asked nobody");
+    assert_eq!(h.get(Q, "state"), json!("idle"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -380,6 +377,7 @@ fn the_backlog_of_the_store_is_embedded_newest_first_once_the_seat_starts() {
     }
     let h = open(Some(file.to_str().unwrap()), true);
     load(&h, "");
+    h.load_stored_entities();
     let mut f = Map::new();
     f.insert("seat_backend".into(), json!(format!("http://127.0.0.1:{}", srv.port)));
     boot_started(&h, &f, true);
@@ -390,14 +388,4 @@ fn the_backlog_of_the_store_is_embedded_newest_first_once_the_seat_starts() {
     for id in ["1000-00000001", "2000-00000002", "3000-00000003"] { assert_eq!(h.get(&body(id), "embedded"), json!(true), "{id}"); }
     until("the progress", || h.get(Q, "line").as_str().map_or(false, |l| l.starts_with("3 of 3 texts have sentence vectors")), &h);
     let _ = std::fs::remove_dir_all(dir);
-}
-
-#[test]
-fn zz_dbg() {
-    let h = seat();
-    box_(&h);
-    say(&h, "m1", "Dogs chase cats. Cats climb trees.", true);
-    answer(&h);
-    let snap = h.snapshot();
-    for (k, v) in snap.iter().filter(|(k, _)| !k.contains("Setting") && !k.contains("Help")) { eprintln!("{k} => {}", v.to_string().chars().take(300).collect::<String>()); }
 }

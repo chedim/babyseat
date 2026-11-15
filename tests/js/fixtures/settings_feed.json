@@ -348,6 +348,27 @@
    "choices": null
   },
   {
+   "id": "import.embeddings",
+   "group": "import",
+   "key": "embeddings",
+   "label": "Sentence vectors",
+   "help": "Every sentence you and the assistant say gets a vector from the local embedding model, made in the background while no answer is running. Read-only: how many texts have theirs.",
+   "kind": "readonly",
+   "live": "restart",
+   "order": 18,
+   "default": null,
+   "min": null,
+   "max": null,
+   "whole": false,
+   "unit": null,
+   "how": "start the seat with --fact embed_model=<name> to use another embedding model (default mxbai-embed-large)",
+   "hidden": false,
+   "current": "12 of 40 texts have sentence vectors; the rest are being made in the background",
+   "refused": "",
+   "applied": null,
+   "choices": null
+  },
+  {
    "id": "access.token_life",
    "group": "access",
    "key": "token_life",

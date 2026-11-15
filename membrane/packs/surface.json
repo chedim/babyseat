@@ -118,6 +118,7 @@
     "members": 67,
     "writes": [
       "Doorbell:chat.at",
+      "membrane:*.embed",
       "membrane:*.mention",
       "membrane:*.queued",
       "membrane:*=ChatLine()",
@@ -201,6 +202,7 @@
       "membrane:*.calls",
       "membrane:*.cost",
       "membrane:*.duration",
+      "membrane:*.embed",
       "membrane:*.ended",
       "membrane:*.error",
       "membrane:*.kept",
@@ -641,6 +643,48 @@
     ],
     "boot_facts": []
   },
+  "embed": {
+    "imports": [
+      "boot",
+      "fetch",
+      "semtext",
+      "chat",
+      "vector"
+    ],
+    "classes": [
+      "Boot",
+      "EmbedAsk",
+      "EmbedQueue",
+      "Fetch",
+      "SemText"
+    ],
+    "members": 41,
+    "writes": [
+      "*.cache",
+      "*.emb_n",
+      "*.embedded",
+      "*.fail",
+      "*.landed",
+      "*.pass_n",
+      "Fetch:embed.request",
+      "membrane:*.retire",
+      "membrane:*=EmbedAsk()",
+      "membrane::Embed:queue.asked",
+      "membrane::Embed:queue.fail",
+      "membrane::Embed:queue.hold",
+      "membrane::Embed:queue.landed",
+      "membrane::Embed:queue=EmbedQueue()"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "embed_model",
+      "seat_backend",
+      "started"
+    ],
+    "resident": [
+      "Embed"
+    ]
+  },
   "entity": {
     "imports": [],
     "classes": [
@@ -764,6 +808,7 @@
     "claims": [],
     "boot_facts": [
       "cloud_models",
+      "embed_model",
       "minds",
       "router_on",
       "seat_backend"

@@ -17,6 +17,7 @@ semtext
 mentions
 chat
 chat_turn
+vector
 embed
 door_session
 legacy_import
@@ -28,4 +29,3 @@ ha
 settings
 link
 link_route
-vector

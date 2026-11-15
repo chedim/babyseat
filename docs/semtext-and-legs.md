@@ -128,10 +128,26 @@ MENTION_CAP = 400 per layer (`SemText.mention_cap`; none was given). `related_n`
 Open: a cut for the entities mentioned by very many sentences (their `mentioned_in` grows without bound and `related` reads it whole; one evaluation past the step budget answers a
 reasoned null); the step budget of a getter or setter applies to the mention setter of a big text (time limits nothing).
 
+### Built: sentence vectors, stage 1 of the semantic field (#1143, operator 2026-11-14)
+`membrane/packs/embed.c1f`. Every sentence of a SemText that is asked gets a vector from the local Ollama, through the Fetch driver, stored as `Vector:of:<key>:s:<start>` (`of`, `start`, `v`; the class is the
+vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (the Span key rule). The ask is `embed = true` on the SemText (the chat writes it on a message body and on an answer's body, next to
+`mention`; a tool's result is not asked). The model server is the boot fact `seat_backend`, the model the fact `embed_model` (default `mxbai-embed-large`, set in `launcher.c1f`); the call is `POST <seat_backend>/api/embed
+{model, input: [...]}` with a 120 s limit. The numbers are the old Python field's: at most 64 sentences a request, a pass of 256 sentences, a same-pass cache of 64 entries (a sentence said twice in a pass makes no second request).
+- THE QUEUE is `Embed:queue` (`state` idle | working | paused | stuck, `reason`, `line`, `inflight`, `landed`, `cache`, `pass_n`, `hold`). ONE request at a time, one text per request: within the existing worker limit (`effect_workers`), no
+  second limit. A request is sent only while no chat turn is running; one in flight finishes, then the queue waits for the turn to end and goes on by itself (the sender is a getter that reads the turns). An `Embed:ask:<key>` is retired when its text has all
+  its vectors; a text is marked `embedded = true` and counts its sentences done in `emb_n` (a restart goes on where it stopped).
+- THE BACKLOG: the chat bodies nobody asked for (the imported history, messages from before) are found in the store (`sql`, 64 texts a page, newest first, a page at a time: the query holds the engine while it runs) and go through the same queue once
+  the model server answers. The Settings row `import.embeddings` ("Sentence vectors", read-only) shows `Embed:queue.line`: done of total texts, or why the queue waits. While a history import runs the total is approximate (it never shows less than done plus the texts known
+  to be waiting; the next start counts exactly); a page of the backlog is asked again at a chat event or at the import's next page, so the very last page of an import is found at the next chat event or start.
+- WHEN IT FAILS (no model server, the model not installed (the reason says `ollama pull <model>`), a timeout, a wrong answer): `fail`/`reason`/`line`/`state: stuck` say why, the sentences stay pending, and the queue is held until the next
+  change that is not its own: a chat event (message, turn start or end) or a new ask; then, with no turn running, it tries again. No timer, no loop, never an Error that stops a round.
+- REPLAY: the Fetch driver's receipt is stamped as a derived write (`driver:request`), NOT a journalled outside write (only the Sql driver's `record:` receipts are); the vectors a receipt made are stored (rows and the vector store), but a replay of the journal alone does not
+  remake them (the queue would ask again). Making the receipt an outside write is a one-line native change (`stamp_writer`), not done here.
+- Tests: `native/tests/embed_1143.rs` (in-process, receipts written by the test, one end-to-end test against a tiny model server in the test) and `native/tests/embed_process_1143.rs` (the real seat, a closed port).
+
 ### Not built
-Vectors and embeddings (sentences carry none), paragraphs, syntax, coreference, the recall index, the field engine's use of the legs, a collection of stored Word entities, the
-mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, embeddings budget,
-untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).
+Sentence vectors for anything but chat bodies and asked texts (the backlog is chat bodies only), recall by meaning (stage 2: `near` over the vectors), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, the recall index, the field engine's use of the legs, a collection of stored Word entities, the
+mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).
 
 
 **Cost notes (w36, #1143).** `SemText.related` reads each entity's cached `edge_rows` (a getter of Word / Identifier / Path: the entity's edges as JSON rows, rebuilt when its `mentioned_in` changes) instead of rebuilding every edge's text on every ask; the asking text's own rows are dropped after the grouping. `mention_done` reads the spans the mention setter listed (`mention_spans`) and waits for their `forms`. `group_by` finds a text key's group through a hash. The rest of the cost of `related` is linear in the edges walked; a cut on the edges of a very common word is an open operator decision (nothing is cut).

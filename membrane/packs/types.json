@@ -203,6 +203,7 @@
       "Request.r_session": "Dict?"
     },
     "writes": {
+      "Chat.embed": "Bool",
       "Chat.mention": "Bool",
       "Chat.queued": "Bool",
       "Doorbell.at": "Num",
@@ -362,6 +363,7 @@
       "Chat.calls": "Any",
       "Chat.cost": "Any",
       "Chat.duration": "Any",
+      "Chat.embed": "Bool",
       "Chat.ended": "Num",
       "Chat.error": "Any",
       "Chat.kept": "Any",
@@ -1233,6 +1235,71 @@
     },
     "findings": []
   },
+  "embed": {
+    "getters": {
+      "EmbedAsk.kind": "Text",
+      "EmbedQueue.asks": "List(Any)",
+      "EmbedQueue.backend": "Any",
+      "EmbedQueue.busy": "Bool",
+      "EmbedQueue.counts": "Any",
+      "EmbedQueue.counts_rows": "Any",
+      "EmbedQueue.ctexts": "List(Any)",
+      "EmbedQueue.cur": "Any",
+      "EmbedQueue.cut": "Any",
+      "EmbedQueue.done_n": "Any",
+      "EmbedQueue.first_open": "Any",
+      "EmbedQueue.flying": "Bool",
+      "EmbedQueue.go": "Dict?",
+      "EmbedQueue.job": "Dict?",
+      "EmbedQueue.kind": "Text",
+      "EmbedQueue.line": "Text",
+      "EmbedQueue.model": "Any",
+      "EmbedQueue.open": "List(Any)",
+      "EmbedQueue.page": "Any",
+      "EmbedQueue.page_rows": "Any",
+      "EmbedQueue.progress": "Text",
+      "EmbedQueue.ready": "Bool",
+      "EmbedQueue.reason": "Any",
+      "EmbedQueue.run": "Any",
+      "EmbedQueue.settled": "List(Any)",
+      "EmbedQueue.sig": "Text",
+      "EmbedQueue.state": "Text",
+      "EmbedQueue.texts": "List(Any)",
+      "EmbedQueue.todo": "Any",
+      "EmbedQueue.total_n": "Any",
+      "EmbedQueue.unc": "List(Any)",
+      "Fetch.em_body": "Any",
+      "Fetch.em_job": "Any",
+      "Fetch.em_mine": "Bool",
+      "Fetch.em_ok": "Any",
+      "Fetch.em_vecs": "Any",
+      "Fetch.em_why": "Text?",
+      "SemText.emb_rest": "List(Dict)",
+      "SemText.vec_todo": "List(Dict)"
+    },
+    "writes": {
+      "*.cache": "List(Any)",
+      "*.emb_n": "Any",
+      "*.embedded": "Bool",
+      "*.fail": "None",
+      "*.landed": "Any",
+      "*.pass_n": "Any",
+      "Embed.asked": "Num?",
+      "Embed.fail": "Text?",
+      "Embed.hold": "Any",
+      "Embed.landed": "Any",
+      "EmbedQueue.after": "Any",
+      "EmbedQueue.inflight": "Dict",
+      "EmbedQueue.made": "Num?",
+      "EmbedQueue.seq": "Num?",
+      "Fetch.request": "Dict",
+      "membrane.retire": "Bool"
+    },
+    "findings": [],
+    "resident": [
+      "Embed"
+    ]
+  },
   "entity": {
     "getters": {
       "Entity.summary": "Text?",
@@ -1395,6 +1462,7 @@
     },
     "writes": {
       "Boot.cloud_models": "List(Dict)",
+      "Boot.embed_model": "Text",
       "Boot.minds": "Dict",
       "Boot.router_on": "Bool",
       "Boot.seat_backend": "Text"
