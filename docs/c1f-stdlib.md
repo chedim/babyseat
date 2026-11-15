@@ -46,7 +46,7 @@ There is no `slice` builtin: a span's `text` is already cut, and `head(tail(t, l
 pack holds only the offsets.
 
 ## The builtins (`native/src/expr.rs`, `RESERVED`)
-Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit vsum near abs min max fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
+Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit vsum near abs min max log fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
 lists and dicts `sort_by pluck distinct group_by concat fold`; time `ago epoch localtime num`; the field `instances referencing prop why`; host functions `jsonl listdir read sql stat recall rerank pronoun`
 (`pronoun` is what a bare `it`, `that`, `they` ... asks the host; the seat's host answers none, so a pronoun reads as the reasoned error `the pronoun "it" is not bound here`).
 `near(<list of numbers>, '<Class>', k)` (#1143, operator 2026-11-14; the shipped MAPPED class is `Vector`, `membrane/packs/vector.c1f`: `Vector:<id>.v` holds a list of numbers) is the k nearest instances of a MAPPED class (`MAPPED Vector f16`, `docs/cliffvm.md`, "Storage modes") by COSINE, best first, as a list of `{eid, score}`
@@ -69,6 +69,9 @@ code (`native/src/expr.rs`), so the browser engine has them too. Tests: `native/
 Rejected for the fold: `lambda` (a new syntax family, and the parser refuses it on purpose), a builtin that takes the step as TEXT (`fold(xs, init, 'acc + x')`: the getter ordering,
 the inferencer and the surface read strings as data, so the step's reads would be invisible), a builtin that names a getter to call per element (a getter is computed on an entity, never
 called with arguments), and an explicit accumulator name (`fold(init, 'acc', [...])`: the last string argument of a call is read as a property name).
+`log(x)` (#1143, operator 2026-11-15: the move-log voter's rarity is log(N / the events holding a thing), `membrane/packs/movelog.c1f`) is the natural log of a positive number: the f64 log
+rounded to f32, so two devices whose math libraries differ in the last bits of an f64 give the same answer (`log(1)` is 0.0). An Error with its reason on 0, a negative number, or anything that is
+not an Int or a Float (`log('e')`, `log(True)`, `log([1])`); a null gives a null (as every call). One step. Typed `Float`. Tests: `native/tests/log_1143.rs`.
 There is NO `int()`, `dict()`, `merge`, `keys` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
 A new builtin needs the operator's approval; it is an arm of `call` and a name in `RESERVED`, with a Rust test.
 
@@ -177,7 +180,7 @@ The old caps (an expression at most 64 nodes / 400 characters) are removed. Inst
 `MEMBRANE_EVAL_BUDGET`. `VEC_MAX` (8192) stays. Structural limits that are not size caps: expressions nest at most 64 deep and
 evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All accounting lives in `expr::Budget`.
 **A native builtin's own cost is not counted**: a call (`json(text)`, `sort`, `len` ...) is one step however large its input, so a getter that
-hands a 1 MB stream to one builtin spends a handful of steps (operator, 2026-11-13: no per-input charges for now). `vsum` is one step however many vectors; `fold` is one step
+hands a 1 MB stream to one builtin spends a handful of steps (operator, 2026-11-13: no per-input charges for now). `vsum` and `log` are one step each (`vsum` however many vectors); `fold` is one step
 plus the steps of the c1f it runs (its start, its list, its `if` and its step, once per element).
 
 **Time decides no value** (operator, 2026-11-13). Until then a getter or setter evaluation whose self time passed 10 ms became an Error

@@ -337,7 +337,7 @@ pub const RESERVED: &[&str] = &[
     "dot", "norm", "distance", "unit", "abs", "min", "max", "len", "lower", "strip", "replace", "startswith", "lines", "words", "spans",
     "join", "head", "tail", "sort_by", "unspeak", "before", "after", "pluck", "distinct", "group_by", "concat", "fit", "clip", "ago",
     "plain", "num", "epoch", "localtime", "json", "str", "referencing", "prop", "why",
-    "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun", "near", "vsum", "fold",
+    "instances", "jsonl", "listdir", "read", "sql", "stat", "recall", "rerank", "pronoun", "near", "vsum", "fold", "log",
     "it", "that", "they", "them", "these", "those", "he", "him", "she", "her",
     "and", "or", "not", "in", "is", "if", "else", "lambda", "for", "await", "yield",
 ];
@@ -948,6 +948,13 @@ fn call(f: &str, a: Vec<V>, w: &dyn World) -> Result<V, Err> {
         }
         // fold(init, [step for x in xs if keep]) is evaluated by `ev_fold` (its step is not evaluated before the call); reaching here means a wrong shape
         "fold" => Err(FOLD_USE.into()),
+        // log(x) (#1143, operator 2026-11-15): the natural log, the f64 log rounded to f32 (two math libraries that differ in an f64's last bits agree); x a positive number
+        "log" => {
+            argn(1)?;
+            let x = match &a[0] { V::Int(i) => *i as f64, V::Float(x) => *x, v => return Err(format!("log(x): x is a number, got a {}", kind_of(v))) };
+            if !(x > 0.0) || !x.is_finite() { return Err(format!("log(x): x is a positive number, got {}", py_str(&a[0]))); }
+            Ok(V::Float(x.ln() as f32 as f64))
+        }
         "abs" => { argn(1)?; match &a[0] { V::Int(i) => Ok(V::Int(i.abs())), V::Float(x) => Ok(V::Float(x.abs())), V::Bool(b) => Ok(V::Int(*b as i64)), _ => Err("bad operand type for abs()".into()) } }
         "min" => { if a.is_empty() { return Err("min expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Less) }
         "max" => { if a.is_empty() { return Err("max expected 1 argument".into()); } extreme(&a, std::cmp::Ordering::Greater) }

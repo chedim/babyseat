@@ -447,6 +447,7 @@ fn call_ty_in(f: &str, args: &[Node], tys: &[Ty], env: &Env) -> Ty {
         "vsum" => { if ar(1, 2) { for i in 0..n { chk(i, Acc::List); } } Ty::list(Ty::float()).null_if(any_null) }
         // fold(init, [step for x in xs]): the step's `acc` is untyped here (an edge), so the value is too
         "fold" => { ar(2, 2); Ty::any() }
+        "log" => { if ar(1, 1) { chk(0, Acc::Num); } Ty::float().null_if(any_null) }
         "abs" => {
             if !ar(1, 1) { return Ty::any(); }
             chk(0, Acc::Num);
