@@ -98,6 +98,8 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is None:                    # a form with no fields is a confirmation (HA's _set_confirm_only is a deprecated no-op)
             step_id, placeholders = ollama_hint(self.hass, "hassio_confirm", {"addon": d["addon"]})
             return self.async_show_form(step_id=step_id, description_placeholders=placeholders)
+        if self._async_current_entries(include_ignore=False):
+            return self.async_abort(reason="already_configured")       # set up by hand while this confirm was open: one entry per Home Assistant
         return self.async_create_entry(title="Membrane", data={
             CONF_SERVE_URL: d["url"], CONF_SERVE_USER: DEFAULT_SERVE_USER, CONF_SERVE_PASS: d["token"]})
 

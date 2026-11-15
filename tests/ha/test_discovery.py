@@ -150,6 +150,21 @@ def test_the_form_aborts_when_the_discovery_already_made_the_entry(ha, run):
     assert res == {"type": "abort", "reason": "already_configured"}
 
 
+def test_a_confirm_left_open_while_the_seat_was_set_up_by_hand_aborts(ha, run):
+    """Real Home Assistant 2026.11 (scripts/ha_core_smoke.py) made a SECOND entry here: the discovery's confirm was open, the person finished the
+    manual form meanwhile (another unique id: nothing in Home Assistant stops it), then confirmed. One entry per Home Assistant: the confirm checks again."""
+    pkg, hass = ha
+
+    async def body(seat):
+        f = _flow(hass)
+        form = await f.async_step_hassio(_info(seat.port, "tok-1"))
+        hass.config_entries.entries.append(fakeha.FakeConfigEntry(data={"serve_url": seat.url, "serve_user": "opencode", "serve_pass": "tok-1"}))
+        return form, await _flow_result(lambda: f.async_step_hassio_confirm({}))
+    form, late = _with_seat(run, hass, "tok-1", body)
+    assert form["step_id"] == "hassio_confirm"
+    assert late == {"type": "abort", "reason": "already_configured"}
+
+
 def test_the_manifest_needs_no_discovery_key_for_the_supervisor():
     """Home Assistant's docs (2026-11-15, contributors.home-assistant.io: config flow "hassio" step, apps "Share services and discover
     integrations"): the Supervisor discovery needs only the `hassio` step; no manifest matcher and no dependency is named for it."""
