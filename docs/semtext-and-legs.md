@@ -1,4 +1,4 @@
-# SemText and legs: how code builds the graph (built: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges, sentence vectors, the recall banner part, Memory)
+# SemText and legs: how code builds the graph (built: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges, sentence vectors, the shared recall, the recall banner part, Memory)
 
 A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "Recall in the banner", "Memory"); the field engine's use of the legs and everything under "Not built" is not. It is the shape the semantic field
 takes in the barest seat: ONE graph (the VM's entities), with the semantic state an opt-in component of an entity, and code (c1f
@@ -128,9 +128,9 @@ Open: a cut for the entities mentioned by very many sentences (their `mentioned_
 reasoned null); the step budget of a getter or setter applies to the mention setter of a big text (time limits nothing).
 
 ### Built: sentence vectors, stage 1 of the semantic field (#1143, operator 2026-11-14)
-`membrane/packs/embed.c1f`. Every sentence of a SemText that is asked gets a vector from the local Ollama, through the Fetch driver, stored as `Vector:of:<key>:s:<start>` (`of`, `start`, `v`; the class is the
-vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (the Span key rule). The ask is `embed = true` on the SemText (the chat writes it on a message body and on an answer's body, next to
-`mention`; a tool's result is not asked). The model server is the boot fact `seat_backend`, the model the fact `embed_model` (default `mxbai-embed-large`, set in `launcher.c1f`); the call is `POST <seat_backend>/api/embed
+`membrane/packs/embed.c1f`. Every sentence of every SemText gets a vector from the local Ollama, through the Fetch driver, stored as `Vector:of:<key>:s:<start>` (`of`, `start`, `v`; the class is the
+vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (the Span key rule). There is no flag (operator 2026-11-15): a SemText is asked when its text is written (a setter on `text`; a
+`Memory`, which becomes a SemText in answer to its text, when its SemText getters arrive) and it is not yet `embedded`. A tool's result is not a SemText and is not asked. The model server is the boot fact `seat_backend`, the model the fact `embed_model` (default `mxbai-embed-large`, set in `launcher.c1f`); the call is `POST <seat_backend>/api/embed
 {model, input: [...]}` with a 120 s limit. The limits: at most 64 sentences a request, a pass of 256 sentences, a same-pass cache of 64 entries (a sentence said twice in a pass makes no second request).
 - THE QUEUE is `Embed:queue` (`state` idle | working | paused | stuck, `reason`, `line`, `inflight`, `landed`, `cache`, `pass_n`, `hold`). ONE request at a time, one text per request: within the existing worker limit (`effect_workers`), no
   second limit. A request is sent only while no chat turn is running (each turn of any chat or session, when it becomes `running`, makes a small `Embed:turn:<key>` of this pack's resident class, and retires it when it is done or an error; the queue reads those, never lists `Chat`; a pointer of a dead run is not counted); one in flight finishes, then the queue waits for the turn to end and goes on by itself (the sender is a getter that reads the turns). An `Embed:ask:<key>` is retired when its text has all
@@ -144,16 +144,37 @@ vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (th
 - Tests: `native/tests/embed_1143.rs` (in-process, receipts written by the test, one end-to-end test against a tiny model server in the test) and `native/tests/embed_process_1143.rs` (the real seat, a closed port).
 
 ### Not built
-Sentence vectors for anything but chat bodies and asked texts (the backlog is chat bodies only), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, the field engine's use of the legs, a collection of stored Word entities, the
+A backlog of stored texts that are not chat bodies (the backlog query reads chat bodies only; any other text is asked when its text is written), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, the field engine's use of the legs, a collection of stored Word entities, the
 mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).
 
 
 **Cost notes (w36, #1143).** `SemText.related` reads each entity's cached `edge_rows` (a getter of Word / Identifier / Path: the entity's edges as JSON rows, rebuilt when its `mentioned_in` changes) instead of rebuilding every edge's text on every ask; the asking text's own rows are dropped after the grouping. `mention_done` reads the spans the mention setter listed (`mention_spans`) and waits for their `forms`. `group_by` finds a text key's group through a hash. The rest of the cost of `related` is linear in the edges walked; a cut on the edges of a very common word is an open operator decision (nothing is cut).
 
+## Recall: one getter on SemText (#1143, operator 2026-11-15)
+`SemText.recall` (`membrane/packs/mentions.c1f`) is the ONE recall: the banner part and `Memory` both read it. The ask is the SemText itself; the caller gives no list of texts, and the recall
+finds the rest in the graph. It computes only while `recall_on` is true (the banner writes it on its ask's body and takes it off the body before; a `Memory` has it always). Tests: `native/tests/semrecall_1143.rs`.
+- **The window.** A chat text (`<message>:body`, `<message>:turn:response:body`) reads the chat's texts counting back from itself in chat order: the ask, the answer before it, that message, the answer
+  before that, ... (6 texts: the length of `r_weights`). The older message keys come from the store's key order (one `sql` over the `(cls, k)` index, key order is time order inside a chat,
+  docs/chat-keys.md); the bodies are read by their ids; a text that is not there (a turn with no answer) is skipped. Each step back counts half as much as the step before it (`r_ratio`, 0.5, a getter a
+  layer overrides: weights 1, 1/2, 1/4, ...). Any other text (a `Memory` note, a leg of a pack) is a window of itself. With no store (the `sql` fails) a chat text falls back to itself alone.
+- **The edge lane.** The sentences that mention the Word / Identifier / Path entities of the window's texts; a shared entity adds the weight of the window text that mentions it times 1 / (the number
+  of sentences that mention it) (`edge_rows`); at most `entity_pool_max`.
+- **The cosine lane.** `near(ask_vec, 'Vector', pool)`. The query is the ASK'S OWN VECTOR: one embedding call of the ask's text (`Fetch:recall:ask` for the chat's asks, `Fetch:recall:note` for a
+  `Memory`), with a 10 s limit; `in_flight` is true while it is out. The design's query is the weighted sum of the window's sentence vectors; c1f cannot sum a list of vectors (`+` adds two, there is no
+  fold), so that waits for a vector-sum builtin (an operator decision); the other window texts feed the edge lane only.
+- **Fusion and rerank** as before: reciprocal rank (`rrf_k`), ties by key; the first `rerank_top` rows reranked by the fitted weights over the cosine score, the fused place and the share of the ask's own
+  entities the sentence mentions.
+- **The ask itself is never a hit**; nothing else is left out (recent chat texts are hits: the model gets no chat history).
+- **Near duplicates merge**: a hit whose shorter sentence has at least `dup_share` (0.8, a getter) of its distinct words (`plain`, lowercase) in the other's is dropped for the better-placed one. Each hit
+  is checked against every hit placed before it, merged or not (c1f has no fold to check against the kept ones only), so in a chain A ~ B ~ C with A and C not alike, C goes too.
+- **No score cut-off**: every hit, best first, `{semtext, start, text, score, sim, overlap}` (`score` the fused one); the readers cut the count.
+- The dials are the entity `recall:dials` (`banner_n`, `pool`, `entity_pool_max`, `rrf_k`, `rerank`, `rerank_top`, `fact_chars`, `header`, `weights`, `assoc_n`, `assoc_clip`; loaded from
+  `native/packs/recall-policy.json`, guarded by the host).
+
 ## Recall in the banner (#1143)
-`Banner:recall` (`membrane/apps/barest.c1f/recall.c1f`, a `RecallPart`) is a banner part: its `words` are the lines recalled for the message a turn is answering, shown after the main banner (the turn's banner is every non-empty `Banner:*`, `Banner:admin:main` first, then the others oldest update first; the banner block and the user's words are two text blocks of one stdin message, `chat_turn.c1f`). Two lanes, each a ranked list of sentences:
-the edge lane (`SemText.related` of the ask's body, above) and the cosine lane (`near(<the ask's vector>, 'Vector', pool)` over the sentence vectors; the ask's vector is one `Fetch:recall:ask` embedding call with a 10 s limit; the lane is absent while there is no vector). The lanes are fused by reciprocal rank (score = sum of 1 / (`rrf_k` + rank)), ties by key, then the first `rerank_top` rows are reranked by the fitted logistic weights over the cosine score, the fused place and the entity overlap. Each line is clipped and says whose words it is (the person's, with the message and its time, or "NOT the person's words" with the source). The dials are the entity `recall:dials` (`banner_n`, `pool`, `entity_pool_max`, `rrf_k`, `rerank`, `rerank_top`, `fact_chars`, `header`, `weights`; loaded from `native/packs/recall-policy.json`). A turn waits for its own ask's embedding (`recall_wait`) and no longer than the call's limit.
+`Banner:recall` (`membrane/apps/barest.c1f/recall.c1f`, a `RecallPart`) is a banner part: its `words` are the lines recalled for the message a turn is answering, shown after the main banner (the turn's banner is every non-empty `Banner:*`, `Banner:admin:main` first, then the others oldest update first; the banner block and the user's words are two text blocks of one stdin message, `chat_turn.c1f`).
+It is a thin reader of `recall` of the ask's body (above): it picks the ask (the oldest queued message), turns the recall on for it, and words the first `banner_n` rows. Each line is clipped to `fact_chars` and says whose words it is (the person's, with the message and its time, or "NOT the person's words" with the source). A turn waits for its ask (`recall_wait`, the part's `ready`) while the ask's embedding call is out (no longer than its 10 s limit) or the window is being read from the store.
 Like the main banner the part is the model's: it can reassign `parents` to a class of its own (`Help:banner`).
 
 ## Memory: what a note reminds of (#1143)
-`Memory:<id>.text = "..."` makes a SemText for the model's own note, mentions it at once (`related_n` is on), and the write's reply carries `associations`, read from the ONE source getter `SemText.assoc_source` (today the edge lane `related`; the fused edge + cosine result replaces that line). See `docs/reply-size.md` and `Help:semtext`.
+`Memory:<id>.text = "..."` makes a SemText for the model's own note, mentions it at once, and the write's reply carries `associations`, read from the ONE source getter `SemText.assoc_source`, which is the shared `recall` (a `Memory` differs from a SemText only in that its recall is always on). Its sentences get vectors like every SemText's, and its own embedding call gives the cosine lane its query: the write's reply waits while that call is out (`door_tools.c1f` `mc_w_ready`; at most the call's 10 s limit, then the edge lane alone). The count and the clip are the dials `assoc_n` (5) and `assoc_clip` (200). See `docs/reply-size.md` and `Help:semtext`.

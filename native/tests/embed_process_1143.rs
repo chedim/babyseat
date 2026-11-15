@@ -106,8 +106,10 @@ fn the_chat_asks_for_the_vectors_of_a_message_and_of_its_answer_and_a_model_serv
     wait("the turn done", || { let (_, b) = http(run.port, "GET", &format!("/membrane/chat/message/{id}"), None, ""); if b.contains("\"state\":\"done\"") { Some(()) } else { None } });
     let msg = format!("membrane::Chat:main:message:{id}:body");
     let ans = format!("membrane::Chat:main:message:{id}:turn:response:body");
-    wait("the asks", || if get(run.port, &msg, "embed") == json!("True") || get(run.port, &msg, "embed") == json!(true) { Some(()) } else { None });
-    assert!(get(run.port, &ans, "embed") != J::Null, "the answer's body is asked too");
+    // every SemText is asked when its text is written (no flag): the asks are `Embed:ask:<the text's id with :: written />`, pending while nothing answers
+    let ask = |eid: &str| format!("membrane::Embed:ask:{}", eid.replace("::", "/"));
+    wait("the asks", || if get(run.port, &ask(&msg), "of") == json!(msg) { Some(()) } else { None });
+    assert_eq!(get(run.port, &ask(&ans), "of"), json!(ans), "the answer's body is asked too");
     // nothing listens at the model server's address: the queue says so, in words, and the pending sentences stay pending
     let q = "membrane::Embed:queue";
     wait("a visible reason", || { let r = get(run.port, q, "reason"); if r.as_str().map_or(false, |t| t.contains("did not answer")) { Some(()) } else { None } });

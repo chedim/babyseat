@@ -163,7 +163,7 @@ rewrites a lower one: `related` reads them as separate edge kinds with their own
    only with evidence in two different texts; the edge is verified on demand against the lexicon (an edge between two words with NO shared synset or common
    hypernym is marked `unsupported`, shown, not hidden); a replay test over the evidence sentences (does the edge still make them `related`); and the
    operator-visible list of `proposed` edges with their evidence.
-7. **Embeddings:** BUILT as stage 1 of the semantic field, not as an option of this ladder: every chat sentence gets a stored vector (`packs/embed.c1f`, `Vector` MAPPED f16, docs/semtext-and-legs.md) and `Banner:recall` fuses a cosine lane with the edge lane by rank. They are stored values with the model name in the fact `embed_model`, never recomputed in a getter. Rungs 1-6 here work without them and would feed the edge lane only.
+7. **Embeddings:** BUILT as stage 1 of the semantic field, not as an option of this ladder: every sentence of every SemText gets a stored vector (`packs/embed.c1f`, `Vector` MAPPED f16, docs/semtext-and-legs.md) and the shared recall (`SemText.recall`, read by `Banner:recall` and `Memory`) fuses a cosine lane with the edge lane by rank. They are stored values with the model name in the fact `embed_model`, never recomputed in a getter. Rungs 1-6 here work without them and would feed the edge lane only.
 
 **Known limits.** Word-sense ambiguity (`bank`: all senses are linked until rung 5/7 or the model chooses one; precision falls on common words, which rung 4's
 weighting softens); negation and scope ("did not buy" matches "bought" at every rung up to 4); world knowledge (nothing here knows a boat is a ship in a

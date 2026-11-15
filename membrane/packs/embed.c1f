@@ -8,8 +8,9 @@ RESIDENT Embed
 -- SENTENCE VECTORS (#1143, stage 1 of the semantic field, docs/semtext-and-legs.md "Built: sentence vectors"): every sentence of a SemText gets an embedding vector, made by the local
 -- Ollama through the Fetch driver, stored as the entity `Vector:of:<key>:s:<start>` ({of: the SemText's eid, start: the sentence's start in chars, v: the vector}), in a
 -- GENTLE background queue. (The class `Vector` and its property `v` belong to the vector pack (packs/vector.c1f: a MAPPED class, f16, the first vector fixes the dimension); this pack only writes them.)
--- THE ASK: `<semtext>.embed = <any value but null>` (the chat writes it on a message body and on an answer's body, next to `mention`; a tool's result is not asked) makes
--- `Embed:ask:<key>` ({of, state: pending, at}); the ask is retired when the text has all its vectors. `<key>` is the text's eid with `::` written `/` (`SemText.skey`).
+-- THE ASK: EVERY SemText is asked, with no flag (operator 2026-11-15): when a text gets its sentences (its text is written, by the chat on a message body and on an answer's body, by a Memory
+-- note, by a model's pack on a leg of its own; a tool's result is not a SemText) and it is not yet `embedded`, `Embed:ask:<key>` ({of, state: pending, at}) is made; the ask is retired when the
+-- text has all its vectors. `<key>` is the text's eid with `::` written `/` (`SemText.skey`).
 -- THE BACKLOG: the bodies of the chat that no ask ever named (the imported history, the messages from before this pack) are found in the store, newest first, 64 texts a page
 -- (`EmbedQueue.page`: a `sql`, re-asked as the cursor `after` moves), and queued the same way once the model server answers. A text that has all its vectors is marked `embedded = true`
 -- (the page skips it), and the sentences done so far are counted in `emb_n` on the text (a text is embedded from its first sentence on; a restart goes on where it stopped).
@@ -29,8 +30,13 @@ EmbedQueue.kind getter: 'queue'
 EmbedAsk.kind getter: 'ask'
 
 -- ---- the ask ----------------------------------------------------------------------------------------------------------------------------------
-SemText.embed on-setter embed-ask:
-  WHEN this.embed != None:
+SemText.text on-setter embed-ask:
+  WHEN this.text != None and strip(str(this.text)) != '' and this.embedded != True:
+    membrane::Embed:ask[this.skey] = EmbedAsk(of: this.eid, state: 'pending', at: clock)
+    membrane::Embed:queue.asked = (prop('membrane::Embed:queue', 'asked') or 0) + 1
+-- a text that BECOMES a SemText after its text was written (a `Memory` note: its class list is written in answer to the text) is heard when its SemText getters arrive
+SemText.skey on-setter embed-ask-late:
+  WHEN this.text != None and strip(str(this.text)) != '' and this.embedded != True:
     membrane::Embed:ask[this.skey] = EmbedAsk(of: this.eid, state: 'pending', at: clock)
     membrane::Embed:queue.asked = (prop('membrane::Embed:queue', 'asked') or 0) + 1
 

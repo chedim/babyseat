@@ -142,7 +142,7 @@ ChatMessage.argv getter:
   ELSE: concat(concat(concat(this.auth_env, ['CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence']), this.model_args), ['--max-turns', str(this.max_turns), '--system-prompt', this.sys])
 
 -- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------
--- THE TURN WAITS FOR ITS OWN ASK'S EMBEDDING (operator 2026-11-14): the recall part of the banner (apps/barest.c1f/recall.c1f) is `ready` when its ask's vector has arrived or cannot come. This message waits only while the part
+-- THE TURN WAITS FOR ITS OWN ASK'S EMBEDDING (operator 2026-11-14): the recall part of the banner (apps/barest.c1f/recall.c1f) is `ready` when its ask's vector has arrived or cannot come and the chat's window of texts has been read (the recall of the ask's body, packs/mentions.c1f). This message waits only while the part
 -- tracks it (`waiting`) and either an earlier message is the ask or the part says it is not ready. No part, or a part whose reading is null or an Error: no wait, a turn never waits on a broken part.
 ChatMessage.recall_wait getter:
   held = prop('membrane::Banner:recall', 'waiting')
@@ -250,7 +250,6 @@ Chat.answer on-setter turn-finish:
     FOR t IN ([this.answer] if this.fail_why == None else []):
       membrane::Chat[this.cp]:turn:response:body = SemText(text: t)
       membrane::Chat[this.cp]:turn:response:body.mention = True
-      membrane::Chat[this.cp]:turn:response:body.embed = True
     FOR e IN [x for x in this.evl if prop(x, 'type') == 'assistant']:
       FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:
         membrane::Chat[this.cp]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
