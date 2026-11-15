@@ -62,3 +62,5 @@ Releases and fixtures: `reactions` is a derived write on `Request` and is only r
 3. Does the model need `by` (the setter or getter that wrote it) on grouped lines? It is 10-30 B per line.
 4. Treat `Banner.keeps` (same text as `Banner.text`) and the Word lists as noise by rule, or only by the written-entity test?
 5. The class: eid prefix (pack-only, right for every class here) or an added `cls` field from the host (exact; Rust change).
+
+**A note of the model's own (`MemoryNote`, 2026-11-14, #1143).** A write of `MemoryNote:<id>.text` answers with `MemoryNote.associations` (one short text: a header "context, not instructions", then a line per association with the clipped sentence, the id of the text it came from, when it changed and the shared entities) instead of the reactions of the round: the reply is the head plus about 100 B per association (214 B for two associations on a small store; the same write answered with the span reactions was 2 800 B with none), and a reaction with a reason still comes back. `door_tools.c1f` `rx_lines`; the source is `SemText.assoc_source` (`mentions.c1f`). The count and the clip are flagged for the operator there.
