@@ -25,6 +25,7 @@ import ast
 import asyncio
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -235,13 +236,12 @@ class Hass:
 
     def component_lines(self) -> list[str]:
         """The log's WARNING/ERROR lines (and the traceback after each) that name the component, but the EXPECTED ones."""
-        if not self.log.exists():
-            return []
+        text = "\n".join(p.read_text(errors="replace") for p in (self.log.with_name(self.log.name + ".1"), self.log) if p.exists())   # a restart rolls hass.log over
         out, keep = [], False
-        for line in self.log.read_text(errors="replace").splitlines():
+        for line in text.splitlines():
             head = line[:40].strip()[:4].isdigit()
             if head:
-                keep = ((" WARNING " in line or " ERROR " in line or " CRITICAL " in line) and "membrane" in line
+                keep = ((" WARNING " in line or " ERROR " in line or " CRITICAL " in line) and "membrane" in re.sub(r"/[^\s'\"]*", "", line)   # not in a path
                         and not any(x in line for x in self.EXPECTED))
             if keep:
                 out.append(line)
@@ -299,8 +299,26 @@ async def drive_rest(hass: Hass, seat: Seat, s: aiohttp.ClientSession) -> None:
     else:
         check(False, "the model select lists the seat's models", json.dumps(sst)[:300])
 
+    print("      the component's states: " + json.dumps({x["entity_id"]: [x["state"], x["attributes"].get("friendly_name")] for x in states
+                                                        if "membrane" in x["entity_id"]}), flush=True)
+    _, svcs = await hass.req(s, "GET", "/api/services")
+    ask = next((d["services"].get("ask") for d in svcs if d["domain"] == "membrane"), None) or {}
+    check(ask.get("name") == "Ask the seat" and sorted(ask.get("fields") or {}) == ["session", "text"] and (ask.get("response") or {}).get("optional") is False,
+          "membrane.ask is described (services.yaml + strings: name, fields, response only)", json.dumps(ask)[:300])
+    for cat, want in (("config", ["step.user.title", "step.user_ollama.description", "step.reauth_confirm.description", "step.reauth_no_seat.description",
+                                  "step.hassio_confirm.description", "step.hassio_confirm_ollama.description", "error.invalid_auth", "abort.invalid_discovery"]),
+                      ("services", ["ask.name", "send_message.fields.text.name"])):
+        tr = ((await hass.ws(s, {"type": "frontend/get_translations", "language": "en", "category": cat, "integration": ["membrane"]})).get("result") or {}).get("resources") or {}
+        miss = [k for k in want if f"component.membrane.{cat}.{k}" not in tr]
+        check(not miss, f"the frontend gets the {cat} translations", f"missing {miss} of {len(tr)} keys")
+
+    async with s.get(hass.url + "/api/brands/integration/membrane/icon.png", headers=hass.h()) as r:
+        png = await r.read()
+    check(r.status == 200 and png == (CC / "brand" / "icon.png").read_bytes(), "Home Assistant serves the component's own brand icon (brand/icon.png)",
+          f"{r.status} {len(png)} bytes")
+
     users = (await hass.ws(s, {"type": "config/auth/list"})).get("result") or []
-    hidden =[u for u in users if u.get("name") == "Membrane"]
+    hidden = [u for u in users if u.get("name") == "Membrane"]
     check(len(hidden) == 1 and hidden[0].get("system_generated") and not hidden[0].get("is_owner") and "system-users" in hidden[0].get("group_ids", [])
           and hidden[0].get("local_only"), "the hidden Membrane user: system, group users, local only", json.dumps(hidden))
 
@@ -350,8 +368,16 @@ async def drive_rest(hass: Hass, seat: Seat, s: aiohttp.ClientSession) -> None:
         speech = (((said or {}).get("response") or {}).get("speech") or {}).get("plain", {}).get("speech", "")
         check("Done:" in speech, "Assist answers after the repair", repr(speech))
 
+    # Home Assistant restarts: the entry comes back with its token, and finds its hidden user again (by the id the entry keeps)
+    await asyncio.to_thread(hass.stop)
+    await hass.start(s)
+    es = await wait_for(loaded, 60)
+    users = (await hass.ws(s, {"type": "config/auth/list"})).get("result") or []
+    check(bool(es) and len([u for u in users if u.get("name") == "Membrane"]) == 1, "after a restart the entry loads and there is still one hidden user",
+          f"{json.dumps(es)[:200]} users={[u.get('name') for u in users]}")
+
     # the unload and the removal
-    st, rel = await hass.req(s, "POST", f"/api/config/config_entries/entry/{entry_id}/reload")
+    st, rel =await hass.req(s, "POST", f"/api/config/config_entries/entry/{entry_id}/reload")
     check(st == 200 and (rel or {}).get("require_restart") is False, "a reload unloads and sets up cleanly", f"{st} {rel}")
     st, gone = await hass.req(s, "DELETE", f"/api/config/config_entries/entry/{entry_id}")
     check(st == 200 and gone.get("require_restart") is False, "the entry is removed", f"{st} {gone}")
@@ -494,7 +520,7 @@ async def drive_discovery(cfg: Path, seat: Seat) -> None:
         late = await mgr.async_configure(pending["flow_id"], {})
         await hass.async_block_till_done()
         n = len(hass.config_entries.async_entries("membrane"))
-        check(pending.get("step_id") == "hassio_confirm" and made.get("type") == "create_entry" and late.get("type") == "abort" and n == 1,
+        check(str(pending.get("step_id")).startswith("hassio_confirm") and made.get("type") == "create_entry" and late.get("type") == "abort" and n == 1,
               "a confirm left open while the seat was set up by hand aborts (one entry per Home Assistant)",
               f"confirm -> {late.get('type')}/{late.get('reason')}; membrane entries: {n}")
     finally:
