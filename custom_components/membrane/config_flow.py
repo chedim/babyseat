@@ -10,7 +10,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_SERVE_PASS, CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_SERVE_USER, DOMAIN
+from .const import CONF_SERVE_PASS, CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_SERVE_USER, DOCS_URL, DOMAIN
 from .seat_client import SeatAuthError, SeatClient, SeatError
 
 
@@ -54,11 +54,22 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_SERVE_PASS): str}))
 
     async def async_step_reauth(self, entry_data):
+        """An entry with a seat address whose token was refused: a new token. An entry with none (it ran the seat inside Home Assistant,
+        which this release no longer does): the address and the token of a seat that runs elsewhere."""
+        if not str(self._get_reauth_entry().data.get(CONF_SERVE_URL) or ""):
+            return await self.async_step_reauth_no_seat()
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(self, user_input=None):
-        """The seat refused the token (it expired, or the seat changed its key), or the entry has no seat yet (it ran the seat inside
-        Home Assistant): a new token, and the address too when the entry has none."""
+        """The seat refused the token: it ran out, the seat's key changed, or it is a token of the old seat (0.7.53), which the new seat
+        does not know."""
+        return await self._reauth("reauth_confirm", user_input)
+
+    async def async_step_reauth_no_seat(self, user_input=None):
+        """The entry ran the seat inside Home Assistant: there is no seat to connect to until the user gives one."""
+        return await self._reauth("reauth_no_seat", user_input)
+
+    async def _reauth(self, step_id: str, user_input):
         entry = self._get_reauth_entry()
         old_url = str(entry.data.get(CONF_SERVE_URL) or "")
         errors = {}
@@ -75,5 +86,7 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not old_url:
             fields[vol.Required(CONF_SERVE_URL)] = str
         fields[vol.Required(CONF_SERVE_PASS)] = str
-        return self.async_show_form(step_id="reauth_confirm", errors=errors, data_schema=vol.Schema(fields),
-                                    description_placeholders={"url": old_url or "(none yet)"})
+        placeholders = {"docs_url": DOCS_URL}
+        if old_url:
+            placeholders["url"] = old_url
+        return self.async_show_form(step_id=step_id, errors=errors, data_schema=vol.Schema(fields), description_placeholders=placeholders)

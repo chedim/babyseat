@@ -124,9 +124,45 @@ def test_the_reauth_of_an_entry_with_no_address_asks_for_the_address_too(ha, run
     async def body(seat):
         e = fakeha.FakeConfigEntry(data={"serve_url": "", "serve_user": "opencode", "serve_pass": ""})
         f = _reauth_flow(pkg, hass, e)
-        form = await f.async_step_reauth_confirm()
+        form = await f.async_step_reauth(dict(e.data))
         assert set(form["data_schema"].fields()) == {"serve_url", "serve_pass"}
-        await f.async_step_reauth_confirm({"serve_url": seat.url + "/", "serve_pass": "tok-1"})
+        await f.async_step_reauth_no_seat({"serve_url": seat.url + "/", "serve_pass": "tok-1"})
         return e, seat
     e, seat = _with_seat(run, hass, "tok-1", body)
     assert e.data["serve_url"] == seat.url and e.data["serve_pass"] == "tok-1"
+
+
+# ---- the texts of the two reauths (0.7.60: the seat no longer runs inside Home Assistant; the new seat's tokens are new) ----------
+
+DOCS = "https://github.com/chedim/membrane/blob/main/docs/home-assistant.md"
+
+
+def _strings():
+    import json
+    from pathlib import Path
+    return json.loads((Path(__file__).resolve().parents[2] / "custom_components" / "membrane" / "strings.json").read_text())
+
+
+def test_an_entry_that_ran_the_seat_inside_home_assistant_is_told_where_the_seat_went(ha, run):
+    pkg, hass = ha
+    e = fakeha.FakeConfigEntry(data={"serve_url": "", "serve_user": "opencode", "serve_pass": ""})
+    form = run(_reauth_flow(pkg, hass, e).async_step_reauth(dict(e.data)))
+    assert form["step_id"] == "reauth_no_seat"
+    assert form["description_placeholders"]["docs_url"] == DOCS
+    step = _strings()["config"]["step"]["reauth_no_seat"]
+    text = step["description"]
+    for words in ("no longer runs inside Home Assistant", "add-on", "Home Assistant OS", "Supervised", "cliffvm serve", "Container",
+                  "Core", "address and token", "{docs_url}"):
+        assert words in text, words
+    assert set(step["data"]) == {"serve_url", "serve_pass"}
+
+
+def test_a_refused_token_is_told_the_old_seats_tokens_do_not_open_the_new_seat_and_where_the_new_one_is(ha, run):
+    pkg, hass = ha
+    e = fakeha.FakeConfigEntry(data={"serve_url": "http://seat:4096", "serve_user": "opencode", "serve_pass": "old"})
+    form = run(_reauth_flow(pkg, hass, e).async_step_reauth(dict(e.data)))
+    assert form["step_id"] == "reauth_confirm"
+    assert form["description_placeholders"] == {"url": "http://seat:4096", "docs_url": DOCS}
+    text = _strings()["config"]["step"]["reauth_confirm"]["description"]
+    for words in ("{url}", "not valid on the new seat", "admin.token", "add-on's log", "discovery", "{docs_url}"):
+        assert words in text, words

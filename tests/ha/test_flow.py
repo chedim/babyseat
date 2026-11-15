@@ -139,7 +139,7 @@ def test_a_migrated_entry_is_not_migrated_twice(ha):
 def test_the_strings_cover_every_step_and_error_the_flow_can_show_and_the_translation_is_the_same_file():
     s = json.loads((CC / "strings.json").read_text())
     assert s == json.loads((CC / "translations" / "en.json").read_text())
-    assert set(s["config"]["step"]) == {"user", "reauth_confirm"}
+    assert set(s["config"]["step"]) == {"user", "reauth_confirm", "reauth_no_seat", "hassio_confirm"}
     assert {"cannot_connect", "invalid_auth", "invalid_url"} <= set(s["config"]["error"])
     assert {"already_configured", "reauth_successful"} <= set(s["config"]["abort"])
     src = (CC / "config_flow.py").read_text()

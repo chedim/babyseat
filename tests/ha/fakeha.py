@@ -192,6 +192,7 @@ class FakeConfigEntries:
         self.entries: list[FakeConfigEntry] = []
         self.forwarded: list = []
         self.updated: list = []
+        self.reloaded = None
 
     def async_entries(self, domain=None):
         return [e for e in self.entries if domain in (None, e.domain)]
@@ -215,6 +216,9 @@ class FakeConfigEntries:
         return True
 
     async def async_reload(self, entry_id):
+        self.reloaded = entry_id
+
+    def async_schedule_reload(self, entry_id):
         self.reloaded = entry_id
 
 
@@ -270,9 +274,22 @@ class ConfigFlow:
     async def async_set_unique_id(self, uid, *, raise_on_progress=True):
         self.unique_id = uid
 
-    def _abort_if_unique_id_configured(self, updates=None, **kw):
-        if any(e.unique_id == self.unique_id for e in self.hass.config_entries.async_entries(self.domain)):
-            raise AbortFlow("already_configured")
+    def _abort_if_unique_id_configured(self, updates=None, reload_on_update=True, **kw):
+        """HA's: the entry of this unique id gets `updates` merged in its data; it is reloaded only when it is loaded or retrying its
+        setup (an entry whose setup failed, a refused token among them, is NOT reloaded: `loaded` models that state), then the flow aborts."""
+        for e in self.hass.config_entries.async_entries(self.domain):
+            if e.unique_id == self.unique_id:
+                if updates is not None and dict(e.data, **updates) != e.data:
+                    self.hass.config_entries.async_update_entry(e, data=dict(e.data, **updates))
+                    if reload_on_update and getattr(e, "loaded", True):
+                        self.hass.config_entries.async_schedule_reload(e.entry_id)
+                raise AbortFlow("already_configured")
+
+    def _async_current_entries(self, include_ignore=None):
+        return self.hass.config_entries.async_entries(self.domain)
+
+    def _set_confirm_only(self):
+        self.confirm_only = True
 
     def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None, last_step=None):
         return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {},
@@ -287,10 +304,14 @@ class ConfigFlow:
     def _get_reauth_entry(self):
         return self.context["entry"]
 
-    def async_update_reload_and_abort(self, entry, *, data_updates=None, data=None, reason="reauth_successful", **kw):
+    def async_update_reload_and_abort(self, entry, *, data_updates=None, data=None, reason="reauth_successful", unique_id=None, **kw):
+        """HA's: the entry's data (and unique id) updated, the entry reloaded whatever its state, the flow aborted with `reason`."""
         d = dict(entry.data if data is None else data)
         d.update(data_updates or {})
         self.hass.config_entries.async_update_entry(entry, data=d)
+        if unique_id is not None:
+            entry.unique_id = unique_id
+        self.hass.config_entries.async_schedule_reload(entry.entry_id)
         return {"type": "abort", "reason": reason}
 
 
@@ -354,6 +375,12 @@ def async_get_result_from_chat_log(user_input, chat_log):
     """The result HA would build: the last assistant content is the speech."""
     last = chat_log.content[-1].content if chat_log.content else ""
     return {"conversation_id": chat_log.conversation_id, "speech": last}
+
+
+class HassioServiceInfo:
+    """What the Supervisor hands `async_step_hassio`: the add-on's announced `config`, its `name`, `slug`, and the message's `uuid`."""
+    def __init__(self, config, name="babyseat", slug="local_babyseat", uuid="u1"):
+        self.config, self.name, self.slug, self.uuid = dict(config), name, slug, uuid
 
 
 def _mod(name, **attrs):
