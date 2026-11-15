@@ -1,6 +1,7 @@
 PACK settings 1
 IMPORT boot 1
 IMPORT door 1
+IMPORT router 1
 RESIDENT Setting
 -- THE SETTINGS (#1143, docs/settings-groups.md, "Built: the server side"): one entity per setting, `Setting:<group>.<key>`, listed whole by a window that groups them by `group` and sorts by `order`.
 -- A row is DATA (written once at start, again only when this pack changes it): group, key, label, help, kind, live, order, and for a number `min`, `max`, `whole`, `unit`; `default`; `how` (what a launch-only row says
@@ -26,7 +27,7 @@ Setting.fact_val getter:
 Setting.current getter:
   WHEN this.eid == 'Setting:model.chat': prop('Minds:seat', 'loops') or prop('Minds:seat', 'seat_default') or this.default
   ELSE WHEN this.eid == 'Setting:model.default': prop('Minds:seat', 'seat_default') or this.default
-  ELSE WHEN this.eid == 'Setting:model.list': [m.name for m in instances('Model') if m.listed == True or m.rung == True]
+  ELSE WHEN this.eid == 'Setting:model.list': [m.name for m in instances('Model') if (m.listed == True and m.chat_ok == True) or m.rung == True]
   ELSE WHEN this.eid == 'Setting:model.cloud': [{'name': prop(c, 'name'), 'backend': prop(c, 'backend'), 'api_key_env': prop(c, 'api_key_env')} for c in (([prop(b, 'cloud_models') for b in instances('Boot') if prop(b, 'cloud_models') != None] or [[]])[0])]
   ELSE WHEN this.eid == 'Setting:home.allow': [{'name': replace(replace(a.eid, 'membrane::', ''), 'HaAllow:', ''), 'services': a.services or [], 'entities': a.entities or []} for a in instances('HaAllow')]
   ELSE WHEN this.eid == 'Setting:import.sources': [{'name': replace(replace(s.eid, 'membrane::', ''), 'SqlSource:', ''), 'path': s.path, 'mode': s.mode or 'ro'} for s in instances('SqlSource')]
@@ -142,4 +143,13 @@ Request.o_settings getter: this.route == '/ui/settings'
 Request.m_settings getter: ['GET']
 -- (the rows are built here, not as a getter of the row: a getter of a Setting would be one more property on every stored row)
 Request.st_rows getter: sort_by([{'id': replace(s.eid, 'Setting:', ''), 'group': s.group, 'key': s.key, 'label': s.label, 'help': s.help, 'kind': s.kind, 'live': s.live, 'order': s.order, 'default': s.default, 'min': s.min, 'max': s.max, 'whole': s.whole == True, 'unit': s.unit, 'how': s.how, 'hidden': s.hidden == True, 'current': s.current, 'refused': s.refused or '', 'applied': s.applied, 'choices': (prop('Setting:model.list', 'current') if s.eid == 'Setting:model.chat' else None)} for s in instances('Setting') if s.group != None], 'order')
-Request.r_settings getter: {'status': 200, 'body': {'settings': this.st_rows}}
+-- THE MODEL ROW'S LIST is the backend's: the feed asks the backend for its tags the way `GET /v1/models` does (packs/router.c1f: `Router:seat.refresh`), once per request, and the reply waits for them
+-- (`models_ready`), so the chat model row's `choices` lists the backend's chat models and the rungs with nothing else asking first. A seat with no backend address asks nothing and waits for nothing.
+Request.sf_ask getter: {'id': this.eid} if (this.entrant and this.o_settings == True and this.models_asked != True and str(([bk.seat_backend for bk in instances('Boot') if bk.seat_backend != None] or [''])[0]) != '') else None
+Request.sf_ask on-setter settings-models-ask:
+  WHEN this.sf_ask != None:
+    this.models_asked = True
+    ('Router:seat').refresh = this.sf_ask
+Request.r_settings getter:
+  WHEN this.models_asked == True and this.models_ready != True: None
+  ELSE: {'status': 200, 'body': {'settings': this.st_rows}}

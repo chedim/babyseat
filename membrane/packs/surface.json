@@ -1305,19 +1305,21 @@
   "settings": {
     "imports": [
       "boot",
-      "door"
+      "door",
+      "router"
     ],
     "classes": [
       "Boot",
       "Request",
       "Setting"
     ],
-    "members": 11,
+    "members": 12,
     "writes": [
       "*.[]",
       "*.retire",
       "HaAllow:*.entities",
       "HaAllow:*.services",
+      "Router:seat.refresh",
       "Setting:*.[]"
     ],
     "claims": [
