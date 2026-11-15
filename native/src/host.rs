@@ -24,6 +24,18 @@ pub const WAL_LIMIT_BYTES: u64 = 8 << 20;
 pub const WRITER: &str = "trigger:field:";
 /// the collection (table `c_field`) of the entity rows: k = eid, body = {cls, props, writers}
 pub const ROWS: &str = "c_field";
+
+/// The first key past everything that starts with `prefix` (its last char one up: `A:1:` -> `A:1;`), so `k >= prefix AND k < prefix_end(prefix)` is the prefix as a RANGE of the
+/// primary key (a `substr` test of every row reads the whole table: the seat that froze on a 1.4 GB store, #1143).
+pub fn prefix_end(prefix: &str) -> String {
+    let mut s = prefix.to_string();
+    if let Some(c) = s.pop().and_then(|c| char::from_u32(c as u32 + 1)) { s.push(c); }
+    s
+}
+/// The delete of a retired entity from a table keyed by `k`: the entity's own key and everything under `<eid>:` (?1 = the eid, ?2 = `<eid>:`, ?3 = `prefix_end(?2)`).
+pub fn retire_delete_sql(table: &str) -> String { format!("DELETE FROM {table} WHERE k = ?1 OR (k >= ?2 AND k < ?3)") }
+/// The delete of a retired namespace: every key under the prefix (?1 = the prefix, ?2 = `prefix_end(?1)`).
+pub fn namespace_delete_sql(table: &str) -> String { format!("DELETE FROM {table} WHERE k >= ?1 AND k < ?2") }
 /// the journal's collection (table `c_journal`): k = sequence number, body = a line
 pub const JOURNAL: &str = "c_journal";
 /// the vector store's table (vecstore.rs): eid -> class and the f16 bytes (little endian). Not an entity row; the memory policy never touches it.
@@ -650,6 +662,7 @@ impl Host {
                 packs_retired.push(name.to_string());
             }
             let below = format!("{eid}:");
+            let above = prefix_end(&below);
             { let mut g = self.eng(); let cls = class_of_eid(eid); if g.0.is_mapped(&cls) { g.0.vectors.remove_tree(&cls, eid); } }   // a retired entity's vector leaves the store, loaded or not
             // a retired `Vm:<ns>` takes the whole namespace `<ns>::` with it (docs/graph-link.md, section 2)
             let ns = Core::namespace_of_vm(eid);
@@ -661,9 +674,9 @@ impl Host {
             }
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.retain(|k, _| k != eid && !k.starts_with(&below) && !ns.as_ref().map_or(false, |n| k.starts_with(n.as_str()))); }   // a retired row is not written back
-            self.exec(&db, &format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
-            self.exec(&db, &format!("DELETE FROM {VECTORS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);   // its vector leaves the table (the engine's store dropped it with the entity)
-            if let Some(n) = &ns { self.exec(&db, &format!("DELETE FROM {ROWS} WHERE substr(k, 1, length(?1)) = ?1"), params![n]); }
+            self.exec(&db, &retire_delete_sql(ROWS), params![eid, below, above]);
+            self.exec(&db, &retire_delete_sql(VECTORS), params![eid, below, above]);   // its vector leaves the table (the engine's store dropped it with the entity)
+            if let Some(n) = &ns { self.exec(&db, &namespace_delete_sql(ROWS), params![n, prefix_end(n)]); }
         }
         crate::gauge!("retired_batch", retired.len());
         let any = any || !retired.is_empty();
