@@ -151,8 +151,8 @@ Boot.started on-setter legacy-name-seed:
 LegacySeat.nm_state getter: prop('membrane::Legacy:name', 'state')
 LegacySeat.nm_fact getter: str(([prop(b, 'seat_name') for b in instances('Boot') if prop(b, 'seat_name') != None] or [''])[0])
 LegacySeat.nm_has getter: str(prop('Setting:chat.name', 'value') or '') != '' or this.nm_fact != ''
--- the cutover found the store (its path is set) and this start has not asked yet
-LegacySeat.nm_beat getter: clock if this.cx_boot != None and prop('SqlSource:legacy', 'path') != None and prop('membrane::Legacy:cutover', 'path') != None and prop('membrane::Legacy:cutover', 'state') in ['importing', 'done', 'error'] and (this.nm_state == None or this.nm_state == 'error') and this.nm_asked != this.cx_boot else None
+-- THIS start's cutover found the store (`cx_launched` is this start's boot: a cutover that was `done` before this start never decides again, so it never asks) and this start has not asked yet
+LegacySeat.nm_beat getter: clock if this.cx_boot != None and this.cx_launched == this.cx_boot and prop('SqlSource:legacy', 'path') != None and prop('membrane::Legacy:cutover', 'path') != None and prop('membrane::Legacy:cutover', 'state') in ['importing', 'done', 'error'] and (this.nm_state == None or this.nm_state == 'error') and this.nm_asked != this.cx_boot else None
 LegacySeat.nm_beat on-setter legacy-name-ask:
   WHEN this.nm_beat != None and this.nm_has:
     this.nm_asked = this.cx_boot

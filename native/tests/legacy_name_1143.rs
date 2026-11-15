@@ -100,6 +100,8 @@ fn the_old_name_is_sent_to_the_model_once_as_a_message_in_the_main_chat() {
     assert_eq!(h.get(&k, "queued"), json!(true), "it starts a normal turn like a person's message");
     assert_eq!(h.get(&format!("{k}:turn"), "message"), json!(k), "its turn is born");
     assert_eq!(h.get(&k, "sent_by"), json!("seat"), "marked as sent by the seat, not typed by a person");
+    // the page's row carries the mark, so the chat view can label it
+    assert_eq!(h.get(&k, "page_view")["sent_by"], json!("seat"));
     assert!(h.snapshot().keys().any(|x| x.starts_with("membrane::Chat:main:time:")), "the time row, so the history lists it");
     drop(h);
     // a later start does nothing: the ledger says sent
@@ -179,4 +181,23 @@ fn a_store_without_the_entity_table_never_fails_the_cutover_and_the_error_is_in_
     assert_eq!(h.get(LED, "state"), json!("error"));
     assert!(h.get(LED, "reason").as_str().map_or(false, |r| !r.is_empty()));
     assert!(texts(&h).is_empty());
+}
+
+#[test]
+fn a_seat_whose_cutover_was_done_before_this_start_never_sends_the_name() {
+    let d = tmp("name-olddone");
+    let old = old_with_name(&d, json!({"name": "Memo"}));
+    // an earlier start (before the carry-over existed) finished the cutover: its ledger says done and the source is declared; there is no `Legacy:name`
+    let h0 = host_with(&d, &[("legacy_path", json!(d.join("nowhere").to_string_lossy()))]);
+    pump_until(&h0, "error", |h| h.get("membrane::Legacy:cutover", "state") == json!("error"));
+    h0.write("membrane::Legacy:cutover", "state", json!("done"), "person");
+    h0.write("membrane::Legacy:cutover", "path", json!(old.to_string_lossy()), "person");
+    h0.write("SqlSource:legacy", "path", json!(old.to_string_lossy()), "person");
+    for _ in 0..20 { h0.pump(); h0.tick(); }
+    drop(h0);
+    let h = host_with(&d, &[("sql_sources", json!([{"name": "legacy", "path": old.to_string_lossy(), "mode": "ro"}]))]);
+    for _ in 0..60 { h.pump(); h.tick(); std::thread::sleep(Duration::from_millis(20)); }
+    assert_eq!(h.get("membrane::Legacy:cutover", "state"), json!("done"));
+    assert!(h.get(LED, "state").is_null(), "no ledger change: {}", h.get(LED, "state"));
+    assert!(texts(&h).is_empty(), "{:?}", texts(&h));
 }

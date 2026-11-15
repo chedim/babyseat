@@ -133,7 +133,7 @@ ChatRow.ph getter: '' if this.ans_src != '' else this.ans_text
 -- a turn the person stopped (the seat ends it with this line, packs/chat_turn.c1f) is a neutral note, not an error
 ChatRow.stopped getter: tail(this.ans_src, 23) == '(stopped from the page)'
 ChatRow.ans_class getter: ('bubble seat stopped' if this.stopped else ('bubble note' if this.state == 'error' else 'bubble seat')) if prop(this.raw, 'response') else 'bubble seat pending'
-ChatRow.view getter: {'id': this.rid, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_src': this.ans_src, 'ph': this.ph, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows} if this.raw != None else None
+ChatRow.view getter: {'id': this.rid, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_src': this.ans_src, 'ph': this.ph, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'by': 'sent by the seat' if prop(this.raw, 'sent_by') == 'seat' else '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows} if this.raw != None else None
 
 ChatRow.view on-setter chat-draw-row:
   WHEN this.view != None:
@@ -150,6 +150,12 @@ ChatRow.view on-setter chat-draw-row:
     (base + ':me:md').class = 'md'
     ('Md:' + prop(this.view, 'id') + ':me').into = base + ':me:md'
     ('Md:' + prop(this.view, 'id') + ':me').src = prop(this.view, 'text')
+    -- a message the seat itself sent (the name carry-over, packs/legacy_cutover.c1f: `sent_by` = seat) says so, in the same muted line as the answer's `who`
+    (base + ':by').parent = base
+    (base + ':by').tag = 'div'
+    (base + ':by').class = 'who'
+    (base + ':by').hidden = prop(this.view, 'by') == ''
+    (base + ':by').text = prop(this.view, 'by')
     (base + ':who').parent = base
     (base + ':who').tag = 'div'
     (base + ':who').class = 'who'
