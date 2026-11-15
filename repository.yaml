@@ -1,0 +1,4 @@
+# The Home Assistant add-on repository (#1143): Settings, Add-ons (Apps), Add-on store, three dots, Repositories, add https://github.com/chedim/membrane.
+# The add-on is the folder addon/ (the Supervisor finds an add-on folder at any depth). The same repository is the HACS integration (custom_components/membrane, hacs.json).
+name: "babyseat"
+url: "https://github.com/chedim/membrane"

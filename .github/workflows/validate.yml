@@ -14,6 +14,16 @@ jobs:
           category: integration
           # every check runs, as the HACS default list requires (2026-11-10): the license is MIT (GitHub detects it)
           # and the integration ships its own brand/ icon (#1081)
+  # the Home Assistant add-on (addon/, repository.yaml): the add-on linter's schema and rules (frenck/action-app-linter, formerly action-addon-linter: it refuses
+  # unknown keys, keys set to their default value and `watchdog`). The add-on's scripts are shellchecked and its pure parts tested in the wrapper job (tests/wrapper/test_ha_addon.py).
+  addon:
+    runs-on: ubuntu-latest
+    continue-on-error: true     # non-blocking until its first green run (operator 2026-11-15)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: frenck/action-app-linter@v2.21.2
+        with:
+          path: "./addon"
   hassfest:
     runs-on: ubuntu-latest
     steps:
@@ -98,6 +108,6 @@ jobs:
           python-version: "3.13"
       - run: pip install pytest build setuptools
       # the packaging scripts and the installer: parse-clean and shellcheck-clean
-      - run: shellcheck -S warning install.sh scripts/dist/*.sh docker/docker-entrypoint.sh
+      - run: shellcheck -S warning install.sh scripts/dist/*.sh docker/docker-entrypoint.sh addon/*.sh
       # the wrapper's tests: the launcher, the versions, the wheel (built from a fake payload), install.sh (a file:// release), the Dockerfile and the workflows
       - run: pytest -q -p no:cacheprovider tests/wrapper
