@@ -1272,6 +1272,7 @@
       "EmbedQueue.todo": "Any",
       "EmbedQueue.total_n": "Any",
       "EmbedQueue.unc": "List(Any)",
+      "EmbedTurn.kind": "Text",
       "Fetch.em_body": "Any",
       "Fetch.em_job": "Any",
       "Fetch.em_mine": "Bool",
