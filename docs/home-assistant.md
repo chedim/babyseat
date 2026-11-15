@@ -119,3 +119,8 @@ The entry is `{serve_url, serve_user, serve_pass}`; `serve_pass` holds the token
 ## Tests
 
 `pytest tests/ha` runs the component against a fake Home Assistant (tests/ha/fakeha.py; the discovery: `test_discovery.py`, the two reauth forms: `test_auth.py`) and, where a `cliffvm` binary is built (`cd native && cargo build --release --no-default-features --features bin`; or `CLIFFVM_BIN=`), against a real seat with a fake `claude`. `native/tests/session_1143.rs` and `native/tests/ha_1143.rs` pin the routes the component calls (the calls, the allow-list, the journal replay).
+
+`scripts/ha_core_smoke.py` (by hand, not in CI) runs the same component in a REAL, throwaway Home Assistant Core: a venv with `pip install homeassistant`, run with that venv's
+python and `--cliffvm <binary>`. It starts a private seat (the launcher, a fake `claude`, no model server), a `hass` on 127.0.0.1 (onboarded over REST), and drives the manual form,
+Assist, the services, a refused token and its repair, a restart and the removal over REST, then the add-on's discovery, the migration of an old entry and the Ollama hint in-process
+through Home Assistant's own flow manager; it removes everything it started (`--keep` keeps the logs). Last run: Home Assistant 2026.11.1 on Python 3.14, every check passed.
