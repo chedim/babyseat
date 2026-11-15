@@ -181,6 +181,36 @@ pub struct Host {
 /// The memory policy's configuration: the boot facts `memory_budget_mb`, `unload_soft`, `unload_hard`, `unload_batch` (none of them has a default number).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MemoryConfig { pub budget_mb: Option<u64>, pub soft: Option<f64>, pub hard: Option<f64>, pub batch: Option<u64> }
+impl MemoryConfig {
+    /// The launcher's default (operator 2026-11-14): a fact left unnamed gets the default, a named one is kept. The budget is 10% of `total_bytes` (MB, rounded down), the
+    /// hard line 90% of the budget, the batch 200; no soft line. With the machine's memory unknown (`None`) nothing is added, so nothing is evicted, as before.
+    pub fn with_defaults(mut self, total_bytes: Option<u64>) -> MemoryConfig {
+        let Some(total) = total_bytes else { return self };
+        if self.budget_mb.is_none() { self.budget_mb = Some(total / 10 / (1 << 20)); }
+        if self.hard.is_none() { self.hard = Some(0.9); }
+        if self.batch.is_none() { self.batch = Some(200); }
+        self
+    }
+}
+/// The machine's physical memory in bytes (the container's limit when a cgroup sets a lower one): `hw.memsize` on macOS, `sysconf` on Linux; None when unreadable.
+#[cfg(target_os = "macos")]
+pub fn physical_memory_bytes() -> Option<u64> {
+    let mut v: u64 = 0; let mut n = std::mem::size_of::<u64>();
+    let name = std::ffi::CString::new("hw.memsize").ok()?;
+    let rc = unsafe { libc::sysctlbyname(name.as_ptr(), &mut v as *mut u64 as *mut libc::c_void, &mut n, std::ptr::null_mut(), 0) };
+    (rc == 0 && v > 0).then_some(v)
+}
+#[cfg(target_os = "linux")]
+pub fn physical_memory_bytes() -> Option<u64> {
+    let (pages, page) = unsafe { (libc::sysconf(libc::_SC_PHYS_PAGES), libc::sysconf(libc::_SC_PAGESIZE)) };
+    let total = (pages > 0 && page > 0).then(|| pages as u64 * page as u64)?;
+    // a container's limit (cgroup v2, then v1) when it is lower than the machine's
+    let limit = ["/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"].iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok()).filter_map(|t| t.trim().parse::<u64>().ok()).filter(|n| *n > 0).min();
+    Some(limit.map_or(total, |l| l.min(total)))
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn physical_memory_bytes() -> Option<u64> { None }
 /// A resident-size reading in bytes (None: unreadable): the real one is `process_rss`; a test injects its own.
 pub type RssReading = Box<dyn Fn() -> Option<u64> + Send + Sync>;
 

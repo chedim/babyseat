@@ -155,19 +155,19 @@
   },
   "memory_budget_mb": {
    "wired": false,
-   "why": "the memory budget of the seat in MB (native/src/host.rs `evict_under_pressure`; NO default): the VM itself evicts the coldest loaded stored entities when the process is over the lines; unset = no pressure and nothing is evicted; told by `--fact memory_budget_mb=<n>`"
+   "why": "the memory budget of the seat in MB (native/src/host.rs `evict_under_pressure`; default: 10% of the machine's memory, or a container's lower limit; `MemoryConfig::with_defaults`): the VM itself evicts the coldest loaded stored entities when the process is over the lines; unset = no pressure and nothing is evicted; told by `--fact memory_budget_mb=<n>`"
   },
   "unload_soft": {
    "wired": false,
-   "why": "the soft line as a fraction of memory_budget_mb (NO default): the VM starts to evict from this fraction; unset = there is no soft line (below the hard line is fine); told by `--fact unload_soft=<f>`"
+   "why": "the soft line as a fraction of memory_budget_mb (no default): the VM starts to evict from this fraction; unset = there is no soft line (below the hard line is fine); told by `--fact unload_soft=<f>`"
   },
   "unload_hard": {
    "wired": false,
-   "why": "the hard line as a fraction of memory_budget_mb (NO number of its own): the VM evicts from this fraction; unset = the budget itself (1.0); told by `--fact unload_hard=<f>`"
+   "why": "the hard line as a fraction of memory_budget_mb (default 0.9): the VM evicts from this fraction; unset = the default; told by `--fact unload_hard=<f>`"
   },
   "unload_batch": {
    "wired": false,
-   "why": "how many of the coldest entities one eviction pass takes out of the engine (native/src/host.rs; NO default): unset = no eviction; a pass runs at the end of every drain while the process is over a line; told by `--fact unload_batch=<n>`"
+   "why": "how many of the coldest entities one eviction pass takes out of the engine (native/src/host.rs; default 200): unset = the default; a pass runs at the end of every drain while the process is over a line; told by `--fact unload_batch=<n>`"
   },
   "command_timeout_s": {
    "wired": false,

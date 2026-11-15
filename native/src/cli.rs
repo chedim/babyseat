@@ -158,9 +158,10 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "effect_workers").and_then(|(_, v)| v.as_u64()) { h.set_effect_workers(n.max(1) as usize); }   // the cap on Command / File / Fetch effects running at once (default 4)
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "command_timeout_s").and_then(|(_, v)| v.as_f64()) { h.set_command_timeout(n); }   // the limit of a Command run that states no timeout_s (default 120 s)
     if let Some(n) = r.facts.iter().find(|(k, _)| k == "warm_rows").and_then(|(_, v)| v.as_u64()) { h.set_warm_rows(n as usize); }   // how many lazy rows the warm boot loads in the background (default host::DEFAULT_WARM_ROWS; 0 = none)
-    // the memory policy (docs/cliffvm.md, "Unload"): the budget, the fractions and the batch are the operator's boot facts, none has a default
+    // the memory policy (docs/cliffvm.md, "Unload"): the budget, the fractions and the batch are the operator's boot facts; a fact left unnamed gets the launcher's default (10% of the machine's memory, a batch of 200, a hard line at 90%), see host.rs `MemoryConfig::with_defaults`
     let fact = |n: &str| r.facts.iter().find(|(k, _)| k == n).map(|(_, v)| v);
-    h.set_memory(host::MemoryConfig { budget_mb: fact("memory_budget_mb").and_then(|v| v.as_u64()), soft: fact("unload_soft").and_then(|v| v.as_f64()), hard: fact("unload_hard").and_then(|v| v.as_f64()), batch: fact("unload_batch").and_then(|v| v.as_u64()) });
+    let mem = host::MemoryConfig { budget_mb: fact("memory_budget_mb").and_then(|v| v.as_u64()), soft: fact("unload_soft").and_then(|v| v.as_f64()), hard: fact("unload_hard").and_then(|v| v.as_f64()), batch: fact("unload_batch").and_then(|v| v.as_u64()) }.with_defaults(host::physical_memory_bytes());
+    h.set_memory(mem.clone());
     // TEST ONLY: MEMBRANE_TEST_RSS names a file that holds the resident size in bytes; the policy reads it at every drain instead of the process's own (unreadable: the real one)
     if let Ok(path) = std::env::var("MEMBRANE_TEST_RSS") { h.set_rss_reading(Box::new(move || std::fs::read_to_string(&path).ok().and_then(|t| t.trim().parse().ok()).or_else(host::process_rss))); }
     h.load_stored_packs();                       // the model's own packs, written in an earlier run (Pack:<name>.text)
@@ -192,6 +193,10 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
     }
     let mut told = facts(r);
     told.extend(admin_facts);
+    // the memory policy the seat runs with (the launcher's default for what the operator left unnamed) is told too, so the settings window shows the real values
+    for (k, v) in [("memory_budget_mb", mem.budget_mb.map(|n| json!(n))), ("unload_soft", mem.soft.map(|n| json!(n))), ("unload_hard", mem.hard.map(|n| json!(n))), ("unload_batch", mem.batch.map(|n| json!(n)))] {
+        if let Some(v) = v { told.entry(k.to_string()).or_insert(v); }
+    }
     for m in host::boot_environment(&h, &told, &std::env::vars().collect::<Vec<_>>()) { eprintln!("cliffvm: {m}"); }   // the environment as an entity (host.rs), before `started` so a setter on it finds it
     host::boot_started(&h, &told, true);
     if let Some(steps) = &steps {
