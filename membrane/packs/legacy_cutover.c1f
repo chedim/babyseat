@@ -2,6 +2,8 @@ PACK legacy_cutover 1
 IMPORT boot 1
 IMPORT sql 1
 IMPORT legacy_import 1
+IMPORT semtext 1
+IMPORT chat 1
 -- THE AUTOMATIC HISTORY CUTOVER (#1143, operator 2026-11-14: "history cutover: automatic"). A user who upgrades from the Python seat (0.7.x) starts this seat once and finds all the history in the one chat,
 -- doing nothing. At the seat's start this pack FINDS the old store, declares it as the read-only `SqlSource:legacy`, and runs the history import (packs/legacy_import.c1f) in the BACKGROUND: the newest
 -- session first, and inside a session the newest questions first, so the page shows the recent history at once and the older turns appear as the import goes on. Nothing is converted but the chat
@@ -132,3 +134,60 @@ LegacyCutover.history getter:
   WHEN this.state == 'importing': 'Importing: ' + str(this.done) + ' of ' + str(this.total) + ' earlier conversations'
   ELSE WHEN this.state == 'done': str(this.total) + ' earlier conversations imported'
   ELSE WHEN this.state == 'error': this.reason
+
+-- ---- THE NAME CARRY-OVER (#1143, operator 2026-11-15): ONE read-only query for the old seat's name, ONE message to the model --------------------------------------------------------------
+-- The old Python store keeps the name in its entity `membrane::name` (table `c_entities`, column `body` = JSON `{e, d: {data: {class, properties: {name, summary, status}}}}`). Once the cutover has found the old
+-- store and the new seat has NO name (`Setting:chat.name` has no value and the launch fact `seat_name` is not told), the seat reads that entity and sends the model ONE message in the main chat, born exactly as a person's
+-- message is (packs/chat.c1f: the message, its body, its turn, its time row, then `queued`), so it starts a normal turn and shows in the chat. The message asks the model to extract its name from the stored text and write
+-- it to `Setting:chat.name`; the model, not this pack, decides what the name is. The stored text is the first present of `name`, `summary`, `status`. The message is marked `sent_by: 'seat'`.
+--   Legacy:name   the LEDGER {state: sent | none | skipped | error, value, message, reason}: `sent` = the message was born; `none` = the old store holds no name; `skipped` = the new seat already had a name;
+--                 `error` = the old store could not be read (the reason is in the ledger; the cutover and the boot are untouched, and the next start asks again, nothing was sent). `sent`, `none` and `skipped` end it for good.
+LegacyName.kind getter: 'legacy_name'
+Boot.started on-setter legacy-name-seed:
+  ALWAYS:
+    SqlQuery:legacy:name.source = 'legacy'
+    SqlQuery:legacy:name.sql = "SELECT body FROM c_entities WHERE k = 'membrane::name'"
+
+LegacySeat.nm_state getter: prop('membrane::Legacy:name', 'state')
+LegacySeat.nm_fact getter: str(([prop(b, 'seat_name') for b in instances('Boot') if prop(b, 'seat_name') != None] or [''])[0])
+LegacySeat.nm_has getter: str(prop('Setting:chat.name', 'value') or '') != '' or this.nm_fact != ''
+-- the cutover found the store (its path is set) and this start has not asked yet
+LegacySeat.nm_beat getter: clock if this.cx_boot != None and prop('SqlSource:legacy', 'path') != None and prop('membrane::Legacy:cutover', 'path') != None and prop('membrane::Legacy:cutover', 'state') in ['importing', 'done', 'error'] and (this.nm_state == None or this.nm_state == 'error') and this.nm_asked != this.cx_boot else None
+LegacySeat.nm_beat on-setter legacy-name-ask:
+  WHEN this.nm_beat != None and this.nm_has:
+    this.nm_asked = this.cx_boot
+    this.nm_done = this.cx_boot
+    FOR c IN ([1] if this.nm_state == None else []):
+      membrane::Legacy:name = LegacyName(source: 'legacy')
+    membrane::Legacy:name.state = 'skipped'
+  ELSE WHEN this.nm_beat != None:
+    this.nm_asked = this.cx_boot
+    SqlQuery:legacy:name.run = {'id': 'name:' + str(this.cx_boot), 'args': []}
+
+LegacySeat.nm_q getter: prop('SqlQuery:legacy:name', 'run_result')
+LegacySeat.nm_got getter: this.nm_q if this.nm_q != None and this.nm_asked != None and this.nm_asked == this.cx_boot and this.nm_done != this.cx_boot and prop(this.nm_q, 'id') == 'name:' + str(this.cx_boot) else None
+-- the first present of name, summary, status (text that is not empty)
+LegacySeat.nm_props getter: prop(prop(prop(json(str(prop(((prop(this.nm_got, 'rows') or []) or [{}])[0], 'body') or '{}')), 'd'), 'data'), 'properties') if this.nm_got != None and prop(this.nm_got, 'status') == 'ok' else None
+LegacySeat.nm_val getter: ([str(prop(this.nm_props, k)) for k in ['name', 'summary', 'status'] if prop(this.nm_props, k) is Text and strip(prop(this.nm_props, k)) != ''] or [None])[0] if this.nm_props != None else None
+-- the answer, in one value the setter reads (a setter never reads a getter that depends on the one it is set on)
+LegacySeat.nm_res getter: {'ok': prop(this.nm_got, 'status') == 'ok', 'head': prop(this.nm_got, 'head'), 'val': this.nm_val, 'text': 'The old store has this stored for your name: ' + str(this.nm_val) + '. Extract your name from it and store it in the Setting:chat.name entity on the graph, with entity_write {spec: "Setting:chat.name", prop: "set", value: "<your name>"}.' if this.nm_val != None else None} if this.nm_got != None else None
+LegacySeat.nm_res on-setter legacy-name-result:
+  WHEN this.nm_res != None:
+    this.nm_done = this.cx_boot
+    FOR c IN ([1] if this.nm_state == None else []):
+      membrane::Legacy:name = LegacyName(source: 'legacy')
+    -- the id of the message: as the chat door makes it (the arrival time in ms, `-`, a number padded to 8 digits; no request here, so the number is 0)
+    id = words(replace(str(clock * 1000), '.', ' '))[0] + '-00000000'
+    FOR m IN ([1] if this.nm_res['ok'] and this.nm_res['val'] != None and not this.nm_has else []):
+      membrane::Legacy:name.value = this.nm_res['val']
+      membrane::Legacy:name.message = id
+      membrane::Chat:main = Chat(name: 'main')
+      membrane::Chat:main:message[id] = ChatMessage(text: this.nm_res['text'], at: clock, sent_by: 'seat')
+      membrane::Chat:main:message[id]:body = SemText(text: this.nm_res['text'])
+      membrane::Chat:main:message[id]:body.mention = True
+      membrane::Chat:main:message[id]:body.embed = True
+      membrane::Chat:main:message[id]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + id, queued_at: clock)
+      membrane::Chat:main:time[id]:main = ChatLine(chat: 'main')
+      membrane::Chat:main:message[id].queued = True
+    membrane::Legacy:name.state = 'error' if not this.nm_res['ok'] else ('skipped' if this.nm_has else ('none' if this.nm_res['val'] == None else 'sent'))
+    membrane::Legacy:name.reason = None if this.nm_res['ok'] else 'the old name could not be read: ' + str(this.nm_res['head'])

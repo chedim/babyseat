@@ -820,23 +820,43 @@
     "imports": [
       "boot",
       "sql",
-      "legacy_import"
+      "legacy_import",
+      "semtext",
+      "chat"
     ],
     "classes": [
+      "Boot",
       "LegacyCutover",
+      "LegacyName",
       "LegacySeat"
     ],
-    "members": 36,
+    "members": 47,
     "writes": [
+      "SqlQuery:legacy:name.run",
+      "SqlQuery:legacy:name.source",
+      "SqlQuery:legacy:name.sql",
       "SqlSource:legacy.mode",
       "SqlSource:legacy.path",
+      "membrane:*.embed",
+      "membrane:*.mention",
+      "membrane:*.queued",
+      "membrane:*=ChatLine()",
+      "membrane:*=ChatMessage()",
+      "membrane:*=ChatTurn()",
+      "membrane:*=SemText()",
+      "membrane::Chat:main=Chat()",
       "membrane::Legacy:cutover.checked",
       "membrane::Legacy:cutover.ended",
       "membrane::Legacy:cutover.path",
       "membrane::Legacy:cutover.reason",
       "membrane::Legacy:cutover.started",
       "membrane::Legacy:cutover.state",
-      "membrane::Legacy:cutover=LegacyCutover()"
+      "membrane::Legacy:cutover=LegacyCutover()",
+      "membrane::Legacy:name.message",
+      "membrane::Legacy:name.reason",
+      "membrane::Legacy:name.state",
+      "membrane::Legacy:name.value",
+      "membrane::Legacy:name=LegacyName()"
     ],
     "claims": [],
     "boot_facts": []
