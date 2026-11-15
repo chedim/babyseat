@@ -306,3 +306,18 @@ fn two_messages_queued_quickly_each_wait_for_their_own_ask_in_order() {
     let a = rx.recv().unwrap(); let b = rx.recv().unwrap();
     assert!(a.contains("first question") && b.contains("second question"), "one call per ask, in order");
 }
+
+#[test]
+fn a_hung_embedder_holds_the_turn_for_at_most_ten_seconds_and_the_turn_then_carries_the_edges_alone() {
+    // an Ollama that accepts the call and never answers (the operator's bound: the ask's embedding call has its own 10 s timeout, not the driver's 60 s)
+    let (url, _rx) = fake_ollama_slow(120_000, 1);
+    let h = turn_seat(Some(&url));
+    said(&h, "m1", "Quokkas eat grass.", 1.0);
+    let t0 = std::time::Instant::now();
+    ask(&h, "m2", "quokka", 2.0);
+    assert_eq!(state(&h, "m2"), "queued", "the turn waits for the call");
+    until(&h, "the hung call times out and the turn starts", |h| state(h, "m2") == "running");
+    let e = t0.elapsed();
+    assert!(e >= std::time::Duration::from_secs(9) && e < std::time::Duration::from_secs(16), "the bound is the ask's own 10 s timeout: {e:?}");
+    assert!(argv(&h, "m2").contains("Quokkas eat grass."), "edges alone: {}", argv(&h, "m2"));
+}

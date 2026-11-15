@@ -48,7 +48,8 @@ RecallPart.root getter: head(this.backend, len(this.backend) - 1) if tail(this.b
 RecallPart.ask_job getter: {'ask': this.ask_msg, 'text': this.ask_text} if this.ask_msg != None else None
 RecallPart.ask_job on-setter embed-ask:
   WHEN this.ask_job != None and this.root != '' and this.embed_model != None and strip(prop(this.ask_job, 'text')) != '':
-    ('Fetch:recall:ask').request = {'id': {'ask': prop(this.ask_job, 'ask')}, 'url': this.root + '/api/embed', 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'model': this.embed_model, 'input': prop(this.ask_job, 'text')}}
+    -- the call has its own 10 s limit (operator 2026-11-14, the driver's default is 60 s): a hung embedding server holds a chat turn for at most that long, then the turn goes on with the edges alone
+    ('Fetch:recall:ask').request = {'id': {'ask': prop(this.ask_job, 'ask')}, 'url': this.root + '/api/embed', 'method': 'POST', 'timeout_s': 10, 'headers': {'Content-Type': 'application/json'}, 'body': {'model': this.embed_model, 'input': prop(this.ask_job, 'text')}}
 RecallPart.ask_rr getter: prop('Fetch:recall:ask', 'request_result')
 RecallPart.ask_json getter: ([j for j in [json(str(prop(this.ask_rr, 'body') or ''))] if j is not Error] or [{}])[0]
 -- READY (read by chat_turn.c1f `recall_wait`): false ONLY while the embedding call for THIS ask is in flight (there is a backend, a model, a text, and no receipt for this ask yet). No backend, no text, a failed or
