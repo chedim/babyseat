@@ -85,8 +85,10 @@ def test_without_ollama_the_confirm_is_the_plain_one(ha, run):
 
 def test_the_manual_form_carries_the_hint_too_and_submits_the_same(ha, run):
     pkg, hass = ha
-    plain = run(_cf().MembraneConfigFlow.async_step_user(_flow(hass)))
+    first = _flow(hass)
+    plain = run(first.async_step_user())
     assert plain["step_id"] == "user" and "ollama_url" not in plain["description_placeholders"]
+    hass.config_entries.flow_abort(first)              # closed: Home Assistant keeps one manual flow in progress at a time
     _ollama(hass, data={"url": "http://ollama.lan:11434", "model": "llama3.2"})
     f = _flow(hass)
     form = run(f.async_step_user())

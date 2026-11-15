@@ -192,8 +192,13 @@ class FakeConfigEntries:
     def __init__(self):
         self.entries: list[FakeConfigEntry] = []
         self.forwarded: list = []
+        self.progress: list = []                # the flows that set a unique id, ended or not (ConfigFlow._done)
         self.updated: list = []
         self.reloaded = None
+
+    def flow_abort(self, flow):
+        """HA's flow.async_abort(flow_id): the person closed the dialog; the flow is no longer in progress."""
+        flow._done = True
 
     def async_entries(self, domain=None, include_ignore=True):
         return [e for e in self.entries if domain in (None, e.domain) and (include_ignore or e.source != "ignore")]
@@ -272,8 +277,17 @@ class ConfigFlow:
     context: dict = {}
     unique_id = None
 
+    _done = False                                 # the flow ended (an entry, an abort): no longer in progress
+
     async def async_set_unique_id(self, uid, *, raise_on_progress=True):
+        """HA's: another flow of this unique id still in progress (a reauth aside) aborts this one `already_in_progress`."""
+        progress = self.hass.config_entries.progress
+        if raise_on_progress and any(f is not self and not f._done and f.unique_id == uid and f.source != "reauth" for f in progress):
+            self._done = True
+            raise AbortFlow("already_in_progress")
         self.unique_id = uid
+        if self not in progress:
+            progress.append(self)
 
     def _abort_if_unique_id_configured(self, updates=None, reload_on_update=True, **kw):
         """HA's: the entry of this unique id gets `updates` merged in its data; it is reloaded only when it is loaded or retrying its
@@ -284,6 +298,7 @@ class ConfigFlow:
                     self.hass.config_entries.async_update_entry(e, data=dict(e.data, **updates))
                     if reload_on_update and getattr(e, "loaded", True):
                         self.hass.config_entries.async_schedule_reload(e.entry_id)
+                self._done = True
                 raise AbortFlow("already_configured")
 
     @property
@@ -299,9 +314,11 @@ class ConfigFlow:
                 "description_placeholders": description_placeholders or {}}
 
     def async_create_entry(self, *, title, data, options=None, description=None):
+        self._done = True
         return {"type": "create_entry", "title": title, "data": dict(data), "options": options}
 
     def async_abort(self, *, reason, description_placeholders=None):
+        self._done = True
         return {"type": "abort", "reason": reason}
 
     def _get_reauth_entry(self):
@@ -315,6 +332,7 @@ class ConfigFlow:
         if unique_id is not None:
             entry.unique_id = unique_id
         self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        self._done = True
         return {"type": "abort", "reason": reason}
 
 

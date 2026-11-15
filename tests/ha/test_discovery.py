@@ -165,6 +165,20 @@ def test_a_confirm_left_open_while_the_seat_was_set_up_by_hand_aborts(ha, run):
     assert late == {"type": "abort", "reason": "already_configured"}
 
 
+def test_a_second_announcement_while_the_confirm_is_open_is_already_in_progress(ha, run):
+    """Real Home Assistant (scripts/ha_core_smoke.py): a flow that sets the unique id of a flow still open (not a reauth) aborts `already_in_progress`,
+    so the add-on announcing again while the person has not confirmed yet makes no second confirm. The fake did not model flows in progress."""
+    pkg, hass = ha
+
+    async def body(seat):
+        first = await _flow(hass).async_step_hassio(_info(seat.port, "tok-1"))
+        second = await _flow_result(lambda: _flow(hass).async_step_hassio(_info(seat.port, "tok-1")))
+        return first, second
+    first, second = _with_seat(run, hass, "tok-1", body)
+    assert first["step_id"] == "hassio_confirm"
+    assert second == {"type": "abort", "reason": "already_in_progress"}
+
+
 def test_an_ignored_seat_stays_ignored_and_the_manual_form_is_still_offered(ha, run):
     """The person pressed Ignore on the add-on's discovery: Home Assistant keeps an entry of source `ignore` with the seat's unique id. Real Home
     Assistant (scripts/ha_core_smoke.py): a later announcement aborts and leaves it alone; the manual form does not count it. The fake had no
