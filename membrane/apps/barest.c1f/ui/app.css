@@ -213,16 +213,3 @@ code.md-code { font: .92em var(--mono); background: rgb(127 127 127 / .18); padd
 .login-err:not(:empty) { background: var(--note); padding: 8px 12px; border-radius: 8px; }
 .login-help { margin: 0; color: var(--mute); font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { .login-card, .login-card * { transition: none !important; animation: none !important; } }
-
-
-
-
-/* the art popup (art_popup.c1f): a scrim over the page and a frame centered on it; a click on the scrim closes */
-.art-scrim { position: fixed; inset: 0; background: rgb(0 0 0 / .45); z-index: 20; }
-.art-frame { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: min(560px, 94vw); max-height: 90vh; overflow: auto; background: var(--panel); color: var(--ink); border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 16px 48px rgb(0 0 0 / .4); z-index: 21; outline: none; }
-.art-scrim[hidden], .art-frame[hidden] { display: none; }
-.art-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
-.art-head h2 { margin: 0; flex: 1; font: 600 14px var(--mono); }
-.art-pic { padding: 18px 28px 6px; text-align: center; color: var(--accent); }
-.art-line { font: 15px/1.2 var(--mono); white-space: pre; }
-.art-hint { margin: 0; padding: 8px 14px 12px; text-align: center; color: var(--mute); font-size: 12px; }
