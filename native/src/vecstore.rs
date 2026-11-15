@@ -142,6 +142,7 @@ impl ClassVecs {
             self.at.insert(self.eids[i].clone(), i);
         }
         self.eids.pop(); self.norms.pop(); self.data.truncate(last * self.dim);
+        if self.eids.is_empty() { self.dim = 0; }   // the last vector left: the class forgets its dimension (the next first vector fixes it again)
         true
     }
     /// The `k` nearest by cosine, best first, ties by eid. `q` has this class's dimension and a non-zero norm (the caller checks).
