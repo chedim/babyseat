@@ -79,6 +79,34 @@ Verdict: trend is growing (median x2.3, p95 x11), against a flat ~3,700 (R9) or 
 @1 and @3 have no like-for-like record: R10 (@1, 10 convs, vote, after memspeak: 0.47 / 0.39 / 0.57 / 0.35 for single / multi / temporal / open) is another subset and another algorithm; now single 0.32, multi 0.12, temporal 0.59, open 0.18 (the category-number-to-name mapping in R10 is assumed to be the LoCoMo paper's). Not comparable, shown for orientation only. Latency: related write+read median 51 ms, p95 83 ms (the old `ask_ms_mean` of 166-1153 ms is the whole ask with an embedder; not comparable, and the question's own mention, about 0.45 s, is not in my 51 ms).
 Limits: the questions stay in the field after being asked (they shift word counts a little; question texts are skipped in the results); only conv 0-1; the old weights were fit on LoCoMo (R12), the new engine has none; speaker names and dates ride inside the turn text.
 
+**(a2) Rerun with distinct-turn scoring, and strict / relative ratings (2026-11-14, internal page: no public claims).** Same ingest, same questions (conv 0-1, 230), a fresh EMPTY private store, release binary built from worktree `w64-bench3`, fake claude, `--port 0`, load average 11-17 (other agents were building and running seats; one heavy job of mine at a time); 1,131 s wall (the first run: 737 s). What changed against (a): each question asks `related_n = 200` SENTENCE rows (`--k-rows`; a parameter of the asker in `scripts/measure_locomo.py`, NOT a product default; `related_n` still has no default in `mentions.c1f`); every row of another question (`Loq`) is dropped BEFORE counting; the rest is deduplicated to distinct TURNS in rank order; hit@k looks at the first k distinct turns. Per question the script writes a JSONL (category, evidence turn ids, the rank of every evidence turn among the distinct turns returned, answered or not); `related` returned a median of 149.5 distinct turns per question and `answered_nothing` is 0, so no list was short.
+
+Metrics. LENIENT = any evidence turn in the top k (the old and the first run's meaning; its ceiling is 1.0 by construction). STRICT = ALL evidence turns of the question in the top k. CEILING@k = share of questions with at most k evidence turns (strict cannot exceed it). RELATIVE = strict / ceiling. @all = anywhere in the 200-row candidate list (the retrieval ceiling: below it, the candidate set never had it; between it and @20, it was ranked too low).
+
+Lenient (this run; the old arm is the recorded R11 conv 0-1 recompute, hit@8 / hit@20 only, no old @1/@3/@all):
+
+| category | n | @1 | @3 | @8 | @20 | @all | first run @8 / @20 | old @8 / @20 (R11) | verdict @8 / @20 |
+|---|---|---|---|---|---|---|---|---|---|
+| multi-hop | 42 | 0.12 | 0.17 | 0.29 | 0.50 | 0.79 | 0.29 / 0.43 | 0.56 / 0.72 (n 43) | worse / worse |
+| temporal | 63 | 0.59 | 0.78 | 0.84 | 0.87 | 0.95 | 0.84 / 0.87 | 0.84 / 0.94 (n 63) | same / worse |
+| open-domain | 11 | 0.18 | 0.18 | 0.18 | 0.36 | 0.73 | 0.18 / 0.36 | 0.46 / 0.62 (n 13) | worse / worse (n tiny) |
+| single-hop | 114 | 0.32 | 0.46 | 0.52 | 0.64 | 0.78 | 0.52 / 0.56 | 0.60 / 0.70 (n 114) | worse / worse |
+| all | 230 | 0.35 | 0.48 | 0.55 | 0.67 | 0.83 | 0.55 / 0.61 | 0.65 / 0.76 | worse / worse |
+
+Strict, ceiling and relative (strict / ceiling):
+
+| category | strict @1 / @3 / @8 / @20 / @all | ceiling @1 / @3 / @8 / @20 | relative @1 / @3 / @8 / @20 |
+|---|---|---|---|
+| multi-hop (42) | 0.00 / 0.00 / 0.02 / 0.07 / 0.36 | 0.07 / 0.83 / 1.00 / 1.00 | 0.00 / 0.00 / 0.02 / 0.07 |
+| temporal (63) | 0.59 / 0.78 / 0.84 / 0.87 / 0.95 | 1.00 / 1.00 / 1.00 / 1.00 | 0.59 / 0.78 / 0.84 / 0.87 |
+| open-domain (11) | 0.00 / 0.00 / 0.00 / 0.09 / 0.45 | 0.27 / 1.00 / 1.00 / 1.00 | 0.00 / 0.00 / 0.00 / 0.09 |
+| single-hop (114) | 0.31 / 0.43 / 0.50 / 0.63 / 0.76 | 0.95 / 1.00 / 1.00 / 1.00 | 0.32 / 0.43 / 0.50 / 0.63 |
+| all (230) | 0.31 / 0.43 / 0.48 / 0.57 / 0.73 | 0.77 / 0.97 / 1.00 / 1.00 | 0.41 / 0.44 / 0.48 / 0.57 |
+
+How much of the first run's gap was the scoring artefact. @8: none (0.548 in both runs, identical in every category; the old arm 0.648; gap 0.100 before and after). @20: 0.613 to 0.665 (+0.052); the gap to the old 0.764 went from 0.151 to 0.099, so about a third (34%) of the @20 gap was the artefact, two thirds remain. Per category @20: multi-hop 0.43 to 0.50, single-hop 0.56 to 0.64, temporal and open-domain unchanged. The gap stays: lenient @8 is 0.10 below the old arm overall, 0.27 below in multi-hop; temporal @8 is the same.
+
+What strict adds (no old per-question strict exists: the old arm recorded lenient only, so no old strict or relative is claimed). Multi-hop is the one category that needs several turns: strict @8 0.02 (1 of 42), strict @20 0.07, and even the whole 200-row list holds every evidence turn for only 0.36, while it holds at least one for 0.79. So for multi-hop and open-domain about 40-45% of questions lose to the candidate set (not all evidence is in the list) and the rest to ranking. Single-hop and temporal are the same strict and lenient up to 0.03 (almost all have one evidence turn), so their relative rating equals the raw one; temporal is at 0.84 of its ceiling at @8, single-hop 0.50, multi-hop 0.02. Limits as in (a): the questions stay in the field; conv 0-1 only; the ten-conversation run was started and stopped, not reported. Files: `scripts/measure_locomo.py` (`--k-rows`, prints the four tables), per-question JSONL kept in the scratchpad (not committed).
+
 **(b) A small hand-built check on Throwy's own history (one author, 20 facts, NOT a benchmark).** Pool: the 154 messages of the copy plus the 45 Keep titles as SemTexts (the 35 existing assistant response bodies are in the field too). Facts picked from what the operator stated (Agatha, boat model, drive kit, prop, battery, Blurp, geography quiz, /tmp, controller, build, ...); each question is a plain sentence (`scripts/facts_throwy.json`). Rank of the source user message among distinct texts:
 
 | | @1 | @3 | @8 | @20 |
