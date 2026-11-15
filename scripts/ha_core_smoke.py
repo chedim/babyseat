@@ -726,10 +726,15 @@ async def drive_inside(work: Path, cliffvm: str, ha_port: int, s) -> None:
         # (c) the history cutover finds <config>/membrane/.membrane by itself
         async def cut():
             txt = await mcp_read(s, cfg, port, "Legacy:cutover")
-            return txt if '"done"' in txt or "done" in txt.split("state", 1)[-1][:20] else None
-        txt = await wait_for(cut, 60, 1)
-        check(bool(txt) and ".membrane/field.sqlite/field.sqlite3" in txt, "inside: the history cutover found the 0.7 store in <config>/membrane/.membrane and imported it",
-              (txt or await mcp_read(s, cfg, port, "Legacy:cutover"))[:400])
+            try:
+                led = json.loads(txt[txt.index("{"):])
+            except ValueError:
+                return None
+            return led if led.get("state") in ("done", "error") else None
+        led = await wait_for(cut, 120, 1) or {}
+        check(led.get("state") == "done" and str(led.get("path", "")).endswith(".membrane/field.sqlite/field.sqlite3") and led.get("total") == 1,
+              "inside: the history cutover found the 0.7 store in <config>/membrane/.membrane and imported its one session",
+              json.dumps(led)[:400] if led else (await mcp_read(s, cfg, port, "Legacy:cutover"))[:400])
 
         # (d) the options flow: another model, the key kept (an empty key field): the seat restarts with it
         st, of = await hass.req(s, "POST", "/api/config/config_entries/options/flow", {"handler": entry_id})
