@@ -1208,7 +1208,10 @@ fn the_history_route_pages_the_newest_turns_oldest_first_with_their_tools_and_a_
     assert_eq!((last["id"].clone(), last["state"].clone(), last["response"].clone()), (json!(ids[59]), json!("done"), json!("Answer to m59")), "{last}");
     assert_eq!(calls_of(last), json!([{"name": "entity_read", "input": {"spec": "Q:m59"}}]), "the page route carries an id, the name and the input only: {last}");
     assert_eq!(last["tools"], json!(["entity_read"]), "the view's own `tools` stay the names");
-    assert_eq!(last, &view(port, &ids[59]).as_object().map(|v| { let mut v = v.clone(); v.insert("tool_calls".into(), last["tool_calls"].clone()); J::Object(v) }).unwrap(), "the per-message view plus tool_calls (name, input)");
+    // the history page also carries the interrupted marks of a failed turn (`interrupted`, `kept`: null for a turn that ended well); the per-message view does not (operator 2026-11-15)
+    let mut page_row = last.as_object().unwrap().clone();
+    for k in ["interrupted", "kept"] { assert_eq!(page_row.remove(k), Some(J::Null), "a turn that ended well carries no interrupted mark"); }
+    assert_eq!(J::Object(page_row), view(port, &ids[59]).as_object().map(|v| { let mut v = v.clone(); v.insert("tool_calls".into(), last["tool_calls"].clone()); J::Object(v) }).unwrap(), "the per-message view plus tool_calls (name, input)");
     // `before` pages to older turns, across the boundary, to the very first
     let h2 = history(port, &format!("?before={}", ids[40]));
     assert_eq!(texts(&h2), (20..40).map(|i| format!("m{i:02}")).collect::<Vec<_>>());
