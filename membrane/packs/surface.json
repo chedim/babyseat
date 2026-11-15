@@ -722,6 +722,43 @@
       "Fetch"
     ]
   },
+  "field": {
+    "imports": [
+      "semtext",
+      "mentions",
+      "vector",
+      "embed"
+    ],
+    "classes": [
+      "FieldBg",
+      "FieldEpisode",
+      "FieldState",
+      "FieldStep",
+      "FieldTerm",
+      "SemText"
+    ],
+    "members": 38,
+    "writes": [
+      "*.ep_seq",
+      "*.eps",
+      "*.field_moves",
+      "*.field_pend",
+      "*.n",
+      "*.retire",
+      "*.run_acc",
+      "*.run_k",
+      "*.v",
+      "FieldBg:all.n",
+      "FieldBg:all.v",
+      "FieldBg:all=FieldBg()",
+      "FieldTerm:*.embed"
+    ],
+    "claims": [],
+    "boot_facts": [],
+    "virtual": [
+      "FieldStep"
+    ]
+  },
   "fs": {
     "imports": [],
     "classes": [
@@ -1312,9 +1349,10 @@
   "vector": {
     "imports": [],
     "classes": [
+      "FieldSeed",
       "Vector"
     ],
-    "members": 1,
+    "members": 2,
     "writes": [],
     "claims": [],
     "boot_facts": []

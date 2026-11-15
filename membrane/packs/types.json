@@ -1331,6 +1331,69 @@
       "Fetch"
     ]
   },
+  "field": {
+    "getters": {
+      "FieldBg.kind": "Text",
+      "FieldEpisode.kind": "Text",
+      "FieldState.kind": "Text",
+      "FieldStep.acc": "Any",
+      "FieldStep.after": "List(Float)?",
+      "FieldStep.ain": "Any",
+      "FieldStep.aout": "Any",
+      "FieldStep.base": "Any",
+      "FieldStep.before": "Any",
+      "FieldStep.closes": "Bool",
+      "FieldStep.ep": "Any",
+      "FieldStep.gain": "Any",
+      "FieldStep.joins": "Bool",
+      "FieldStep.k": "Any",
+      "FieldStep.kin": "Any",
+      "FieldStep.kout": "Any",
+      "FieldStep.move": "Num?",
+      "FieldStep.n": "Num?",
+      "FieldStep.ready": "Bool",
+      "FieldStep.rows": "List(Any)?",
+      "FieldStep.xv": "List(Float)?",
+      "FieldTerm.vec_todo": "List(Dict)",
+      "SemText.field_done": "Dict?",
+      "SemText.field_ep_max": "Int",
+      "SemText.field_ep_run": "Int",
+      "SemText.field_from": "Any",
+      "SemText.field_gain": "Float",
+      "SemText.field_k_mat": "Int",
+      "SemText.field_land": "List(Dict)?",
+      "SemText.field_mature": "Int",
+      "SemText.field_modes": "List(Dict)?",
+      "SemText.field_need": "List(Dict)?",
+      "SemText.field_plan": "List(Dict)?",
+      "SemText.field_ready": "List(Dict)?",
+      "SemText.field_rows": "List(Dict)?",
+      "SemText.field_upto": "Any",
+      "SemText.field_vid": "List(Text)",
+      "SemText.field_word_min": "Int"
+    },
+    "writes": {
+      "*.ep_seq": "Num?",
+      "*.eps": "List(Dict)",
+      "*.field_moves": "List(Any)",
+      "*.field_pend": "List(Any)",
+      "*.n": "Any",
+      "*.retire": "Bool",
+      "*.run_acc": "Any",
+      "*.run_k": "Any",
+      "*.v": "Any",
+      "FieldBg.n": "Any",
+      "FieldBg.v": "Any",
+      "FieldTerm.embed": "Bool",
+      "SemText.field_go": "Any",
+      "SemText.field_n": "Any",
+      "SemText.field_steps": "List(Text?)"
+    },
+    "findings": [],
+    "virtual": [
+      "FieldStep"
+    ]
+  },
   "fs": {
     "getters": {
       "Dir.entries": "Any",
@@ -2097,6 +2160,7 @@
   },
   "vector": {
     "getters": {
+      "FieldSeed.dim": "Int",
       "Vector.dim": "Int"
     },
     "writes": {},
