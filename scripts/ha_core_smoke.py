@@ -827,13 +827,13 @@ async def main() -> int:
             await asyncio.to_thread(hass.stop)
             lines = hass.component_lines()
             check(not lines, "no WARNING/ERROR from the component in hass.log over the whole run", "\n      ".join(lines[:40]))
+        if not a.skip_inside:             # before the in-process run: Home Assistant's blocking-call detector stays in this process after it
+            async with aiohttp.ClientSession() as s:
+                await drive_inside(work, a.cliffvm, a.ha_port, s)
         if not a.skip_discovery:
             await drive_discovery(config_dir(work / "ha-discovery", a.ha_port), seat)
             lines = await asyncio.to_thread(Hass(work / "ha-discovery", 0).component_lines)
             check(not lines, "no WARNING/ERROR from the component in the in-process run", "\n      ".join(lines[:40]))
-        if not a.skip_inside:
-            async with aiohttp.ClientSession() as s:
-                await drive_inside(work, a.cliffvm, a.ha_port, s)
     finally:
         if hass is not None:
             await asyncio.to_thread(hass.stop)

@@ -148,6 +148,16 @@ class SeatClient:
             cause = (body or {}).get("error") if isinstance(body, dict) else None
             raise SeatError(f"the seat refused the model {model}: {cause if isinstance(cause, str) else status}")
 
+    async def write_entity(self, spec: str, prop: str, value) -> str:
+        """One `entity_write` on the seat's tool route (`POST /mcp`, what the model's own tools call; any verified token is the admin) -> the reply text."""
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_write", "arguments": {"spec": spec, "prop": prop, "value": value}}}
+        status, got = await self._call("POST", "/mcp", HEALTH_TIMEOUT_S, body)
+        res = (got or {}).get("result") if isinstance(got, dict) else None
+        text = str((((res or {}).get("content") or [{}])[0] or {}).get("text") or "")
+        if status != 200 or not isinstance(res, dict) or res.get("isError"):
+            raise SeatError(f"writing {spec}.{prop} answered {status}: {text or got}")
+        return text
+
     async def prompt(self, sid: str, text: str, speaker: str = "") -> None:
         """A message the seat answers in its own time (nothing waits for the turn): the same parts as `message`."""
         status, _ = await self._call("POST", f"/session/{sid}/prompt_async", SESSION_TIMEOUT_S, {"agent": "build", "parts": _parts(text, speaker)})

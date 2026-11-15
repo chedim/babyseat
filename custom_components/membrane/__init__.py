@@ -151,12 +151,15 @@ async def _start_seat(hass: HomeAssistant, entry: ConfigEntry) -> SeatProcess:
 
 
 async def _apply_model(client: SeatClient, settings: dict) -> None:
-    """The entry's model is the seat's pick. The seat seeds its pick from the `minds` fact only at its first start (router.c1f), so a model changed in
-    Configure is written through the seat's own options route (what the model select posts) when the seat runs on another one."""
+    """The entry's model is the seat's pick. The seat seeds its minds (`Minds:seat`) from the `minds` fact only at its first start (router.c1f), and its
+    options route takes only an Ollama model or a claude rung (door_models.c1f), so when the seat runs on another model the minds are written as the
+    `minds` fact would write them (every mind on the model), with `entity_write` on the seat's tool route."""
     model = settings.get(CONF_MODEL) or (DEFAULT_ANTHROPIC_MODEL if settings.get(CONF_PROVIDER) == "anthropic" else "")
     try:
         if model and ((await client.options()).get("background") or {}).get("loops") != model:
-            await client.set_model(model)
+            for mind in ("loops", "cortex", "workers", "seat_default"):
+                await client.write_entity("Minds:seat", mind, model)
+            _LOGGER.info("membrane: the seat runs on %s now", model)
     except SeatError as e:
         _LOGGER.warning("membrane: the seat did not take the model %s: %s", model, e)
 

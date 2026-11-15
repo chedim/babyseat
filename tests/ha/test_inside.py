@@ -413,8 +413,9 @@ def test_a_setup_that_fails_after_the_seat_started_stops_the_seat(ha, run, tmp_p
 
 def test_the_entrys_model_is_the_seats_pick_at_every_start(ha, run, tmp_path):
     """The seat seeds its pick (Minds:seat) from the `minds` fact only at its FIRST start (router.c1f): a model changed in Configure would never reach it
-    (the real Home Assistant run, scripts/ha_core_smoke.py, answered "No Anthropic API key" after the change). The setup writes the entry's model through
-    the seat's own options route when the seat runs on another; a seat already on it gets no write."""
+    (the real Home Assistant run, scripts/ha_core_smoke.py, answered "No Anthropic API key" after the change). The options route refuses a cloud rung that
+    is not claude-agent (door_models.c1f `pickable`), so the setup writes the minds as the `minds` fact would, with entity_write on /mcp, when the seat
+    runs on another model; a seat already on it gets no write."""
     pkg, hass = ha
     posts = tmp_path / "config" / "membrane" / "fake-posts.jsonl"
 
@@ -425,5 +426,5 @@ def test_the_entrys_model_is_the_seats_pick_at_every_start(ha, run, tmp_path):
         await pkg.async_setup_entry(hass, e)
         return first, posts.read_text().splitlines() if posts.exists() else []
     first, after = _setup_inside(pkg, hass, tmp_path, run, body, model="claude-opus-5-5")
-    assert [json.loads(x) for x in first] == [{"loops": "claude-opus-5-5"}]
+    assert [json.loads(x) for x in first] == [{"write": ["Minds:seat", k, "claude-opus-5-5"]} for k in ("loops", "cortex", "workers", "seat_default")]
     assert after == first, "the seat already runs on it: no second write"

@@ -10,6 +10,7 @@ its environment and its pid):
   {"mode": "nohealth"}                 writes the token and never answers health (no listener)
   {"mode": "ignore_term"}              like ok, but SIGTERM is ignored (the runner has to kill it)
   GET/POST /membrane/options           the seat's model pick: `want["loops"]` (default "first-model") until a POST {loops} writes <data>/fake-loops; each POST is a line of fake-posts.jsonl
+  POST /mcp entity_write               logged as {"write": [spec, prop, value]} in fake-posts.jsonl; Minds:seat.loops sets the pick
 `cliffvm token mint ...` prints `minted-<n>` (n counts the mints in <secret file>.mints).
 """
 from __future__ import annotations
@@ -76,6 +77,13 @@ class H(BaseHTTPRequestHandler):
                 open(os.path.join(data, "fake-posts.jsonl"), "a").write(json.dumps({"loops": loops}) + "\n")
             cur = open(f).read() if os.path.exists(f) else want.get("loops", "first-model")
             code, body = 200, json.dumps({"background": {"loops": cur, "models": [cur]}}).encode()
+        if self.path == "/mcp" and got == token and self.command == "POST":   # the model's tool route: entity_write of Minds:seat (loops sets the pick above)
+            call = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            args = call["params"]["arguments"]
+            open(os.path.join(data, "fake-posts.jsonl"), "a").write(json.dumps({"write": [args["spec"], args["prop"], args["value"]]}) + "\n")
+            if args["spec"] == "Minds:seat" and args["prop"] == "loops":
+                open(os.path.join(data, "fake-loops"), "w").write(args["value"])
+            code, body = 200, json.dumps({"jsonrpc": "2.0", "id": call.get("id"), "result": {"content": [{"type": "text", "text": "ok"}], "isError": False}}).encode()
         self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.end_headers()
         self.wfile.write(body)
     do_POST = do_GET
