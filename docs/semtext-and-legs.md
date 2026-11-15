@@ -134,8 +134,9 @@ vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (th
 {model, input: [...]}` with a 120 s limit. The limits: at most 64 sentences a request, a pass of 256 sentences, a same-pass cache of 64 entries (a sentence said twice in a pass makes no second request).
 - THE QUEUE is `Embed:queue` (`state` idle | working | paused | stuck, `reason`, `line`, `inflight`, `landed`, `cache`, `pass_n`, `hold`). ONE request at a time, one text per request: within the existing worker limit (`effect_workers`), no
   second limit. A request is sent only while no chat turn is running (each turn of any chat or session, when it becomes `running`, makes a small `Embed:turn:<key>` of this pack's resident class, and retires it when it is done or an error; the queue reads those, never lists `Chat`; a pointer of a dead run is not counted); one in flight finishes, then the queue waits for the turn to end and goes on by itself (the sender is a getter that reads the turns). An `Embed:ask:<key>` is retired when its text has all
-  its vectors; a text is marked `embedded = true` and counts its sentences done in `emb_n` (a restart goes on where it stopped). A text whose own recall call is out (`in_flight`, below) waits:
-  a `Memory` note's call embeds its sentences and writes their vectors itself (`embed-ask-vectors`), and the queue then only settles it.
+  its vectors; a text is marked `embedded = true` and counts its sentences done in `emb_n` (a restart goes on where it stopped). A text whose own recall call is out (`in_flight`, below) waits, and so
+  does the body of a message queued for a turn that has not started: a chat ask's and a `Memory` note's call embeds its sentences and writes their vectors itself (`embed-ask-vectors`), and the
+  queue then only settles it.
 - THE BACKLOG: the chat bodies nobody asked for (the imported history, messages from before) are found in the store (`sql`, 64 texts a page, OLDEST first by the message id, a page at a time: the query holds the engine while it runs; the waiting asks go first, oldest first too, so the vectors land in text order for the field, `packs/field.c1f`) and go through the same queue once
   the model server answers. The Settings row `import.embeddings` ("Sentence vectors", read-only) shows `Embed:queue.line`: done of total texts, or why the queue waits. While a history import runs the total is approximate (it never shows less than done plus the texts known
   to be waiting; the next start counts exactly); a page of the backlog is asked again at a chat event or at the import's next page, so the very last page of an import is found at the next chat event or start.
@@ -187,9 +188,11 @@ finds the rest in the graph. It computes only while `recall_on` is true (the ban
 - **The cosine lane.** `near(r_query, 'Vector', pool)`. The query (`r_query`, operator 2026-11-15) is the weighted sum of the window's texts' vectors with the window's weights (`r_weights`,
   `vsum`); a text's vector is the unit of the sum of its sentence vectors (`Vector:of:<key>:s:<start>`, the embedding pipeline's). A window text with no vector yet is left out; with none,
   there is no query and no lane (`the_cosine_query_is_the_weighted_sum_of_the_windows_text_vectors`). The ASK's own vectors come from its own embedding call while that receipt is there
-  (`ask_vecs`; 10 s limit; `in_flight` is true while it is out), else from its sentence vectors: what the call embeds is `ask_input`, the ask's whole text as one input for a chat ask
-  (`Fetch:recall:ask`, shared by the chat's asks: one vector, a stand-in for its sentence vectors until the queue makes them), its first sentences (at most 64, the queue's batch) for a `Memory`
-  (below).
+  (`ask_vecs`; 10 s limit; `in_flight` is true while it is out), else from its sentence vectors: what the call embeds is `ask_input`: for a chat text (`Fetch:recall:ask`, shared by the chat's
+  asks) and a `Memory` (below) its first sentences (at most 64, the queue's batch; operator 2026-11-15), and the call writes their `Vector`s and `emb_n` (`packs/embed.c1f` `embed-ask-vectors`), so
+  a message is embedded once (`a_chat_asks_own_call_writes_the_sentence_vectors_of_its_message`, `a_chat_message_is_embedded_once`); any other text embeds its whole text as one input
+  (one vector, not kept). The queue leaves a text alone while its own call is out (`in_flight`) and while it is the body of a message queued for a turn that has not started (the
+  banner is about to ask it); once the turn starts or ends it is the queue's again (so a failed call or a missing banner part only delays it).
 - **Fusion and rerank** as before: reciprocal rank (`rrf_k`), ties by key; the first `rerank_top` rows reranked by the fitted weights over the cosine score, the fused place and the share of the ask's own
   entities the sentence mentions.
 - **The ask itself is never a hit**; nothing else is left out (recent chat texts are hits: the model gets no chat history).

@@ -217,12 +217,13 @@ SemText.r_edge_rows getter:
   [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'rank': len(before(ej, '|' + x['key'] + '|')) - len(replace(before(ej, '|' + x['key'] + '|'), '|', '')) + 1, 'sim': 0, 'ov': x['d'] / n if n > 0 else 0} for x in this.r_edge_keyed]
 
 -- THE ASK'S OWN CALL: one embedding call to the local model server (the boot facts `seat_backend` and `embed_model`, the embedding pipeline's model, packs/embed.c1f), with its own
--- 10 s limit (operator 2026-11-14: a hung server holds a reader for at most that long). What it embeds is `ask_input`: the ask's text as ONE input (a chat ask: one vector), or a list of
--- its first sentences (a Memory note, below: then the call is the embedding pipeline's request for those sentences and writes their `Vector`s, packs/embed.c1f `embed-ask-vectors`).
+-- 10 s limit (operator 2026-11-14: a hung server holds a reader for at most that long). What it embeds is `ask_input`: for a chat text and a Memory note (below)
+-- the list of its first sentences (at most the queue's batch of 64; operator 2026-11-15): then the call is the embedding pipeline's request for those sentences and writes their `Vector`s
+-- (packs/embed.c1f `embed-ask-vectors`), so the text is embedded once; any other text (a leg of a pack) embeds its whole text as ONE input (one vector, not kept).
 -- The call is the Fetch entity `ask_fetch` (the chat's asks share `Fetch:recall:ask`; each Memory note has its own, `Fetch:recall:note:<key>`); a receipt that names another text is
 -- not this one's. `in_flight` is true ONLY while this text's call is out (no backend, no model, no text, a refused or failed call: not; for a note, not once its vectors are made).
 SemText.ask_fetch getter: 'Fetch:recall:ask'
-SemText.ask_input getter: str(this.text or '')
+SemText.ask_input getter: [s['text'] for s in head(this.sentences or [], 64)] if this.r_chat else str(this.text or '')
 SemText.ask_job getter:
   WHEN this.recall_on != True: None
   ELSE:
@@ -252,8 +253,8 @@ SemText.ask_vecs getter:
     e if e is List and len(e) == n and len([v for v in e if not (v is List) or len(v) == 0]) == 0 else None
 
 -- THE QUERY of the cosine lane (#1143, operator 2026-11-15): the window's texts' vectors, summed with the window's weights (`r_weights`, by `vsum`); a text's vector is the unit of the sum of
--- its sentence vectors (`Vector:of:<key>:s:<start>`, the embedding pipeline's). The ask's own are its call's vectors while that receipt is there (a chat ask's call embeds its whole text:
--- one vector; a note's, its sentences), else its sentence vectors. A window text with no vector yet is left out; with none at all there is no query and no cosine lane.
+-- its sentence vectors (`Vector:of:<key>:s:<start>`, the embedding pipeline's). The ask's own are its call's vectors while that receipt is there (a chat ask's and a note's: its sentences),
+-- else its sentence vectors. A window text with no vector yet is left out; with none at all there is no query and no cosine lane.
 SemText.r_qrows getter:
   WHEN this.r_win == None: None
   ELSE: [{'w': x['w'], 'vs': this.ask_vecs if x['t'] == this.eid and this.ask_vecs != None else [v for v in [prop('Vector:of:' + replace(x['t'], '::', '/') + ':s:' + str(s['start']), 'v') for s in (prop(x['t'], 'sentences') or [])] if v != None]} for x in this.r_win]

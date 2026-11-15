@@ -75,8 +75,9 @@ EmbedQueue.page_rows getter: sql("SELECT k, sk, row_number() OVER (ORDER BY sk) 
 EmbedQueue.page getter: this.page_rows if this.page_rows is List and this.model != None and this.backend != None else []
 EmbedQueue.texts getter: distinct(concat(head(this.asks, 64), [prop(r, 'k') for r in this.page]))
 -- a stored text that is not loaded yet reads `vec_todo` as none: that is `not known`, never `nothing to do` (the first text not known yet makes the queue wait for it, so the order holds)
--- (a text whose own recall call is out, packs/mentions.c1f `in_flight`, waits: that call may make its vectors, `embed-ask-vectors` below)
-EmbedQueue.open getter: [t for t in this.texts if prop(t, 'in_flight') != True and (not (prop(t, 'vec_todo') is List) or len(prop(t, 'vec_todo')) > 0)]
+-- (a text whose own recall call is out, packs/mentions.c1f `in_flight`, waits: that call may make its vectors, `embed-ask-vectors` below; so does the body of a message queued for its turn,
+-- whose recall call is about to be made (the banner asks it); once the turn starts or ends it is the queue's again)
+EmbedQueue.open getter: [t for t in this.texts if prop(t, 'in_flight') != True and not (tail(t, 5) == ':body' and prop(head(t, len(t) - 5), 'queued') == True and prop(head(t, len(t) - 5), 'tstate') == 'queued') and (not (prop(t, 'vec_todo') is List) or len(prop(t, 'vec_todo')) > 0)]
 EmbedQueue.cur getter: this.open[0] if len(this.open) > 0 and prop(this.open[0], 'vec_todo') is List else None
 EmbedQueue.todo getter: prop(this.cur, 'vec_todo') if this.cur != None else []
 
