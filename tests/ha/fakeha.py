@@ -162,8 +162,9 @@ class FakeEntityRegistry:
 
 
 class FakeConfigEntry:
-    def __init__(self, data=None, options=None, version=1, minor_version=4, domain="membrane", entry_id="e1", unique_id="membrane"):
+    def __init__(self, data=None, options=None, version=1, minor_version=4, domain="membrane", entry_id="e1", unique_id="membrane", source="user"):
         self.data, self.options = dict(data or {}), dict(options or {})
+        self.source = source                    # "ignore": the person pressed Ignore on a discovery (HA keeps the unique id, no data)
         self.version, self.minor_version, self.domain = version, minor_version, domain
         self.entry_id, self.unique_id = entry_id, unique_id
         self.runtime_data = None
@@ -194,8 +195,8 @@ class FakeConfigEntries:
         self.updated: list = []
         self.reloaded = None
 
-    def async_entries(self, domain=None):
-        return [e for e in self.entries if domain in (None, e.domain)]
+    def async_entries(self, domain=None, include_ignore=True):
+        return [e for e in self.entries if domain in (None, e.domain) and (include_ignore or e.source != "ignore")]
 
     def async_update_entry(self, entry, *, data=None, options=None, minor_version=None, version=None, unique_id=None, title=None):
         if data is not None:
@@ -285,8 +286,13 @@ class ConfigFlow:
                         self.hass.config_entries.async_schedule_reload(e.entry_id)
                 raise AbortFlow("already_configured")
 
+    @property
+    def source(self):
+        return (self.context or {}).get("source")
+
     def _async_current_entries(self, include_ignore=None):
-        return self.hass.config_entries.async_entries(self.domain)
+        """HA's: ignored entries count unless the flow is the person's own (source user), or `include_ignore` says."""
+        return self.hass.config_entries.async_entries(self.domain, include_ignore or (include_ignore is None and self.source != "user"))
 
     def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None, last_step=None):
         return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {},

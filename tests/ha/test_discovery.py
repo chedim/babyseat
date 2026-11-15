@@ -165,6 +165,22 @@ def test_a_confirm_left_open_while_the_seat_was_set_up_by_hand_aborts(ha, run):
     assert late == {"type": "abort", "reason": "already_configured"}
 
 
+def test_an_ignored_seat_stays_ignored_and_the_manual_form_is_still_offered(ha, run):
+    """The person pressed Ignore on the add-on's discovery: Home Assistant keeps an entry of source `ignore` with the seat's unique id. Real Home
+    Assistant (scripts/ha_core_smoke.py): a later announcement aborts and leaves it alone; the manual form does not count it. The fake had no
+    `source` and returned ignored entries whatever `include_ignore` said."""
+    pkg, hass = ha
+    ign = fakeha.FakeConfigEntry(data={}, unique_id="127.0.0.1:4096", source="ignore")
+    hass.config_entries.entries.append(ign)
+    res = run(_flow_result(lambda: _flow(hass).async_step_hassio(_info(4096, "tok"))))
+    assert res == {"type": "abort", "reason": "already_configured"}
+    assert ign.data == {} and hass.config_entries.updated == [] and hass.config_entries.reloaded is None
+    f = importlib.import_module("cc_membrane.config_flow").MembraneConfigFlow()
+    f.hass, f.context = hass, {"source": "user"}
+    form = run(_flow_result(lambda: f.async_step_user()))
+    assert form["type"] == "form" and form["step_id"] == "user"
+
+
 def test_the_manifest_needs_no_discovery_key_for_the_supervisor():
     """Home Assistant's docs (2026-11-15, contributors.home-assistant.io: config flow "hassio" step, apps "Share services and discover
     integrations"): the Supervisor discovery needs only the `hassio` step; no manifest matcher and no dependency is named for it."""
