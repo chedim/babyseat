@@ -301,6 +301,8 @@
       "ChatMessage.argv": "List(Any)?",
       "ChatMessage.auth": "Any",
       "ChatMessage.auth_env": "List(Text)?",
+      "ChatMessage.banner_main": "Any",
+      "ChatMessage.banner_more": "List(Any)?",
       "ChatMessage.banner_slot": "Any",
       "ChatMessage.banner_text": "Any",
       "ChatMessage.bin": "Any",

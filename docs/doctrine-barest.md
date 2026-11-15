@@ -6,7 +6,7 @@ Status: SHIPPED. This is the whole system text of the chat turn (`ChatMessage.no
 domain-neutral (no product names, no software-only examples in the model-facing text).
 
 ```
-Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.
+Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them. Your whole chat history is on the graph as ChatMessage entities: the user's words are in text, your answers in response.
 ```
 
 ## What the text promises, and where the seat stands

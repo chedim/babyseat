@@ -101,7 +101,7 @@ ChatMessage.banner_text getter:
   ELSE: join(concat([this.banner_main], this.banner_more), '\n')
 ChatMessage.note getter:
   WHEN this.over: None
-  ELSE: 'Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them.'
+  ELSE: 'Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them. Your whole chat history is on the graph as ChatMessage entities: the user\'s words are in text, your answers in response.'
 -- THE PROMPT PROPS END WITH THE TURN (#1143): banner_main, banner_more, bin, max_turns, port, admin_file, mcp_server, admin_env, mcp_json, banner_text, banner_slot, sys, argv and note are none once the turn is over (done/error): a finished message
 -- no longer reads the banner, so a banner change recomputes only unfinished messages (not every message ever sent), the reply of a write carries none of them and the
 -- stored rows hold no copy of the system prompt. The view, the text, the response and the tools are not among them.
