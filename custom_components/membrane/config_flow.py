@@ -129,8 +129,7 @@ class _ProviderSteps:
             if not errors:
                 return await self._seat_done(settings)
         src = user_input if user_input is not None else (self._keep if self._keep.get(CONF_PROVIDER) == provider else {})
-        shown = {k: v for k, v in src.items() if k not in SECRET_KEYS.values()}
-        return self.async_show_form(step_id=provider, errors=errors, data_schema=provider_schema(self.hass, provider, shown, self._key_required))
+        return self.async_show_form(step_id=provider, errors=errors, data_schema=provider_schema(self.hass, provider, src, self._key_required))
 
     async def async_step_anthropic(self, user_input=None):
         return await self._provider_step("anthropic", user_input)

@@ -209,9 +209,9 @@ def test_home_assistants_stop_stops_the_seat(ha, run, tmp_path):
         await pkg.async_setup_entry(hass, e)
         pid = e.runtime_data.seat.pid
         await hass.fire("homeassistant_stop")
-        return pid
-    pid = _setup_inside(pkg, hass, tmp_path, run, body)
-    assert not _alive(pid)
+        return pid, _alive(pid)                   # before the test's own cleanup stops it
+    pid, alive = _setup_inside(pkg, hass, tmp_path, run, body)
+    assert not alive
 
 
 def test_a_seat_that_cannot_start_is_not_ready_and_leaves_no_process(ha, run, tmp_path):
@@ -390,3 +390,22 @@ def test_the_addons_discovery_leaves_an_inside_entry_alone(ha, run):
     res = run(go())
     assert res["type"] == "abort" and res["reason"] == "already_configured"
     assert e.data["mode"] == "inside" and "serve_url" not in e.data and hass.config_entries.reloaded is None
+
+
+def test_a_setup_that_fails_after_the_seat_started_stops_the_seat(ha, run, tmp_path, monkeypatch):
+    pkg, hass = ha
+    coord = importlib.import_module("cc_membrane.coordinator")
+
+    async def down(self):
+        raise fakeha.UpdateFailed("the first poll failed")
+    monkeypatch.setattr(coord.SeatHealth, "_async_update_data", down)
+
+    async def body(e, srv):
+        try:
+            await pkg.async_setup_entry(hass, e)
+        except fakeha.ConfigEntryNotReady:
+            pass
+        pid = _runs(tmp_path / "config")[-1]["pid"]
+        return pid, _alive(pid)
+    pid, alive = _setup_inside(pkg, hass, tmp_path, run, body)
+    assert not alive
