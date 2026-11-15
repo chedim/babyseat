@@ -21,7 +21,8 @@ const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f
 const QUICK: &str = r#"#!/usr/bin/env python3
 import json, sys
 def line(o): return json.dumps(o) + "\n"
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 sys.stdout.write(line({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hello"}}}) + line({"type": "result", "subtype": "success", "is_error": False, "result": "Done: " + prompt, "num_turns": 1, "duration_ms": 9, "total_cost_usd": 0.5, "usage": {"input_tokens": 1, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3, "output_tokens": 4}, "session_id": "q-1"}))
 sys.stdout.flush()
 "#;
@@ -30,7 +31,8 @@ sys.stdout.flush()
 const SPLIT: &str = r#"#!/usr/bin/env python3
 import json, sys, time
 def line(o): return json.dumps(o) + "\n"
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 sys.stdout.write(line({"type": "system", "subtype": "init", "session_id": "q-1"})); sys.stdout.flush()
 time.sleep(0.5)
 sys.stdout.write(line({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hello"}}}) + line({"type": "result", "subtype": "success", "is_error": False, "result": "Done: " + prompt, "num_turns": 1, "duration_ms": 9, "total_cost_usd": 0.5, "usage": {"input_tokens": 1, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3, "output_tokens": 4}, "session_id": "q-1"}))

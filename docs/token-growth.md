@@ -27,7 +27,7 @@ constants are at the top of the script.
 
 ## 1. What is in a turn's input (per call)
 
-The CLI runs `-p --no-session-persistence --system-prompt <doctrine + banner> -- <message>`: no history, each call re-sends
+The CLI runs `-p --no-session-persistence --system-prompt <doctrine + banner> -- <message>` (measured then; since 2026-11-14 the system prompt is the doctrine only and the banner and the message are the two blocks of one user message on stdin, docs/cliffvm.md): no history, each call re-sends
 the context of the turn. The turn's `usage` is the sum over its API calls (verified exactly on the turns that kept raw events);
 `usage.iterations[-1]` is the last call. The prompt props (`sys`, `argv`, `banner_text`) are erased when a turn ends, so
 the per-turn banner is **not** recoverable; the base is measured from turns whose first call is fully known (no tool: T; one tool: T-L; 41 turns).

@@ -17,7 +17,8 @@ impl Drop for Dir { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0
 const FAKE: &str = r#"#!/usr/bin/env python3
 import json, os, sys
 here = os.path.dirname(os.path.abspath(__file__))
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
 json.dump({"argv": sys.argv[1:]}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
 def out(o): sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()

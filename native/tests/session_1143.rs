@@ -133,7 +133,8 @@ fn same_shape_in(dir: &str, name: &str, status: u16, body: &J) {
 const QUICK: &str = r#"#!/usr/bin/env python3
 import json, sys
 def out(o): sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 out({"type": "system", "subtype": "init", "session_id": "q-1"})
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Done: " + prompt, "num_turns": 1, "duration_ms": 9, "total_cost_usd": 0.5, "usage": {"input_tokens": 1, "cache_creation_input_tokens": 2, "cache_read_input_tokens": 3, "output_tokens": 4}, "session_id": "q-1"})
 "#;
@@ -181,7 +182,8 @@ fn sessions_are_created_listed_read_renamed_and_deleted_in_the_shape_the_python_
 const STEPS: &str = r#"#!/usr/bin/env python3
 import json, os, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
 json.dump({"argv": sys.argv[1:]}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
 def out(o):
@@ -682,7 +684,7 @@ fn a_message_that_names_a_model_makes_it_the_sessions_and_the_turn_runs_the_cli_
     let a = argv_of(&dir, "quick sonnet").expect("the CLI ran");
     let i = a.iter().position(|x| x == "--model").unwrap_or_else(|| panic!("--model in {a:?}"));
     assert_eq!(a[i + 1], "sonnet", "the rung's prefix is the Python seat's namespace, the CLI knows the bare alias: {a:?}");
-    assert!(i < a.iter().position(|x| x == "--").unwrap(), "an option, before the `--` that ends the options: {a:?}");
+    assert!(!a.iter().any(|x| x == "--") && i < a.iter().position(|x| x == "--system-prompt").unwrap(), "an option, before the system prompt; no positional prompt follows (the message is on stdin): {a:?}");
     assert_eq!(r[2]["info"]["model"]["modelID"], "claude-agent:sonnet");
     assert_eq!(r[3]["info"]["modelID"], "claude-agent:sonnet", "the assistant row names the model that answered");
     assert_eq!(api(port, "GET", &format!("/session/{sid}"), J::Null).1["model"]["id"], "claude-agent:sonnet", "the pick sticks to the session");

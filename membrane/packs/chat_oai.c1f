@@ -62,7 +62,7 @@ ChatMessage.oai_tools getter:
 Chat.oai_tools on-setter oai-first:
   WHEN prop(this.oai_tools, 'tools') != None and not this.over:
     membrane::Chat[this.cp]:turn.oai_tools = prop(this.oai_tools, 'tools')
-    membrane::Chat[this.cp]:turn:round[1] = ChatRound(cp: this.cp, n: 1, messages: [{'role': 'system', 'content': this.sys}, {'role': 'user', 'content': this.text}])
+    membrane::Chat[this.cp]:turn:round[1] = ChatRound(cp: this.cp, n: 1, messages: [{'role': 'system', 'content': join([this.note, this.banner_slot], '\n\n')}, {'role': 'user', 'content': this.text}])
     membrane::Chat[this.cp]:turn:round[1].go = True
     membrane::Chat[this.cp]:turn.round = 1
 

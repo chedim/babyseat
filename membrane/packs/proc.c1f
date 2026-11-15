@@ -4,6 +4,7 @@ RESIDENT Command
 --   Command:<name> {cmd: an argument list, or a string run by `sh -c`; cwd; env_from {VAR: ENV_VAR}}
 -- Run it with a write; the run never blocks the field, and its receipt lands when it ends:
 --   Command.run = {id, args}  -> run_result {id, status, rc, head, stdout, stderr, stdout_bytes, stderr_bytes, started, finished (epoch seconds), ms}, run_rc
+--   Command.run = {id, args, stdin: "text"}  -> the same, and the child reads that text as its standard input, then end of input (give `stdin` when the program reads its input there; without it the program sees an empty input)
 --   Command.stop = {id}       -> the running child is killed; stop_result
 -- `output` is the whole stdout and `errors` the whole stderr of the last run (the reply of entity_write carries only the first and last 8 KB of each).
 -- Secrets are named in env_from (read when the command starts), never stored. A time limit (`timeout_s`, below), no output cap.

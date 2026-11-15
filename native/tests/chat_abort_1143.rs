@@ -24,7 +24,8 @@ const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f
 const FAKE: &str = r#"#!/usr/bin/env python3
 import json, os, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 out({"type": "system", "subtype": "init", "session_id": "s-1"})

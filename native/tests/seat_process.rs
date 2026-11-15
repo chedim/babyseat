@@ -33,7 +33,8 @@ const FAKE: &str = r#"#!/usr/bin/env python3
 import json, sys
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 out({"type": "system", "subtype": "init", "session_id": "fake-1", "tools": []})
 out({"type": "assistant", "message": {"content": [{"type": "text", "text": "Looking."}, {"type": "tool_use", "id": "tu1", "name": "mcp__membrane__entity_query", "input": {"q": "kind:Chat"}}]}})
 out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu1", "content": "none"}]}})

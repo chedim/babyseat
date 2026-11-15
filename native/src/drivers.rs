@@ -10,6 +10,8 @@
 //!                                     env_from {VAR: ENV_VAR}: secrets named, read here, never stored)
 //!     SqlQuery:<...>.run = {id, args, max_rows}  (a prepared statement on a second SQLite file: sqldrv.rs)
 //!     SqlQuery:<...>.run = {id, args, max_rows}  (a prepared statement on a second SQLite file, sqldrv.rs; the receipt carries the rows)
+//!                                     the run value's optional `stdin` (text) is the child's standard input: written on its own thread, then the pipe is
+//!                                     CLOSED (end of input); without it stdin is null. It is part of the request like `args` (journalled with the run write), not a secret channel.
 //!     Command.stop      = {id}        (kills the running child; its run's receipt says so)
 //! - Reach (the operator): everything the VM's OS user can do. Entity scripts and peers never trigger an effect
 //!   (fields.rs checks the writer). Per-token scopes are a later release.
@@ -237,7 +239,10 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                     J::String(s) if !s.trim().is_empty() => { let mut c = std::process::Command::new("sh"); c.arg("-c").arg(s).arg("sh"); c }
                     _ => return receipt(&id, 2, "a command needs `cmd` (an argument list, or a string for sh -c)".into(), Map::new()),
                 };
-                c.args(&args).current_dir(&cwd).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).stdin(std::process::Stdio::null());
+                // `stdin` (text, optional): the child gets a piped stdin that is written on its own thread and then CLOSED; absent, stdin is null
+                let stdin_text: Option<String> = req2.get("stdin").and_then(|t| t.as_str()).map(|t| t.to_string());
+                let stdin_mode = if stdin_text.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() };
+                c.args(&args).current_dir(&cwd).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).stdin(stdin_mode);
                 std::os::unix::process::CommandExt::process_group(&mut c, 0);   // the child leads its own group: a timeout or a stop ends the whole tree
                 // the values handed over are SECRETS: whatever the child prints of them (a 401 page, a debug line) is masked before it reaches a chunk, a receipt or any row
                 let mut secrets: Vec<String> = Vec::new();
@@ -266,6 +271,9 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                     let ch = g.as_mut().unwrap();
                     (ch.stdout.take(), ch.stderr.take())
                 };
+                let mut in_w = slot.lock().unwrap_or_else(|e| e.into_inner()).as_mut().and_then(|ch| ch.stdin.take());
+                // the write is on its own thread: the child may fill its output pipes (read below) before it has read all of its input; dropping the handle closes the pipe (end of input)
+                let in_t = stdin_text.map(|text| std::thread::spawn(move || { if let Some(mut w) = in_w.take() { let _ = std::io::Write::write_all(&mut w, text.as_bytes()); } }));
                 let err_t = std::thread::spawn(move || { let mut s = String::new(); if let Some(r) = err_r.as_mut() { let _ = std::io::Read::read_to_string(r, &mut s); } s });
                 // `partial: true`: what each read brings, cut at its last newline, is pushed as an outside birth `Chunk:<command>:<n>` ({cmd, id, n,
                 // data}) while the process runs; the unterminated tail goes at the end. The receipt below still carries the whole output.
@@ -297,6 +305,7 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                 if partial && !held.is_empty() { push(&held, &mut n); }
                 let out = mask(String::from_utf8_lossy(&all).to_string());
                 let err = mask(err_t.join().unwrap_or_default());
+                if let Some(t) = in_t { let _ = t.join(); }
                 let status = slot.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|ch| ch.wait());
                 crate::store::child_done(sh, eid);
                 drop(done_tx);

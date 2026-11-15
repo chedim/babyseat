@@ -23,7 +23,8 @@ if (!existsSync(chrome)) { console.log(`chat scroll: skipped, no Chrome at ${chr
 
 const FAKE = `#!/usr/bin/env python3
 import json, sys
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 def out(o):
     sys.stdout.write(json.dumps(o) + "\\n"); sys.stdout.flush()
 out({"type": "system", "subtype": "init", "session_id": "f", "tools": []})

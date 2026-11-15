@@ -137,13 +137,15 @@ const FAKE: &str = r#"#!/usr/bin/env python3
 import json, os, sys, time, urllib.request
 here = os.path.dirname(os.path.abspath(__file__))
 argv = sys.argv[1:]
-prompt = argv[-1]
+_stdin = json.loads(sys.stdin.readline())   # the ONE user message the turn sends: [<banner> block, the user's text block]
+_rest = sys.stdin.read()   # blocks until the driver CLOSES the pipe (a driver that kept it open hangs the turn: the tests time out)
+prompt = _stdin["message"]["content"][-1]["text"]
 tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
 _k = os.environ.get("ANTHROPIC_API_KEY")
 _watch = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_OAUTH_TOKEN"]
 _wp = os.path.join(here, "want_key")   # a file `want_key` holds the key the test planted: the record says only whether the child's key IS it (never the key)
 _want = open(_wp).read() if os.path.exists(_wp) else None
-json.dump({"argv": argv, "auto_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY"), "cwd": os.getcwd(), "key_is_wanted": (_k == _want) if _want is not None else None, "cred_env": [n for n in _watch if os.environ.get(n)]}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
+json.dump({"argv": argv, "stdin": _stdin, "stdin_rest": _rest, "auto_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY"), "cwd": os.getcwd(), "key_is_wanted": (_k == _want) if _want is not None else None, "cred_env": [n for n in _watch if os.environ.get(n)]}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
 if os.path.exists(os.path.join(here, "echo_key")):   # a CLI that echoes its key on stderr and in its answer (a 401 page, a debug line)
     sys.stderr.write("auth debug: key=" + (_k or "") + "\n"); sys.stderr.flush()
 errp = os.path.join(here, "err")   # a file `err`: the CLI ends with a result line that reports this text as an error
@@ -266,6 +268,7 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     let a: J = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("what is up")))).unwrap()).unwrap();
     let args: Vec<String> = a["argv"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
     let after = |flag: &str| -> String { let i = args.iter().position(|x| x == flag).unwrap_or_else(|| panic!("no {flag} in {args:?}")); args[i + 1].clone() };
+    eprintln!("TURN COMMAND LINE: {}\nTURN STDIN: {}", args.iter().map(|x| if x.contains(' ') || x.is_empty() || x.contains('{') { format!("{x:?}") } else { x.clone() }).collect::<Vec<_>>().join(" "), a["stdin"]);
     assert_eq!(a["auto_memory"], "1");
     assert!(args.contains(&"-p".to_string()) && args.contains(&"--verbose".to_string()) && args.contains(&"--include-partial-messages".to_string()), "{args:?}");
     assert_eq!(after("--output-format"), "stream-json");
@@ -274,14 +277,24 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert_eq!(after("--allowedTools"), "mcp__membrane__*");
     assert_eq!(after("--setting-sources"), "", "no settings files");
     assert_eq!(after("--max-turns"), "5", "the ceiling is the fact");
-    assert!(after("--system-prompt").contains("CONVERSATION: main") && !after("--system-prompt").contains("BannerLine"), "the system prompt carries the default banner");
     assert!(after("--system-prompt").contains("Modify your banner to help you maintain continuity."), "the system prompt carries the doctrine");
+    assert!(!after("--system-prompt").contains("CONVERSATION: main") && !after("--system-prompt").contains("<banner>"), "the system prompt is the doctrine ONLY: no banner in it");
     assert!(!after("--system-prompt").to_lowercase().contains("history reaches"), "the prompt never says what the model lacks (it makes Claude panic)");
     assert!(after("--mcp-config").contains(&format!("127.0.0.1:{port}/mcp")));
     assert!(!after("--mcp-config").contains("Authorization"), "the barest seat has no secret: the MCP config names no token header");
     assert!(after("--mcp-config").contains("X-Turn"), "the config names the turn (the message's id) for the link of what a call creates");
-    assert_eq!(args[args.len() - 2], "--", "the options end before the prompt");
-    assert_eq!(args[args.len() - 1], "what is up", "the prompt is the message alone");
+    assert_eq!(after("--input-format"), "stream-json", "the message goes in on stdin");
+    assert!(!args.iter().any(|x| x == "--" || x == "what is up"), "no positional prompt, no `--`: {args:?}");
+    // the ONE user message on stdin: the banner is its own FIRST block (in <banner> tags), the user's message is the LAST
+    assert_eq!(a["stdin"]["type"], "user");
+    assert_eq!(a["stdin"]["message"]["role"], "user");
+    let blocks = a["stdin"]["message"]["content"].as_array().unwrap();
+    assert_eq!(blocks.len(), 2, "two text blocks in ONE message: {blocks:?}");
+    assert!(blocks.iter().all(|b| b["type"] == "text"));
+    let b0 = blocks[0]["text"].as_str().unwrap();
+    assert!(b0.starts_with("<banner>\n") && b0.ends_with("\n</banner>") && b0.contains("CONVERSATION: main") && !b0.contains("BannerLine"), "the first block is the default banner in <banner> tags: {b0}");
+    assert_eq!(blocks[1]["text"], "what is up", "the last block is the message alone");
+    assert_eq!(a["stdin_rest"], "", "one line, then the pipe is closed (the fake read to end of input)");
     assert!(!args.iter().any(|x| x == "--bare" || x == "--resume" || x == "--continue"), "{args:?}");
 
     // the tools it ran are entities under the message, and the write it made through the door is in the field
@@ -305,6 +318,39 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
 }
 
 #[test]
+fn a_message_with_quotes_newlines_a_backslash_and_an_emoji_reaches_the_cli_whole_and_a_seat_with_no_embedding_still_sends_both_blocks() {
+    // the default fake seat has no embedding model and no recall part: the turn still sends the banner block AND the message block
+    let (mut run, port, dir) = fake_seat("stdinesc", &[]);
+    let msg = "esc: say \"hi\"\nline two \\ back \u{1F600} caf\u{e9} \t tab </banner> {\"a\": [1]}";
+    let id = send(port, msg);
+    let v = finish(port, &dir, &id, msg);
+    assert_eq!(v["state"], "done", "{v}");
+    let a: J = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of(msg)))).unwrap()).unwrap();
+    let blocks = a["stdin"]["message"]["content"].as_array().unwrap();
+    assert_eq!(blocks.len(), 2, "both blocks: {blocks:?}");
+    assert!(blocks[0]["text"].as_str().unwrap().starts_with("<banner>\n") && blocks[0]["text"].as_str().unwrap().len() > 30, "the banner block is there: {}", blocks[0]);
+    assert_eq!(blocks[1]["text"], msg, "the message arrives byte for byte (the fake parsed the line as JSON)");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_banner_of_200_kb_reaches_the_cli_on_stdin_without_deadlock() {
+    // a banner pack with a 200 KB literal; the fake reads stdin only after printing nothing, the driver writes on its own thread
+    let big = "banner words ".repeat(16_000);   // ~208 KB
+    let pack = format!("PACK bigbanner 1\nIMPORT default_banner 1\nBanner.text getter: '{big}'\n");
+    let (mut run, port, dir) = fake_seat_with("stdinbig", &[], &[("bigbanner.c1f", &pack)]);
+    let id = send(port, "big banner please");
+    let v = finish(port, &dir, &id, "big banner please");
+    assert_eq!(v["state"], "done", "{v}");
+    let a: J = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("big banner please"))).to_str().unwrap()).unwrap()).unwrap();
+    let b0 = a["stdin"]["message"]["content"][0]["text"].as_str().unwrap();
+    assert!(b0.len() > 200_000 && b0.contains("banner words banner words"), "the whole banner arrived: {} bytes", b0.len());
+    assert_eq!(a["stdin"]["message"]["content"][1]["text"], "big banner please");
+    assert!(!a["argv"].to_string().contains("banner words"), "the banner is in no argument");
+    assert!(terminate(&mut run));
+}
+
+#[test]
 fn a_cli_that_fails_is_an_error_answer_with_its_stderr_and_a_missing_one_says_how_to_name_it() {
     let (mut run, port, dir) = fake_seat("chatfail", &[]);
     std::fs::write(dir.join("fail"), "").unwrap();
@@ -321,7 +367,12 @@ fn a_cli_that_fails_is_an_error_answer_with_its_stderr_and_a_missing_one_says_ho
     assert!(terminate(&mut run));
 }
 
-/// the system prompt of the run the fake recorded for `prompt`
+/// the BANNER the run the fake recorded for `prompt` was given: the first text block of the one user message on stdin (the system prompt is the doctrine only)
+fn banner_of(dir: &std::path::Path, prompt: &str) -> String {
+    let a: J = wait("the fake's argv file", || std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of(prompt)))).ok().and_then(|t| serde_json::from_str(&t).ok()));
+    a["stdin"]["message"]["content"][0]["text"].as_str().unwrap().to_string()
+}
+/// the system prompt of the run the fake recorded for `prompt` (the doctrine only)
 fn system_prompt(dir: &std::path::Path, prompt: &str) -> String {
     let a: J = wait("the fake's argv file", || std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of(prompt)))).ok().and_then(|t| serde_json::from_str(&t).ok()));
     let args = a["argv"].as_array().unwrap();
@@ -346,7 +397,7 @@ fn a_failed_runs_whole_stderr_reaches_the_response_and_the_next_banner() {
     assert_eq!(v["response"], want.as_str(), "the response carries the whole stderr");
     std::fs::remove_file(dir.join("fail")).unwrap();
     send(port, "second");
-    let sys = system_prompt(&dir, "second");
+    let sys = banner_of(&dir, "second");
     assert!(sys.contains(&want), "the banner's error line carries all of it: {sys}");
     assert!(terminate(&mut run));
 }
@@ -357,17 +408,18 @@ fn a_banner_without_text_still_runs_the_turn_and_the_system_prompt_shows_the_ban
     let pack = "PACK nulltext 1\nIMPORT default_banner 1\nBanner.text getter: prop('Missing:one', 'text')\n";
     let (mut run, port, dir) = fake_seat_with("bannernull", &[], &[("nulltext.c1f", pack)]);
     let id = send(port, "still there");
-    let sys = system_prompt(&dir, "still there");
+    let sys = banner_of(&dir, "still there");
     assert!(sys.contains("BANNER ERROR:") && sys.contains("Help:banner"), "{sys}");
     assert!(sys.contains("has no `text`"), "{sys}");
-    assert!(sys.contains("Modify your banner to help you maintain continuity."), "the doctrine is still there: {sys}");
+    let doctrine = system_prompt(&dir, "still there");
+    assert!(doctrine.contains("Modify your banner to help you maintain continuity.") && !doctrine.contains("BANNER ERROR"), "the doctrine is still there, and the banner error is not in it: {doctrine}");
     assert_eq!(finish(port, &dir, &id, "still there")["state"], "done");
     assert!(terminate(&mut run));
     // a null with a reason of its own: the reason is in the banner error
     let pack = "PACK nulltext 1\nIMPORT default_banner 1\nBanner.text getter: None('the model emptied it')\n";
     let (mut run, port, dir) = fake_seat_with("bannernull2", &[], &[("nulltext.c1f", pack)]);
     send(port, "again");
-    let sys = system_prompt(&dir, "again");
+    let sys = banner_of(&dir, "again");
     assert!(sys.contains("BANNER ERROR:") && sys.contains("the reason: the model emptied it"), "{sys}");
     assert!(terminate(&mut run));
 }
@@ -381,12 +433,12 @@ fn the_banner_shows_the_previous_errors_entity_and_its_whole_text_until_a_turn_s
     assert_eq!(finish(port, &dir, &id1, "first")["state"], "error");
     std::fs::remove_file(dir.join("err")).unwrap();
     let id2 = send(port, "second");
-    let sys = system_prompt(&dir, "second");
+    let sys = banner_of(&dir, "second");
     let line = format!("THE PREVIOUS TURN ENDED WITH AN ERROR: membrane::Chat:main:message:{id1}:turn:response - claude reported an error: {long}");
     assert!(sys.contains(&line), "the eid, the summary, no cap: {sys}");
     assert_eq!(finish(port, &dir, &id2, "second")["state"], "done");
     let id3 = send(port, "third");
-    let sys = system_prompt(&dir, "third");
+    let sys = banner_of(&dir, "third");
     assert!(!sys.contains("ENDED WITH AN ERROR"), "a later successful turn clears the line: {sys}");
     assert_eq!(finish(port, &dir, &id3, "third")["state"], "done");
     assert!(terminate(&mut run));
@@ -398,9 +450,10 @@ fn the_banner_shows_the_previous_errors_entity_and_its_whole_text_until_a_turn_s
 const PIECES: &str = r#"#!/usr/bin/env python3
 import json, os, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
-prompt = sys.argv[-1]
+_stdin = json.loads(sys.stdin.readline())
+prompt = _stdin["message"]["content"][-1]["text"]
 tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
-json.dump({"argv": sys.argv[1:]}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
+json.dump({"argv": sys.argv[1:], "stdin": _stdin}, open(os.path.join(here, "argv." + tag + ".json"), "w"))
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 def gate(name):
@@ -1071,7 +1124,7 @@ fn a_run_the_driver_refused_says_why_in_the_reply() {
 const QUICK: &str = r#"#!/usr/bin/env python3
 import json, os, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
-prompt = sys.argv[-1]
+prompt = json.loads(sys.stdin.readline())["message"]["content"][-1]["text"]
 tag = "".join(c if c.isalnum() else "_" for c in prompt)[:40]
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
@@ -1639,7 +1692,7 @@ fn a_turn_the_cli_died_in_stores_its_cause_on_the_turn_the_response_and_the_next
     assert!(e.contains("about to be killed"), "the turn itself carries the cause: {e}");
     std::fs::remove_file(dir.join("die")).unwrap();
     send(port, "after");
-    let sys = system_prompt(&dir, "after");
+    let sys = banner_of(&dir, "after");
     assert!(sys.contains("THE PREVIOUS TURN ENDED WITH AN ERROR") && sys.contains("about to be killed"), "{sys}");
     assert!(terminate(&mut run));
 }
@@ -1818,7 +1871,7 @@ fn a_keep_write_with_running_turns_answers_small_the_written_in_full_the_rest_as
     assert!(own("summary")["new"].as_str().unwrap().starts_with("keep: a keep line"), "{t}");
     assert_eq!(own("summary")["cls"], "Keep", "the host's class field: {t}");
     let other = other.unwrap_or_else(|| panic!("the rest as counts: {t}"));
-    assert!(other.contains("Banner.text x1") && other.contains("Chat.argv x"), "grouped as <Class>.<prop> xN: {other}");
+    assert!(other.contains("Banner.text x1") && other.contains("Chat.stdin x"), "grouped as <Class>.<prop> xN: {other}");
     assert!(!rs.iter().any(|r| r["eid"].as_str().unwrap().contains("Chat:main:message")), "no Chat value is listed: {t}");
     // a reasoned null on an entity that was not written still surfaces its reason
     assert!(t.contains("no alert for a keep"), "the reason of a null on another entity stays: {t}");

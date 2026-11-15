@@ -8,7 +8,7 @@ VIRTUAL Chunk
 -- THE BARE CHAT'S TURN (#1143, operator 2026-11-12): a message is answered by ONE run of the model's CLI, in the mode the Python rung
 -- used (membrane/claude_agent.py): Claude's built-in tools OFF, no user MCP config, no settings files, the allowed tools exactly the
 -- membrane MCP set (the door's `POST /mcp`, packs/door_tools.c1f), one continuous run per answer with a ceiling, the system prompt is the
--- barest doctrine (docs/doctrine-barest.md) plus the chat's banner, the prompt is the message ALONE: no chat history reaches the model (map mode). What must outlive
+-- barest doctrine (docs/doctrine-barest.md) ONLY; the chat's banner and then the message are the two text blocks of the one user message on stdin, the prompt is the message ALONE: no chat history reaches the model (map mode). What must outlive
 -- the turn goes into the field; the banner shows it.
 -- THE RUN is a Command entity (`membrane::Command:chat:<id>`) the turn writes; the stream-json lines of its stdout are read here by
 -- `json()` (the receipt lands when the process ends; the partial chunks stream while it runs, see docs/cliffvm.md "The event stream"); the result line is the answer,
@@ -24,7 +24,7 @@ VIRTUAL Chunk
 -- `env CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is the CLI's own switch the Python rung set (no auto-memory keyed to the folder).
 -- (the two setters are on the class Chat, not on the kind ChatMessage: a setter reaches a kind only through an ISA parent ENTITY, `cls:chatmessage`,
 -- and a getter only needs the `parents` stamp; only a message has `plan` and `answer`.)
--- `--` ends the options (the CLI's --allowedTools and --mcp-config take lists: without it they would swallow the prompt).
+-- THE MESSAGE GOES IN ON STDIN (operator 2026-11-14), not as the last argument: `--input-format stream-json`, no positional prompt (so no `--`), the Command run's `stdin` is the one JSON line (getter `stdin`).
 -- The login is the CLI's own and only by opt-in (chat_auth=login); --bare is NOT used: it never reads the login (OAuth/keychain), only an API key.
 -- KEY MODE (the default): the credentials the CLI ranks above the key or that stand in for it (ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY, CLAUDE_CODE_OAUTH_TOKEN) are
 -- REMOVED from the child's environment (`env -u`), the list of the Python rung (claude_agent.py OVERRIDING_ENV and LOGIN_ENV, v0.7.53), so the key is what answers even where a login is stored.
@@ -107,16 +107,26 @@ ChatMessage.seat_name getter:
 ChatMessage.note getter:
   WHEN this.over: None
   ELSE: 'Your name is ' + this.seat_name + '. This graph is you: requests come and go, the graph stays. What is on it is what you remember, and nobody else keeps it up. Maintain it. Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them. Your whole chat history is on the graph as ChatMessage entities: the user\'s words are in text, your answers in response. Before you say you do not know or do not remember, search the ChatMessage entities. Do not guess: if you find nothing, say so, unless the user asks you to guess.' + (' Bob is only the default name: work with the user to choose yours, and save it with entity_write {spec: "Setting:chat.name", prop: "set", value: "<the name>"}.' if this.seat_name == 'Bob' else '')
--- THE PROMPT PROPS END WITH THE TURN (#1143): seat_name, banner_main, banner_more, bin, max_turns, port, admin_file, mcp_server, admin_env, mcp_json, banner_text, banner_slot, sys, argv and note are none once the turn is over (done/error): a finished message
+-- THE PROMPT PROPS END WITH THE TURN (#1143): seat_name, banner_main, banner_more, bin, max_turns, port, admin_file, mcp_server, admin_env, mcp_json, banner_text, banner_block, banner_slot, sys, stdin, argv and note are none once the turn is over (done/error): a finished message
 -- no longer reads the banner, so a banner change recomputes only unfinished messages (not every message ever sent), the reply of a write carries none of them and the
 -- stored rows hold no copy of the system prompt. The view, the text, the response and the tools are not among them.
 -- A banner with no `text` (the model's pack left it null) is SHOWN, not skipped: the turn runs with the banner error in the banner's slot, so the model can repair it (Help:banner).
 ChatMessage.banner_slot getter:
   WHEN this.over: None
   ELSE: this.banner_text if this.banner_text != None and not (this.banner_text is Error) else 'BANNER ERROR: your banner `Banner:admin:main` has no `text` (the reason: ' + (why(this.banner_text) or 'it has no text property') + '). Give `Banner.text` a value again, in a pack that defines it; Help:banner shows how.'
+-- THE SYSTEM PROMPT IS THE DOCTRINE ONLY (operator 2026-11-14): the banner is no longer part of it. The banner is the FIRST text block of the ONE user message `stdin` below, in <banner> tags, and the
+-- user's words are its LAST block (one message of two blocks makes ONE model turn; two messages would make two).
 ChatMessage.sys getter:
   WHEN this.over: None
-  ELSE: join([this.note, this.banner_slot], '\n\n')
+  ELSE: this.note
+ChatMessage.banner_block getter:
+  WHEN this.over or this.banner_slot == None: None
+  ELSE: '<banner>\n' + this.banner_slot + '\n</banner>'
+-- THE MESSAGE ON STDIN (the CLI's `--input-format stream-json`): ONE JSON line, a user message whose content is two text blocks, the banner then the user's words. `str(dict)` writes the line
+-- (valid JSON: quotes, newlines, backslashes and unicode are escaped by the engine's own writer). The Command driver's `stdin` hands it to the CLI and closes the pipe.
+ChatMessage.stdin getter:
+  WHEN this.over or this.banner_block == None or this.text == None: None
+  ELSE: str({'type': 'user', 'message': {'role': 'user', 'content': [{'type': 'text', 'text': this.banner_block}, {'type': 'text', 'text': str(this.text)}]}})
 -- THE MODEL (#1143): the model that answers is the message's `pick` (the session's pick, packs/door_session.c1f; none on the bare chat), else the seat's default (`seat_model`). A name in the
 -- `claude-agent:` namespace the Python seat gave its rungs runs the CLI with `--model <the bare alias>` (the CLI knows `sonnet`, not `claude-agent:sonnet`); the seat's own default
 -- under any other name (`claude`: the CLI's own default) runs with no flag; another claude-agent rung runs under its own name; any other pick (a local model, an unknown name)
@@ -129,7 +139,7 @@ ChatMessage.model_args getter: ['--model', this.sdk_model] if this.sdk_model != 
 ChatMessage.argv getter:
   WHEN this.over: None
   ELSE WHEN this.bin == '' or this.mcp_json == None or this.sys == None or this.text == None: None
-  ELSE: concat(concat(concat(this.auth_env, ['CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence']), this.model_args), ['--max-turns', str(this.max_turns), '--system-prompt', this.sys, '--', this.text])
+  ELSE: concat(concat(concat(this.auth_env, ['CLAUDE_CODE_DISABLE_AUTO_MEMORY=1', this.bin, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--tools', '', '--strict-mcp-config', '--mcp-config', this.mcp_json, '--allowedTools', 'mcp__membrane__*', '--setting-sources', '', '--no-session-persistence']), this.model_args), ['--max-turns', str(this.max_turns), '--system-prompt', this.sys])
 
 -- ---- start: the run is one write ----------------------------------------------------------------------------------------------------------
 -- THE TURN WAITS FOR ITS OWN ASK'S EMBEDDING (operator 2026-11-14): the recall part of the banner (apps/barest.c1f/recall.c1f) is `ready` when its ask's vector has arrived or cannot come. This message waits only while the part
@@ -147,7 +157,7 @@ ChatMessage.plan getter:
   ELSE WHEN this.auth not in ['api_key', 'login']: {'refuse': 'The chat_auth fact says ' + str(this.auth) + ', which is not a way the claude CLI is run here. Use chat_auth=api_key (the default: the key of ANTHROPIC_API_KEY) or chat_auth=login (the login of the claude CLI itself), then send the message again.'}
   ELSE WHEN this.auth == 'api_key' and not this.key_set: {'refuse': 'No Anthropic API key: the chat answers through the claude CLI with an API key by default. Set ANTHROPIC_API_KEY in the environment the seat is started from, restart the seat, then send the message again. To use the login of the claude CLI itself instead, start the seat with --fact chat_auth=login (a deliberate choice).'}
   ELSE WHEN not this.pick_ok: {'refuse': 'This seat answers through the claude CLI only: ' + str(this.pick) + ' is not one of its claude models (GET /v1/models lists them). Pick one of those, or the seat default.'}
-  ELSE WHEN this.argv != None: {'argv': this.argv}
+  ELSE WHEN this.argv != None and this.stdin != None: {'argv': this.argv, 'stdin': this.stdin}
   ELSE: None
 Chat.plan on-setter turn-start:
   WHEN prop(this.plan, 'refuse') != None:
@@ -159,7 +169,7 @@ Chat.plan on-setter turn-start:
     membrane::Chat[this.cp]:turn.state = 'running'
     membrane::Chat[this.cp]:turn.started = clock
     membrane::Command:chat[this.cp] = Command(cmd: prop(this.plan, 'argv'), env_from: this.admin_env)
-    membrane::Command:chat[this.cp].run = {'id': this.cp, 'args': [], 'partial': True, 'timeout_s': this.turn_timeout_s}
+    membrane::Command:chat[this.cp].run = {'id': this.cp, 'args': [], 'stdin': prop(this.plan, 'stdin'), 'partial': True, 'timeout_s': this.turn_timeout_s}
 
 -- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------
 -- `partial: True` makes the Command driver push what each read of stdout brings (whole lines) as an entity `Chunk:<command>:<n>` ({cmd, id, n, data});

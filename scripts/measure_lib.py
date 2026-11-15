@@ -7,7 +7,7 @@ import json, sys, time, os
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
-prompt = sys.argv[-1]
+prompt = json.loads(sys.stdin.readline())["message"]["content"][-1]["text"]   # the one user message on stdin: [banner block, user text block]
 out({"type": "system", "subtype": "init", "session_id": "fake-1", "tools": []})
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Seat answer to: " + prompt[:80], "num_turns": 1, "session_id": "fake-1"})
 '''

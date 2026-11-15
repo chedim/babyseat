@@ -108,6 +108,8 @@ the door's listener, a held request, an open event stream and `Command.stop` tak
 
 **Every entity remembers what birthed it** (#1143, operator 2026-11-14; `vm.rs` `BORN_BY`, `Core::born_by`): `<entity>.born_by` is a VM-provided, read-only property like `updated`: the eid of the CAUSE of the birth, the entity whose setter was running when the entity was made (the setter's `this`; for a door `entity_write` that creates its target, the call's `Request`; for a cascade, the entity of the step that did the birth). An entity with no cause (loaded at start, born by the host) reads as the plain `absent` null. It is a constant: set once, stored with the row (one string `born_by` in the body, no key when there is none; it survives the VM's eviction and a restart) and never written (a setter's write is refused with a receipt, an outside write is dropped and not journalled), so a getter that reads it is only recomputed when the entity itself arrives. A birth a replay recomputes gets the same cause; a birth it cannot (a virtual trigger's, journalled as an outside birth) carries it in the journal line's optional `by` (a journal without it replays as no cause). **The VM rule `births_to`** (`vm.rs` `BIRTHS_TO`, `Fields::cause_of`): when the entity whose setter creates an entity has a property `births_to` holding a non-empty entity id, the created entity's `born_by` is that id instead of the setter's own entity (an ordinary property read at the birth; no other effect). The door uses it for the turn's link: the turn's MCP config carries `X-Turn: <the message's id>` (`chat_turn.c1f` `mcp_server`), `Request.mc_message` (`door_tools.c1f`) is that header when it names an existing chat message, and `Request.births_to` is the message or else the Request itself; `run_cliff` copies it to the scratch entity whose setter runs the block. So what a door call creates says the MESSAGE in `born_by`, permanently (the Request is collected after its reply, the message is not), and "which entities did this message create" is `[x.eid for x in instances('<Class>') if x.born_by == '<message>']`; a call with no message header (or one naming no chat message) says its Request. Tests: `native/tests/born_by_1143.rs` (including `births_to`, replay and restart), `native/tests/born_by_chain_1143.rs`.
 
+**A command's input** (#1143, operator 2026-11-14): the run value may carry `stdin` (text): `Command:x.run = {id, cmd, stdin: "..."}`. The child gets a piped standard input; the driver writes the text on its own thread (a big text cannot deadlock against the output pipes the driver reads) and then CLOSES the pipe, so a program that reads to the end of its input proceeds. Without `stdin` the child's stdin is null (end of input at once), as before. The text is part of the request like `args`: it is in the run write, which the journal records like any write (the chat turn's banner and message were already in the argv, so nothing new is exposed), and it is not a place for secrets (those go by `env_from`). Tests: `command_stdin_1143.rs`.
+
 **A command's time limit** (`drivers.rs`, `proc.c1f`; operator request 2026-11-13, after a model-run `grep -r` over the whole projects tree ran 71 minutes and held a worker slot): `timeout_s` is the model's own estimate of the longest a command may run, in the run value
 (`Command:x.run = {id, cmd, timeout_s: 600}`) or set on the entity before the run. Without it the Boot fact `command_timeout_s` applies (default 120 s, the operator-delegated sensible default; the Python-era Mirror limited commands to 60 s).
 There is no upper bound and no unbounded command: 0 or less (or a non-number) is refused with a reasoned receipt, a long job states a big number. The child leads its own process group; at the deadline the group gets SIGTERM, after `KILL_GRACE_MS` (2 s) SIGKILL;
@@ -378,16 +380,19 @@ entity (a kind stamp came after the birth), and `--fact name=value` (any Boot fa
 
 ```
 env -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u CLAUDE_CODE_OAUTH_TOKEN
-    CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 <chat_claude_bin> -p --output-format stream-json --verbose --include-partial-messages
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 <chat_claude_bin> -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
     --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{"membrane":{"type":"http","url":"http://127.0.0.1:<port>/mcp"}}}'
     --allowedTools 'mcp__membrane__*' --setting-sources "" --no-session-persistence --max-turns <chat_max_turns>
-    --system-prompt <the doctrine (four sentences) + the chat's banner> -- <the message>
+    --system-prompt <the doctrine>
+stdin (one JSON line, then end of input):
+    {"type":"user","message":{"role":"user","content":[{"type":"text","text":"<banner>\n<the chat's banner>\n</banner>"},{"type":"text","text":"<the message>"}]}}
 ```
 
 Built-in tools off, no user MCP config (the config is an inline JSON string, generated by a getter from `Http:door`'s real port), no
-settings files, allowed tools exactly the membrane server's, one continuous run, the system prompt is the doctrine, the operator's four sentences
-(`docs/doctrine-barest.md`) plus `Banner:admin:main`'s text (the banner, see "The banner"), the prompt is the message ALONE: no history. `--` ends the options (the
-list-valued `--allowedTools` / `--mcp-config` would swallow a prompt). `--bare` is NOT used: per `claude --help` (2.1.323) it never
+settings files, allowed tools exactly the membrane server's, one continuous run, the system prompt is the doctrine ONLY (operator 2026-11-14,
+`docs/doctrine-barest.md`); the banner (`Banner:admin:main`'s text and the other banners, see "The banner") is the FIRST text block of the ONE user message the CLI reads on stdin
+(in `<banner>` tags) and the user's words are its LAST block: the prompt is the message ALONE, no history. One message of two blocks makes ONE model turn (two messages made two turns, each answered
+and each with its own `result` event: measured with the real CLI), and there is no positional prompt, so no `--`. The Command run's `stdin` (see "A command's input") carries the line; getters `banner_block` and `stdin` build it (`str` of the dict is the JSON), both none once the turn is over. The OpenAI-compatible rung is unchanged: its system message is still the doctrine and the banner. `--bare` is NOT used: per `claude --help` (2.1.323) it never
 reads OAuth or the keychain, only an API key, so it cannot use the CLI's login. The stream-json stdout is read by c1f
 (`json()` per line): the `result` line's text is the answer, else the assistant's text in order; `is_error` or a failing exit with no
 result line is an error answer (with stderr); `error_max_turns` keeps what was said and says it stopped at the ceiling. Boot facts:
@@ -440,7 +445,7 @@ There are no users (docs/auth.md): no per-person chat (the 0.7 seat's "one chat 
 *The shape comparer* (`session_1143.rs`, `shape_misses`): the answers are compared with the 0.7 seat's recorded answers (`tests/golden/session/*.json`; no model): every key of the fixture in the answer with the same JSON type, extra keys allowed, a `null` in the fixture accepts any type, each element of an answer's list matches SOME element of the fixture's list; values (ids, times) are never compared. `tests/js/page_boot.test.mjs` shows the page itself (headless Chrome) creating a session and following `/ui/serve/event`.
 
 **Open design questions**: (1) the UI's message route: DECIDED 2026-11-13: the opencode session API, simplified, for now (not built yet; this route stays until then); (2) the system prompt: DECIDED 2026-11-13: the barest
-doctrine (`docs/doctrine-barest.md`, four sentences) plus the banner, for now; (3) `entity_write` writes any property of any class the door imports
+doctrine (`docs/doctrine-barest.md`) as the system prompt, with the banner as the first block of the message on stdin; (3) `entity_write` writes any property of any class the door imports
 (a prop like `cmd` or `run` is a program): the barest seat has no security by decision, so the guard is only the import list; (4) the
 tool spec is an eid, not a name fragment as in the Python tool; (5) a kind's SETTER needs an ISA parent entity (`cls:chatmessage`):
 `chat_turn` puts its setters on the class `Chat` instead.

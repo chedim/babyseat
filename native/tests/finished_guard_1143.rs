@@ -27,7 +27,7 @@ fn seat(store: Option<&str>, before: impl Fn(&Host)) -> Host {
     h.pump();
     h
 }
-const DERIVED: [&str; 12] = ["seat_name", "banner_main", "banner_more", "banner_text", "banner_slot", "sys", "argv", "mcp_json", "bin", "port", "max_turns", "note"];
+const DERIVED: [&str; 14] = ["seat_name", "banner_main", "banner_more", "banner_text", "banner_block", "banner_slot", "sys", "stdin", "argv", "mcp_json", "bin", "port", "max_turns", "note"];
 
 /// the live shapes: the class of the eid's namespace (Chat), the kind in `parents`; the turn's state lives on the `:turn` entity
 fn message(h: &Host, n: u32, state: Option<&str>) {
@@ -71,7 +71,7 @@ fn a_banner_change_recomputes_no_finished_message() {
     let before = rows(&db);
     h.write("Note:x", "n", json!(1), "person"); h.pump();
     assert_eq!(rows(&db), before, "no finished message row was rewritten");
-    assert!(h.get("membrane::Chat:message:50", "sys").as_str().unwrap().contains("n=1"), "the queued one follows the banner");
+    assert!(h.get("membrane::Chat:message:50", "stdin").as_str().unwrap().contains("n=1"), "the queued one follows the banner (it is in the message on stdin)");
 }
 
 #[test]

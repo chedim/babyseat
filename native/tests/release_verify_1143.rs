@@ -33,7 +33,8 @@ fn now() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EP
 /// hands to its CLI in the environment (what a model that obeys the message could do): the fact test of the one chat reads it back
 const FAKE: &str = r#"#!/usr/bin/env python3
 import json, os, re, sys, urllib.request
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 out({"type": "system", "subtype": "init", "session_id": "fake-1", "tools": []})

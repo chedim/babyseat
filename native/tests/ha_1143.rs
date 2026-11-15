@@ -26,7 +26,8 @@ impl Drop for Dir { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0
 const FAKE: &str = r#"#!/usr/bin/env python3
 import json, sys
 def out(o): sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
-prompt = sys.argv[-1]
+_stdin = __import__("json").loads(sys.stdin.readline())   # the one user message on stdin: [<banner> block, the user's text block]
+prompt = _stdin["message"]["content"][-1]["text"]
 out({"type": "system", "subtype": "init", "session_id": "q-1"})
 if "this will fail" in prompt:
     sys.stderr.write("fake: not logged in\n"); sys.exit(3)

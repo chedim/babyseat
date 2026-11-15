@@ -19,7 +19,7 @@ BYTES_PER_TOK = 2.32      # MEASURED on 7 one-tool turns whose result is a 31-33
 TOK_PER_TOOL = 150        # MEASURED: one-tool turns with tiny results add 110-380 tokens (the tool_use block)
 API_PER_TOOL = 0.51       # MEASURED on 16 early turns that kept raw events: (API calls - 1) / tool calls = 99/193 (parallel batches)
 
-ECHO_PROPS = ("text", "banner_text", "banner_slot", "sys", "argv", "alert_lines", "keeps", "view", "stream_view",
+ECHO_PROPS = ("text", "banner_text", "banner_block", "banner_slot", "sys", "stdin", "argv", "alert_lines", "keeps", "view", "stream_view",
               "history_view", "page_view")
 
 

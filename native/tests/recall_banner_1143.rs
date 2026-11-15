@@ -249,8 +249,9 @@ fn turn_seat(backend: Option<&str>) -> Host {
     h
 }
 fn state(h: &Host, id: &str) -> String { h.get(&format!("{M}{id}"), "tstate").as_str().unwrap_or("").to_string() }
-/// what the turn was started with: the command the turn wrote (its argv), not the getter (which follows the field after the start)
-fn argv(h: &Host, id: &str) -> String { h.get(&format!("membrane::Command:chat:main:message:{id}"), "cmd").to_string() }
+/// what the turn was started with: the command the turn wrote (its argv), and the message it hands the CLI on stdin (the banner block and the user's block; the run write
+/// is an effect and keeps no copy on the Command, so the message's own `stdin` getter, none only once the turn is over, is read)
+fn argv(h: &Host, id: &str) -> String { format!("{} {}", h.get(&format!("membrane::Command:chat:main:message:{id}"), "cmd"), h.get(&format!("{M}{id}"), "stdin")) }
 fn until(h: &Host, what: &str, f: impl Fn(&Host) -> bool) { for _ in 0..400 { h.pump(); if f(h) { return; } std::thread::sleep(std::time::Duration::from_millis(50)); } panic!("never: {what}"); }
 
 #[test]
