@@ -32,6 +32,8 @@ if [ -z "$bin" ]; then
     bin=$root/native/target/release/cliffvm
   fi
 fi
+# x is set by the eval on the next line (shellcheck cannot see it)
+# shellcheck disable=SC2154
 for v in bin out archive; do eval "x=\$$v"; case $x in ""|/*) ;; *) eval "$v=\$PWD/\$x" ;; esac; done
 case $bin in /*) ;; *) bin=$PWD/$bin ;; esac   # the paths are used from inside other folders below
 case $out in ''|/*) ;; *) out=$PWD/$out ;; esac
