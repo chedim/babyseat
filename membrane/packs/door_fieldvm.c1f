@@ -43,7 +43,8 @@ FvDir.files on-setter fv-read:
 FieldVm.listed getter: len(this.dirs) == this.want and len([d for d in this.dirs if d.opened != True]) == 0
 FieldVm.files getter: [f for f in instances('FvFile')]
 FieldVm.done getter: this.listed and len([f for f in this.files if f.text == None]) == 0
-FieldVm.pairs getter: [[f.stem, f.text] for f in this.files if f.view]
+-- (login_view.c1f is the sign-in screen: the page fetches it from /ui/www when this very route answers 401, so it is never in a signed-in page's packs)
+FieldVm.pairs getter: [[f.stem, f.text] for f in this.files if f.view and f.stem != 'login_view']
 FieldVm.rows getter: sql("SELECT json_group_object(json_extract(value, '$[0]'), json_extract(value, '$[1]')) AS packs FROM json_each(?)", this.pairs) if this.done else None
 -- THE FIELD VIEW'S SETTINGS ride the same entity: `field_window` (how many of the most recently active entities the field view keeps, launch fact, none by default: the pack's tried value stands) and
 -- `field_poll_ms` (the period of its calls); the field view is the page's Field view (apps/field.c1f/field_view.c1f, drawn by the shell: shell_view.c1f).

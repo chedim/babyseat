@@ -21,6 +21,12 @@ No token, a bad one, one signed by another key or one past its life: `401`, `WWW
 
 The only way to an open door is to name no secret on purpose (`--fact door_secret_file=`): then there is no admin token, `/ui/conf` says `auth: none`, and every caller is the admin. That is for tests and trusted sandboxes.
 
+**The sign-in screen** (c1f, not JS). A page opened from another machine (a LAN address, a remote name, a loopback `Host` the door does not allow) gets no cookie, so `GET /ui/fieldvm` answers 401; `boot.js` then fetches `/ui/www/login_view.c1f` and runs ONLY that pack (`apps/barest.c1f/login_view.c1f`, imports `dom` and `fetch`). It is the one pack of the app folder the door serves without a token (door.c1f `Request.login_pack`; every other pack is 404 there) and `/ui/fieldvm` never lists it for a signed-in page. The card takes the token in a password box, `POST /ui/login`s it as JSON, and on a 2xx reloads: the cookie is the seat's (HttpOnly, SameSite=Strict as above). A wrong token shows the seat's own reason beside the form; no answer shows "The seat did not answer". The page keeps nothing: no localStorage, the box and the pack's entity are cleared at submit, the token is in no URL. The shell's bar shows **Sign out** (`POST /ui/logout`, then a reload) only when `/ui/conf` says who the page is.
+
+**The claude turn's credential (the release gate).** The turn's CLI answers with the Anthropic API key of the seat's environment variable `ANTHROPIC_API_KEY` by default; `--fact chat_auth=login` opts into the CLI's own login.
+The key travels like the admin token: the run's `env_from` hands the launcher's value to the child's environment, so it is never in `argv`, a property, a row, the journal, a log or a reply, and the Command driver masks it
+(`***`) in anything the child prints (only values of 16+ characters: a shorter one is no credential; 16 is the operator-approved minimum). With no key and no opt-in the turn is refused with the way to set it (docs/cliffvm.md, "The claude turn's auth").
+
 ## The files `cliffvm serve` makes (the data folder, `--data-dir`)
 
 - `door.secret`: 64 hex characters from `/dev/urandom`, mode 0600, made at the first start and kept. A missing or empty file is made; one shorter than 32 bytes, unreadable, or a folder REFUSES the start (the seat never

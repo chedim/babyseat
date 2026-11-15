@@ -271,8 +271,9 @@ fn the_browser_vm_snapshot_carries_the_view_packs_and_needs_the_admin() {
     names.sort();
     let folder = format!("{}/../membrane/apps/barest.c1f", env!("CARGO_MANIFEST_DIR"));
     let mut want: Vec<String> = std::fs::read_dir(&folder).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map(|x| x == "c1f").unwrap_or(false))
-        .filter(|p| std::fs::read_to_string(p).unwrap().lines().any(|l| l.starts_with("IMPORT dom "))).map(|p| p.file_stem().unwrap().to_string_lossy().to_string()).collect();
+        .filter(|p| std::fs::read_to_string(p).unwrap().lines().any(|l| l.starts_with("IMPORT dom "))).map(|p| p.file_stem().unwrap().to_string_lossy().to_string()).filter(|n| n != "login_view").collect();   // login_view is the sign-in screen: the page fetches it from /ui/www on a 401, a signed-in page's packs never carry it
     want.sort();
+    assert!(!names.contains(&"login_view".to_string()), "the sign-in pack is not in a signed-in page's snapshot");
     assert!(!want.is_empty() && names == want, "only the app folder's packs that import dom: {names:?} vs {want:?}");
     let shell = packs["shell_view"].as_str().unwrap();
     assert_eq!(shell, std::fs::read_to_string(format!("{folder}/shell_view.c1f")).unwrap(), "the file's text, whole");

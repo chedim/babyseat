@@ -14,10 +14,12 @@ Request.is_read getter: this.method == 'GET' or this.method == 'HEAD'
 -- THE FILES OF AN APP are data at their path (docs/c1f-layers.md): Boot:seat.app_dirs is the apps' folders, the UPPER layer first, and an
 -- app's files are under its `ui/`; Boot:seat.ui_dir (--ui-dir) is the lowest layer. The first folder that holds the file wins, so an
 -- upper layer's file shadows the lower one's. The files are /, /index.html, /membrane (the page),
--- /favicon.ico and /ui/www/<file>; a path with '..', a percent, a backslash, a leading '/' or a second /ui/www/ is refused.
+-- /favicon.ico and /ui/www/<file> (and /ui/www/login_view.c1f, the sign-in pack, from the app folder itself); a path with '..', a percent, a backslash, a leading '/' or a second /ui/www/ is refused.
 Request.ui_root getter: ([b.ui_dir for b in instances('Boot') if b.ui_dir != None] or [''])[0]
 Request.app_dirs getter: ([b.app_dirs for b in instances('Boot') if b.app_dirs != None] or [[]])[0]
-Request.ui_roots getter: concat([d + '/ui' for d in this.app_dirs], [this.ui_root] if this.ui_root != '' else [])
+-- the ONE app pack served from the app folder itself (not its `ui/`): the sign-in screen, which a page with no cookie must be able to fetch (login_view.c1f); no other pack is reachable this way
+Request.login_pack getter: this.rel == 'login_view.c1f'
+Request.ui_roots getter: this.app_dirs if this.login_pack else concat([d + '/ui' for d in this.app_dirs], [this.ui_root] if this.ui_root != '' else [])
 Request.rel getter:
   WHEN this.route == '/' or this.route == '/index.html' or this.route == '/membrane': 'index.html'
   ELSE WHEN this.route == '/favicon.ico': 'favicon.svg'

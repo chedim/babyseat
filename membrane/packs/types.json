@@ -498,6 +498,7 @@
       "Request.login_cookie": "Text?",
       "Request.login_has": "Bool",
       "Request.login_ok": "Bool",
+      "Request.login_pack": "Bool",
       "Request.login_reply": "Dict?",
       "Request.login_shape": "Bool",
       "Request.login_token": "Any",
@@ -528,7 +529,7 @@
       "Request.static_reply": "Dict?",
       "Request.ui_path": "Text?",
       "Request.ui_root": "Any",
-      "Request.ui_roots": "List(Any)",
+      "Request.ui_roots": "Any",
       "Request.ui_served": "Bool",
       "Request.unauthorized": "Dict",
       "Request.who": "Dict?"

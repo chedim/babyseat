@@ -34,7 +34,7 @@ export const FETCH_PACK = "PACK fetch 1\nRESIDENT Fetch\n-- THE OUTBOUND HTTP DR
 export const DOM_ALLOW = {
   tags: 'div span p ul ol li h1 h2 h3 h4 h5 h6 button a section header footer small strong em code pre table thead tbody tr td th label details summary input textarea select option form blockquote hr',   // blockquote hr h5 h6: the markdown view (markdown.c1f); a decision, 2026-11-14
   svgTags: 'svg g circle line path text rect',                       // made in the SVG namespace
-  attrs: 'class title role hidden alt href aria-label value placeholder disabled type name for tabindex rows checked selected multiple target rel',   // target rel: a link opens in a new tab (decision, 2026-11-14)
+  attrs: 'class title role hidden alt href aria-label value placeholder disabled type name for tabindex rows checked selected multiple target rel autocomplete spellcheck inputmode',   // target rel: a link opens in a new tab (decision, 2026-11-14); autocomplete spellcheck inputmode: the sign-in box (login_view.c1f)
   svgAttrs: 'cx cy r x y x1 y1 x2 y2 d width height viewBox points fill stroke stroke-width transform',
   prefixes: ['aria-', 'data-'],
   // never written to the element, each with its reason (a decision: `style`, `href`'s scheme, `src`)
@@ -333,6 +333,7 @@ class Host {
     if (prop === 'text') el.textContent = v == null ? '' : String(v);
     else if (prop === 'parent') this.attach(el, v, (this.get(eid) || {}).before);
     else if (prop === 'before') { if (!(this.made && this.made.has(eid))) this.attach(el, (this.get(eid) || {}).parent, v, true); }   // a node made this round is already in place
+    else if (prop === 'reload') { if (v === true) globalThis.location.reload(); }   // a pack's `reload = True`: the page is loaded again (the sign-in and sign-out screens: the seat has set or cleared the cookie)
     else if (prop === 'copy') this.copy(eid, v);                       // a pack's `copy` {text, at}: the text goes to the clipboard (the Copy button of a code block); `at` makes a second click a new value
     else if (prop === 'focused') {                                // a pack's focus(): the event that follows is no write (same value)
       if (v && document.activeElement !== el) el.focus(); else if (!v && document.activeElement === el) el.blur();

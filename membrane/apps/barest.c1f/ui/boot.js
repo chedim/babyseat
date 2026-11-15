@@ -39,8 +39,22 @@ function link_facts(host) {
   wide.addEventListener('change', put);
 }
 
+async function sign_in() {
+  const r = await fetch('/ui/www/login_view.c1f', { credentials: 'same-origin' });
+  if (!r.ok) throw new Error(`the seat's /ui/fieldvm answered 401 and its sign-in screen answered ${r.status}`);
+  const mount = document.createElement('div');
+  mount.id = 'mount';
+  const host = await start(mount);
+  loadPacks(host, { login_view: await r.text() });
+  host.feed('Login:main', 'Login', { open: true }, true);
+  app.replaceChildren(mount);
+  host.run_clock(CLOCK_MS);
+  window.MEMBRANE_PAGE = host;
+}
+
 (async () => {
   const r = await fetch('/ui/fieldvm', { credentials: 'same-origin' });
+  if (r.status === 401) return sign_in();                              // no cookie for this machine: the sign-in screen (login_view.c1f, public), a pack of its own
   if (!r.ok) throw new Error(`the seat's /ui/fieldvm answered ${r.status}`);
   const snap = await r.json();
   const mount = document.createElement('div');
