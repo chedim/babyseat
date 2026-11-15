@@ -430,7 +430,8 @@ fn a_restart_restores_the_models_entities_and_still_sweeps_old_requests() {
     let (n, _) = call(port2, "entity_read", json!({"spec": "Note:keep", "prop": "a"}));
     assert_eq!(n, "7", "the note is back");
     let (q, _) = call(port2, "entity_query", json!({"q": "kind:Banner"}));
-    assert_eq!(q.lines().filter(|l| l.contains("(Banner)")).count(), 1, "the default banner entity was born once: {q}");
+    assert_eq!(q.lines().filter(|l| l.contains("membrane::Banner:admin:main (Banner)")).count(), 1, "the default banner entity was born once: {q}");
+    assert_eq!(q.lines().filter(|l| l.contains("Banner:recall (Banner)")).count(), 1, "and so was the recall part, the second banner a turn shows: {q}");
     wait("the old Request row swept", || (!call(port2, "entity_query", json!({"q": "kind:Request", "k": 100})).0.contains("Request:900001")).then_some(()));
     // the restored banner stays live
     call(port2, "entity_write", json!({"spec": "Stop:b", "prop": "done", "value": true}));
