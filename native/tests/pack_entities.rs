@@ -171,3 +171,120 @@ fn the_tools_write_and_create_an_entity_of_a_class_the_model_pack_owns_directly(
     read_until_has(port, "Spy:s", "refused", "can't grant");
     assert_eq!(read(port, "Pack:thief", "privileged"), "Pack:thief has no privileged");
 }
+
+fn wtext(port: u16, spec: &str, prop: &str, v: J) -> String { let (t, e) = call(port, "entity_write", json!({"spec": spec, "prop": prop, "value": v})); assert!(!e, "{t}"); t }
+
+/// THE INCIDENT (#1143, 2026-11-14): a model-written pack that did not load was silent in the write's reply, and the model believed its banner carried the route.
+/// The reply now says on its first lines `pack <name> loaded` or `pack <name> did not load: <the engine's error, verbatim>`; the pack that blocks it is named by that text.
+#[test]
+fn the_reply_of_a_pack_write_says_whether_the_pack_loaded_and_why_not() {
+    let (_run, port) = start("packreply", None);
+    let first = wtext(port, "Pack:notes", "text", json!("PACK notes 1\nBanner.text getter: 'notes'\n"));
+    assert!(first.lines().any(|l| l == "pack notes loaded"), "{first}");
+    // the second pack defines the same getter and does NOT import the first
+    let second = wtext(port, "Pack:route", "text", json!("PACK route 1\nBanner.text getter: 'route'\nBanner.undone getter: 'x'\n"));
+    let err = read_until_has(port, "Pack:route", "error", "belongs to pack notes");
+    assert!(second.lines().nth(1).map_or(false, |l| l.starts_with("pack route did not load: ")), "{second}");
+    assert!(second.contains(&err), "the engine's error verbatim: {second} / {err}");
+    assert!(second.contains("add IMPORT notes 1"), "{second}");
+    assert!(second.contains("Pack:route.loaded") && second.contains(".error"), "{second}");
+    assert!(!second.contains("pack route loaded"), "{second}");
+    // the first still loaded
+    assert_eq!(read(port, "Pack:notes", "state"), "loaded");
+    // a third pack that imports the first loads
+    let third = wtext(port, "Pack:more", "text", json!("PACK more 1\nIMPORT notes 1\nBanner.text getter: 'more'\n"));
+    assert!(third.lines().any(|l| l == "pack more loaded"), "{third}");
+    // the same through a run_cliff block that writes a pack text
+    let (t, e) = call(port, "run_cliff", json!({"code": "Pack:blk.text = 'PACK blk 1\\nBanner.text getter: 1\\n'"}));
+    assert!(!e, "{t}");
+    assert!(t.contains("pack blk did not load: "), "{t}");
+}
+
+/// wait until `eid.prop` no longer reads `old` (a missing entity reads as a sentence, not as the value)
+fn gone_until(port: u16, eid: &str, prop: &str, old: &str) { wait(&format!("{eid}.{prop} to stop reading {old}"), || if read(port, eid, prop) != old { Some(()) } else { None }); }
+
+fn probe_pack(name: &str, imp: &str, v: &str) -> String { format!("PACK {name} 1\n{imp}Lamp.probe getter: '{v}'\n") }
+
+/// Unloading a pack (#1143): `Pack:<name>.retire = true` and an empty `text` each remove the pack's definitions AND what its getters left on entities; the reply says
+/// `pack <name> unloaded`; the same name loads fresh afterwards; retiring a top layer re-exposes the one below.
+#[test]
+fn retire_and_an_empty_text_unload_a_pack_its_getters_read_as_absent_and_the_name_loads_fresh() {
+    let (_run, port) = start("unload", None);
+    let gone = |port: u16, what: &str| { let t = wait(&format!("{what} to read as absent"), || { let t = read(port, "Lamp:one", "probe"); if !t.contains("alive") && !t.contains("top") { Some(t) } else { None } }); t };
+    wtext(port, "Lamp:one", "x", json!(1));
+    // 1. retire
+    assert!(wtext(port, "Pack:p3", "text", json!(probe_pack("p3", "", "alive3"))).contains("pack p3 loaded"));
+    read_until(port, "Lamp:one", "probe", "alive3");
+    let r = wtext(port, "Pack:p3", "retire", json!(true));
+    assert!(r.lines().any(|l| l == "pack p3 unloaded"), "{r}");
+    gone(port, "retire");
+    gone_until(port, "Pack:p3", "text", &probe_pack("p3", "", "alive3"));
+    // the same name loads fresh
+    wtext(port, "Pack:p3", "text", json!(probe_pack("p3", "", "alive3b")));
+    read_until(port, "Lamp:one", "probe", "alive3b");
+    // 2. an empty text
+    let r = wtext(port, "Pack:p3", "text", json!(""));
+    assert!(r.lines().any(|l| l == "pack p3 unloaded"), "{r}");
+    gone(port, "empty text");
+    // and a restart-proof state: the pack does not come back as `waiting` with the old getter
+    assert_eq!(read(port, "Pack:p3", "loaded"), "False");
+    wtext(port, "Pack:p3", "text", json!(probe_pack("p3", "", "alive3c")));
+    read_until(port, "Lamp:one", "probe", "alive3c");
+    // 3. layers: retiring the top layer re-exposes the one below
+    wtext(port, "Pack:p3", "retire", json!(true)); gone(port, "p3");
+    wtext(port, "Pack:base", "text", json!(probe_pack("base", "", "below")));
+    read_until(port, "Lamp:one", "probe", "below");
+    wtext(port, "Pack:topl", "text", json!(probe_pack("topl", "IMPORT base 1\n", "top")));
+    read_until(port, "Lamp:one", "probe", "top");
+    wtext(port, "Pack:topl", "retire", json!(true));
+    read_until(port, "Lamp:one", "probe", "below");
+}
+
+/// Death by null (#1143, operator 2026-11-14): `entity_write {spec, value: null}` with no prop destroys the entity (and its children), the mirror of a birth; a Pack unloads.
+#[test]
+fn a_plain_null_written_to_an_entity_destroys_it_and_its_children_and_a_pack_unloads() {
+    let (_run, port) = start("death", None);
+    wtext(port, "Pack:p5", "text", json!(probe_pack("p5", "", "alive5")));
+    wtext(port, "Lamp:a", "x", json!(1)); wtext(port, "Lamp:a:kid", "x", json!(2)); wtext(port, "Lamp:ab", "x", json!(3));
+    read_until(port, "Lamp:a", "probe", "alive5");
+    let r = call(port, "entity_write", json!({"spec": "Lamp:a", "value": null})).0;
+    assert!(r.starts_with("removed Lamp:a"), "{r}");
+    gone_until(port, "Lamp:a", "x", "1");
+    gone_until(port, "Lamp:a:kid", "x", "2");
+    assert_eq!(read(port, "Lamp:ab", "x"), "3", "a sibling that only shares the prefix stays");
+    // a call that forgets the prop and the value is refused, nothing is destroyed
+    let (t, _) = call(port, "entity_write", json!({"spec": "Lamp:ab"}));
+    assert!(t.contains("needs spec"), "{t}");
+    assert_eq!(read(port, "Lamp:ab", "x"), "3");
+    // the pack
+    let r = call(port, "entity_write", json!({"spec": "Pack:p5", "value": null})).0;
+    assert!(r.lines().any(|l| l.starts_with("pack p5 unloaded")), "{r}");
+    wait("the getter reads as absent", || { let t = read(port, "Lamp:ab", "probe"); if !t.contains("alive5") { Some(()) } else { None } });
+    wtext(port, "Pack:p5", "text", json!(probe_pack("p5", "", "fresh5")));
+    read_until(port, "Lamp:ab", "probe", "fresh5");
+    // `retire = true` still works
+    wtext(port, "Lamp:ab", "retire", json!(true));
+    gone_until(port, "Lamp:ab", "x", "3");
+}
+
+/// A pack's setter destroys with `<entity> = None`; ONLY a plain None: a reasoned null, an Error or a non-null value refuses and destroys nothing.
+#[test]
+fn a_setter_destroys_with_a_plain_none_and_a_reasoned_null_or_an_error_destroys_nothing() {
+    let (_run, port) = start("deathset", None);
+    let pack = "PACK reaper 1\nIMPORT door_tools 1\nPack.how on-setter reap:\n  ALWAYS:\n    Lamp:z = None\n\
+                Pack.how2 on-setter reap2:\n  ALWAYS:\n    Lamp:z = prop('Nothing:here', 'x')\n\
+                Pack.how3 on-setter reap3:\n  ALWAYS:\n    Lamp:z = 1 + None\n\
+                Pack.how4 on-setter reap4:\n  ALWAYS:\n    Lamp:z = 5\n";
+    wtext(port, "Lamp:z", "x", json!(1));
+    wtext(port, "Pack:reaper", "text", json!(pack));
+    wait("reaper", || { let t = read(port, "Pack:reaper", "state"); if t == "loaded" { Some(()) } else if t == "error" { panic!("{}", read(port, "Pack:reaper", "error")) } else { None } });
+    for how in ["how2", "how3", "how4"] {
+        wtext(port, "Pack:reaper", how, json!(1));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(read(port, "Lamp:z", "x"), "1", "{how} destroyed nothing");
+        let why = read_until_has(port, "Pack:reaper", "refused", "nothing was");   // the receipt says why, loudly
+        assert!(why.contains("Lamp:z"), "{why}");
+    }
+    wtext(port, "Pack:reaper", "how", json!(1));
+    gone_until(port, "Lamp:z", "x", "1");
+}

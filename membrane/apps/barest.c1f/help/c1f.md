@@ -204,7 +204,7 @@ Shelf.add on-setter add-book:
     Book:copy[slug] = Book(title: this.add)
 ```
 
-`target.[expr] = value` writes the property whose NAME the expression gives. `this.retire = True` removes an entity.
+`target.[expr] = value` writes the property whose NAME the expression gives. `this.retire = True` removes an entity; so does writing a plain None to it, the mirror of a birth: `Stop:3 = None` (a computed identity: `('Stop:' + this.n) = None`; the tool: `entity_write {spec: "Stop:3", value: null}` with no prop). Only a plain `None` destroys: a null that has a reason, an Error or any other value is refused with its reason and nothing is destroyed.
 
 ## Effects are writes
 

@@ -870,7 +870,7 @@
    {
     "eid": "Request:1",
     "prop": "reply.body.result.content.0.text",
-    "equals": "entity_write needs spec (the entity's id) and prop"
+    "equals": "entity_write needs spec (the entity's id) and prop (or value: null with no prop, to remove the entity)"
    },
    {
     "eid": "Scratch:a",

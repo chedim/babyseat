@@ -1499,6 +1499,10 @@ impl Fields {
                 self.construct(core, work, eid, name, pack, target, value, &binds, now, seq);
                 continue;
             }
+            if prop == crate::syntax::KILL {
+                self.kill(core, work, eid, name, pack, target, value, &binds, now, seq);
+                continue;
+            }
             let (vars, extra) = scope(eid, &binds, now);
             // `<target>.[<expr>] = v`: the property's name is computed (non-empty text; anything else writes nothing)
             let dynamic: String;
@@ -1579,6 +1583,27 @@ impl Fields {
             }
         }
         Ok(())
+    }
+
+    /// `<target> = None`: the mirror of a birth (operator, 2026-11-14). Only a PLAIN None destroys: a reasoned null (`pending:`, `absent:`, ...), an Error or any other value is refused
+    /// with a receipt that names it, and nothing is destroyed. It is `<target>.retire = true` once the checks pass (the same ownership rules, the same host removal, a Pack unloads).
+    fn kill(&mut self, core: &mut Core, work: &mut VecDeque<Write>, eid: &str, name: &str, pack: &str, target: &str, value: &str,
+            binds: &[(String, crate::vm::Item)], now: f64, seq: &mut i64) {
+        let (vars, extra) = scope(eid, binds, now);
+        let tgt = match core.eval_target(target, &vars, &extra) {
+            Ok(t) => t,
+            Err(why) => { self.receipt(core, eid, name, format!("error: {} = {}: {}; nothing was destroyed", target, value, why.strip_prefix("error: ").unwrap_or(&why)), J::Null, seq, now); return; }
+        };
+        match core.eval_value(value, &vars, &extra) {
+            Ok(crate::expr::V::None) => {}
+            Ok(crate::expr::V::Nil(r)) => { self.receipt(core, eid, name, format!("refused: {tgt} = {r}: a null that has a reason is not a plain None; nothing was destroyed (write `{tgt} = None` to destroy it)"), J::Null, seq, now); return; }
+            Ok(crate::expr::V::Error(r)) => { self.receipt(core, eid, name, format!("refused: {tgt} = {r}: an Error never destroys; nothing was destroyed"), J::Null, seq, now); return; }
+            Ok(_) | Err(_) => { self.receipt(core, eid, name, format!("refused: {tgt} = {value}: an entity on the left of `=` takes a constructor (`Class(name: value)`) or a plain `None` (destroy it); nothing was changed"), J::Null, seq, now); return; }
+        }
+        self.ensure(core, &tgt, now);
+        if !core.docs.contains_key(&tgt) { return; }      // nothing there: the death of what does not exist is no news
+        if let Err(why) = self.may_write_ent(core, pack, &tgt) { self.receipt(core, eid, name, why, J::Null, seq, now); return; }
+        self.emit(core, work, &tgt, "retire", json!(true), name, seq, now);
     }
 
     /// `<target> = Class(name: value, ...)`: the target is the identity. Created by the creation path of a write (the class must be one

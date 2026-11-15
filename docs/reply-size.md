@@ -53,6 +53,8 @@ What the model loses, and the construct each needs:
 
 Releases and fixtures: `reactions` is a derived write on `Request` and is only read by `mc_w_text` (entity_write) and `cl_*` (run_cliff). The `/membrane/*` JSON routes and `tests/specs/door_tools.json` (which feeds `reactions: []` as an INPUT) do not see it. The tests that read the `reactions:` line as a JSON array (`chat_process.rs`: `a_write_returns_the_reactions...`, `a_clifflet_that_writes...`, `reactions_list_only_real_changes...`, `a_banner_change_returns_reactions...`) would change with any design that changes the shape; the three help pages (`help/c1f.md`, `help/packs.md`, `help/cliff.md`) and `docs/cliffvm.md` describe `reactions` and need the same edit. Today's shape is one JSON array on one line.
 
+**Pack state in the reply (2026-11-14, #1143).** A write of `Pack:<name>.text` (entity_write or run_cliff) adds the host's reaction `Pack:<name>.loaded` (`pack_reactions` in `host.rs`: new = loaded, why = the loader's error verbatim; the mirror of `loaded`/`error` is a later round, so the reply could not read it). `rx_pack_lines` words it on the first lines after the head and keeps it out of `reactions:`. Cost: one short line `pack <name> loaded` (about 17 B) per pack written; a failure adds the engine's message (about 150 B) and one hint line (about 250 B).
+
 ## 4. Open decisions (no number chosen)
 
 1. Design: A, B1, B2 or C (or B2 under a byte budget as a backstop). Measured: B2 is 0.8-2.7 KB on the writes that hurt (today 12-265 KB); C 4 096 is bounded at ~4 KB.

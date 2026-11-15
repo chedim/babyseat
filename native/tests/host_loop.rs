@@ -275,6 +275,32 @@ fn retiring_an_entity_retires_what_its_path_owns_and_replays() {
     assert_eq!(r.snapshot().keys().cloned().collect::<Vec<_>>(), ["A:10", "A:2"]);
 }
 
+/// Death by null (#1143): an outside None written to an ENTITY (no property) destroys it and what its path owns, journalled as the retire it is, and a replay ends the same;
+/// a setter's `<entity> = None` does the same, and a Pack entity written None unloads the pack (its getter reads as absent).
+#[test]
+fn a_plain_none_written_to_an_entity_destroys_it_by_an_outside_write_a_setter_and_for_a_pack_and_replays() {
+    let pack = "PACK keep 1\nBox.label getter: 'box'\nBox.done on-setter bye:\n  WHEN this.done == True:\n    ('Box:' + this.kid) = None\n";
+    let mk = || { let mut o = Options::new(None); o.effects = false; let h = Host::open(o).unwrap(); h.load_pack("keep", pack).unwrap(); h.rebuild(); h };
+    let h = mk();
+    for e in ["Box:1", "Box:1:x", "Box:10", "Box:2"] { h.born(e, "Box", Map::new(), "person"); }
+    assert_eq!(h.get("Box:10", "label"), json!("box"));
+    h.write("Box:1", "", J::Null, "person");                          // an outside None to the entity
+    assert_eq!(h.snapshot().keys().cloned().collect::<Vec<_>>(), ["Box:10", "Box:2"], "Box:1 and its child went, Box:10 stayed");
+    h.write("Box:2", "kid", json!("10"), "person");
+    h.write("Box:2", "done", json!(true), "person");                  // the setter: `('Box:' + this.kid) = None`
+    assert_eq!(h.snapshot().keys().cloned().collect::<Vec<_>>(), ["Box:2"]);
+    let j = h.journal();
+    let mut j2 = vec![]; for e in ["Box:1", "Box:1:x", "Box:10", "Box:2"] { j2.push(Line::Born { ts: 0.0, writer: "person".into(), eid: e.into(), cls: "Box".into(), props: Map::new() }); }
+    j2.extend(j.into_iter().filter(|l| matches!(l, Line::Write { .. })));
+    let r2 = mk(); r2.replay(&j2);
+    assert_eq!(r2.snapshot().keys().cloned().collect::<Vec<_>>(), ["Box:2"], "the replay destroys again");
+    // a Pack entity written None unloads the pack
+    h.write("Pack:keep", "text", json!(pack), "person");
+    h.write("Pack:keep", "", J::Null, "person");
+    h.born("Box:9", "Box", Map::new(), "person");
+    assert_ne!(h.get("Box:9", "label"), json!("box"), "the getter of the unloaded pack reads as absent");
+}
+
 // ---- a running command's partial output (#1143, the SSE slice) --------------------------------------------------------------------------
 const PARTIAL: &str = "PACK pc 1
 Chunk.kind getter: 'chunk'
