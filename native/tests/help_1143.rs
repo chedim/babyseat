@@ -231,7 +231,7 @@ fn the_help_is_positive_and_domain_neutral() {
     }
 }
 
-const DOCTRINE: &str = "Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them. Your whole chat history is on the graph as ChatMessage entities: the user\\'s words are in text, your answers in response. Before you say you do not know or do not remember, search the ChatMessage entities. Do not guess: if you find nothing, say so, unless the user asks you to guess.";
+const DOCTRINE: &str = "Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. The field is programmable. Use cliffhanger to interact with your environment. Process updates on the graph and react to them. Your whole chat history is on the graph as ChatMessage entities: the user\\'s words are in text, your answers in response. Before you say you do not know or do not remember, search the ChatMessage entities. Do not guess: if you find nothing, say so, unless the user asks you to guess.";
 
 #[test]
 fn the_doctrine_in_the_chat_turn_is_the_name_the_graph_and_the_operators_sentences_and_the_help_tells_where_it_lives() {
