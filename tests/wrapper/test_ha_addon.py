@@ -412,6 +412,13 @@ def test_the_add_on_folder_has_its_files():
     assert (ADDON / "icon.png").read_bytes() == (ROOT / "custom_components" / "membrane" / "brand" / "icon.png").read_bytes()
 
 
+def test_the_dist_folder_the_dockerfile_copies_is_in_git():
+    # `COPY dist/` fails on a fresh clone without the folder, and the root .gitignore ignores every `dist/`: its README is tracked on purpose
+    r = subprocess.run(["git", "ls-files", "--error-unmatch", "addon/dist/README.md"], cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode == 0, "addon/dist/README.md is not tracked (git add -f addon/dist/README.md)"
+    assert "COPY dist/ /tmp/dist/" in (ADDON / "Dockerfile").read_text()
+
+
 def test_the_dockerfile_builds_on_a_pinned_base_with_a_default_and_installs_no_claude():
     d = (ADDON / "Dockerfile").read_text()
     assert re.search(r"(?m)^ARG BUILD_FROM=ghcr\.io/home-assistant/base:\d+\.\d+$", d), "Supervisor 2026.04+ passes no BUILD_FROM: it needs a pinned default"

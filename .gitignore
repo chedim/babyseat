@@ -78,6 +78,5 @@ membrane/dist/
 # the release dist folder (scripts/dist/build.sh) is build output; the scripts that make it are source
 !scripts/dist/
 
-# the add-on's local build tarballs (addon/dist/README.md)
-addon/dist/*.tar.gz
-addon/dist/*.sha256
+# the add-on's local build tarballs (addon/dist/README.md): `dist/` above ignores them; only addon/dist/README.md is tracked (added with -f), because the
+# add-on's Dockerfile COPYs the folder and a fresh clone must have it
