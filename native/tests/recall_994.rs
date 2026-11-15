@@ -26,7 +26,7 @@ fn ok(p: &str, v: &J) -> bool {
     match p {
         "banner_n" | "pool" | "fact_chars" | "recent_turns" | "entity_pool_max" => int(1),
         "history_turns" | "rerank_top" => int(0),
-        "no_topic_min" | "dedupe_jaccard" => unit(),
+        "no_topic_min" | "dup_share" => unit(),
         "rrf_k" => v.as_f64().map(|x| x > 0.0).unwrap_or(false),
         "rerank" => v.is_boolean(),
         "header" => v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false),

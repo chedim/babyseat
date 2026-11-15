@@ -23,8 +23,11 @@ fn seat_with(facts: &Map<String, J>) -> Host { seat_opts(facts, false) }
 fn seat_opts(facts: &Map<String, J>, store: bool) -> Host {
     membrane_vm::expr::set_eval_time_ms(Some(10_000));
     let file = store.then(|| {
+        // the clock alone can give two parallel tests one name (it ticks in microseconds here): a counter keeps each store its own
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("semrecall-{}-{n}.sqlite", std::process::id())).to_str().unwrap().to_string()
+        let s = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("semrecall-{}-{n}-{s}.sqlite", std::process::id())).to_str().unwrap().to_string()
     });
     let mut o = Options::new(file);
     o.effects = store;
@@ -134,6 +137,38 @@ fn near_duplicates_merge_and_every_row_has_its_score_with_no_cut_off() {
     assert!(pos(&r, "Quokkas sleep.").is_some(), "{r:?}");
     assert!(r.iter().all(|x| x["score"].is_number()), "{r:?}");
     assert_eq!(r.len(), 7, "every hit, however weak, is there (no score cut-off): {r:?}");
+}
+
+/// The merge is GREEDY: a hit goes only when it is a near duplicate of a hit already KEPT. A ~ B and B ~ C, A and C unlike, ranked A, B, C:
+/// B goes (a duplicate of A), C stays (its only twin, B, was not kept).
+#[test]
+fn a_chain_of_near_duplicates_keeps_its_far_end() {
+    let h = seat();
+    let a: Vec<String> = (1..10).map(|i| format!("alpha{i}")).collect();
+    let c: Vec<String> = (1..10).map(|i| format!("gamma{i}")).collect();
+    leaf(&h, "a", &format!("Quokka {}.", a.join(" ")));
+    leaf(&h, "b", &format!("Quokka {} {}.", a.join(" "), c.join(" ")));
+    leaf(&h, "c", &format!("Quokka {}.", c.join(" ")));
+    leaf(&h, "q", "quokka");
+    let r = recall(&h, "Leaf:x:q:body");
+    assert!(pos(&r, "alpha1").is_some(), "{r:?}");
+    assert!(pos(&r, "alpha1 alpha2 alpha3 alpha4 alpha5 alpha6 alpha7 alpha8 alpha9 gamma1").is_none(), "B is A's near duplicate: {r:?}");
+    assert!(texts(&r).iter().any(|t| t.starts_with("Quokka gamma1")), "C stays: its twin B was not kept: {r:?}");
+    assert_eq!(r.len(), 2, "{r:?}");
+}
+
+/// The share is the dial `dup_share` of `recall:dials` (the old unused `dedupe_jaccard`, renamed: one dial, the same 0.8), read by the overridable getter.
+#[test]
+fn the_near_duplicate_share_is_the_dial() {
+    let h = seat();
+    leaf(&h, "q", "quokka");
+    assert_eq!(h.get("recall:dials", "dup_share"), json!(0.8));
+    assert_eq!(h.get("recall:dials", "dedupe_jaccard"), J::Null, "renamed, not doubled");
+    assert_eq!(h.get("Leaf:x:q:body", "dup_share"), json!(0.8));
+    h.write("recall:dials", "dup_share", json!(0.5), "person"); h.pump();
+    assert_eq!(h.get("Leaf:x:q:body", "dup_share"), json!(0.5));
+    h.write("recall:dials", "dup_share", json!(1.5), "person"); h.pump();
+    assert_eq!(h.get("recall:dials", "dup_share"), json!(0.5), "guarded: a share is between 0 and 1");
 }
 
 #[test]

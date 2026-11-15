@@ -174,15 +174,15 @@ SemText.related getter:
 --   FUSION by reciprocal rank (`rrf_k`), ties by key; RERANK of the first `rerank_top` rows by the fitted weights `weights.rerank` over sim (the cosine score), inv_rank (1 / the fused place)
 --           and overlap (the share of the ask's own entities the sentence mentions); the features this seat does not have are 0, as the old seat scored a row the models had not scored.
 --   THE ASK ITSELF is never a hit; nothing else is left out (recent chat texts are hits: the model gets no chat history).
---   NEAR DUPLICATES MERGE: a hit whose shorter sentence has at least `dup_share` (0.8, a getter) of its distinct words (lowercase, `plain`) in the other's is dropped for the better-placed one
---           (each hit is checked against every hit placed before it, merged or not: c1f has no fold to check against the kept ones only).
+--   NEAR DUPLICATES MERGE, greedy: a hit is dropped when it is a near duplicate of a better-placed hit that was KEPT (a `fold` over the hits): two hits are near duplicates when the shorter
+--           sentence has at least `dup_share` of its distinct words (lowercase, `plain`) in the other's. `dup_share` is a getter (a layer overrides it) that reads the dial `dup_share` (0.8).
 --   NO SCORE CUT-OFF: every hit is returned, best first, as `{semtext, start, text, score, sim, shared}` (`score` the fused one); the readers cut the count (`banner_n`, `assoc_n`).
 --   THE DIALS are the entity `recall:dials` (native/packs/recall-policy.json; its writes are guarded by the host).
 SemText.r_ratio getter: 0.5
 SemText.r_weights getter:
   q = this.r_ratio
   [1, q, q * q, q * q * q, q * q * q * q, q * q * q * q * q]
-SemText.dup_share getter: 0.8
+SemText.dup_share getter: prop('recall:dials', 'dup_share')
 SemText.r_chat getter: startswith(this.eid, 'membrane::Chat:') and ':message:' in this.eid and tail(this.eid, 5) == ':body'
 SemText.r_msg getter: before(this.eid, ':message:') + ':message:' + before(after(this.eid, ':message:') + ':', ':') if this.r_chat else None
 -- the place of a chat text in the chat's order: the message key, then 1 for an answer (said after its message) and 0 for the message
@@ -278,16 +278,18 @@ SemText.r_words getter:
     rj = '|' + join([x['key'] for x in this.r_ranked], '|') + '|'
     rows = [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'ov': x['ov'], 'o': len(before(rj, '|' + x['key'] + '|')) - len(replace(before(rj, '|' + x['key'] + '|'), '|', '')), 'ws': distinct(words(replace(plain(x['text']) + ' ', '. ', ' ')))} for x in this.r_ranked]
     [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'ov': x['ov'], 'o': x['o'], 'ws': x['ws'] or [x['key']], 'n': len(x['ws']) or 1} for x in rows]
--- the hits that are no near duplicate of a hit placed before them. For a hit x and the hits E before it: shared = n(y) + n(x) - |the words of both, distinct| for each y of E (a list, one
--- vector operation), and x is a duplicate when some y has shared >= dup_share x min(n(x), n(y)), that is when the largest of (shared - dup_share x n(x)) or of (shared - dup_share x n(y)) is >= 0.
+-- the hits that are no near duplicate of a KEPT hit placed before them (greedy: a chain A ~ B ~ C with A and C unlike keeps A and C). For a hit x and the hits E before it:
+-- shared = n(y) + n(x) - |the words of both, distinct| for each y of E (a list, one vector operation), and x is a duplicate of y when shared >= dup_share x min(n(x), n(y)), that is when
+-- (shared - dup_share x n(x)) or (shared - dup_share x n(y)) is >= 0. The `fold` walks the hits in order with `acc` = the keep-mask so far (1 kept, 0 dropped, one entry per hit before x):
+-- a hit that was dropped has (n(x) + n(y) + 1) taken off both terms, which makes them negative (shared <= n(x) + n(y)), so only the KEPT hits can make x a duplicate. Each step is a few vector operations.
 SemText.r_kept getter:
   WHEN this.r_words == None: None
   ELSE:
     s = this.dup_share
     ws = this.r_words
-    both = [{'o': x['o'], 'n': x['n'], 'u': [len(distinct(concat(x['ws'], y['ws']))) for y in head(ws, x['o'])], 'm': [y['n'] for y in head(ws, x['o'])]} for x in ws if x['o'] > 0]
-    dup = [d['o'] for d in both if max(max(d['m'] + d['n'] - d['u'] - s * d['n']), max(d['m'] * (1 - s) + d['n'] - d['u'])) >= 0]
-    [x for x in ws if not (x['o'] in dup)]
+    both = [{'o': x['o'], 'n': x['n'], 'u': [len(distinct(concat(x['ws'], y['ws']))) for y in head(ws, x['o'])], 'm': [y['n'] for y in head(ws, x['o'])]} for x in ws]
+    keep = fold([], [concat(acc, [1 if d['o'] == 0 or max(max(d['m'] + d['n'] - d['u'] - s * d['n'] - (1 - acc) * (d['m'] + d['n'] + 1)), max(d['m'] * (1 - s) + d['n'] - d['u'] - (1 - acc) * (d['m'] + d['n'] + 1))) < 0 else 0]) for d in both])
+    [x for x in ws if keep[x['o']] == 1]
 SemText.recall getter:
   WHEN this.r_kept == None: None
   ELSE: [{'semtext': x['of'], 'start': num(after(x['key'], '#')), 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'overlap': x['ov']} for x in this.r_kept]

@@ -1778,7 +1778,7 @@
       "SemText.ask_rr": "Any",
       "SemText.ask_vec": "Any",
       "SemText.assoc_source": "List(Dict)?",
-      "SemText.dup_share": "Float",
+      "SemText.dup_share": "Any",
       "SemText.in_flight": "Bool",
       "SemText.mention_cap": "Int",
       "SemText.mention_done": "List(Dict)",
