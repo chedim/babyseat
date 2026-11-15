@@ -39,7 +39,8 @@
       "reauth_successful": "The new token works.",
       "cannot_connect": "The seat didn't answer at the address the add-on gave.",
       "invalid_auth": "The seat refused the token the add-on gave.",
-      "invalid_discovery": "The add-on's announcement had no host, port or token."
+      "invalid_discovery": "The add-on's announcement had no host, port or token.",
+      "already_in_progress": "This seat is already being set up."
     }
   },
   "services": {
