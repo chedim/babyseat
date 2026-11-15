@@ -53,9 +53,13 @@ Setting.set on-setter setting-set:
     this.refused = str(this.label) + ' must be at least ' + str(this.min) + ' (' + str(this.set) + ' is below it)'
   ELSE WHEN this.kind == 'number' and this.max != None and this.set > this.max:
     this.refused = str(this.label) + ' must be at most ' + str(this.max) + ' (' + str(this.set) + ' is above it)'
-  ELSE WHEN this.kind == 'text' and not (this.set is Text):
+  ELSE WHEN this.eid == 'Setting:chat.name' and not (this.set is Text):
+    this.refused = 'the name must be text, not ' + str(this.set)
+  ELSE WHEN this.eid == 'Setting:chat.name' and ('\n' in this.set or '\r' in this.set or len(this.set) > 120):
+    this.refused = 'the name is one line of at most 120 characters (it goes into the prompt, so no line breaks); spaces are fine'
+  ELSE WHEN this.kind == 'text' and this.eid != 'Setting:chat.name' and not (this.set is Text):
     this.refused = str(this.label) + ' must be text (a model name), not ' + str(this.set)
-  ELSE WHEN this.kind == 'text' and this.set != '' and (plain(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) != lower(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) or '#' in this.set or ' ' in this.set or len(this.set) > 120):
+  ELSE WHEN this.kind == 'text' and this.eid != 'Setting:chat.name' and this.set != '' and (plain(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) != lower(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) or '#' in this.set or ' ' in this.set or len(this.set) > 120):
     this.refused = str(this.label) + ' is not a model name: ' + this.set + ' (1 to 120 characters: letters, digits and _.:/@~+-)'
   ELSE WHEN this.kind == 'list' and not (this.set is List):
     this.refused = str(this.label) + ' must be a list of names'
