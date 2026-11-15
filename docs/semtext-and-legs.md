@@ -190,10 +190,12 @@ The old membrane's entity recall voter. For an ask whose `recall_on` is true, `S
   lane's `r_cos_raw` keeps its own. With the recall off nothing is computed (null).
 - **The constants** are getters on SemText a layer overrides: `ent_k` 8 and `ent_depth` 20 (approved), `ent_over` 4 (the over-fetch, 32 candidates of each kind) and `ent_cover` 0.9 (both
   carried from the old seat, awaiting the operator's yes); the mature age is the field's `field_mature`.
-- **Cost**: one stage per getter (each evaluation has its own step budget). The largest is reading the candidates' sentence vectors for their means (`ent_mvecs`), about 30 steps a
-  mention read: with 300 texts naming 8 of 40 identifiers each (every entity 60 mentions, 32 candidates whose mean is a point) it takes about 57,600 steps of the 100,000 budget
-  (28,800 at 150 texts; measured 2026-11-15 by bisecting the budget on `a_realistic_field_stays_inside_the_step_budget`). So the candidates may hold about 3,300 applied mentions
-  between them; past that (a common word of thousands of mentions among the candidates) the evaluation answers `budget exceeded`, not a wrong list. Nothing is cut.
+- **Cost**: one stage per getter (each evaluation has its own step budget). The candidates' means take a few steps a candidate whatever their mentions (`props` + `vmean`;
+  about 1,100 steps at 150 texts of the measurement below, the same at 600 and 2,400). The largest now is the EVIDENCE (`ent_parts`: for each hit entity, each text that mentions it,
+  each row of that text's `field_moves`, about 10 steps a row) and before it `ent_pairs` (each text of each hit's `mentioned_in`): linear in the texts that mention the hits. On
+  `a_realistic_field_stays_inside_the_step_budget` (texts naming 8 of 40 identifiers) the largest evaluation takes about 50,000 steps at 300 texts and 99,900 at 600 (bisected
+  2026-11-15); on the whole-recall measurement (three words in every text, below) `ent_parts` needs about 122,900 at 600 texts and 430,200 at 2,400, so entity recall drops out of
+  the vote there (`budget exceeded`, never a wrong list). Nothing is cut.
 - Not built: the move log's previous turn (`held`), the answerable-events filter of the old voter, the old seat's word hop (it was off for the vote: `hop=False`).
 
 ### The move-log voter (#1143, step 4; `membrane/packs/movelog.c1f`, tests `native/tests/movelog_1143.rs`)
@@ -262,13 +264,19 @@ finds the rest in the graph. It computes only while `recall_on` is true (the ban
 - **Not ported from the old vote**: the instance-histories voter (weight 3: a parser and a date reader this seat does not have) and the `bge` reranker (a model runtime). The old seat
   kept the vote's order when the reranker was down; this recall reranks the vote's first 20 by the `legacy` weights (operator 2026-11-15).
 - **Cost of the whole recall** (each evaluation has its own step budget; measured 2026-11-15 by bisecting the budget on `measure_the_step_budget_of_the_whole_recall`, a chat whose texts each name
-  8 of 40 identifiers and three words every text says, every voter voting). 150 texts: the largest evaluation takes about 33,000 steps (the near duplicates' pair counts, `r_pairs`); by part, the edge lane 13,900
-  (`r_edge`), the cosine lane 3,100, the move log 2,800, entity recall 18,000 (`ent_mvecs`), the vote, rerank and merge 33,000. 600 texts: entity recall needs about 122,900
-  (`ent_mvecs` reads the sentence vectors of its 32 candidates' mentions, and the three words every text says are candidates with 600 mentions each), so under the default budget it
-  fails (`budget exceeded`) and the vote goes on without it (its ballot is missing); the rest fits: the edge lane 54,400 (linear in the mentions of the ask's entities), the cosine lane
-  3,100, the move log 2,800, the vote, rerank and merge 29,500. Nothing is cut (no threshold was given): somewhere between 150 and 600 such texts (not bisected by text count), entity recall drops out of the vote. With every
-  lane and ballot full and no key shared (114 hits of 13 words, the most the shipped dials allow; `full_ballots_of_long_sentences_stay_inside_the_step_budget`) the largest
-  evaluation, the pair counts, takes about 79,500.
+  8 of 40 identifiers and three words every text says, every voter voting; the largest single evaluation of each part, in steps):
+
+  | texts | edge lane | cosine lane | move log | entity recall | vote, rerank, merge |
+  |---|---|---|---|---|---|
+  | 150 | 1,300 | 3,100 | 2,800 | 9,600 (`ent_scored`) | 33,000 (`r_pairs`) |
+  | 600 | 1,300 | 3,100 | 2,800 | 122,900 (`ent_parts`: fails) | 48,700 |
+  | 2,400 | 1,300 | 3,100 | 10,300 | 430,200 (`ent_parts`: fails) | 53,100 |
+
+  Before `props`, `vmean` and the column sums of `group_by` (the same measurement): the edge lane took 13,900 at 150 texts and 54,400 at 600 (linear in the sentences its entities reach,
+  past the budget at about 1,100 texts), entity recall 18,000 at 150 and failed at 600 (the means alone, `ent_mrows` + `ent_mvecs`, about 175,000). Now the edge lane and the means
+  do not grow with the field; what still grows is entity recall's evidence (`ent_parts`, `ent_pairs`, above) and the move log (`ml_scores`, linear in the holders of the question's
+  things, about 4 steps a holder). With every lane and ballot full and no key shared (114 hits of 13 words, the most the shipped dials allow; `full_ballots_of_long_sentences_stay_inside_the_step_budget`)
+  the largest evaluation, the pair counts, takes about 79,500.
 - **The ask itself is never a hit**; nothing else is left out (recent chat texts are hits: the model gets no chat history).
 - **Near duplicates merge, greedy**: two hits are near duplicates when the shorter sentence has at least `dup_share` of its distinct words (`plain`, lowercase) in the other's; a hit is dropped
   only when it is a near duplicate of a better-placed hit that was KEPT, so in a chain A ~ B ~ C with A and C not alike, B goes and C stays (`a_chain_of_near_duplicates_keeps_its_far_end`).
