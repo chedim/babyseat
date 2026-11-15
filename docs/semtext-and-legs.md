@@ -1,6 +1,6 @@
 # SemText and legs: how code builds the graph (built: the tokenizer, SemText, spans, form classes, mentions, the message body, recall by edges, sentence vectors, the shared recall, the recall banner part, Memory)
 
-A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "The field", "Recall in the banner", "Memory"); recall's use of the field and everything under "Not built" is not. It is the shape the semantic field
+A conversation between the operator and the assistant, written down. The slices below are built ("Built: the first slice", "sentence vectors", "The field", "The move-log voter", "Recall in the banner", "Memory"); recall's use of the field and everything under "Not built" is not. It is the shape the semantic field
 takes in the barest seat: ONE graph (the VM's entities), with the semantic state an opt-in component of an entity, and code (c1f
 packs) building the graph from text.
 
@@ -166,10 +166,37 @@ sentence number, the move); `field_n` on the text counts the sentences applied.
   before older history: that history then moves the states after it).
 - **How**: c1f has no loop with an accumulator, so one landing is one cascade: a setter makes a VIRTUAL `FieldStep` per (entity, mention), each chained to the previous mention of the same entity; their
   getters compute the walk; when every chain is computed, one setter writes each state, each text's moves, the nursery, the episodes and the background. The steps are collected when the round ends.
-- Recall does not read the field yet (steps 4-6: the move log voter, entity recall over `near(q, 'FieldState', k)` centred on the background, the vote).
+- Recall does not read the field yet: the move-log voter (step 4, below) is built as its own getter and is not fused; entity recall over `near(q, 'FieldState', k)` centred on the background (step 5) and the vote (step 6) are not built.
+
+### The move-log voter (#1143, step 4; `membrane/packs/movelog.c1f`, tests `native/tests/movelog_1143.rs`)
+The old membrane's `movelog.settle`, over the move log above (`field_moves`). It is ONE getter, `SemText.movelog_votes`, computed while `recall_on` is true (as `recall`); **recall does not read it yet**
+(the fusion of the voters is step 6).
+- **Held**: an event (a text) holds, for each thing (Word / Identifier / Path entity), the LARGER of its own move of it (the largest of its sentences') and the move of its PREVIOUS TURN (that
+  turn's own move, not what that turn held). The previous turn of an answer body is its message's body; of a message body, the answer body of the message before it, else that message's body
+  (chat order is the store's key order, the way recall's window reads it). A text that is not a chat's (a `Memory` note, a pack's leg) has its own moves only.
+- **The vote**: each thing the question (the ask SemText's `mentions`) names weighs `log(N / the events holding it)` (the builtin `log`), N the texts the field applied (`MoveLog:all.n`, counted at each
+  text's first landing); an event scores the sum over those things of that weight x the move it holds; scores are divided by the top score (a top of 0 or less, or no thing held by anyone: `[]`);
+  ties by the text's eid (the key starts with it); the first `ml_depth` (20) rows `{key, of, text, score}`: `of` the text, `key` `<text eid>#<start>` of its sentence that moved a question's thing
+  the most (its first sentence when it only holds its previous turn's move), `text` that sentence. The question itself is never a row (it may hold the things it names: it counts in N and in the
+  holders, as any text the field applied). One round (the old `ROUNDS` = 1). A thing every event holds weighs 0 and is skipped (it would add 0 to every score).
+- **The posting list** (the old `held_by`): each thing keeps `ml_held_by`, `[{t, h}]` (the events holding it and the move held), so the vote reads only the question's things (their lists, as
+  JSON text cached on the thing, `ml_rows`, with the weight put in by one text replace and one parse), never every text. Two setters keep it, each one write per thing:
+  `movelog-post` on the field's `field_ready` (the landing's chains; one level below the field's apply, which ends the landing in the same round): the texts the landing gave moves (the landing
+  text, and the earlier texts of a word that materialises) and each one's follower (`ml_next`) hold the new moves, the larger value kept; at a chat text's FIRST landing it also makes the link (the
+  text holds the previous turn's moves, the previous turn learns `ml_next`), because the previous turn was read when the text was mentioned (`ml_prev`, one `sql` per chat text); `movelog-link`
+  makes the link later for a text that landed before the store answered.
+- **The constants** are getters on SemText a layer overrides: `ml_depth` 20 and `ml_weight` 2 (the voter's weight in the vote, read by step 6, not yet). Both carried from the old seat
+  (`recall_vote.py`; approved for the port 2026-11-15).
+- **Cost** (measured 2026-11-15 by bisecting the step budget, `measure_the_step_budget`, a question naming seven things that every text or three in five hold): 150 texts: the vote 3,301 steps,
+  the largest expression of the posting setter (one thing's list rewritten) 1,855 steps for a thing held by 91 texts; 600 texts: the vote 12,751 steps, the setter 7,255 for 361 holders. Both are
+  linear (about 21 steps per text holding a question's thing, about 20 per holder of the thing written), so under the default budget (100,000) the vote fits about 4,700 holding texts and a
+  thing fits about 5,000 holders; past that the evaluation is an Error (`budget exceeded`) and, for the setter, that thing's list is not written. Nothing is cut (no threshold was given).
+- **Not handled** (the old code relinked; this one does not): a turn written into the chat's order after its follower was linked (an answer that ends after the next message was sent: the
+  next message keeps the message body as its previous turn); two landings in one round (several texts waiting on one seed land together; the engine keeps the first write of a thing's list in a
+  round, so one landing's postings can be lost: the field's own apply has the same limit). Texts the field applied before this pack existed have no postings (no backfill).
 
 ### Not built
-A backlog of stored texts that are not chat bodies (the backlog query reads chat bodies only; any other text is asked when its text is written), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, recall's use of the field (the move log voter, entity recall over the states, the vote), a collection of stored Word entities, the
+A backlog of stored texts that are not chat bodies (the backlog query reads chat bodies only; any other text is asked when its text is written), cross-text batching (a request holds one text's sentences: c1f has no flatten or zip), a request in parallel, paragraphs, syntax, coreference, recall's use of the field (the move-log voter is built but not fused; entity recall over the states and the vote are not built), a collection of stored Word entities, the
 mention rules for urls and numbers (they have spans, no entities), re-mentioning when a text's `text` changes (write `mention` again), per-origin statistics, untrusted legs, lazy reads of `<semtext>:w[3]`, a nested comprehension (c1f has none: `related` flattens through JSON text; a `flatten` would be a builtin to propose).
 
 
