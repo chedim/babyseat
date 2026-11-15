@@ -2,6 +2,41 @@
 
 Everything below is live in this seat; each block is loaded and run by a test.
 
+## What exists now
+
+Builtins added since 0.7.53 (`Help:c1f` has each in its place):
+
+- `near(list, 'Vector', k)`: the k nearest `Vector`s by cosine, best first, as `{eid, score}`;
+- `vsum(vectors, weights)`: the sum of a list of vectors, each times its weight (the weights are optional);
+- `fold(start, [step for x in xs if keep])`: carries `acc` across a list;
+- `log(x)`: the natural log of a positive number;
+- `props(ids, 'name')`: one property of every entity of a list, in one step (`props(ids, at, 'name')` takes element `at[i]` of each value);
+- `vmean(ids)`: the mean of the unit vectors `v` of a list of entities (an id with no vector is skipped);
+- `group_by(rows, key, ['col'])`: the third argument totals each named column per group.
+
+```c1f
+-- given Vector:a {"v": [3.0, 4.0]}
+-- given Vector:b {"v": [0.0, 2.0]}
+-- given P:q {"ids": ["Vector:a", "Vector:b"], "rows": [{"k": "x", "n": 1}, {"k": "y", "n": 5}, {"k": "x", "n": 2}]}
+-- reads P:q.nearest = ["Vector:b"]
+-- reads P:q.added = [2.0, 0.5]
+-- reads P:q.total = 6
+-- reads P:q.ln = 0.0
+-- reads P:q.dims = [2, 2]
+-- reads P:q.mid = [0.30000001192092896, 0.8999999761581421]
+-- reads P:q.per_key = [3, 5]
+P.nearest getter: pluck(near([0.0, 1.0], 'Vector', 1), 'eid')
+P.added getter: vsum([[1, 0], [0, 1]], [2, 0.5])
+P.total getter: fold(0, [acc + x for x in [1, 2, 3]])
+P.ln getter: log(1)
+P.dims getter: props(this.ids, 'dim')
+P.mid getter: vmean(this.ids)
+P.per_key getter: pluck(group_by(this.rows, 'k', ['n']), 'n')
+```
+
+Semantic search is built: every sentence gets a vector in the background (`Help:semtext`, "Sentence vectors"), the things the sentences mention move in a field of their own as those vectors land, and
+recall combines its finders (shared words and things, the nearest sentence vectors, the field) by a vote, best first (`Help:semtext`, "Recall and a direct search").
+
 ## Blocks and locals (getters and setters)
 
 One line `name = expr` is a local, visible to the lines below it in its own block. A getter ends in its value. Locals are never

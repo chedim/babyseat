@@ -69,7 +69,82 @@ The loader's words come back, once for the block read as a value and once read a
 [x for x in
 ```
 
-A block that runs past its step or time budget answers with that reason (`Error: budget exceeded (N steps)`), and the seat goes on.
+A block that runs past its step budget answers with that reason (`Error: budget exceeded (N steps)`), and the seat goes on ("The step budget" below).
+
+## Inside a block: builtins, and the tools stay outside
+
+`entity_query`, `entity_read` and `entity_write` are tools of the door, called by you; a block calls the builtins (`Help:c1f`). A tool's name in a block is answered with an Error:
+
+```cliff
+-- error: only the built-ins may be called
+entity_read('Help:c1f')
+```
+
+Inside a block, read a class with `instances('<Class>')`, an entity's property with `x.prop` or `prop(x, 'prop')` (also when the id is text you built), and one property of many entities with `props`:
+
+```cliff
+-- given Lamp:desk {"watts": 40}
+-- given Lamp:hall {"watts": 60}
+-- value {"ids": ["Lamp:desk", "Lamp:hall"], "desk": 40, "all": [40, 60]}
+ids = [l.eid for l in instances('Lamp')]
+{'ids': ids, 'desk': prop('Lamp:' + 'desk', 'watts'), 'all': props(ids, 'watts')}
+```
+
+`instances` lists the entities that are LOADED (a class declared `RESIDENT` is always loaded whole; `Help:packs`, "Storage"). For every stored entity of a class, loaded or not, use the tool `entity_query` (`Help:c1f`, "Finding entities").
+
+## What a null or an Error usually means
+
+| the block's last line | it answers | what it means |
+|---|---|---|
+| `None('nothing measured yet')` | `null: nothing measured yet` | a null that says why: nothing failed, the value is simply not there yet |
+| `Lamp:desk.room` | `null: absent: Lamp:desk.room` | the entity is there and holds no `room` |
+| `Lamp:nowhere.watts` | `null: absent: Lamp:nowhere does not exist` | no entity has that id |
+| a getter that gave no value, `None` | `null` | a plain null, with no reason |
+| `near(q, 'Vector', 3)` over no vectors | `null: empty: no vectors in class Vector` | nothing to search yet |
+| `Int('a')`, `Error('...')` | `Error: <the reason>` | something FAILED; the reason says what to do |
+
+Each row is run here:
+
+```cliff
+-- given Lamp:desk {"watts": 40}
+-- null: absent: Lamp:desk.room
+Lamp:desk.room
+```
+
+```cliff
+-- null: absent: Lamp:nowhere does not exist
+Lamp:nowhere.watts
+```
+
+```cliff
+-- value null
+None
+```
+
+```cliff
+-- null: empty: no vectors in class Vector
+near([1.0, 0.0], 'Vector', 3)
+```
+
+```cliff
+-- error: the light needs a new bulb
+Error('the light needs a new bulb')
+```
+
+## The step budget
+
+Every evaluation (a getter, a setter, a block) has 100,000 steps. Each part of an expression it visits costs a step, and a comprehension pays for each item it walks; a native builtin (`len`, `sort_by`,
+`group_by`, `props`, `near`, `vsum` ...) is ONE step however long its input. Past the budget the evaluation is an Error, `budget exceeded (100000 steps)`; the rest of the field keeps running, and a getter
+over budget shows the Error until its inputs change. Three loops of 50 inside one another walk 125,000 items:
+
+```cliff
+-- error: budget exceeded
+xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
+len([len([len([c for c in xs if c > b]) for b in xs]) for a in xs])
+```
+
+A cheap getter hands the long walk to a builtin: `props(ids, 'name')` in place of `[prop(e, 'name') for e in ids]`, `group_by(rows, key, ['col'])` in place of a total per key, `near` in place of a
+cosine against every vector. Keep a loop off lists that grow without end (every message, every mention of a word: `mentioned_in`), or cut them first with `head` or `tail`.
 
 ## Writes
 

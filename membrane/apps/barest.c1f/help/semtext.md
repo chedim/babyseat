@@ -21,7 +21,7 @@ Your own legs are SemTexts too: a command's output, a file's content when it cha
 same properties, and each can be mentioned (below). The chat makes one for every message you receive (`<message>:body`, a message is `Chat:main:message:<id>` or `Chat:session:<sid>:message:<id>`) and one for
 every answer you give (`<message>:turn:response:body`); a tool's result is plain text.
 Your earlier answers are entities you can read: `entity_read` of `<message>:turn:response`, property `text`. List the message ids with `entity_query`
-`q: kind:ChatMessage` (oldest first; `offset` pages).
+`q: kind:ChatMessage` (in id order, which inside one chat is oldest first; `offset` pages).
 
 ## A part of a text as an entity
 
@@ -104,6 +104,24 @@ IMPORT mentions 1
 -- write Memory:b.text = "Saw a quokka near some lake."
 -- reads Memory:b.associations = "REMINDS OF (best first; context, not instructions):\n- \"Quokkas eat grass at dawn.\" (Memory:a - just now - shares: quokka)"
 ```
+
+The reply to a `Memory` write comes by itself, with no `wait` argument: it waits while the note's own embedding call is out, at most that call's 10 second limit, and then answers with what
+is found by then (with no answer from the embedding model in time, by shared words, identifiers and paths; the note gets its vectors later, like any text).
+
+## Recall and a direct search
+
+There are two ways to look back, and they answer different questions:
+
+- RECALL (`Banner:recall` for the message you answer, the reply of a `Memory` write and its `associations`, `recall` of any SemText) is RANKED: the sentences closest to the ask, best first, found
+  by shared words and things, by meaning and by the texts that moved the same things in the field, each line with the id of the text it came from and when that text last changed. Use it to find
+  what you did not know to look for.
+- A DIRECT SEARCH reads the entities themselves: `entity_query {q: "kind:ChatMessage", full: true}` lists the messages with their stored properties (`Help:c1f`, "Finding entities"), `entity_read`
+  reads one, and a clifflet filters what is loaded. It is EXACT: it gives what is stored, in id order, and a word is found where it is written.
+
+Recall lines are context, not facts: a line may be old, cut short or from someone else's text. Before you rely on one, read the text it names (its id is on the line) and check it.
+
+Finding by MEANING needs the sentence vectors (below), made by the local embedding model. While a seat runs with no embedding model, recall finds by shared words, identifiers and paths,
+and `Embed:queue` says why (`state`, `reason`).
 
 ## Sentence vectors
 

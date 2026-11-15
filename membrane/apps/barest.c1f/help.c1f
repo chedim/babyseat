@@ -10,6 +10,7 @@ Help.text getter: read(this.file) if this.file != None else None
 Boot.started on-setter seed-help:
   ALWAYS:
     dir = this.help_dir
+    Help:start.file = dir + '/help/start.md'
     Help:c1f.file = dir + '/help/c1f.md'
     Help:packs.file = dir + '/help/packs.md'
     Help:upgrade.file = dir + '/help/upgrade.md'
