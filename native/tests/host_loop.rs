@@ -65,6 +65,9 @@ fn client(port: u64, path: &str) -> std::sync::mpsc::Receiver<String> {
     rx
 }
 
+/// the engine's entities, without `recall:dials`: the seat's own policy entity, loaded into every host at open (the recall part reads it)
+fn snap_keys(h: &Host) -> Vec<String> { h.snapshot().keys().filter(|k| k.as_str() != "recall:dials").cloned().collect() }
+
 #[test]
 fn the_stamping_rules_are_fields_lives() {
     assert_eq!(stamp_writer("answer"), "trigger:field:answer");
@@ -266,13 +269,13 @@ fn retiring_an_entity_retires_what_its_path_owns_and_replays() {
     h.rebuild();
     for e in ["A:1", "A:1:x", "A:1:x:y", "A:10", "A:2"] { h.born(e, "A", Map::new(), "person"); }
     h.write("A:1", "retire", json!(true), "person");
-    let keys: Vec<String> = h.snapshot().keys().cloned().collect();
+    let keys = snap_keys(&h);
     assert_eq!(keys, ["A:10", "A:2"], "the engine keeps the others");
     assert_eq!(h.rows().keys().cloned().collect::<Vec<_>>(), ["A:10", "A:2"], "and so does the store");
     let r = mk();
     r.rebuild();
     r.replay(&h.journal());
-    assert_eq!(r.snapshot().keys().cloned().collect::<Vec<_>>(), ["A:10", "A:2"]);
+    assert_eq!(snap_keys(&r), ["A:10", "A:2"]);
 }
 
 /// Death by null (#1143): an outside None written to an ENTITY (no property) destroys it and what its path owns, journalled as the retire it is, and a replay ends the same;
@@ -285,15 +288,15 @@ fn a_plain_none_written_to_an_entity_destroys_it_by_an_outside_write_a_setter_an
     for e in ["Box:1", "Box:1:x", "Box:10", "Box:2"] { h.born(e, "Box", Map::new(), "person"); }
     assert_eq!(h.get("Box:10", "label"), json!("box"));
     h.write("Box:1", "", J::Null, "person");                          // an outside None to the entity
-    assert_eq!(h.snapshot().keys().cloned().collect::<Vec<_>>(), ["Box:10", "Box:2"], "Box:1 and its child went, Box:10 stayed");
+    assert_eq!(snap_keys(&h), ["Box:10", "Box:2"], "Box:1 and its child went, Box:10 stayed");
     h.write("Box:2", "kid", json!("10"), "person");
     h.write("Box:2", "done", json!(true), "person");                  // the setter: `('Box:' + this.kid) = None`
-    assert_eq!(h.snapshot().keys().cloned().collect::<Vec<_>>(), ["Box:2"]);
+    assert_eq!(snap_keys(&h), ["Box:2"]);
     let j = h.journal();
     let mut j2 = vec![]; for e in ["Box:1", "Box:1:x", "Box:10", "Box:2"] { j2.push(Line::Born { ts: 0.0, writer: "person".into(), eid: e.into(), cls: "Box".into(), props: Map::new(), by: None }); }
     j2.extend(j.into_iter().filter(|l| matches!(l, Line::Write { .. })));
     let r2 = mk(); r2.replay(&j2);
-    assert_eq!(r2.snapshot().keys().cloned().collect::<Vec<_>>(), ["Box:2"], "the replay destroys again");
+    assert_eq!(snap_keys(&r2), ["Box:2"], "the replay destroys again");
     // a Pack entity written None unloads the pack
     h.write("Pack:keep", "text", json!(pack), "person");
     h.write("Pack:keep", "", J::Null, "person");
