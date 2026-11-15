@@ -1662,58 +1662,15 @@
       "McpServer"
     ]
   },
-  "memory": {
-    "getters": {
-      "Memory.cut_gone": "Int",
-      "Memory.cut_line": "List(Text?)",
-      "Memory.cut_report": "Text?",
-      "Memory.cut_said": "List(List(Any))",
-      "Memory.cut_what": "List(List(Any))",
-      "Memory.fg_bad": "Int",
-      "Memory.fg_dash": "Int",
-      "Memory.fg_dec": "Int",
-      "Memory.fg_ends": "List(Dict)",
-      "Memory.fg_nan": "Int",
-      "Memory.fg_nums": "List(Num?)",
-      "Memory.fg_o0": "List(Num?)",
-      "Memory.fg_o1": "List(Num?)",
-      "Memory.fg_o2": "List(Num?)",
-      "Memory.fg_o3": "List(Num?)",
-      "Memory.fg_o4": "List(Num?)",
-      "Memory.fg_o5": "List(Num?)",
-      "Memory.fg_spans": "List(List(Any))",
-      "Memory.fg_spec": "Text",
-      "Memory.fg_toks": "List(Text)",
-      "Memory.fg_wide": "Int",
-      "Memory.forget_plan": "Dict?",
-      "Memory.near_report": "Text?",
-      "Memory.sent": "Bool?"
-    },
-    "writes": {
-      "Memory.agent_writes": "Any",
-      "Memory.cut": "Dict",
-      "Memory.forget_id": "Num",
-      "Memory.forget_result": "Dict",
-      "Memory.learn_result": "Dict",
-      "Memory.name": "Text",
-      "Memory.near": "Dict",
-      "Memory.note": "Dict",
-      "Memory.summary": "Text"
-    },
-    "findings": [],
-    "resident": [
-      "Memory"
-    ]
-  },
   "mentions": {
     "getters": {
       "Identifier.edge_rows": "Text",
       "Identifier.texts": "Int",
-      "MemoryNote.assoc_clip": "Int",
-      "MemoryNote.assoc_line": "List(Text?)",
-      "MemoryNote.assoc_n": "Int",
-      "MemoryNote.associations": "Text?",
-      "MemoryNote.related_n": "Int",
+      "Memory.assoc_clip": "Int",
+      "Memory.assoc_line": "List(Text?)",
+      "Memory.assoc_n": "Int",
+      "Memory.associations": "Text?",
+      "Memory.related_n": "Int",
       "Path.edge_rows": "Text",
       "Path.texts": "Int",
       "SemAllCaps.form": "Text",
@@ -1743,8 +1700,8 @@
     },
     "writes": {
       "Identifier.mentioned_in": "List(Any)",
-      "MemoryNote.mention": "Any",
-      "MemoryNote.parents": "List(Text)",
+      "Memory.mention": "Any",
+      "Memory.parents": "List(Text)",
       "Path.mentioned_in": "List(Any)",
       "SemText.mention_n": "Int",
       "SemText.mention_spans": "List(Dict)",

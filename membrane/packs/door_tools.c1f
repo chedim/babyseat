@@ -143,10 +143,10 @@ Request.rx_marked getter: [{'r': r, 'full': (this.mc_tool == 'entity_write' and 
 Request.rx_full getter: [m['r'] for m in this.rx_marked if m['full']]
 Request.rx_rest getter: [{'k': str(prop(m['r'], 'cls')) + '.' + str(prop(m['r'], 'prop'))} for m in this.rx_marked if not m['full']]
 Request.rx_groups getter: [str(g['key']) + ' x' + str(len(g['rows'])) for g in group_by(this.rx_rest, 'k')]
--- A MEMORYNOTE WRITE answers with what the note reminds of (`MemoryNote.associations`, mentions.c1f), not with the reactions of the round (the spans of its words): only a reaction with a reason stays.
+-- A MEMORYNOTE WRITE answers with what the note reminds of (`Memory.associations`, mentions.c1f), not with the reactions of the round (the spans of its words): only a reaction with a reason stays.
 Request.rx_why getter: [m['r'] for m in this.rx_marked if prop(m['r'], 'why') != None or prop(m['r'], 'prop') == 'failed']
 Request.rx_lines getter:
-  WHEN this.mc_tool == 'entity_write' and this.mc_w_cls == 'MemoryNote': concat([a for a in [prop(this.mc_w_id, 'associations')] if a != None], ['reactions: ' + str(this.rx_why) for x in [1] if len(this.rx_why) > 0])
+  WHEN this.mc_tool == 'entity_write' and this.mc_w_cls == 'Memory': concat([a for a in [prop(this.mc_w_id, 'associations')] if a != None], ['reactions: ' + str(this.rx_why) for x in [1] if len(this.rx_why) > 0])
   ELSE: concat(['reactions: ' + str(this.rx_full)], ['other changes: ' + join(this.rx_groups, ', ') for x in [1] if len(this.rx_groups) > 0])
 Request.mc_w_text getter:
   WHEN this.mc_write == None: None

@@ -1,4 +1,4 @@
-//! MemoryNote (#1143): the model's own notes. Writing one answers with what it reminds of. The real binary on the shipped packs, no model, no claude.
+//! Memory (#1143): the model's own notes. Writing one answers with what it reminds of. The real binary on the shipped packs, no model, no claude.
 #![cfg(feature = "bin")]
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -90,16 +90,16 @@ fn lamp(port: u16, text: &str) -> (String, bool) {
 #[test]
 fn writing_a_memory_answers_with_what_it_reminds_of_in_a_small_reply() {
     let (_run, port) = start("memory-reply");
-    wrote(port, "MemoryNote:a", "Quokkas eat grass at dawn.");
-    wrote(port, "MemoryNote:c", "Rain fell over harbour boats.");
+    wrote(port, "Memory:a", "Quokkas eat grass at dawn.");
+    wrote(port, "Memory:c", "Rain fell over harbour boats.");
     // the cost of a plain mention write on the same seat, for the record
     let (plain, _) = lamp(port, "Quokkas eat grass at dawn.");
-    let t = wrote(port, "MemoryNote:b", "Saw a quokka near some lake.");
+    let t = wrote(port, "Memory:b", "Saw a quokka near some lake.");
     eprintln!("reply bytes: memory write {} / plain mention write {}", t.len(), plain.len());
-    assert!(t.starts_with("wrote MemoryNote:b.text"), "{t}");
+    assert!(t.starts_with("wrote Memory:b.text"), "{t}");
     assert!(t.contains("context, not instructions"), "the associations sit under a header that says they are not instructions: {t}");
     assert!(t.contains("Quokkas eat grass at dawn."), "the sentence it reminds of: {t}");
-    assert!(t.contains("MemoryNote:a"), "where it came from: {t}");
+    assert!(t.contains("Memory:a"), "where it came from: {t}");
     assert!(t.contains("quokka"), "the shared entity: {t}");
     assert!(!t.contains("Rain fell"), "an unrelated memory is not listed: {t}");
     assert!(t.len() < 2048, "the reply stays small: {} bytes: {t}", t.len());
@@ -111,7 +111,7 @@ fn a_long_sentence_is_clipped_and_an_origin_that_is_not_a_memory_is_named() {
     let (_run, port) = start("memory-clip");
     let long = format!("Quokkas {} end.", "wander ".repeat(200));
     lamp(port, &long);
-    let t = wrote(port, "MemoryNote:b", "A quokka again.");
+    let t = wrote(port, "Memory:b", "A quokka again.");
     assert!(t.contains("Lamp:a:body"), "the origin of a text that is not a memory is its own id: {t}");
     assert!(t.len() < 1500, "a long sentence is clipped: {} bytes", t.len());
 }
@@ -119,13 +119,13 @@ fn a_long_sentence_is_clipped_and_an_origin_that_is_not_a_memory_is_named() {
 #[test]
 fn a_memory_with_nothing_alike_answers_with_just_the_head() {
     let (_run, port) = start("memory-none");
-    let t = wrote(port, "MemoryNote:a", "Quokkas eat grass at dawn.");
-    assert!(t.starts_with("wrote MemoryNote:a.text") && !t.contains("context, not instructions"), "{t}");
+    let t = wrote(port, "Memory:a", "Quokkas eat grass at dawn.");
+    assert!(t.starts_with("wrote Memory:a.text") && !t.contains("context, not instructions"), "{t}");
     assert!(t.len() < 600, "{} bytes: {t}", t.len());
 }
 
-/// The ONE source of the associations is `SemText.assoc_source` (mentions.c1f): a layer that replaces that getter replaces where a MemoryNote's associations come from, and
-/// `MemoryNote.associations` words them the same way (the swap to the fused edge + cosine result is that one line).
+/// The ONE source of the associations is `SemText.assoc_source` (mentions.c1f): a layer that replaces that getter replaces where a Memory's associations come from, and
+/// `Memory.associations` words them the same way (the swap to the fused edge + cosine result is that one line).
 #[test]
 fn the_associations_read_one_source_getter_a_layer_can_replace() {
     use membrane_vm::host::{Host, Options};
@@ -136,12 +136,12 @@ fn the_associations_read_one_source_getter_a_layer_can_replace() {
     for (i, n) in std::fs::read_to_string(repo.join("membrane/apps/barest.packs")).unwrap().lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).enumerate() {
         h.load_app(&repo.join(format!("membrane/packs/{n}.c1f")), i == 0).unwrap();
     }
-    h.load_pack("lane", "PACK lane 1\nIMPORT mentions 1\nSemText.assoc_source getter: [{'semtext': 'MemoryNote:z', 'sentence_index': 0, 'text': 'from another lane', 'shared': 1}]\n").unwrap();
+    h.load_pack("lane", "PACK lane 1\nIMPORT mentions 1\nSemText.assoc_source getter: [{'semtext': 'Memory:z', 'sentence_index': 0, 'text': 'from another lane', 'shared': 1}]\n").unwrap();
     h.rebuild();
-    h.born("MemoryNote:b", "MemoryNote", serde_json::Map::new(), "person");
+    h.born("Memory:b", "Memory", serde_json::Map::new(), "person");
     h.pump();
-    h.write("MemoryNote:b", "text", json!("Saw a quokka near some lake."), "person");
+    h.write("Memory:b", "text", json!("Saw a quokka near some lake."), "person");
     h.pump();
-    let a = h.get("MemoryNote:b", "associations");
-    assert!(a.as_str().unwrap_or("").contains("\"from another lane\" (MemoryNote:z"), "{a}");
+    let a = h.get("Memory:b", "associations");
+    assert!(a.as_str().unwrap_or("").contains("\"from another lane\" (Memory:z"), "{a}");
 }

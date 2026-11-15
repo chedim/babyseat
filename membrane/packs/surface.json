@@ -985,35 +985,13 @@
       "McpServer"
     ]
   },
-  "memory": {
-    "imports": [
-      "boot"
-    ],
-    "classes": [
-      "Boot",
-      "Memory"
-    ],
-    "members": 27,
-    "writes": [
-      "Memory:seat.agent_writes",
-      "Memory:seat.name",
-      "Memory:seat.summary"
-    ],
-    "claims": [],
-    "boot_facts": [
-      "agent_writes"
-    ],
-    "resident": [
-      "Memory"
-    ]
-  },
   "mentions": {
     "imports": [
       "semtext"
     ],
     "classes": [
       "Identifier",
-      "MemoryNote",
+      "Memory",
       "Path",
       "SemAllCaps",
       "SemCapital",
