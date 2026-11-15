@@ -1771,6 +1771,7 @@
       "SemText.r_edge_keyed": "List(Dict)",
       "SemText.r_edge_rows": "List(Dict)",
       "SemText.r_fused": "List(Dict)?",
+      "SemText.r_kept": "List(Dict)?",
       "SemText.r_mine": "Text?",
       "SemText.r_msg": "Text?",
       "SemText.r_older": "Any",
@@ -1809,7 +1810,9 @@
       "Span.parents": "List(Text?)?",
       "Word.mentioned_in": "List(Any)"
     },
-    "findings": []
+    "findings": [
+      "SemText.r_kept: max: argument 1 is Num?, expected a list"
+    ]
   },
   "messages": {
     "getters": {},

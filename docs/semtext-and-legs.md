@@ -167,6 +167,8 @@ finds the rest in the graph. It computes only while `recall_on` is true (the ban
 - **The ask itself is never a hit**; nothing else is left out (recent chat texts are hits: the model gets no chat history).
 - **Near duplicates merge**: a hit whose shorter sentence has at least `dup_share` (0.8, a getter) of its distinct words (`plain`, lowercase) in the other's is dropped for the better-placed one. Each hit
   is checked against every hit placed before it, merged or not (c1f has no fold to check against the kept ones only), so in a chain A ~ B ~ C with A and C not alike, C goes too.
+  Cost: the pairs are counted with builtins and vector operations (`r_kept`); with both pools full (24 + 50 hits of 13 words) the merge takes between 25,000 and 35,000 steps of the
+  100,000 budget (`full_pools_of_long_sentences_stay_inside_the_step_budget`); it grows with the square of the hits, so pools about twice as large would exceed it.
 - **No score cut-off**: every hit, best first, `{semtext, start, text, score, sim, overlap}` (`score` the fused one); the readers cut the count.
 - The dials are the entity `recall:dials` (`banner_n`, `pool`, `entity_pool_max`, `rrf_k`, `rerank`, `rerank_top`, `fact_chars`, `header`, `weights`, `assoc_n`, `assoc_clip`; loaded from
   `native/packs/recall-policy.json`, guarded by the host).

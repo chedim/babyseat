@@ -270,18 +270,27 @@ SemText.r_ranked getter:
     fj = '|' + join([x['key'] for x in this.r_fused], '|') + '|'
     top = [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'ov': x['ov'], 'z': prop(rw, 'bias') + prop(rw, 'sim') * x['sim'] + prop(rw, 'inv_rank') / (len(before(fj, '|' + x['key'] + '|')) - len(replace(before(fj, '|' + x['key'] + '|'), '|', '')) + 1) + prop(rw, 'overlap') * x['ov']} for x in head(this.r_fused, rn)]
     concat(sort_by(top, 'z', True), tail(this.r_fused, len(this.r_fused) - rn) if len(this.r_fused) > rn else [])
--- each hit with its place (`o`, from 0) and its distinct words, for the merge of near duplicates
+-- each hit with its place (`o`, from 0), its distinct words `ws` and their number `n`, for the merge of near duplicates (a sentence with no word gets its own key as its one word: it is
+-- never anybody's duplicate). The shared words of two hits are counted with builtins only (|A| + |B| - |A and B together, distinct|): a pair costs a few steps, so full pools fit one evaluation.
 SemText.r_words getter:
   WHEN this.r_ranked == None: None
   ELSE:
     rj = '|' + join([x['key'] for x in this.r_ranked], '|') + '|'
-    [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'ov': x['ov'], 'o': len(before(rj, '|' + x['key'] + '|')) - len(replace(before(rj, '|' + x['key'] + '|'), '|', '')), 'ws': distinct(words(replace(plain(x['text']) + ' ', '. ', ' ')))} for x in this.r_ranked]
-SemText.recall getter:
+    rows = [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'ov': x['ov'], 'o': len(before(rj, '|' + x['key'] + '|')) - len(replace(before(rj, '|' + x['key'] + '|'), '|', '')), 'ws': distinct(words(replace(plain(x['text']) + ' ', '. ', ' ')))} for x in this.r_ranked]
+    [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'ov': x['ov'], 'o': x['o'], 'ws': x['ws'] or [x['key']], 'n': len(x['ws']) or 1} for x in rows]
+-- the hits that are no near duplicate of a hit placed before them. For a hit x and the hits E before it: shared = n(y) + n(x) - |the words of both, distinct| for each y of E (a list, one
+-- vector operation), and x is a duplicate when some y has shared >= dup_share x min(n(x), n(y)), that is when the largest of (shared - dup_share x n(x)) or of (shared - dup_share x n(y)) is >= 0.
+SemText.r_kept getter:
   WHEN this.r_words == None: None
   ELSE:
     s = this.dup_share
-    kept = [x for x in this.r_words if len([y for y in head(this.r_words, x['o']) if min(len(y['ws']), len(x['ws'])) > 0 and len(y['ws']) + len(x['ws']) - len(distinct(concat(y['ws'], x['ws']))) >= s * min(len(y['ws']), len(x['ws']))]) == 0]
-    [{'semtext': x['of'], 'start': num(after(x['key'], '#')), 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'overlap': x['ov']} for x in kept]
+    ws = this.r_words
+    both = [{'o': x['o'], 'n': x['n'], 'u': [len(distinct(concat(x['ws'], y['ws']))) for y in head(ws, x['o'])], 'm': [y['n'] for y in head(ws, x['o'])]} for x in ws if x['o'] > 0]
+    dup = [d['o'] for d in both if max(max(d['m'] + d['n'] - d['u'] - s * d['n']), max(d['m'] * (1 - s) + d['n'] - d['u'])) >= 0]
+    [x for x in ws if not (x['o'] in dup)]
+SemText.recall getter:
+  WHEN this.r_kept == None: None
+  ELSE: [{'semtext': x['of'], 'start': num(after(x['key'], '#')), 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'overlap': x['ov']} for x in this.r_kept]
 
 -- ---- MEMORY: the model's own notes, and what a note reminds of (#1143) -----------------------------------------------------------------
 -- `Memory:<id>.text = "..."` (entity_write, or a pack's `Memory:<id> = Memory(text: ...)`) makes a SemText that is mentioned at once and whose write answers with

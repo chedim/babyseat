@@ -192,3 +192,27 @@ fn the_recall_pack_names_no_default_of_its_own() {
     let t = std::fs::read_to_string(repo().join("membrane/apps/barest.c1f/recall.c1f")).unwrap();
     assert!(!t.contains("mxbai"), "the embedding model's default lives in launcher.c1f only");
 }
+
+/// Both pools full (the edge lane's `entity_pool_max` 24 and the cosine lane's `pool` 50, every hit a sentence of 13 words): the recall, its fusion, its rerank and the merge of
+/// near duplicates (every hit against every hit placed before it) stay inside the step budget of one evaluation (no `budget exceeded` null).
+#[test]
+fn full_pools_of_long_sentences_stay_inside_the_step_budget() {
+    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
+    for i in 0..80 {
+        let t = format!("Quokka {} ends here.", (0..10).map(|j| format!("w{i}x{j}")).collect::<Vec<_>>().join(" "));
+        leaf(&h, &format!("n{i}"), &t);
+        let k = format!("Leaf:x:n{i}:body");
+        let ve = format!("Vector:of:{k}:s:0");
+        h.born(&ve, "Vector", props(json!({"of": k, "start": 0})), "person");
+        h.write(&ve, "v", json!([1.0, (i as f64) / 100.0]), "person"); h.pump();
+    }
+    h.born("Memory:b", "Memory", Map::new(), "person"); h.pump();
+    h.write("Memory:b", "text", json!("A quokka."), "person"); h.pump();
+    if !h.snapshot().contains_key("Fetch:recall:note") { h.born("Fetch:recall:note", "Fetch", Map::new(), "person"); }
+    h.write("Fetch:recall:note", "request_result", json!({"id": {"ask": "Memory:b"}, "status": "ok", "rc": 0, "http_status": 200, "body": json!({"embeddings": [[1.0, 0.5]]}).to_string()}), "person");
+    h.pump();
+    let r = h.get("Memory:b", "recall");
+    assert_eq!(h.get("Memory:b", "failed"), J::Null, "no evaluation failed");
+    let n = r.as_array().unwrap_or_else(|| panic!("{r}")).len();
+    assert!(n >= 50, "both lanes are there: {n}");
+}
