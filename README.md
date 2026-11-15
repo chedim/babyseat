@@ -27,10 +27,11 @@ Version **0.7.60**. This is a rebuild: the 0.7 Python seat is retired (see [Upgr
 - **Your history comes along.** A seat started over a 0.7 install imports the old chats by itself, newest first.
 - **Home Assistant.** A HACS integration makes the seat an Assist conversation agent and lets the model use the house
   ([docs/home-assistant.md](docs/home-assistant.md)).
+- **Your choice of model.** The chat answers through the `claude` CLI or any OpenAI-compatible endpoint, a local Ollama included (the boot fact `cloud_models`, or `seat_backend` for a local backend; [docs/cliffvm.md](docs/cliffvm.md)).
 - **Local and strict.** The door listens on `127.0.0.1`; every route needs a signed token; the page gets one only from this machine ([docs/auth.md](docs/auth.md)).
 
-Not in this release: the 3D field view (built, switched off: `membrane/apps/field.c1f`), the Home Assistant sidebar panel and relay, Ollama and
-other local models, Blurp and the quota/self/toybox features of 0.7. They are in the tag `python-seat-last` and the 0.7.53 package.
+Not in this release: the 3D field view (built, switched off: `membrane/apps/field.c1f`), the Home Assistant sidebar panel and relay, Blurp and the
+quota/self/toybox features of 0.7. They are in the tag `python-seat-last` and the 0.7.53 package.
 
 ## Install
 
@@ -81,6 +82,10 @@ The key is handed to the CLI child and is never written to a property, a row, th
 `--fact host_names=seat.local` lets the page hand out its cookie for a name you reach it by; from another machine the page itself needs a token (the Home Assistant component carries one).
 
 ## Connect Home Assistant
+
+> **0.7.60 is a pre-release for Home Assistant.** HACS offers the latest release, so HACS users stay on the 0.7.53 component (and its seat inside Home Assistant) for now; do not upgrade the `babyseat` package inside
+> Home Assistant's environment. The connect-only component below, and an add-on for Home Assistant OS and Supervised, come in the next release. Home Assistant Container and Core installs that run their own seat
+> can try it now: copy `custom_components/membrane` by hand, or turn on *Show beta versions* for the repository in HACS.
 
 1. HACS, three dots, *Custom repositories*, `https://github.com/chedim/membrane`, category *Integration*; install **babyseat (membrane)** and restart Home Assistant.
 2. *Settings, Devices & services, Add integration, babyseat (membrane)*: the seat's address (`http://<seat-machine>:4096`; the seat needs `--bind` for that) and the token in `<data>/admin.token`.

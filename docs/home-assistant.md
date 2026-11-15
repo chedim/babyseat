@@ -3,6 +3,9 @@
 Status: describes the component in `custom_components/membrane/` as it ships at 0.7.60 (version `0.7.60` in `manifest.json`; the domain stays `membrane`). Tests: `pytest tests/ha` (a fake Home Assistant and a real private seat with a fake `claude`),
 `native/tests/ha_1143.rs` and `native/tests/session_1143.rs` (the routes the component calls).
 
+> **Release note (operator 2026-11-15).** 0.7.60 is published as a pre-release: HACS offers the latest release, so HACS users stay on the 0.7.53 component, which runs the old seat inside Home Assistant. This page describes the
+> connect-only component of this tree; install it by hand or with *Show beta versions* on. An add-on for Home Assistant OS and Supervised follows in the next release.
+
 The **babyseat (membrane)** integration (HACS) is a **thin client of a seat you already run**. It gives Home Assistant three things: the seat as an **Assist conversation agent**, a few **entities and services** for the seat, and the seat's
 **use of the house** (the model reads states and calls services through Home Assistant, with no Home Assistant secret on the seat). It connects to the seat's address with a token. It does **not** start a seat inside Home Assistant and it installs
 no package (`requirements: []`).
