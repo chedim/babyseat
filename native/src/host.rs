@@ -290,6 +290,7 @@ impl Host {
         let mut fields = Fields::goalgraph();
         core.storage = fields.storage_handle();   // the core reads the classes' modes too (`.pinned`)
         fields.inbound_by_host = true;
+        fields.calls_refused = true;
         // TRUST BY POSITION: nothing is privileged at open (not even a pack named `boot`); `load_app(.., trusted)` marks the first app's packs
         Ok(Host { eng: Mutex::new((core, fields, 0)), db, journal: Mutex::new(vec![]), journal_next: std::sync::atomic::AtomicU64::new(journal_next), clock: o.clock, waiter, refusals: Mutex::new(Default::default()), packs_dirty: AtomicBool::new(false), wal: o.store.as_ref().map(|p| std::path::PathBuf::from(format!("{p}-wal"))), depth: Default::default(), commits: Default::default(), pending: Mutex::new(None), wrote: AtomicBool::new(false), round_ts: Default::default(), warm_rows: std::sync::atomic::AtomicUsize::new(DEFAULT_WARM_ROWS), warm: Default::default(), memory: Default::default(), rss_reading: Default::default() })
     }
@@ -356,7 +357,7 @@ impl Host {
     pub fn write(&self, eid: &str, prop: &str, new: J, writer: &str) {
         // an outside None written to an ENTITY (no property) is its death, the mirror of a birth: journalled as the `retire = true` it is, so a replay destroys it again
         let (prop, new) = if prop.is_empty() && new.is_null() { ("retire", json!(true)) } else { (prop, new) };
-        if prop == crate::vm::UPDATED || prop == crate::vm::PINNED || prop == crate::vm::BORN_BY { return; }   // the VM's own, read-only: refused, not journalled
+        if crate::vm::vm_provided(prop).is_some() { return; }   // the VM's own, read-only: refused, not journalled
         let ts = self.now();
         self.journal_push(Line::Write { ts, writer: writer.into(), eid: eid.into(), prop: prop.into(), new: new.clone() });
         self.inject_write(ts, eid, prop, new, writer, writer);
@@ -1133,7 +1134,9 @@ pub fn boot_environment(h: &Host, facts: &Map<String, J>, env: &[(String, String
     let (props, refused) = environment_props(facts, env);
     if !h.snapshot().contains_key(ENV_ENTITY) { h.born(ENV_ENTITY, "Environment", Map::new(), ENV_WRITER); }
     let old: Vec<String> = h.snapshot().get(ENV_ENTITY).and_then(|e| e["props"].as_object().map(|p| p.keys().cloned().collect())).unwrap_or_default();
-    for k in old { if k != "parents" && !props.contains_key(&k) { h.write(ENV_ENTITY, &k, J::Null, ENV_WRITER); } }
-    for (k, v) in &props { h.write(ENV_ENTITY, k, v.clone(), ENV_WRITER); }
+    // a property a getter of the class owns is the getter's, not a variable's: never cleared, never stored over
+    let owned = |k: &str| h.eng().1.has_getter("Environment", k);
+    for k in old { if k != "parents" && !props.contains_key(&k) && !owned(&k) { h.write(ENV_ENTITY, &k, J::Null, ENV_WRITER); } }
+    for (k, v) in &props { if !owned(k) { h.write(ENV_ENTITY, k, v.clone(), ENV_WRITER); } }
     refused
 }

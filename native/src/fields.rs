@@ -313,6 +313,11 @@ pub struct Fields {
     pub retired: Vec<String>,
     /// the host takes the door's requests itself (to journal them, then `arrive`): a round leaves them in the store
     pub inbound_by_host: bool,
+    /// the native seat has no model-call effect (the host drops `calls`): a write of `membrane::llm.call` is refused with a receipt there; the browser engine hands `calls` to its page
+    pub calls_refused: bool,
+    /// eid -> (setter, reason, the receipt's own number): the last `refused` receipt a setter left on its entity, so the setter's next good write can clear it (RAM only)
+    refused_by: std::collections::HashMap<String, (String, String)>,
+    receipt_n: u64,
     /// getters declared in cliffhanger, their levels, and their inputs: (eid, field) read -> instances (eid, getter)
     pub getters: Vec<Getter>,
     glevel: Vec<usize>,
@@ -398,7 +403,7 @@ impl Fields {
     /// The class table the engine's core reads too (`Core::storage`): one shared map, written by `compose`.
     pub fn storage_handle(&self) -> crate::vm::StorageMap { self.storage.clone() }
     pub fn goalgraph() -> Self {
-        let mut f = Fields { link: Default::default(), setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false,
+        let mut f = Fields { link: Default::default(), setters: on_setters(), calls: vec![], writes: 0, recall: false, adapters: false, method_calls: vec![], learn: None, accepted: Default::default(), visited: Default::default(), refusals: vec![], out: vec![], retired: vec![], inbound_by_host: false, calls_refused: false, refused_by: Default::default(), receipt_n: 0,
             getters: vec![], glevel: vec![], deps: Default::default(), reads: Default::default(), dirty: Default::default(),
             known: Default::default(), primed: false, fresh: vec![], late: vec![], flips: Default::default(), class_deferred: Default::default(), recon: Default::default(), in_run: false, packs: Default::default(),
             owner: Default::default(), imports: Default::default(), pack_errors: Default::default(), load_order: vec![], granted: Default::default(), layer_of: Default::default(), claimed: Default::default(), skipped: Default::default(), storage: Default::default(), trigger_virtual: false };
@@ -414,6 +419,9 @@ impl Fields {
     pub fn set_pack(&mut self, name: &str, src: &str) -> Result<(), String> {
         let p = crate::syntax::parse_full(src).map_err(|e| format!("pack {}: {}", name, e))?;
         if let Some(n) = &p.name { if n != name { return Err(format!("pack {}: its PACK line says {}", name, n)); } }
+        if let Some(g) = p.getters.iter().find(|g| crate::vm::vm_provided(&g.prop).is_some()) {
+            return Err(format!("pack {}: {}.{} is a getter of a name the VM provides ({}): a read of `{}` always answers the VM's value, so the getter would never be read; pick another name", name, g.cls, g.prop, crate::vm::vm_provided(&g.prop).unwrap_or(""), g.prop));
+        }
         if let Some(e) = stale_setter_read(&p.setters, &p.getters) { return Err(format!("pack {}: {}", name, e)); }
         // the same check across the layers: this pack's setters against the getters of every other pack, and the other packs' setters against
         // this pack's getters (an arm it adds to a lower getter can make that getter depend on a lower setter's trigger)
@@ -818,7 +826,7 @@ impl Fields {
         for e in es { self.reconcile_failed(core, &e, seq, now); }
     }
 
-    fn has_getter(&self, cls: &str, prop: &str) -> bool { self.getters.iter().any(|g| g.cls == cls && g.prop == prop) }
+    pub fn has_getter(&self, cls: &str, prop: &str) -> bool { self.getters.iter().any(|g| g.cls == cls && g.prop == prop) }
 
     /// The getters that apply to an entity for ONE property, nearest class first (the one rule: own class, `parents` in list order, the root
     /// `Entity`; ties by declaration). The first is the property's node; the rest are only the arms it falls through to.
@@ -1212,6 +1220,8 @@ impl Fields {
     /// entity. Not queued: it triggers nothing.
     fn receipt(&mut self, core: &mut Core, eid: &str, writer: &str, reason: String, refused: J, seq: &mut i64, now: f64) {
         self.refusals.push(json!({"eid": eid, "prop": "", "refused": refused, "writer": writer, "reason": reason}));
+        self.receipt_n += 1;
+        self.refused_by.insert(eid.to_string(), (writer.to_string(), reason.clone()));
         *seq += 1;
         let r = Write { eid: eid.into(), prop: "refused".into(), new: json!(reason), old: J::Null, writer: "field:setter-error".into(), chain: json!({}), seq: *seq };
         self.out.push(json!({"eid": r.eid, "prop": r.prop, "new": r.new, "writer": r.writer}));
@@ -1527,9 +1537,18 @@ impl Fields {
                 let Some(writes) = chosen else { continue };
                 let pack = self.setters[i].pack.clone();
                 // in written order; a FOR's list is read when the FOR is reached (it sees what the writes above made)
+                let (writes0, receipts0) = (self.writes, self.receipt_n);
                 if let Err(e) = self.run_writes(core, work, &w.eid, &w.prop, &name, &pack, &writes, &[], now, seq) {
                     let reason = format!("error in setter {}: {}; the setter stopped there", name, e);
                     self.receipt(core, &w.eid, &name, reason, J::Null, seq, now);
+                } else if self.writes > writes0 && self.receipt_n == receipts0 {
+                    // the setter's next GOOD run (it wrote, and was refused nowhere) clears the receipt it left earlier on this entity, if that is still what `refused` says
+                    if let Some((by, reason)) = self.refused_by.get(&w.eid).cloned() {
+                        if by == name {
+                            self.refused_by.remove(&w.eid);
+                            if core.docs.get(&w.eid).and_then(|e| e.props.get("refused")) == Some(&json!(reason)) { self.emit_unchecked(core, work, &w.eid, "refused", J::Null, "setter-ok", seq, now); }
+                        }
+                    }
                 }
             }
             self.trigger_virtual = false;
@@ -1611,6 +1630,10 @@ impl Fields {
                 self.receipt(core, eid, name, format!("refused: `{}` is provided by the VM (the entity whose setter was running when the entity was born) and is read-only: no setter writes it", crate::vm::BORN_BY), J::Null, seq, now);
                 continue;
             }
+            if prop == "cls" || prop == "eid" {
+                self.receipt(core, eid, name, format!("refused: `{prop}` is provided by the VM ({}) and is read-only: no setter writes it (a class is set at birth with a constructor)", crate::vm::vm_provided(prop).unwrap_or("")), J::Null, seq, now);
+                continue;
+            }
             if prop == crate::vm::PINNED {
                 self.receipt(core, eid, name, format!("refused: `{prop}` is provided by the VM (the reason an entity cannot be unloaded) and is read-only: no setter writes it"), J::Null, seq, now);
                 continue;
@@ -1625,9 +1648,23 @@ impl Fields {
                 Err(_) => continue,
             };
             if let Some(k) = claim { self.claimed.insert(k, (pack.to_string(), name.to_string())); }   // a write that was made: it is the first
-            if target == LLM_CALL { self.calls.push(v); continue; }
+            if target == LLM_CALL {
+                if self.calls_refused { self.receipt(core, eid, name, format!("refused: `{LLM_CALL}` does nothing on this seat (it has no model-call effect): the call was not made; ask the model through a chat message instead"), J::Null, seq, now); continue; }
+                self.calls.push(v);
+                continue;
+            }
             let tgt = if is_me(target) { Some(eid.to_string()) } else { core.eval_ref(target, &vars, &extra) };
             let Some(tgt) = tgt else { continue };
+            let tgt_cls = crate::vm::class_of_eid(&tgt);
+            if let Some(why) = match (tgt_cls.as_str(), prop.as_str()) {
+                ("Pack", "granted_by" | "loaded" | "error" | "state") => Some("the host writes it from what it did with the pack's text; read it, and write `text` to change the pack"),
+                ("Boot", "started") => Some("the seat announces its own start once, after the field engine is up; a setter on it reacts, none writes it"),
+                ("Request", "authed" | "sub" | "claims") => Some("the door writes who a request is from its verified token; no setter claims an identity"),
+                _ => None,
+            } {
+                self.receipt(core, eid, name, format!("refused: {tgt_cls}.{prop} is not written by a setter: {why}"), J::Null, seq, now);
+                continue;
+            }
             let grant = tgt.strip_prefix("Pack:").filter(|n| !n.is_empty() && prop == "privileged").map(String::from);
             if grant.is_some() {
                 if let Err(why) = self.grant_check(pack) { self.receipt(core, eid, name, why, J::Null, seq, now); continue; }
@@ -1635,7 +1672,9 @@ impl Fields {
             self.ensure(core, &tgt, now);   // stored but not loaded: it loads, it is not created anew
             if !core.docs.contains_key(&tgt) {
                 // creation: `<Class>:<key>` of a class the pack owns or imports (a privileged pack: any class)
-                let Some((cls, _)) = tgt.split_once(':') else { continue };
+                if !tgt.contains(':') { continue; }
+                let cls_owned = crate::vm::class_of_eid(&tgt);   // after a namespace: `membrane::Thing:k` is a Thing
+                let cls = cls_owned.as_str();
                 if !self.is_privileged(pack) {
                     // loud, never silent: the receipt names the entity, the class and the pack (the same `refused` receipt as rule B)
                     if self.owner.get(cls).is_none() {

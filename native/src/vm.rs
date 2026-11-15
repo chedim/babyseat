@@ -179,6 +179,18 @@ pub const UPDATED: &str = "updated";
 /// The VM-provided, read-only property of every entity: the eid of the CAUSE of its birth (the entity whose setter was running; for a door write, the Request of the call). A constant:
 /// set once at the birth, stored with the row (`StoredRow::born_by`), never written, so a getter that reads it is never invalidated by it. An entity with no cause reads as the plain "absent" null.
 pub const BORN_BY: &str = "born_by";
+/// The names the VM answers itself for every entity: a stored property or a getter of one of these names would be shadowed by the VM's value on every read, so no write stores one
+/// and no pack declares a getter of one. -> why, for a refusal.
+pub fn vm_provided(prop: &str) -> Option<&'static str> {
+    match prop {
+        "cls" => Some("the entity's first class"),
+        "eid" => Some("the entity's id"),
+        UPDATED => Some("the time of the entity's last write"),
+        BORN_BY => Some("the entity whose setter was running when the entity was born"),
+        PINNED => Some("the reason an entity cannot be unloaded"),
+        _ => None,
+    }
+}
 /// The VM rule that charges births: when the entity whose setter creates an entity has a property `births_to` holding an entity id, the created entity's `born_by` is that id
 /// (a door call charges what it creates to the chat message it belongs to); with none, the cause is the setter's own entity. An ordinary property, read when the birth happens.
 pub const BIRTHS_TO: &str = "births_to";
