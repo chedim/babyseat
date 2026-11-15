@@ -1,6 +1,6 @@
 [
  {
-  "name": "the argv is the print-mode run of the CLI: built-in tools off, only the door's MCP server, only its tools, one run with a ceiling, the message last",
+  "name": "the argv is the print-mode run of the CLI: built-in tools off, only the door's MCP server, only its tools, one run with a ceiling, the message read from stdin (no positional prompt)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/fs.c1f",
@@ -139,7 +139,7 @@
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.14",
-    "equals": "--output-format"
+    "equals": "--input-format"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
@@ -149,87 +149,92 @@
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.16",
-    "equals": "--verbose"
+    "equals": "--output-format"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.17",
-    "equals": "--include-partial-messages"
+    "equals": "stream-json"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.18",
-    "equals": "--tools"
+    "equals": "--verbose"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.19",
-    "equals": ""
+    "equals": "--include-partial-messages"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.20",
-    "equals": "--strict-mcp-config"
+    "equals": "--tools"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.21",
-    "equals": "--mcp-config"
-   },
-   {
-    "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.22",
-    "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\",\"headers\":{\"X-Turn\":\"membrane::Chat:main:message:1-1\"}}}}"
-   },
-   {
-    "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.23",
-    "equals": "--allowedTools"
-   },
-   {
-    "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.24",
-    "equals": "mcp__membrane__*"
-   },
-   {
-    "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.25",
-    "equals": "--setting-sources"
-   },
-   {
-    "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.26",
     "equals": ""
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
+    "prop": "argv.22",
+    "equals": "--strict-mcp-config"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "argv.23",
+    "equals": "--mcp-config"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "argv.24",
+    "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\",\"headers\":{\"X-Turn\":\"membrane::Chat:main:message:1-1\"}}}}"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "argv.25",
+    "equals": "--allowedTools"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "argv.26",
+    "equals": "mcp__membrane__*"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.27",
-    "equals": "--no-session-persistence"
+    "equals": "--setting-sources"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.28",
-    "equals": "--max-turns"
+    "equals": ""
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.29",
-    "equals": "7"
+    "equals": "--no-session-persistence"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.30",
-    "equals": "--system-prompt"
+    "equals": "--max-turns"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "argv.31",
+    "equals": "7"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.32",
-    "equals": "--"
+    "equals": "--system-prompt"
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "argv.33",
-    "equals": "hello"
+    "equals": "Your name is Bob. This graph is you: requests come and go, the graph stays. What is on it is what you remember, and nobody else keeps it up. Maintain it. Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Program the graph as your memory. Process updates on the graph and react to them. Your whole chat history is on the graph as ChatMessage entities: the user's words are in text, your answers in response. Before you say you do not know or do not remember, search the ChatMessage entities. Do not guess: if you find nothing, say so, unless the user asks you to guess. Bob is only the default name: work with the user to choose yours, and save it with entity_write {spec: \"Setting:chat.name\", prop: \"set\", value: \"<the name>\"}."
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
@@ -239,7 +244,7 @@
   ]
  },
  {
-  "name": "the system prompt is the barest doctrine and the chat's banner, and the prompt is the message alone (no history)",
+  "name": "the system prompt is the barest doctrine ONLY; the banner is the first text block of the one user message on stdin and the message alone is the last (no history)",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/fs.c1f",
@@ -306,8 +311,23 @@
   "expect": [
    {
     "eid": "membrane::Chat:main:message:1-1",
-    "prop": "sys",
+    "prop": "stdin",
+    "contains": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<banner>\\nBANNER (placeholder)"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "stdin",
+    "contains": "\\n</banner>\"},{\"type\":\"text\",\"text\":\"hello\"}]}}"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "banner_block",
     "contains": "BANNER (placeholder)"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "stdin",
+    "contains": "\"role\":\"user\""
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
@@ -321,7 +341,7 @@
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.29",
+    "prop": "argv.31",
     "equals": "2048"
    }
   ]
@@ -1481,7 +1501,7 @@
   "expect": [
    {
     "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.22",
+    "prop": "argv.24",
     "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://192.168.1.50:4321/mcp\",\"headers\":{\"X-Turn\":\"membrane::Chat:main:message:1-1\"}}}}"
    }
   ]
@@ -1555,7 +1575,7 @@
   "expect": [
    {
     "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.22",
+    "prop": "argv.24",
     "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\",\"headers\":{\"X-Turn\":\"membrane::Chat:main:message:1-1\"}}}}"
    }
   ]
@@ -1629,7 +1649,7 @@
   "expect": [
    {
     "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.22",
+    "prop": "argv.24",
     "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:4321/mcp\",\"headers\":{\"X-Turn\":\"membrane::Chat:main:message:1-1\"}}}}"
    }
   ]
@@ -1703,7 +1723,7 @@
   "expect": [
    {
     "eid": "membrane::Chat:main:message:1-1",
-    "prop": "argv.22",
+    "prop": "argv.24",
     "equals": "{\"mcpServers\":{\"membrane\":{\"type\":\"http\",\"url\":\"http://[fe80::1]:4321/mcp\",\"headers\":{\"X-Turn\":\"membrane::Chat:main:message:1-1\"}}}}"
    }
   ]
