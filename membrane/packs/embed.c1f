@@ -10,7 +10,7 @@ RESIDENT Embed
 -- GENTLE background queue. (The class `Vector` and its property `v` belong to the vector pack (packs/vector.c1f: a MAPPED class, f16, the first vector fixes the dimension); this pack only writes them.)
 -- THE ASK: `<semtext>.embed = <any value but null>` (the chat writes it on a message body and on an answer's body, next to `mention`; a tool's result is not asked) makes
 -- `Embed:ask:<key>` ({of, state: pending, at}); the ask is retired when the text has all its vectors. `<key>` is the text's eid with `::` written `/` (`SemText.skey`).
--- THE BACKLOG: the bodies of the chat that no ask ever named (the imported history, the messages from before this pack) are found in the store, newest first, 64 texts a page
+-- THE BACKLOG: the bodies of the chat that no ask ever named (the imported history, the messages from before this pack) are found in the store, OLDEST first (by the message id), 64 texts a page
 -- (`EmbedQueue.page`: a `sql`, re-asked as the cursor `after` moves), and queued the same way once the model server answers. A text that has all its vectors is marked `embedded = true`
 -- (the page skips it), and the sentences done so far are counted in `emb_n` on the text (a text is embedded from its first sentence on; a restart goes on where it stopped).
 -- THE QUEUE is the entity `Embed:queue` (EmbedQueue): `state` (idle | working | paused | stuck), `reason` (why it is stuck, as text), `line` (the sentence the Settings row `import.embeddings` shows:
@@ -62,9 +62,9 @@ EmbedQueue.busy getter: len([t for t in instances('Embed') if t.kind == 'turn' a
 EmbedQueue.run getter: ([b.started for b in instances('Boot') if b.started != None] or [0])[0]
 EmbedQueue.sig getter: str(this.run) + '/' + str(prop('Doorbell:chat', 'at')) + '/' + str(len(this.asks))
 
--- ---- the work: asks first (newest first), then the backlog page -----------------------------------------------------------------------------------
-EmbedQueue.asks getter: [prop(a, 'of') for a in sort_by([{'of': x.of, 'at': 0 - (x.at or 0)} for x in instances('Embed') if x.kind == 'ask' and x.state == 'pending'], 'at')]
-EmbedQueue.page_rows getter: sql("SELECT k, sk, row_number() OVER (ORDER BY sk DESC) AS n FROM (SELECT k, substr(k, instr(k, ':message:') + 9) AS sk FROM c_field WHERE cls = 'Chat' AND k LIKE '%:body' AND instr(k, ':message:') > 0 AND json_extract(body, '$.props.text') IS NOT NULL AND json_extract(body, '$.props.embedded') IS NULL) WHERE sk < ?1 AND (?2 = ?2 OR ?2 IS NULL) AND (?3 = ?3 OR ?3 IS NULL) ORDER BY sk DESC LIMIT 64", this.after or '~', prop('membrane::Legacy:seat', 'tick'), prop('Doorbell:chat', 'at'))
+-- ---- the work: asks first (oldest first), then the backlog page (oldest first): the vectors land in text order, so the field (packs/field.c1f) moves its entities in that order ----
+EmbedQueue.asks getter: [prop(a, 'of') for a in sort_by([{'of': x.of, 'at': x.at or 0} for x in instances('Embed') if x.kind == 'ask' and x.state == 'pending'], 'at')]
+EmbedQueue.page_rows getter: sql("SELECT k, sk, row_number() OVER (ORDER BY sk) AS n FROM (SELECT k, substr(k, instr(k, ':message:') + 9) AS sk FROM c_field WHERE cls = 'Chat' AND k LIKE '%:body' AND instr(k, ':message:') > 0 AND json_extract(body, '$.props.text') IS NOT NULL AND json_extract(body, '$.props.embedded') IS NULL) WHERE sk > ?1 AND (?2 = ?2 OR ?2 IS NULL) AND (?3 = ?3 OR ?3 IS NULL) ORDER BY sk LIMIT 64", this.after or '', prop('membrane::Legacy:seat', 'tick'), prop('Doorbell:chat', 'at'))
 -- (no model or no server address: the backlog is not looked at, so reading it loads no stored text)
 EmbedQueue.page getter: this.page_rows if this.page_rows is List and this.model != None and this.backend != None else []
 EmbedQueue.texts getter: distinct(concat(head(this.asks, 64), [prop(r, 'k') for r in this.page]))

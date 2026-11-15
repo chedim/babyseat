@@ -129,6 +129,21 @@ fn the_receipt_becomes_vector_entities_the_text_is_marked_and_the_ask_is_gone() 
 }
 
 #[test]
+fn waiting_asks_go_oldest_first_so_the_vectors_land_in_text_order() {
+    // the field (packs/field.c1f) moves its entities as the vectors land: a message's body must land before the answer asked after it
+    let h = seat();
+    box_(&h);
+    say(&h, "m1", "First one is out.", true);
+    say(&h, "z2", "Asked second.", true);
+    std::thread::sleep(Duration::from_millis(5));
+    say(&h, "a3", "Asked third.", true);
+    answer(&h);
+    assert_eq!(inputs(&h), ["Asked second."], "the older ask goes first (its id sorts later: the order is the ask's time, not the id)");
+    answer(&h);
+    assert_eq!(inputs(&h), ["Asked third."]);
+}
+
+#[test]
 fn a_request_holds_at_most_64_sentences_and_the_rest_follows() {
     let h = seat();
     box_(&h);
@@ -361,7 +376,7 @@ fn through_the_fetch_driver_the_request_is_the_ollama_call_and_the_vectors_arriv
 }
 
 #[test]
-fn the_backlog_of_the_store_is_embedded_newest_first_once_the_seat_starts() {
+fn the_backlog_of_the_store_is_embedded_oldest_first_once_the_seat_starts() {
     let srv = fake();
     let dir = tmp("backlog");
     let file = dir.join("seat.sqlite");
@@ -382,10 +397,11 @@ fn the_backlog_of_the_store_is_embedded_newest_first_once_the_seat_starts() {
     let mut f = Map::new();
     f.insert("seat_backend".into(), json!(format!("http://127.0.0.1:{}", srv.port)));
     boot_started(&h, &f, true);
-    until("the whole backlog", || h.get(&vec_eid("1000-00000001", 0), "v") != J::Null, &h);
+    until("the whole backlog", || h.get(&vec_eid("3000-00000003", 0), "v") != J::Null, &h);
     let seen = srv.seen.lock().unwrap().clone();
     let order: Vec<String> = seen.iter().map(|s| s["body"]["input"][0].as_str().unwrap().to_string()).collect();
-    assert_eq!(order, ["Newest message.", "Middle message.", "Oldest message."], "newest first, one text a request");
+    // oldest first (the field moves its entities in text order as the vectors land: packs/field.c1f)
+    assert_eq!(order, ["Oldest message.", "Middle message.", "Newest message."], "oldest first, one text a request");
     for id in ["1000-00000001", "2000-00000002", "3000-00000003"] { assert_eq!(h.get(&body(id), "embedded"), json!(true), "{id}"); }
     until("the progress", || h.get(Q, "line").as_str().map_or(false, |l| l.starts_with("3 of 3 texts have sentence vectors")), &h);
     let _ = std::fs::remove_dir_all(dir);
