@@ -696,6 +696,21 @@
     "claims": [],
     "boot_facts": []
   },
+  "entityrecall": {
+    "imports": [
+      "semtext",
+      "mentions",
+      "vector",
+      "field"
+    ],
+    "classes": [
+      "SemText"
+    ],
+    "members": 19,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
   "environment": {
     "imports": [],
     "classes": [],

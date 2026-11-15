@@ -29,7 +29,7 @@ Anything in progress says so on its page and names its branch. The README at the
 | [c1f-stdlib.md](c1f-stdlib.md) | the Request contract, boot facts, the builtins, locals, entity literals, constructors, the step budget, the contract tests |
 | [c1f-error.md](c1f-error.md) | the `Error` value kind: a failure that is not a null |
 | [cliffhanger-fields.md](cliffhanger-fields.md) | the field language's design: getters, setters, packs, the browser VM's host API (section 9) |
-| [semtext-and-legs.md](semtext-and-legs.md) | SemText: how text becomes graph entities (the tokenizer, spans, mentions, sentence vectors, the Memory class and the banner recall are built; legs are design) |
+| [semtext-and-legs.md](semtext-and-legs.md) | SemText: how text becomes graph entities (the tokenizer, spans, mentions, sentence vectors, the field, entity recall by worldline, the Memory class and the banner recall are built; legs are design) |
 | [chat-keys.md](chat-keys.md) | the session id in the message's key: why and how |
 | [doctrine-barest.md](doctrine-barest.md) | the doctrine (the system prompt), the banner and the message: what the model gets, and what it promises |
 | [ui-rebuild-plan.md](ui-rebuild-plan.md) | the page as c1f view packs: status per slice, the shell and view-pack contract, markdown and Stop |

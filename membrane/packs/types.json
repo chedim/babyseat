@@ -1312,6 +1312,31 @@
     "writes": {},
     "findings": []
   },
+  "entityrecall": {
+    "getters": {
+      "SemText.ent_bg": "Any",
+      "SemText.ent_cands": "List(Any)?",
+      "SemText.ent_cover": "Float",
+      "SemText.ent_depth": "Int",
+      "SemText.ent_info": "List(Dict)?",
+      "SemText.ent_k": "Int",
+      "SemText.ent_means": "List(Dict)?",
+      "SemText.ent_mrows": "Any",
+      "SemText.ent_mvecs": "List(Dict)?",
+      "SemText.ent_near_eps": "Any",
+      "SemText.ent_near_states": "Any",
+      "SemText.ent_over": "Int",
+      "SemText.ent_pairs": "Any",
+      "SemText.ent_parts": "Any",
+      "SemText.ent_q": "List(Float)?",
+      "SemText.ent_qc": "List(Float)?",
+      "SemText.ent_scored": "List(Dict)?",
+      "SemText.entity_hits": "List(Dict)?",
+      "SemText.entity_votes": "List(Dict)?"
+    },
+    "writes": {},
+    "findings": []
+  },
   "environment": {
     "getters": {},
     "writes": {},
