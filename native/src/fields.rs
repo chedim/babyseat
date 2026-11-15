@@ -1692,7 +1692,8 @@ impl Fields {
             if !core.docs.contains_key(&tgt) {
                 // creation: `<Class>:<key>` of a class the pack owns or imports (a privileged pack: any class)
                 if !tgt.contains(':') { continue; }
-                let cls_owned = crate::vm::class_of_eid(&tgt);   // after a namespace: `membrane::Thing:k` is a Thing
+                // the class the eid names: after a LEADING `namespace::` (`membrane::Thing:k` is a Thing); a `::` later, inside the key, is the key's
+                let cls_owned = match tgt.split_once("::") { Some((ns, rest)) if !ns.contains(':') => rest.split(':').next().unwrap_or("").to_string(), _ => tgt.split(':').next().unwrap_or("").to_string() };
                 let cls = cls_owned.as_str();
                 if !self.is_privileged(pack) {
                     // loud, never silent: the receipt names the entity, the class and the pack (the same `refused` receipt as rule B)
