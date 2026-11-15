@@ -177,6 +177,27 @@ A `VIRTUAL` entity is collected as soon as NOTHING HOLDS IT: at the end of the r
 
 A plain read holds nothing (`prop(x, 'k')`, a getter that peeks, an entity literal). A read of a collected entity is a null with a reason, `collected: nothing held it`. Only virtual classes are collected: a stored entity keeps its `retire` write, and a stored one that is not touched for a while may leave the engine (the VM decides, nothing to write: docs/cliffvm.md).
 
+### Answering a message without a model
+
+A pack that imports `chat_turn` can add arms to what `chat_turn` defines on `ChatMessage` (the arms of every layer form one list, your arms first). Two arms answer a message from the graph and start no model:
+
+- `ChatMessage.plan` returns none for the message: the turn does not start a model run for it;
+- `ChatMessage.answer` returns the answer text: the turn finishes on its own, the answer is written as the turn's response (a text of the graph like any answer, found by recall) and the turn is `done`.
+
+Hold the answer arm until `this.queued == True`. The turn entity exists from that moment: an answer that is ready earlier finishes a turn that is not there yet and writes to nothing. Every other message falls through to the arms below yours and is answered by the model as before.
+
+```c1f
+PACK pingpong 1
+IMPORT chat_turn 1
+-- a message that says exactly `ping` is answered `pong` by the graph, with no model run
+ChatMessage.plan getter:
+  WHEN this.text == 'ping': None
+ChatMessage.answer getter:
+  WHEN this.text == 'ping' and this.queued == True: 'pong'
+```
+
+Use it for questions the graph already answers (a value on an entity, a count, a line of a note), and keep the model for everything else. A rule that answers wrongly gives a wrong answer with full confidence, so make it as narrow as the one message it covers, and read a few of its answers before you widen it.
+
 ## Habits that keep packs working
 
 - Load, then read the reply's first lines or `Pack:<name>.state`; fix `error` before anything else.
