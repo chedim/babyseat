@@ -61,6 +61,8 @@ jobs:
         with:
           name: wheel-payload-${{ matrix.target }}
           path: payload
+      # download-artifact does not keep file modes (the artifact is a zip of plain files): the binary gets its executable bit back before the wheel is packed
+      - run: chmod +x payload/dist/bin/cliffvm
       - name: the wheel (the payload's dist folder, packed)
         run: sh scripts/dist/build_wheel.sh "${{ matrix.tag }}" --payload payload --out dist-wheels
       - name: Rosetta (the x86_64 binary runs on Apple silicon)
