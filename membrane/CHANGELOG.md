@@ -14,7 +14,6 @@
 ### Fixes
 - **The chat page asks again.** A read of the turns that timed out left "The seat did not answer the last read of the turns; the view asks again." on the page until a reload, because with the link up the page re-read only when the seat rang its doorbell. A failed read now leaves the page owing it, and the next tick asks again.
 - **Float timestamps read back exactly** (`serde_json` `float_roundtrip`): a stored f64 could come back one bit off, which made a journal test fail on some runs. No stored format changes.
-- **Two CI-only flakes** (the float one above and a race in `field_active_1143`) no longer fail releases.
 
 ### Known gaps (not in 0.7.62)
 - **Goals and decision cards are not in the standalone seat** (the old goal graph was Python-era); the old `tool:clock` was not ported either (Cron is the new tool for time).
