@@ -408,3 +408,33 @@ fn a_hung_embedder_holds_the_turn_for_at_most_ten_seconds_and_the_turn_then_carr
     assert!(e >= std::time::Duration::from_secs(9) && e < std::time::Duration::from_secs(16), "the bound is the ask's own 10 s timeout: {e:?}");
     assert!(argv(&h, "m2").contains("Quokkas eat grass."), "edges alone: {}", argv(&h, "m2"));
 }
+
+/// a message that arrives while another turn RUNS is answered when that turn ends (#1143, seen on a live seat: three messages stayed `queued` for ever after a turn ended)
+#[test]
+fn a_message_posted_while_a_turn_runs_starts_when_that_turn_ends() {
+    for backend in [None, Some(fake_ollama_slow(100, 1))] {
+        let (h, _keep) = match backend { None => (turn_seat(None), None), Some((u, rx)) => (turn_seat(Some(&u)), Some(rx)) };
+        post(&h, "m1", "first question", 1.0);
+        until(&h, "m1 runs", |h| started(h, "m1"));
+        assert_eq!(state(&h, "m1"), "running");
+        post(&h, "m2", "asked during the first turn", 2.0);
+        post(&h, "m3", "and a third", 3.0);
+        until(&h, "m1 ends", |h| state(h, "m1") == "done" || state(h, "m1") == "error");
+        until(&h, "m2 starts after m1 ended", |h| started(h, "m2"));
+        until(&h, "m3 starts", |h| started(h, "m3"));
+        until(&h, "m3 ends", |h| state(h, "m3") == "done" || state(h, "m3") == "error");
+    }
+}
+
+/// a message posted by a pack of the model's own (a watcher) with NO body entity: the turn must still start, and the messages behind it with it
+const BARE: &str = "PACK barepost 1\nIMPORT chat 1\nBare.go on-setter make:\n  ALWAYS:\n    membrane::Chat:main:message[this.k] = ChatMessage(text: this.t, at: this.at)\n    membrane::Chat:main:message[this.k]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.k, queued_at: this.at)\n    membrane::Chat:main:message[this.k].queued = True\n";
+#[test]
+fn a_message_with_no_body_entity_does_not_hold_the_queue() {
+    let h = turn_seat(None);
+    h.load_pack("barepost", BARE).unwrap(); h.rebuild(); h.pump();
+    h.born("Bare:w1", "Bare", props(json!({"k": "w1", "t": "[watch] a notice", "at": 1.0})), "person"); h.pump();
+    h.write("Bare:w1", "go", json!(true), "person"); h.pump();
+    post(&h, "m2", "a person asks", 2.0);
+    until(&h, "the bare message starts", |h| started(h, "w1"));
+    until(&h, "the person's message starts", |h| started(h, "m2"));
+}

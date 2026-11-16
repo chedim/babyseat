@@ -33,8 +33,8 @@ RecallPart.ask_body on-setter arm-recall:
     (this.ask_body).recall_on = True
     this.armed = this.ask_body
 -- READY (read by chat_turn.c1f `recall_wait`): false ONLY while the ask's own embedding call is out (`in_flight`: the call has its own 10 s limit, then the edges alone) or the chat's
--- window is still being read from the store. No backend, no text, a failed or refused call, or no ask at all: ready.
-RecallPart.ready getter: not (prop(this.ask_body, 'in_flight') == True) and not (prop(this.ask_body, 'recall_on') == True and prop(this.ask_body, 'r_win') == None)
+-- window is still being read from the store (a message that has no body text, as a pack's own post may be, has no window to read: ready). No backend, no text, a failed or refused call, or no ask at all: ready.
+RecallPart.ready getter: not (prop(this.ask_body, 'in_flight') == True) and not (prop(this.ask_body, 'recall_on') == True and prop(this.ask_body, 'r_win') == None and prop(this.ask_body, 'text') != None)
 
 -- THE LINES with their origin
 RecallPart.picked getter: [{'text': x['text'], 'of': x['semtext'], 'o': head(x['semtext'], len(x['semtext']) - 5) if tail(x['semtext'], 5) == ':body' else x['semtext']} for x in head(prop(this.ask_body, 'recall') or [], this.banner_n or 0)]
