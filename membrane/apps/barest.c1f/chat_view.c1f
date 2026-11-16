@@ -293,6 +293,8 @@ Fetch.cv on-setter chat-import-line:
 -- the newest page: the first load also holds the cursor of the older turns (legacy `load`); a poll only draws what is new or changed
 Fetch.cv on-setter chat-history-done:
   WHEN this.eid == 'Fetch:history':
+    -- a read that did not succeed leaves the page owing it: `owing` makes the view due again on the next tick (not in this round: the same answer cannot also start the next read)
+    ('View:chat').owing = prop(this.cv, 'ok') != True
     ('View:chat').polling = False
     ('View:chat').last_poll = clock
 Fetch.cv on-setter chat-history-first:
@@ -316,7 +318,7 @@ View.bell getter: prop('membrane::Doorbell:chat', 'at') if this.linked else None
 View.bell on-setter chat-bell:
   WHEN this.bell != None:
     this.owed = (this.owed or 0) + 1
-View.due getter: this.open == True and not this.polling and not prop('Conn:page', 'hidden') and ((this.linked and ((this.owed or 0) != (this.served or 0) or this.last_poll == 0)) or (not this.linked and this.tick - (this.last_poll or 0) >= (this.active_ms if len([r for r in instances('ChatRow') if not r.done]) > 0 else this.list_ms) / 1000))
+View.due getter: this.open == True and not this.polling and not prop('Conn:page', 'hidden') and ((this.linked and ((this.owed or 0) != (this.served or 0) or this.last_poll == 0 or (this.owing == True and this.tick > (this.last_poll or 0)))) or (not this.linked and this.tick - (this.last_poll or 0) >= (this.active_ms if len([r for r in instances('ChatRow') if not r.done]) > 0 else this.list_ms) / 1000))
 View.due on-setter chat-poll:
   WHEN this.due == True:
     n = (this.seq or 0) + 1
