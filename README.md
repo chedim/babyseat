@@ -75,7 +75,9 @@ Open the printed URL: the page loads and you are in the chat. The port is 4096 (
 
 From a checkout you can run the same seat on the repo's own `membrane/` folder: `scripts/seat [--open] [--port <n>]` (data in `./.cliffvm`; the development wrapper).
 
-**Which model answers.** The local Ollama, and the model is YOURS to pick: the seat starts with none chosen, and a message sent before you pick one starts nothing and says so. The page opens a first-run window
+### Which model answers
+
+The local Ollama, and the model is YOURS to pick: the seat starts with none chosen, and a message sent before you pick one starts nothing and says so. The page opens a first-run window
 (a dropdown of the models Ollama lists, embedding models left out, and the seat's name) at every load until both are chosen; the same choice is the *Model* row of Settings (a dropdown; a name that is set but not listed stays as an option marked not available).
 If the list is empty, Ollama is not running or has nothing pulled: `ollama pull <name>`, then *Refresh*. **Developer mode:** `--fact seat_default=claude` makes the `claude` CLI the model of the chat (a `minds` or `cloud_models` fact works too).
 
