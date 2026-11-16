@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- pointer and wheel events of the browser VM, written back as props of the DomNode (run by fieldvm_pointer.test.mjs in headless Chrome) -->
+<body>
+<div id="mount"></div>
+<pre id="result">pending</pre>
+<script type="module">
+import { start } from '/membrane/apps/barest.c1f/ui/fieldvm.js';
+const PACK = `PACK t 1
+IMPORT dom 1
+Thing.make on-setter mk:
+  ALWAYS:
+    ('DomNode:t:s').tag = 'svg'
+    ('DomNode:t:s').viewBox = '0 0 100 100'
+    ('DomNode:t:s').width = 200
+    ('DomNode:t:s').height = 200
+`;
+const res = {};
+try {
+  const host = await start(document.getElementById('mount'), { packs: { t: PACK } });
+  res.errors = host.errors; host.schedule = (fn) => setTimeout(fn, 0);
+  const wait = () => new Promise(r => setTimeout(r, 60));
+  host.feed('Thing:1', 'Thing', { make: true }, true);
+  await wait();
+  const el = document.querySelector('[data-key="DomNode:t:s"]');
+  const r = el.getBoundingClientRect();
+  const ev = (type, x, y, extra = {}) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: r.left + x, clientY: r.top + y, pointerId: 1, buttons: type === 'pointerup' ? 0 : 1, ...extra }));
+  const writes = [];
+  const hw = host.write.bind(host); host.write = (e, p, v) => { writes.push(p); return hw(e, p, v); };
+  ev('pointermove', 5, 5, { buttons: 0 }); await wait();                 // a hover (no button): no write, the field is not flooded
+  res.hover = host.get('DomNode:t:s').pointer ?? null;
+  ev('pointerdown', 10, 20); await wait(); res.down = host.get('DomNode:t:s').pointer;
+  ev('pointermove', 30, 25); await wait(); res.move = host.get('DomNode:t:s').pointer;
+  ev('pointerup', 30, 25); await wait(); res.up = host.get('DomNode:t:s').pointer;
+  const w = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120, clientX: r.left + 7, clientY: r.top + 8 });
+  el.dispatchEvent(w); await wait();
+  res.wheel = host.get('DomNode:t:s').wheel; res.wheelPrevented = w.defaultPrevented;
+  res.done = true;
+} catch (e) { res.error = String(e && e.stack || e); res.done = true; }
+document.getElementById('result').textContent = JSON.stringify(res);
+</script>

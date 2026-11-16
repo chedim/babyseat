@@ -1,0 +1,75 @@
+{
+ "status": 200,
+ "body": [
+  {
+   "name": "build",
+   "native": true,
+   "mode": "primary",
+   "description": "The default agent. Executes tools based on configured permissions.",
+   "permission": [
+    {
+     "permission": "*",
+     "pattern": "*",
+     "action": "allow"
+    }
+   ],
+   "options": {}
+  },
+  {
+   "name": "plan",
+   "native": true,
+   "mode": "primary",
+   "description": "Plan mode.",
+   "permission": [
+    {
+     "permission": "*",
+     "pattern": "*",
+     "action": "allow"
+    }
+   ],
+   "options": {}
+  },
+  {
+   "name": "general",
+   "native": true,
+   "mode": "subagent",
+   "description": "General-purpose subagent.",
+   "permission": [
+    {
+     "permission": "*",
+     "pattern": "*",
+     "action": "allow"
+    }
+   ],
+   "options": {}
+  },
+  {
+   "name": "explore",
+   "native": true,
+   "mode": "subagent",
+   "description": "Exploration subagent.",
+   "permission": [
+    {
+     "permission": "*",
+     "pattern": "*",
+     "action": "allow"
+    }
+   ],
+   "options": {}
+  },
+  {
+   "name": "watch",
+   "native": true,
+   "mode": "subagent",
+   "description": "A watch-trigger thinking loop: reacts or ignores one fired watch event through the membrane tools (the event's entity id rides the session title).",
+   "permission": [
+    {
+     "permission": "*",
+     "pattern": "*",
+     "action": "allow"
+    }
+   ],
+   "options": {}
+  }
+ ]
+}

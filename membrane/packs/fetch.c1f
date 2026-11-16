@@ -1,0 +1,5 @@
+PACK fetch 1
+RESIDENT Fetch
+-- THE OUTBOUND HTTP DRIVER's class (native/src/fetch.rs): `Fetch:<x>.request = {id, url, ...}` is the effect, `request_result` the receipt
+-- ({id, status, rc, head, http_status, headers, body}). A pack that makes a call IMPORTs this pack and adds its own getters/setters.
+Fetch.kind getter: 'fetch'

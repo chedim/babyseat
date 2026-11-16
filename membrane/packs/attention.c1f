@@ -1,0 +1,33 @@
+PACK attention 1
+IMPORT boot 1
+RESIDENT Attention
+-- THE ALERT DIAL (operator, 2026-11-12: everything moves to cliffhanger). How many watch events per window may wake the
+-- model as their own turn; the rest fold into the digest of its next WHERE WE ARE block. One write sets it:
+--   Attention:seat.dial = {budget: 0..50, window_min: 1..1440, mode: 'interrupt' | 'digest'}   (only the given fields)
+-- and `dial_result` says what happened. The first start makes the entity with the defaults; a start never resets it.
+
+Boot.started on-setter attention-defaults:
+  WHEN len([a for a in instances('Attention')]) == 0:
+    ('Attention:seat').budget = 6
+    ('Attention:seat').window_min = 10
+    ('Attention:seat').mode = 'interrupt'
+
+Attention.dial on-setter dial-budget:
+  WHEN prop(this.dial, 'budget') != None and prop(this.dial, 'budget') >= 0 and prop(this.dial, 'budget') <= 50:
+    this.budget = prop(this.dial, 'budget')
+Attention.dial on-setter dial-window:
+  WHEN prop(this.dial, 'window_min') != None and prop(this.dial, 'window_min') >= 1 and prop(this.dial, 'window_min') <= 1440:
+    this.window_min = prop(this.dial, 'window_min')
+Attention.dial on-setter dial-mode:
+  WHEN prop(this.dial, 'mode') in ['interrupt', 'digest']:
+    this.mode = prop(this.dial, 'mode')
+-- the receipt: one setter, the first bad field names itself, else ok
+Attention.dial on-setter dial-result:
+  WHEN prop(this.dial, 'budget') != None and (prop(this.dial, 'budget') < 0 or prop(this.dial, 'budget') > 50):
+    this.dial_result = {'ok': False, 'error': 'budget is 0..50 interrupt turns per window'}
+  ELSE WHEN prop(this.dial, 'window_min') != None and (prop(this.dial, 'window_min') < 1 or prop(this.dial, 'window_min') > 1440):
+    this.dial_result = {'ok': False, 'error': 'window_min is 1..1440'}
+  ELSE WHEN prop(this.dial, 'mode') != None and not (prop(this.dial, 'mode') in ['interrupt', 'digest']):
+    this.dial_result = {'ok': False, 'error': 'mode is one of interrupt, digest'}
+  ELSE:
+    this.dial_result = {'ok': True}

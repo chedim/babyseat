@@ -11,7 +11,9 @@ About.release getter: before(this.notes, '\n')
 About.body getter: distinct([strip(l) for l in lines(after(this.notes, '\n')) if strip(l)])
 About.label getter: 'babyseat ' + str(this.version or '?') + (' · ' + this.sha if this.sha else '')
 
-About.version on-setter draw:
+-- (drawn from the label, not the version: the setter reads the label, a getter of the version, and a setter sees the getters as
+-- they were before its write; the label changes with the version and with the sha)
+About.label on-setter draw:
   ALWAYS:
     ('DomNode:about:anchor').parent = 'DomNode:page:#topbar'
     ('DomNode:about:anchor').tag = 'span'

@@ -1,0 +1,67 @@
+[
+ {
+  "name": "setup",
+  "essential": true,
+  "blocks": [
+   "field rows"
+  ]
+ },
+ {
+  "name": "field rows",
+  "essential": true,
+  "blocks": [
+   "entities"
+  ]
+ },
+ {
+  "name": "entities",
+  "essential": true,
+  "blocks": [
+   "minds"
+  ]
+ },
+ {
+  "name": "minds",
+  "essential": true,
+  "blocks": [
+   "loops + goal graph"
+  ]
+ },
+ {
+  "name": "loops + goal graph",
+  "blocks": [
+   "router"
+  ]
+ },
+ {
+  "name": "router",
+  "blocks": [
+   "embedder"
+  ]
+ },
+ {
+  "name": "embedder",
+  "blocks": [
+   "config"
+  ]
+ },
+ {
+  "name": "config",
+  "essential": true,
+  "blocks": [
+   "serve"
+  ]
+ },
+ {
+  "name": "serve",
+  "essential": true
+ },
+ {
+  "name": "vote warm",
+  "background": true
+ },
+ {
+  "name": "forewarning",
+  "background": true
+ }
+]

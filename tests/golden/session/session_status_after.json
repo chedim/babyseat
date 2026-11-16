@@ -1,0 +1,11 @@
+{
+ "status": 200,
+ "body": {
+  "ses_69143f4fc8088e7ec097c182": {
+   "type": "idle"
+  },
+  "ses_3678f92e6f574f341f5b0674": {
+   "type": "idle"
+  }
+ }
+}

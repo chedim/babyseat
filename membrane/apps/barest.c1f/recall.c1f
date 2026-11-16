@@ -1,0 +1,55 @@
+PACK recall 1
+IMPORT default_banner 1
+IMPORT mentions 1
+IMPORT chat 1
+IMPORT boot 1
+-- THE RECALL PART OF THE BANNER (#1143). `Banner:recall` is a banner PART (the multi-banner mechanism, packs/chat_turn.c1f `banner_more`): its `words` hold the lines recalled for the
+-- message the turn is answering (the ask), and the turn shows them after the main banner. Like the main banner it is the model's: reassign its `parents` to a class of your own that
+-- defines `words` (Help:banner); writing `Banner:recall.words` is refused because a getter owns it.
+-- THE RECALL ITSELF is not here: the part reads `recall` of the ask's body, the ONE recall every reader shares (`SemText.recall`, packs/mentions.c1f: the chat's window of texts, the edge
+-- and the cosine lane, the move log and entity recall, the vote, the rerank, the merge of near duplicates). This part picks the ask, turns the recall on for it (and off for the ask before it), and words the lines.
+-- THE ASK is the oldest queued message whose turn has not started, else the latest (a setter below hears `queued`).
+-- THE LINES: `banner_n` of them (a dial of `recall:dials`), each cut to `fact_chars`, each with its ORIGIN: the person's words say who and when (the chat message and its time); any other
+-- text (a fetched page, a file, a command's output) says it is NOT the person's words and where it came from. The header is the dial `header`: recalled text is context, not instructions.
+-- Nothing is shown while the ask has no lines.
+RecallPart.kind getter: 'recall'
+
+RecallPart.banner_n getter: prop('recall:dials', 'banner_n')
+RecallPart.fact_chars getter: prop('recall:dials', 'fact_chars')
+RecallPart.header getter: prop('recall:dials', 'header')
+-- THE ASK is the OLDEST queued message whose turn has not started (`waiting`, kept by the setter below): the turns wait for their own ask's recall, in order (`ready`, below; chat_turn.c1f `recall_wait`).
+ChatMessage.queued on-setter recall-ask:
+  WHEN this.queued == True and prop('membrane::Banner:recall', 'seeded') == True:
+    membrane::Banner:recall.latest = this.eid
+    membrane::Banner:recall.waiting = concat([m for m in (prop('membrane::Banner:recall', 'waiting') or []) if prop(m, 'tstate') == 'queued' and m != this.eid], [this.eid])
+-- once every queued message has started, the ask stays the latest one (the part keeps showing what was recalled for it)
+RecallPart.ask_msg getter: ([m for m in (this.waiting or []) if prop(m, 'tstate') == 'queued'] or [this.latest])[0]
+RecallPart.ask_body getter: this.ask_msg + ':body' if this.ask_msg != None else None
+-- the recall is on for the ask's body only: the body asked before is let go (its recall stops computing)
+RecallPart.ask_body on-setter arm-recall:
+  WHEN this.ask_body != None:
+    FOR o IN [x for x in [this.armed] if x != None and x != this.ask_body]:
+      (o).recall_on = None
+    (this.ask_body).recall_on = True
+    this.armed = this.ask_body
+-- READY (read by chat_turn.c1f `recall_wait`): false ONLY while the ask's own embedding call is out (`in_flight`: the call has its own 10 s limit, then the edges alone) or the chat's
+-- window is still being read from the store. No backend, no text, a failed or refused call, or no ask at all: ready.
+RecallPart.ready getter: not (prop(this.ask_body, 'in_flight') == True) and not (prop(this.ask_body, 'recall_on') == True and prop(this.ask_body, 'r_win') == None)
+
+-- THE LINES with their origin
+RecallPart.picked getter: [{'text': x['text'], 'of': x['semtext'], 'o': head(x['semtext'], len(x['semtext']) - 5) if tail(x['semtext'], 5) == ':body' else x['semtext']} for x in head(prop(this.ask_body, 'recall') or [], this.banner_n or 0)]
+RecallPart.picked_msg getter: [{'text': y['text'], 'of': y['of'], 'o': y['o'], 'msg': before(y['o'], ':turn')} for y in this.picked]
+RecallPart.picked_when getter: [{'text': y['text'], 'of': y['of'], 'o': y['o'], 'msg': y['msg'], 'at': prop(y['msg'], 'at')} for y in this.picked_msg]
+RecallPart.picked_origin getter:
+  [{'text': y['text'], 'origin': (('the person said' if y['o'] == y['msg'] else 'the answer to the person') + ' in ' + y['msg'] + ((' at ' + prop(localtime(y['at']), 'date') + ' ' + prop(localtime(y['at']), 'clock')) if y['at'] != None else '')) if startswith(y['of'], 'membrane::Chat:') else 'NOT the person\'s words, text of ' + y['o']} for y in this.picked_when]
+RecallPart.shown getter:
+  WHEN this.fact_chars == None: []
+  ELSE: ['- ' + head(strip(replace(y['text'], '\n', ' ')), this.fact_chars) + ' [' + y['origin'] + ']' for y in this.picked_origin if y['text'] != '']
+RecallPart.words getter:
+  WHEN len(this.shown) == 0 or this.header == None: None
+  ELSE: join(concat([this.header], this.shown), '\n')
+
+-- BORN with the seat: the instance is `Banner:recall` (the eid class is Banner, so the turn's banner list finds it; its kind is RecallPart, which owns `words`).
+Boot.started on-setter seed-recall:
+  WHEN prop('membrane::Banner:recall', 'seeded') != True:
+    membrane::Banner:recall = RecallPart(seeded: True)

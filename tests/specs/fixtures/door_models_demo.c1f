@@ -1,0 +1,4 @@
+PACK door_models 1
+IMPORT door 1
+Request.r_models getter: {'status': 200, 'body': {'family': 'models', 'path': this.path}} if startswith(this.path, '/v1/models') else None
+Request.o_models getter: startswith(this.path, '/v1/models')

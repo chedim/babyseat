@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- a pack's `retire = true` in the browser VM (run by fieldvm_retire.test.mjs in headless Chrome): the entity leaves the page's engine, and a DomNode's element leaves the page -->
+<body>
+<div id="mount"></div>
+<pre id="result">pending</pre>
+<script type="module">
+import { start } from '/membrane/apps/barest.c1f/ui/fieldvm.js';
+const PACK = `PACK t 1
+IMPORT dom 1
+Thing.make on-setter mk:
+  ALWAYS:
+    ('DomNode:t:a').tag = 'span'
+    ('DomNode:t:a').text = 'A'
+    ('DomNode:t:a:kid').tag = 'span'
+    ('DomNode:t:a:kid').parent = 'DomNode:t:a'
+    ('DomNode:t:a:kid').text = 'kid'
+    ('DomNode:t:b').tag = 'button'
+    ('DomNode:t:b').text = 'B'
+DomNode.clicked on-setter go:
+  WHEN this.eid == 'DomNode:t:b':
+    ('DomNode:t:a').retire = True
+    ('Thing:1').retire = True
+`;
+const res = {};
+const out = () => { document.getElementById('result').textContent = JSON.stringify(res); };
+try {
+  const host = await start(document.getElementById('mount'), { packs: { t: PACK } });
+  res.errors = host.errors; host.schedule = (fn) => setTimeout(fn, 0);
+  const wait = () => new Promise(r => setTimeout(r, 60));
+  host.feed('Thing:1', 'Thing', { n: 1, make: true }, true);
+  await wait();
+  res.before = { a: !!document.querySelector('[data-key="DomNode:t:a"]'), kid: !!document.querySelector('[data-key="DomNode:t:a:kid"]'), thing: host.get('Thing:1') !== null };
+  host.write('DomNode:t:b', 'clicked', 1);
+  await wait();
+  res.after = {
+    aElement: !!document.querySelector('[data-key="DomNode:t:a"]'), kidElement: !!document.querySelector('[data-key="DomNode:t:a:kid"]'), bElement: !!document.querySelector('[data-key="DomNode:t:b"]'),
+    aEntity: host.get('DomNode:t:a'), thing: host.get('Thing:1'), nodes: [...host.nodes.keys()],
+  };
+  res.done = true;
+} catch (e) { res.error = String(e && e.stack || e); res.done = true; }
+out();
+</script>

@@ -1,106 +1,143 @@
 name: docker
 
-# THE IMAGE LANE (#202): a published release builds the public image
-# chedim/babyseat for amd64 + arm64 and pushes X.Y.Z, X.Y and latest.
-# The same image goes to chedim/membrane with the same tags (#303: the
-# project's name before 0.7) so existing pulls keep updating.
-# It builds from a CLEAN checkout of the release tag (never a dev tree),
-# and the allowlist .dockerignore sends only the package. A pull request
-# that touches the Docker files gets a build-only run: smoke + privacy check.
-#
-# Repo secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (a Docker Hub access
-# token with write access to BOTH chedim/babyseat and chedim/membrane).
+# THE IMAGE LANE (#1143, #202): the image is the release's dist tarball on debian-slim (Dockerfile): the Rust seat `cliffvm serve`, no Rust, Python or torch, non-root (uid 10001), port 4096, data in the /data volume,
+# NO claude CLI (the Dockerfile says how to supply it). Two ways in, and NEITHER pushes by itself:
+#   pull request touching the image: builds it from a linux x86_64 dist made right here, runs it, and checks it (health 401/200, non-root, no runtime state in it). Build only.
+#   workflow_dispatch (the operator's `!` line): builds the image from the tag's PUBLISHED release tarballs (publish.yml with github_release; each checked against its .sha256) and pushes ONLY when `push` is
+#   ticked and `confirm` says "push <tag>"; otherwise it builds and checks and stops.
+#       gh workflow run docker.yml --ref v0.7.61 -f tag=v0.7.61 -f push=true -f confirm="push v0.7.61"   (add -f stable=true only for a stable release: it moves X.Y and latest)
+# Pushes chedim/babyseat and the same image to chedim/membrane (the project's name before 0.7, so existing pulls keep updating): X.Y.Z always, and X.Y and latest only with `stable` ticked
+# (a pre-release must not move the tags that existing pulls follow).
+# Repo secrets (read only by the login step of a confirmed push): DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (write access to BOTH repositories).
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "the tag to build and push (e.g. v0.6.1)"
+        description: "the release tag whose tarballs the image is built from (e.g. v0.7.61)"
         required: true
+      push:
+        description: "push the image to Docker Hub (needs the confirmation below)"
+        type: boolean
+        default: false
+      confirm:
+        description: 'to push, type exactly: push <tag>'
+        required: false
+      stable:
+        description: "also move the X.Y and latest tags (a stable release): a pre-release pushes only X.Y.Z, so the pulls that follow latest are not moved to it"
+        type: boolean
+        default: false
   pull_request:
     paths:
       - Dockerfile
       - .dockerignore
       - "docker/**"
       - .github/workflows/docker.yml
-      - pyproject.toml
+
+permissions:
+  contents: read
 
 jobs:
-  check:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+  image:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: the version, and the tag it must match
+        id: ver
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          ver=$(sed -n 's/^version = "\(.*\)"$/\1/p' native/Cargo.toml | head -1)
+          [ -n "$ver" ] || { echo "no version in native/Cargo.toml"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$TAG" != "v$ver" ]; then
+            echo "tag $TAG is not v$ver (native/Cargo.toml): nothing built"; exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      # the tarballs of the dist folder (glibc, both architectures) into the build context
+      - name: "the release tarballs (dispatch: the published release's, checked against their .sha256)"
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          mkdir -p docker-dist
+          gh release download "$TAG" -D docker-dist -p 'babyseat-*-unknown-linux-gnu.tar.gz' -p 'babyseat-*-unknown-linux-gnu.tar.gz.sha256'
+          (cd docker-dist && for f in *.sha256; do sha256sum -c "$f"; done)
+          ls -l docker-dist
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: github.event_name == 'pull_request'
+      - uses: Swatinem/rust-cache@v2
+        if: github.event_name == 'pull_request'
+        with:
+          workspaces: native
+      - name: "the dist tarball of this tree (pull request: x86_64 only, built here)"
+        if: github.event_name == 'pull_request'
+        run: |
+          VER=${{ steps.ver.outputs.version }}
+          sh scripts/dist/build.sh --archive "docker-dist/babyseat-$VER-x86_64-unknown-linux-gnu.tar.gz"
+
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - name: build the image (linux/amd64, loaded for the checks)
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           load: true
           push: false
+          build-args: VERSION=${{ steps.ver.outputs.version }}
           tags: babyseat:ci
-      - name: smoke (the CLI runs without booting a seat)
-        run: docker run --rm --entrypoint membrane babyseat:ci --help
-      - name: smoke (the babyseat command is in the image too)
-        run: docker run --rm --entrypoint babyseat babyseat:ci --help
-      - name: smoke (the entrypoint passes non-seat commands through)
-        run: docker run --rm babyseat:ci --help
+
+      - name: the image runs as a non-root user, exposes 4096, has a /data volume and no claude CLI
+        run: |
+          set -eu
+          [ "$(docker run --rm --entrypoint id babyseat:ci -u)" = 10001 ]
+          docker inspect babyseat:ci --format '{{.Config.ExposedPorts}} {{.Config.Volumes}}' | grep -q '4096/tcp.*/data'
+          docker run --rm --entrypoint sh babyseat:ci -c '! command -v claude'
+          docker run --rm babyseat:ci --version | grep -q "${{ steps.ver.outputs.version }}"
+      - name: the seat answers (health 401 without the token, 200 with the admin token)
+        run: |
+          set -eu
+          docker run -d --name seat -p 127.0.0.1:4096:4096 babyseat:ci
+          for i in $(seq 1 60); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4096/global/health)" = 401 ] && break
+            sleep 1
+          done
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4096/global/health)" = 401 ] || { docker logs seat; exit 1; }
+          tok=$(docker exec seat cat /data/admin.token)
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $tok" http://127.0.0.1:4096/global/health)" = 200 ]
+          docker stop seat >/dev/null
+          docker rm seat >/dev/null
       - name: privacy (no runtime state in the image)
         run: |
           found=$(docker run --rm --entrypoint sh babyseat:ci -c \
-            'find / -xdev \( -name ".membrane" -o -name "*.jsonl" -o -name "field*.json" -o -name "serve-auth.json" \) -not -path "*/site-packages/*" 2>/dev/null' || true)
-          if [ -n "$found" ]; then
-            echo "runtime state found in the image:"; echo "$found"; exit 1
-          fi
+            'find / -xdev \( -name ".membrane" -o -name "*.jsonl" -o -name "admin.token" -o -name "door.secret" -o -name "seat.sqlite*" \) -not -path "/data/*" 2>/dev/null' || true)
+          if [ -n "$found" ]; then echo "runtime state found in the image:"; echo "$found"; exit 1; fi
           echo "clean"
 
-  publish:
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      # THE TAG IS THE VERSION (mirrors publish.yml): an image tagged with a
-      # version the package doesn't carry stops here.
-      - name: the tag is the package's version
-        id: ver
+      # THE PUSH: only a dispatch that ticked `push` and typed the confirmation
+      - name: the push is confirmed
+        id: go
+        if: github.event_name == 'workflow_dispatch' && inputs.push
+        env:
+          TAG: ${{ inputs.tag }}
+          CONFIRM: ${{ inputs.confirm }}
         run: |
-          tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          ver=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
-          [ "${tag#v}" = "$ver" ] || { echo "tag $tag is not the package version $ver: bump pyproject.toml before releasing"; exit 1; }
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
-      # THE SOURCE IS THE TAG, THE RECIPE IS THIS COMMIT: a dispatch of a
-      # tag cut before the image existed (v0.6.1) has no Dockerfile in its
-      # tree, so the build recipe (Dockerfile, .dockerignore, docker/) comes
-      # from the workflow's own commit and is laid over the tag's checkout.
-      # On a release event both are the same commit.
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: _recipe
-          sparse-checkout: |
-            Dockerfile
-            .dockerignore
-            docker/
-          sparse-checkout-cone-mode: false
-      - name: lay the recipe over the tag's source
-        run: |
-          cp _recipe/Dockerfile _recipe/.dockerignore .
-          rm -rf docker && cp -R _recipe/docker docker
-          rm -rf _recipe
+          [ "$CONFIRM" = "push $TAG" ] || { echo "the confirmation is '$CONFIRM', not 'push $TAG': nothing pushed"; exit 1; }
       - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+        if: steps.go.conclusion == 'success'
       - uses: docker/login-action@v3
+        if: steps.go.conclusion == 'success'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - id: meta
+        if: steps.go.conclusion == 'success'
         uses: docker/metadata-action@v5
         with:
           images: |
@@ -108,9 +145,10 @@ jobs:
             chedim/membrane
           tags: |
             type=semver,pattern={{version}},value=${{ steps.ver.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ver.outputs.version }}
-            type=raw,value=latest
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ver.outputs.version }},enable=${{ inputs.stable == true }}
+            type=raw,value=latest,enable=${{ inputs.stable == true }}
       - uses: docker/build-push-action@v6
+        if: steps.go.conclusion == 'success'
         with:
           context: .
           platforms: linux/amd64,linux/arm64

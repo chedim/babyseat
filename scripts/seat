@@ -1,0 +1,43 @@
+#!/bin/sh
+# The dev wrapper of `cliffvm serve` (the users' launcher, docs/packaging-plan.md): the same seat on THIS checkout's membrane/ folder (packs/, apps/, ui/ have the dist's shape), the data in ./.cliffvm.
+# Builds nothing: build the binary once with `cargo build --release --no-default-features --features bin` in native/.
+#   scripts/seat [--open] [--data-dir <dir>] [--store <sqlite>] [--port <n>] [--fact name=value ...]     (every option of `cliffvm serve --help` passes through)
+# Every default lives in membrane/packs/launcher.c1f; the door is strict (the secret and the admin token are in the data folder).
+# CLIFFVM names the binary, CLAUDE_BIN the claude CLI (else the one on PATH). CLAUDE_AUTH=login passes --fact chat_auth=login (the claude CLI's login instead of ANTHROPIC_API_KEY).
+# --open (this wrapper's own) opens the page once the seat says its URL.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+bin=${CLIFFVM:-}
+[ -n "$bin" ] || { [ -x "$root/native/target/release/cliffvm" ] && bin=$root/native/target/release/cliffvm; } || true
+[ -n "$bin" ] || bin=$(command -v cliffvm || true)
+if [ -z "$bin" ]; then
+  echo "scripts/seat: cliffvm is not built yet. Build it once:" >&2
+  echo "  (cd $root/native && cargo build --release --no-default-features --features bin)" >&2
+  echo "or point CLIFFVM at the binary." >&2
+  exit 1
+fi
+open_page=0
+have_data=0
+n=$#
+while [ "$n" -gt 0 ]; do   # take --open out, keep every other argument as it was
+  a=$1; shift; n=$((n - 1))
+  case "$a" in
+    --open) open_page=1; continue ;;
+    --data-dir|--store) have_data=1 ;;
+  esac
+  set -- "$@" "$a"
+done
+[ "$have_data" = 1 ] || set -- --data-dir ./.cliffvm "$@"
+case "${CLAUDE_AUTH:-}" in
+  '') ;;
+  login) set -- "$@" --fact chat_auth=login ;;
+  *) echo "scripts/seat: CLAUDE_AUTH=${CLAUDE_AUTH} is not known (it is: login)." >&2; exit 2 ;;
+esac
+if [ "$open_page" = 1 ]; then
+  "$bin" serve --root "$root/membrane" "$@" | while IFS= read -r line; do
+    echo "$line"
+    case "$line" in "cliffvm serve: open "*) u=${line#cliffvm serve: open }; if [ "$(uname)" = Darwin ]; then open "$u"; else xdg-open "$u" >/dev/null 2>&1 || true; fi ;; esac
+  done
+  exit 0
+fi
+exec "$bin" serve --root "$root/membrane" "$@"

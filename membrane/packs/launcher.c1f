@@ -1,0 +1,29 @@
+PACK launcher 1
+IMPORT boot 1
+-- THE LAUNCHER'S DEFAULTS (docs/packaging-plan.md, decided 2026-11-14: "the defaults live in c1f"). `cliffvm serve` only finds files (the dist folder, the data
+-- folder, the claude CLI) and tells their paths as facts; what the seat DOES by default is here, as setters on `Boot.started` that fill a fact only when the launcher
+-- or the operator (`--fact name=value`) did not tell it, so a fact always wins. Edit a default here, in the dist's packs/ folder: no binary changes.
+--   default_port     4096 (the door listens there unless `--port` named another; `--port 0` = any free port)
+--   minds            the claude CLI is the model of every background mind and of the chat's default pick
+--   cloud_models     one rung, `claude` (the claude CLI)
+--   seat_backend     the local backend's address: the default Ollama one (nothing needs to run there: a refused connection is an empty list of models)
+--   embed_model      mxbai-embed-large (the model that makes the vector of each sentence, packs/embed.c1f; asked of the model server at seat_backend)
+--   router_on        false (no router between the minds and the models)
+-- NOT here: chat_auth (the default api_key lives in chat_turn.c1f; `--fact chat_auth=login` opts into the CLI's login).
+
+Boot.default_port getter: 4096   -- read by door.c1f's door-listen when no `--port` told door_port
+Boot.started on-setter launcher-minds:
+  WHEN this.minds == None:
+    this.minds = {'loops': 'claude', 'cortex': 'claude', 'workers': 'claude', 'seat_default': 'claude', 'loops_auth': 'chat', 'cortex_auth': 'chat', 'workers_auth': 'chat', 'think': 'auto'}
+Boot.started on-setter launcher-models:
+  WHEN this.cloud_models == None:
+    this.cloud_models = [{'name': 'claude', 'backend': 'claude-agent'}]
+Boot.started on-setter launcher-backend:
+  WHEN this.seat_backend == None:
+    this.seat_backend = 'http://127.0.0.1:11434'
+Boot.started on-setter launcher-embed-model:
+  WHEN this.embed_model == None:
+    this.embed_model = 'mxbai-embed-large'
+Boot.started on-setter launcher-router:
+  WHEN this.router_on == None:
+    this.router_on = False

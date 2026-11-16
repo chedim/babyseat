@@ -1,82 +1,60 @@
-# babyseat image (chedim/babyseat; also pushed as chedim/membrane, the
-# project's name before 0.7): `membrane standalone` -- the serve
-# API + web UI on :4096 and the OpenAI-compatible memory proxy on :11500.
+# babyseat: the Rust seat (`cliffvm serve`) in a small image (#1143, docs/packaging-plan.md). NO Rust, Python or torch in it: the image is the release's dist tarball on debian-slim.
 #
-# A PUBLIC image: it holds the installed package and nothing else. Every
-# site-specific value (backend URL, models, keys) arrives at run time through
-# env or the /data volume. See docs/docker.md for run recipes.
+# The build context holds the release tarballs release-binaries.yml makes (the glibc ones: the dist folder inside is babyseat-<version>-<triple>/<version>/):
+#   docker-dist/babyseat-<version>-x86_64-unknown-linux-gnu.tar.gz   docker-dist/babyseat-<version>-aarch64-unknown-linux-gnu.tar.gz
+#   docker buildx build --build-arg VERSION=0.7.61 -t chedim/babyseat:0.7.61 .
+# (docker.yml downloads them from the workflow's artifacts; scripts/dist/build.sh --archive makes one by hand, from a linux binary.)
 #
-#   docker build -t membrane:dev .
-#   docker run -d -p 4096:4096 -p 11500:11500 -v membrane-data:/data \
-#     -e MEMBRANE_EMBED_MODEL=mxbai-embed-large --stop-timeout 60 membrane:dev
-#
-# The ports carry no authentication today: publish them only on a network
-# you trust.
+# RUN:    docker run -p 4096:4096 -v babyseat:/data -e ANTHROPIC_API_KEY chedim/babyseat
+#   the seat is on http://localhost:4096 ; its data (store, door secret, admin token) is the /data volume. THE OWNER TOKEN for a local tool: docker exec <container> cat /data/admin.token
+#   The door binds 0.0.0.0 inside the container (docker's bridge is not loopback) and wants a token for everything but the page: publish the port to 127.0.0.1 unless you mean the network (-p 127.0.0.1:4096:4096).
+# THE claude CLI IS NOT IN THE IMAGE (it is Anthropic's, with its own license and updates): the chat runs it as a child, so the image has a seat that boots, serves the page and answers /global/health,
+#   and a chat that says how to supply it. Supply it by mounting a Linux claude executable and naming it:  -v /path/to/claude:/opt/claude:ro -e CLAUDE_BIN=/opt/claude
+#   with the key in ANTHROPIC_API_KEY (the default auth: it is passed to claude; no login is stored in the image). The CLI's own login is an opt-in: add --fact chat_auth=login after the image name, with a mounted ~/.claude.
+# STOP: docker stop sends SIGTERM to the seat (PID 1, exec'd): it ends cleanly.
+ARG BASE=debian:bookworm-slim
 
-# the field engine is native (Rust): a build stage compiles the package into a wheel; the image installs only the
-# wheel (no Rust toolchain in the image)
-FROM python:3.12-slim AS build
-RUN apt-get update && apt-get install -y --no-install-recommends curl build-essential ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-ENV PATH="/root/.cargo/bin:${PATH}"
-WORKDIR /src
-COPY pyproject.toml setup.py README.md LICENSE ./
-COPY native ./native
-COPY membrane ./membrane
-RUN pip wheel --no-cache-dir --no-deps -w /wheels .
+# the dist folder: the local tarball is unpacked here (one top folder, the version) so the tarball itself is in no layer of the image
+FROM ${BASE} AS dist
+ARG VERSION=dev
+ARG TARGETARCH
+COPY docker-dist/ /tmp/docker-dist/
+RUN set -eu; case "${TARGETARCH:-amd64}" in amd64) t=x86_64-unknown-linux-gnu ;; arm64) t=aarch64-unknown-linux-gnu ;; *) echo "no binary for ${TARGETARCH}" >&2; exit 1 ;; esac; \
+    tar -xzf "/tmp/docker-dist/babyseat-${VERSION}-$t.tar.gz" -C /tmp/docker-dist; \
+    mv "/tmp/docker-dist/${VERSION}" /opt/babyseat; \
+    [ "$(cat /opt/babyseat/VERSION)" = "${VERSION}" ]
 
-FROM python:3.12-slim
-
+FROM ${BASE}
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="babyseat" \
-      org.opencontainers.image.description="babyseat (formerly membrane): a seat for AI with its own web UI and membrane, its memory field + proxy" \
+      org.opencontainers.image.description="babyseat (formerly membrane): a local-first seat for AI with a memory field (the Rust seat, cliffvm)" \
       org.opencontainers.image.source="https://github.com/chedim/membrane" \
       org.opencontainers.image.url="https://github.com/chedim/membrane" \
-      org.opencontainers.image.documentation="https://github.com/chedim/membrane/blob/main/docs/docker.md" \
+      org.opencontainers.image.documentation="https://github.com/chedim/membrane/blob/main/docs/packaging-plan.md" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}"
 
-# A container has no terminal, no browser and no git checkout to update:
-# the boot update-check, the skills auto-install into the workdir, the
-# browser launch and the interactive prompts are all off.
-ENV PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    MEMBRANE_NO_UPDATE_CHECK=1 \
-    MEMBRANE_NO_AUTOINSTALL=1 \
-    MEMBRANE_NO_BROWSER=1 \
-    MEMBRANE_NO_ASK=1
+# ca-certificates: the seat's https calls; curl: the healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /wheels /wheels
-RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels \
-    && python -c "from membrane import membrane_vm"
-# the recall reranker (#680), baked in (a container installs nothing at boot): CPU-only torch,
-# not GBs of CUDA; its model (bge-reranker-v2-m3) downloads into the /data volume on first boot
-RUN pip install --no-cache-dir --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install --no-cache-dir --only-binary=:all: sentence-transformers
+COPY --from=dist /opt/babyseat /opt/babyseat
 
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh \
-    && useradd --uid 10001 --home-dir /data --no-create-home --shell /bin/sh membrane \
+    && useradd --uid 10001 --home-dir /data --no-create-home --shell /usr/sbin/nologin membrane \
     && mkdir -p /data && chown membrane:membrane /data
 
-# HOME is the volume: the project field (/data/.membrane) and the per-user
-# state under ~/.membrane (auth.json, the global field, project env) both
-# persist. A bind mount must be writable by uid 10001; a named volume
-# inherits the ownership on first use.
+# the data: a named volume inherits this ownership on first use; a bind mount must be writable by uid 10001
 USER membrane
 ENV HOME=/data
 WORKDIR /data
 VOLUME /data
+EXPOSE 4096
 
-EXPOSE 4096 11500
+# /global/health answers 401 without a token and 200 with it: either says the door is up
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4096/global/health)" -ge 200 || exit 1
 
-# /membrane/state on the proxy answers without the model backend; the first
-# boot takes ~40-60 s and the first state query can be slow.
-HEALTHCHECK --interval=30s --timeout=30s --start-period=90s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:11500/membrane/state', timeout=25)" || exit 1
-
-# docker stop: the seat's teardown lease runs up to 90 s -- run with
-# --stop-timeout 60 (compose: stop_grace_period: 60s) or more.
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["standalone"]
+CMD []

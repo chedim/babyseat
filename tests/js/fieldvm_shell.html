@@ -1,0 +1,93 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- The shell gaps of the chat view pack (#1143): clock driver, scroll write, ordered children (`before`), `composing` on the key event, `document.hidden`.
+     Run by fieldvm_shell.test.mjs in headless Chrome. -->
+<style>[data-key="DomNode:t:log"], [data-key="DomNode:t:log2"] { height: 50px; overflow: auto; }</style>
+<body>
+<div id="mount"></div>
+<pre id="result">pending</pre>
+<script type="module">
+import { start } from '/membrane/apps/barest.c1f/ui/fieldvm.js';
+const frame = () => new Promise(r => setTimeout(r, 40));
+const res = {}; const step = (s) => { res.step = s; document.getElementById('result').textContent = JSON.stringify(res); };
+try {
+  step('start');
+  const host = await start(document.getElementById('mount'), { packs: {} });
+  res.errors = host.errors; host.schedule = (fn) => setTimeout(fn, 0);
+  const calls = [];
+  const fw = host.f.write.bind(host.f);
+  let sim = false;
+  host.f.write = (eid, prop, json, now) => { if (!sim) calls.push([eid, prop, json]); return fw(eid, prop, json, now); };
+  const pack = (eid, prop, v) => { sim = true; try { host.f.write(eid, prop, JSON.stringify(v), 1); } finally { sim = false; }
+    host.pending.push({ eid, prop, new: v }); host.flush(); };
+  const put = (eid, props) => { if (host.f.get(eid) === 'null') host.f.load(eid, 'DomNode', '{}');
+    for (const [k, v] of Object.entries(props)) pack(eid, k, v); };
+  const el = (k) => host.nodes.get(k);
+  const order = (k) => [...el(k).children].map(c => c.getAttribute('data-key').split(':').pop());
+
+  // 6. the clock driver: explicit start/stop, fake timers, no hidden timer
+  const fake = { fns: new Map(), n: 0, set(fn, ms) { this.fns.set(++this.n, { fn, ms }); return this.n; }, clear(id) { this.fns.delete(id); } };
+  host.timers = fake;
+  const ticks = []; const ft = host.f.tick.bind(host.f); host.f.tick = (t) => { ticks.push(t); return ft(t); };
+  res.clock = { before: fake.fns.size };
+  host.run_clock(700);
+  res.clock.after = [...fake.fns.values()].map(x => x.ms);
+  [...fake.fns.values()][0].fn(); [...fake.fns.values()][0].fn();
+  res.clock.ticks = ticks.length;
+  host.run_clock(100);
+  res.clock.restarted = [...fake.fns.values()].map(x => x.ms);
+  host.stop_clock();
+  res.clock.stopped = fake.fns.size;
+
+  // 7. a scroll write
+  put('DomNode:t:log', { tag: 'div' });
+  for (let i = 0; i < 20; i++) { put(`DomNode:t:log:r${i}`, { tag: 'div', parent: 'DomNode:t:log', text: 'row ' + i }); }
+  await frame();
+  const log = el('DomNode:t:log');
+  res.scroll = { start: log.scrollTop, canScroll: log.scrollHeight > log.clientHeight };
+  pack('DomNode:t:log', 'scroll', { top: 10 }); await frame();
+  res.scroll.top10 = log.scrollTop;
+  pack('DomNode:t:log', 'scroll', 'end'); await frame();
+  res.scroll.end = log.scrollHeight - log.clientHeight - log.scrollTop <= 1;
+  res.scroll.field = host.get('DomNode:t:log').scroll;
+  // a scroll write in the same batch as the rows it follows lands after them
+  put('DomNode:t:log2', { tag: 'div' }); await frame();
+  pack('DomNode:t:log2', 'scroll', 'end');
+  for (let i = 0; i < 20; i++) put(`DomNode:t:log2:r${i}`, { tag: 'div', parent: 'DomNode:t:log2', text: 'row ' + i });
+  await frame();
+  const l2 = el('DomNode:t:log2'); res.scroll.batch = l2.scrollHeight > l2.clientHeight && l2.scrollHeight - l2.clientHeight - l2.scrollTop <= 1;
+
+  // 8. ordered children: `before` is a sibling DomNode
+  put('DomNode:t:list', { tag: 'ol' });
+  put('DomNode:t:list:a', { tag: 'li', parent: 'DomNode:t:list' });
+  put('DomNode:t:list:b', { tag: 'li', parent: 'DomNode:t:list' });
+  await frame();
+  res.before = { start: order('DomNode:t:list') };
+  put('DomNode:t:list:c', { tag: 'li', parent: 'DomNode:t:list', before: 'DomNode:t:list:a' });
+  put('DomNode:t:list:d', { tag: 'li', parent: 'DomNode:t:list', before: 'DomNode:t:list:a' });
+  await frame();
+  res.before.batch = order('DomNode:t:list');
+  pack('DomNode:t:list:b', 'before', 'DomNode:t:list:c'); await frame();
+  res.before.moved = order('DomNode:t:list');
+  pack('DomNode:t:list:a', 'text', 'x'); await frame();
+  res.before.stable = order('DomNode:t:list');
+
+  // 9. composing on the key event
+  put('DomNode:t:ta', { tag: 'textarea' }); await frame();
+  const ta = el('DomNode:t:ta');
+  ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, cancelable: true }));
+  ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', cancelable: true }));
+  res.keys = calls.filter(c => c[0] === 'DomNode:t:ta' && c[1] === 'key').map(c => JSON.parse(c[2]).composing);
+
+  // 10. document.hidden
+  let hid = false;
+  Object.defineProperty(document, 'hidden', { get: () => hid, configurable: true });
+  host.track_hidden();
+  res.hidden = [host.get('Conn:page').hidden];
+  hid = true; document.dispatchEvent(new Event('visibilitychange'));
+  res.hidden.push(host.get('Conn:page').hidden);
+  hid = false; document.dispatchEvent(new Event('visibilitychange'));
+  res.hidden.push(host.get('Conn:page').hidden);
+  res.done = true; step('done');
+} catch (e) { res.error = String(e && e.stack || e); res.done = true; step('error'); }
+</script>

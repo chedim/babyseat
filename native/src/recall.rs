@@ -18,7 +18,7 @@ pub const HEADER: &str = "RECALL (membrane's field, best first; #N = event numbe
 pub fn defaults() -> Map<String, J> {
     let v = json!({
         "banner_n": 12, "pool": 50, "no_topic_min": 0.3, "fact_chars": 200, "recent_turns": 8, "history_turns": 1,
-        "dedupe_jaccard": 0.8, "rrf_k": 60, "entity_pool_max": 24, "rerank_top": 20, "rerank": true,
+        "dup_share": 0.8, "rrf_k": 60, "entity_pool_max": 24, "rerank_top": 20, "rerank": true, "assoc_n": 5, "assoc_clip": 200,
         "reply_keys": ["listener", "said", "about"], "header": HEADER,
         "weights": {
             "fit": "#942 (2026-11-08), LoCoMo conversations 2-9",
@@ -42,9 +42,9 @@ fn strs(v: &J) -> bool { v.as_array().map(|a| a.iter().all(|x| x.is_string())).u
 /// The guard setters, one per dial: may this value be set? (false = put the last accepted value back)
 pub fn guard(prop: &str, v: &J) -> bool {
     match prop {
-        "banner_n" | "pool" | "fact_chars" | "recent_turns" | "entity_pool_max" => count(v, 1),
+        "banner_n" | "pool" | "fact_chars" | "recent_turns" | "entity_pool_max" | "assoc_n" | "assoc_clip" => count(v, 1),
         "history_turns" | "rerank_top" => count(v, 0),
-        "no_topic_min" | "dedupe_jaccard" => num(v).map(|x| (0.0..=1.0).contains(&x)).unwrap_or(false),
+        "no_topic_min" | "dup_share" => num(v).map(|x| (0.0..=1.0).contains(&x)).unwrap_or(false),
         "rrf_k" => num(v).map(|x| x > 0.0).unwrap_or(false),
         "rerank" => v.is_boolean(),
         "header" => v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false),

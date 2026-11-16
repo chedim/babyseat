@@ -1,0 +1,17 @@
+{
+ "status": 200,
+ "body": {
+  "loops": "claude",
+  "cortex": "claude",
+  "loops_auth": "chat",
+  "cortex_auth": "chat",
+  "models": [
+   "claude"
+  ],
+  "claude": [
+   "claude"
+  ],
+  "chat_auth": "api-key",
+  "picked": true
+ }
+}

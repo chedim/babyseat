@@ -1,0 +1,49 @@
+PACK semtext 1
+VIRTUAL Span
+-- SEMTEXT (#1143, docs/semtext-and-legs.md): TEXT IS A FLAT STRING WITH LABELS ON TOP. `SemText` is a CLASS: an entity of any eid is one
+-- when a write makes it, explicitly, with a constructor: `membrane::Chat:message[id]:body = SemText(text: ...)` (the chat's message body),
+-- `Command:tests:output = SemText(text: ...)` (a model's pack: a sensor's leg).
+--   text         the ONE stored string (a write of it recomputes every layer below)
+--   sentences words identifiers paths urls numbers
+--                the layers: `[{start, end, text}]`, offsets in chars, each recomputed when `text` changes. They are getters over the
+--                native tokenizer (`spans`, docs/c1f-stdlib.md): the tokenizer is INTERNAL to this pack: a model reads these properties
+--                and never calls `spans` itself (Help:semtext does not teach it).
+-- STORAGE: the default, lazy. A body is stored and loaded when it is first referenced, like the message it belongs to; making it RESIDENT would load
+-- every text ever said at start.
+-- The span ENTITIES (virtual children of the text) are in the same pack, below.
+
+SemText.sentences getter: spans(this.text, 'sentence')
+SemText.words getter: spans(this.text, 'word')
+SemText.identifiers getter: spans(this.text, 'identifier')
+SemText.paths getter: spans(this.text, 'path')
+SemText.urls getter: spans(this.text, 'url')
+SemText.numbers getter: spans(this.text, 'number')
+
+-- ---- the span ENTITIES (virtual children of a text) ----------------------------------------------------------------------------------
+-- A part of a text becomes an entity only when something wants one: a write of `attach` on the SemText,
+--   `<semtext>.attach = {layer: 'word', start: 5}`     (layer: sentence word identifier path url number; start: the span's offset in chars)
+-- makes `Span:of:<semtext key>:<letter>:<start>` (letters s w i p u n; the key is the text's eid with `::` written `/`, so the class of the
+-- eid is Span) with `of` (the SemText), `layer`, `start`, `end`. `Span` is VIRTUAL: never stored, never journalled, never restored. It is
+-- COLLECTED (docs/cliffvm.md, "Garbage collection of virtual entities") at the end of the round nothing holds it, and what holds it is a
+-- `$ref` value: the receipt `attach_result` of the write (it holds the span of the LAST attach: the next attach lets the earlier one go)
+-- or any live entity that keeps it (`Reader.keep = <span>`); a mention edge (mentions.c1f) is one. The span's `text` is a getter that cuts the
+-- parent's text by the offsets (`armed` is written right after the birth: a getter of a span that waits for it, mentions.c1f `forms`, then computes from a
+-- value that CHANGES, which is what a setter on a getter hears; a birth alone runs no setter): there is no second copy of the string, and a change of the parent's text shows in it (re-attach after an
+-- edit to be sure the offsets still name a token). The key is the START OFFSET, not a list index: c1f has no enumerate, and (layer, start)
+-- is unique, because a layer's spans never overlap.
+SemText.skey getter: replace(this.eid, '::', '/')
+SemText.attach on-setter attach-span:
+  WHEN this.attach != None:
+    layer = str(prop(this.attach, 'layer'))
+    plural = {'sentence': 'sentences', 'word': 'words', 'identifier': 'identifiers', 'path': 'paths', 'url': 'urls', 'number': 'numbers'}[layer]
+    letter = {'sentence': 's', 'word': 'w', 'identifier': 'i', 'path': 'p', 'url': 'u', 'number': 'n'}[layer]
+    start = prop(this.attach, 'start')
+    FOR row IN [r for r in prop(this.eid, plural) if r['start'] == start]:
+      Span:of[this.skey][letter][start] = Span(of: this, layer: layer, start: start, end: row['end'])
+      Span:of[this.skey][letter][start].armed = True
+      this.attach_result = Span:of[this.skey][letter][start]
+
+Span.text getter: head(tail(prop(this.of, 'text'), len(prop(this.of, 'text')) - this.start), this.end - this.start)
+-- the lemma of a span: the form a word is counted under. Lowercase only, no stemming (operator decision); a CLASS of the span changes it
+-- (mentions.c1f: `SemPlural.lemma`), nearest class first.
+Span.lemma getter: lower(this.text)

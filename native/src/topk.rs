@@ -229,6 +229,7 @@ impl VecStore {
     pub fn near(&mut self, q: &[f32], k: usize) -> Vec<(String, f32)> {
         if let Some((cq, ck, cg, r)) = &self.cache { if *cg == self.gen && *ck == k && cq.as_slice() == q { return r.clone(); } }
         self.computes += 1;
+        #[allow(unused_mut)]
         let mut sc: Option<Vec<f32>> = None;
         #[cfg(feature = "metal")]
         if let Some(g) = self.gpu.as_mut() {

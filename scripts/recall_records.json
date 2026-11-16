@@ -1,0 +1,26 @@
+{
+ "note": "Recorded recall numbers from docs/measurements-2026-11-14.md (copied, not re-measured). Cells left out were not recorded. 'convs' decides what is comparable with a run: only records on the same conversations are compared per cell; the others are listed apart.",
+ "records": [
+  {"name": "old engine, document arm (R11)", "convs": [0, 1], "source": "doc section 3(a), old hit@8/@20 (lenient only; n 43/63/13/114, so n differs from the new rows by up to 2 questions)",
+   "per_cat": {
+    "multi-hop": {"lenient@8": 0.56, "lenient@20": 0.72}, "temporal": {"lenient@8": 0.84, "lenient@20": 0.94},
+    "open-domain": {"lenient@8": 0.46, "lenient@20": 0.62}, "single-hop": {"lenient@8": 0.60, "lenient@20": 0.70},
+    "all": {"lenient@8": 0.65, "lenient@20": 0.76}}},
+  {"name": "edges, first run (20 rows asked, deduplicated to texts)", "convs": [0, 1], "source": "doc section 3(a); lenient only; superseded by the distinct-turn rerun",
+   "per_cat": {
+    "multi-hop": {"lenient@1": 0.12, "lenient@3": 0.17, "lenient@8": 0.29, "lenient@20": 0.43},
+    "temporal": {"lenient@1": 0.59, "lenient@3": 0.78, "lenient@8": 0.84, "lenient@20": 0.87},
+    "open-domain": {"lenient@1": 0.18, "lenient@3": 0.18, "lenient@8": 0.18, "lenient@20": 0.36},
+    "single-hop": {"lenient@1": 0.32, "lenient@3": 0.46, "lenient@8": 0.52, "lenient@20": 0.56},
+    "all": {"lenient@1": 0.35, "lenient@3": 0.48, "lenient@8": 0.55, "lenient@20": 0.61}}},
+  {"name": "edges, distinct-turn rerun (200 rows asked)", "convs": [0, 1], "source": "doc section 3(a2); lenient and strict",
+   "per_cat": {
+    "multi-hop": {"lenient@1": 0.12, "lenient@3": 0.17, "lenient@8": 0.29, "lenient@20": 0.50, "lenient@all": 0.79, "strict@1": 0.00, "strict@3": 0.00, "strict@8": 0.02, "strict@20": 0.07, "strict@all": 0.36},
+    "temporal": {"lenient@1": 0.59, "lenient@3": 0.78, "lenient@8": 0.84, "lenient@20": 0.87, "lenient@all": 0.95, "strict@1": 0.59, "strict@3": 0.78, "strict@8": 0.84, "strict@20": 0.87, "strict@all": 0.95},
+    "open-domain": {"lenient@1": 0.18, "lenient@3": 0.18, "lenient@8": 0.18, "lenient@20": 0.36, "lenient@all": 0.73, "strict@1": 0.00, "strict@3": 0.00, "strict@8": 0.00, "strict@20": 0.09, "strict@all": 0.45},
+    "single-hop": {"lenient@1": 0.32, "lenient@3": 0.46, "lenient@8": 0.52, "lenient@20": 0.64, "lenient@all": 0.78, "strict@1": 0.31, "strict@3": 0.43, "strict@8": 0.50, "strict@20": 0.63, "strict@all": 0.76},
+    "all": {"lenient@1": 0.35, "lenient@3": 0.48, "lenient@8": 0.55, "lenient@20": 0.67, "lenient@all": 0.83, "strict@1": 0.31, "strict@3": 0.43, "strict@8": 0.48, "strict@20": 0.57, "strict@all": 0.73}}},
+  {"name": "fitted vote after memspeak (R10, 10 conversations, @1 only)", "convs": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "source": "doc section 3(a): another subset and another algorithm; category names assumed from the LoCoMo paper",
+   "per_cat": {"single-hop": {"lenient@1": 0.47}, "multi-hop": {"lenient@1": 0.39}, "temporal": {"lenient@1": 0.57}, "open-domain": {"lenient@1": 0.35}}}
+ ]
+}

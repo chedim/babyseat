@@ -1,0 +1,106 @@
+PACK entityrecall 1
+IMPORT semtext 1
+IMPORT mentions 1
+IMPORT vector 1
+IMPORT field 1
+-- ENTITY RECALL BY WORLDLINE (#1143, step 5 of the semantic field on SemText; docs/semtext-and-legs.md "The field", "Entity recall"). The old membrane's entity recall voter, in c1f.
+-- For the ask (a SemText whose `recall_on` is true), ONE getter: `SemText.entity_votes`, the texts that moved the entities nearest the ask, best first, as rows `{key, of, text, score}`
+-- (`key` = the text's eid + '#' + the start of its sentence, the row shape of the other lanes of `recall`, packs/mentions.c1f). The vote of `recall` reads it (packs/mentions.c1f `r_ballots`, weight `ent_weight`).
+--   THE QUERY is the cosine lane's: `r_query` (the weighted sum of the window's text vectors).
+--   CANDIDATES: the entities of the `ent_over` x `ent_k` states nearest the query (`near(q, 'FieldState', n)`), and the owners of the `ent_over` x `ent_k` episodes nearest it
+--     (`near(q, 'FieldEpisode', n)`: an old entity whose state moved away is found by an old phase). `near` is a plain cosine over the stored vectors, so the candidates come
+--     from the raw query; the re-score below is centred.
+--   THE WORLDLINE of a candidate (its points): a YOUNG entity (fewer than `field_mature` mentions, or no episode yet) is its MEAN; an OLD one is its episodes, its open run (`run_acc` /
+--     `run_k`) and, while the episodes and the run hold less than `ent_cover` of its mentions, its mean too (the life before the episodes). The mean is not stored: it is
+--     recomputed here, for the candidates only, as the mean of the unit vectors of the sentences that moved the entity (its `mentioned_in` entries whose text has applied that
+--     sentence, `field_n`); with no such vector the state stands in.
+--   THE SCORE of a candidate: the best, over its points, of dot(unit(p - bg), unit(q - bg)), bg the background `FieldBg:all` (without one, or of another length: no centring).
+--     The `ent_k` best, ties by the entity's eid. No score cut-off.
+--   THE EVIDENCE (the old `evidence` / `entity_scores`): every text that moved one of those entities (its `mentioned_in` texts, their `field_moves`) scores the sum over the
+--     entities of (the entity's score x the move the text made of it, summed over its sentences). The row's sentence is the one that holds the largest part of that sum (ties: the
+--     first). The ask itself is never a row. The `ent_depth` best, ties by key.
+--   COST: computed only while `recall_on` is true; one stage per getter (each evaluation has its own step budget).
+--   THE CONSTANTS are getters on SemText a model's layer can override: `ent_k` 8 and `ent_depth` 20 (approved), `ent_over` 4 and `ent_cover` 0.9 (the old seat's, awaiting the operator's yes).
+
+SemText.ent_k getter: 8
+SemText.ent_over getter: 4
+SemText.ent_depth getter: 20
+SemText.ent_cover getter: 0.9
+-- this voter's weight in the vote (`SemText.r_ballots`, packs/mentions.c1f; the old seat's, approved by the operator 2026-11-11)
+SemText.ent_weight getter: 0.75
+
+-- ---- the query, the background, the centred query --------------------------------------------------------------------------------------------------------------------
+SemText.ent_q getter:
+  WHEN this.recall_on != True: None
+  ELSE: this.r_query
+SemText.ent_bg getter:
+  WHEN not (this.ent_q is List): None
+  ELSE:
+    bg = prop('FieldBg:all', 'v')
+    bg if bg is List and len(bg) == len(this.ent_q) else None
+SemText.ent_qc getter:
+  WHEN not (this.ent_q is List): None
+  ELSE WHEN this.ent_bg != None: unit(this.ent_q - this.ent_bg)
+  ELSE: unit(this.ent_q)
+
+-- ---- the candidates: the entities of the nearest states and of the nearest episodes --------------------------------------------------------------------------------------
+-- `near` answers a list, a reasoned null (no vector in the class yet) or an Error (a query of another length: it says why, as the cosine lane's `r_cos_raw` does); the
+-- candidates read only a list, so a missing or failed search is an empty one and the votes are empty, never an error
+SemText.ent_near_states getter: near(this.ent_q, 'FieldState', this.ent_over * this.ent_k) if this.ent_q is List else None
+SemText.ent_near_eps getter: near(this.ent_q, 'FieldEpisode', this.ent_over * this.ent_k) if this.ent_q is List else None
+SemText.ent_cands getter:
+  WHEN this.recall_on != True: None
+  ELSE:
+    of_s = [prop(h['eid'], 'of') for h in this.ent_near_states] if this.ent_near_states is List else []
+    of_e = [prop(h['eid'], 'of') for h in this.ent_near_eps] if this.ent_near_eps is List else []
+    distinct([e for e in concat(of_s, of_e) if e != None and prop('FieldState:' + e, 'v') is List])
+-- what each candidate is: old (mature, with an episode) or young; whether its mean is one of its points
+SemText.ent_info getter:
+  WHEN this.ent_cands == None: None
+  ELSE:
+    mat = this.field_mature
+    cov = this.ent_cover
+    rows = [{'e': e, 'st': 'FieldState:' + e, 'n': prop('FieldState:' + e, 'n') or 0, 'eps': prop('FieldState:' + e, 'eps') or [], 'rk': prop('FieldState:' + e, 'run_k') or 0} for e in this.ent_cands]
+    [{'e': r['e'], 'st': r['st'], 'n': r['n'], 'eps': r['eps'], 'rk': r['rk'], 'old': r['n'] >= mat and len(r['eps']) > 0, 'mean': not (r['n'] >= mat and len(r['eps']) > 0) or dot([x['n'] for x in r['eps']], [1 for x in r['eps']]) + r['rk'] < cov * r['n']} for r in rows]
+
+-- ---- the means, recomputed for the candidates that need one: the applied mentions (the text's `field_n` is past the sentence), then their sentence vectors ----------------
+-- each text keeps the vector ids of its APPLIED sentences by sentence number (`ent_vids`, recomputed when the field moves on: once per text, not per ask), so a candidate's
+-- mentions become vector ids by one `props` (the id at each mention's sentence; a sentence not applied yet is past the end: a null) and its mean is one `vmean` (the mean of
+-- the unit vectors; a mention with no vector is skipped): a few steps a candidate however many mentions it has. A candidate with no vector has no mean.
+SemText.ent_vids getter: ['Vector:of:' + this.skey + ':s:' + str(s['start']) for s in head(this.sentences or [], this.field_n or 0)]
+SemText.ent_means getter:
+  WHEN this.ent_info == None: None
+  ELSE:
+    ms = [{'e': r['e'], 'mi': prop(r['e'], 'mentioned_in') or []} for r in this.ent_info if r['mean']]
+    [x for x in [{'e': r['e'], 'm': vmean(props(pluck(r['mi'], 'text'), pluck(r['mi'], 'sentence'), 'ent_vids'))} for r in ms] if x['m'] is List]
+
+-- ---- the score of each candidate: its best point, centred; the `ent_k` best entities -----------------------------------------------------------------------------------
+SemText.ent_scored getter:
+  WHEN this.ent_info == None or this.ent_means == None: None
+  ELSE:
+    q = this.ent_qc
+    bg = this.ent_bg
+    means = this.ent_means
+    rows = [{'e': r['e'], 'old': r['old'], 'ep': concat([prop(x['e'], 'v') for x in r['eps']], [prop(r['st'], 'run_acc') / r['rk']] if r['rk'] > 0 and prop(r['st'], 'run_acc') is List else []) if r['old'] else [], 'own': [m['m'] for m in means if m['e'] == r['e']] if r['mean'] else [], 'v': prop(r['st'], 'v')} for r in this.ent_info]
+    pts = [{'e': r['e'], 'p': [p for p in (concat(r['ep'], r['own']) if r['old'] else (r['own'] if len(r['own']) > 0 else [r['v']])) if p is List]} for r in rows]
+    [{'e': x['e'], 's': max([dot(unit(p - bg) if bg != None else unit(p), q) for p in x['p']])} for x in pts if len(x['p']) > 0]
+SemText.entity_hits getter:
+  WHEN this.ent_scored == None: None
+  ELSE: head(sort_by(sort_by(this.ent_scored, 'e'), 's', True), this.ent_k)
+
+-- ---- the evidence: the texts that moved those entities, by the sum of (score x move) --------------------------------------------------------------------------------------
+-- (entity, text) pairs: each text of the entity's `mentioned_in` once, the ask left out
+SemText.ent_pairs getter:
+  WHEN this.entity_hits == None: None
+  ELSE: fold([], [concat(acc, [{'e': h['e'], 's': h['s'], 't': t} for t in distinct([x['text'] for x in (prop(h['e'], 'mentioned_in') or [])]) if t != this.eid]) for h in this.entity_hits])
+-- each move a text made of a hit entity, as its part of the text's score
+SemText.ent_parts getter:
+  WHEN this.ent_pairs == None: None
+  ELSE: fold([], [concat(acc, [{'k': p['t'] + '#' + str(r['s']), 't': p['t'], 'n': r['s'], 'w': p['s'] * r['m']} for r in (prop(p['t'], 'field_moves') or []) if r['e'] == p['e'] and r['m'] != None]) for p in this.ent_pairs])
+SemText.entity_votes getter:
+  WHEN this.ent_parts == None: None
+  ELSE:
+    sents = [{'t': g['rows'][0]['t'], 'n': g['rows'][0]['n'], 'w': dot([x['w'] for x in g['rows']], [1 for x in g['rows']])} for g in group_by(this.ent_parts, 'k')]
+    evs = [{'t': g['key'], 'score': dot([x['w'] for x in g['rows']], [1 for x in g['rows']]), 'n': sort_by(sort_by(g['rows'], 'n'), 'w', True)[0]['n']} for g in group_by(sents, 't')]
+    rows = [{'key': x['t'] + '#' + str(prop(prop(x['t'], 'sentences')[x['n']], 'start')), 'of': x['t'], 'text': prop(prop(x['t'], 'sentences')[x['n']], 'text'), 'score': x['score']} for x in evs]
+    head(sort_by(sort_by(rows, 'key'), 'score', True), this.ent_depth)

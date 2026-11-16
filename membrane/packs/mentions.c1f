@@ -1,0 +1,385 @@
+PACK mentions 1
+IMPORT semtext 1
+IMPORT fetch 1
+-- MENTIONS (#1143, docs/semtext-and-legs.md): the rules (in c1f, so a model can layer over them) that turn the spans of a text into
+-- classes, entities and edges. THIS PART: the FORM CLASSES of a span.
+--
+-- A span that is attached (`SemText.attach`, semtext.c1f) is classified at once: its `parents` list is written, nearest class first, the
+-- class `span` last. A word span carries SEVERAL classes; the first class whose getter answers a property wins (docs/c1f-layers.md), so
+-- `SemPlural.lemma` beats the default `Span.lemma`, and a model's pack that IMPORTs mentions and defines `SemPlural.lemma` is the
+-- upper layer and beats both.
+--   layer word:        SemNumber (the word is a `number` span: digits, 3.5, 1,000)
+--                      SemPlural (CRUDE, English only: more than 3 letters, ends in s, not ss / us / is: `cats` `boxes` `cities`; `bus` `class` are not)
+--                      SemAllCaps (two letters or more; the first two and the last two letters are upper case: `NASA`)
+--                      SemCapital (first letter upper case, not all caps, NOT the first word of a sentence: `Rex`, not `Dogs bark`'s `Dogs`)
+--   layer identifier:  SemIdentifier        layer path: SemPath        (url, number and sentence spans have no form class)
+-- `form` names the nearest form class in one word; a class's other getters are its own (`lemma`).
+-- The lemma of a plural strips the plural suffix by a crude rule: `ies` -> `y`, `ses` `xes` `zes` `ches` `shes` -> drop `es`, else drop `s`
+-- (`houses` -> `hous`: a rule, not a dictionary; the model overrides it in a layer).
+
+SemNumber.form getter: 'number'
+SemPlural.form getter: 'plural'
+SemAllCaps.form getter: 'allcaps'
+SemCapital.form getter: 'capital'
+SemIdentifier.form getter: 'identifier'
+SemPath.form getter: 'path'
+
+SemPlural.lemma getter:
+  WHEN tail(lower(this.text), 3) == 'ies': head(lower(this.text), len(this.text) - 3) + 'y'
+  ELSE WHEN tail(lower(this.text), 3) in ['ses', 'xes', 'zes'] or tail(lower(this.text), 4) in ['ches', 'shes']: head(lower(this.text), len(this.text) - 2)
+  ELSE: head(lower(this.text), len(this.text) - 1)
+
+Span.f_number getter: 'cls:semnumber' if this.layer == 'word' and len([n for n in prop(this.of, 'numbers') if n['start'] == this.start and n['end'] == this.end]) > 0 else None
+Span.f_plural getter: 'cls:semplural' if this.layer == 'word' and this.f_number == None and len(this.text) > 3 and tail(lower(this.text), 1) == 's' and tail(lower(this.text), 2) not in ['ss', 'us', 'is'] else None
+-- c1f cannot walk a text letter by letter, so the rule looks at four letters: the first two and the last two are all upper case (`NASA`, `OK`, `HTTP`; `HTTP2` is not, `McDonald` is not, `ABcD` is, a known crude edge)
+Span.f_allcaps getter: 'cls:semallcaps' if this.layer == 'word' and len(this.text) >= 2 and head(this.text, 2) != lower(head(this.text, 2)) and tail(this.text, 2) != lower(tail(this.text, 2)) and head(this.text, 1) != lower(head(this.text, 1)) and tail(this.text, 1) != lower(tail(this.text, 1)) else None
+Span.f_initial getter: len([s for s in prop(this.of, 'sentences') if s['start'] == this.start]) > 0
+Span.f_capital getter: 'cls:semcapital' if this.layer == 'word' and this.f_allcaps == None and not this.f_initial and head(this.text, 1) != lower(head(this.text, 1)) else None
+Span.forms getter:
+  WHEN this.armed != True: None
+  ELSE WHEN this.layer == 'word': concat([c for c in [this.f_number, this.f_plural, this.f_allcaps, this.f_capital] if c != None], ['cls:span'])
+  ELSE WHEN this.layer == 'identifier': ['cls:semidentifier', 'cls:span']
+  ELSE WHEN this.layer == 'path': ['cls:sempath', 'cls:span']
+  ELSE: ['cls:span']
+
+-- A span is classified when its `forms` arrive: a setter on the getter's own property (the way a getter's value is heard, `Request.ev_snap` in
+-- chat.c1f) writes the class list, nearest class first, `span` last. (A birth runs no setter and the getters of an entity born in a round
+-- are computed when it ends, so a setter of the attach or of a `classify` write would read them as nothing.) A change of the text that changes
+-- the forms re-classifies the span; `forms` does not read `parents`, so the write does not come back.
+Span.forms on-setter classify-span:
+  WHEN this.forms != None:
+    this.parents = this.forms
+    this.classified = True
+
+SemIdentifier.lemma getter: this.text
+SemPath.lemma getter: this.text
+
+-- ---- the mentions: spans -> Word / Identifier / Path entities and the edges ------------------------------------------------------------
+-- `<semtext>.mention = <any value but null>` (the chat writes it on a new body; a model's pack writes it on a leg of its own) asks for the mentions of a text.
+-- WHAT IT DOES, in order, all inside the one cascade of that write:
+--   1. births an ARMED span (semtext.c1f) for each word, identifier and path of the text: the first MENTION_CAP of each layer (a word span that lies
+--      inside an identifier, a path or a url is skipped: `my_fn` is an Identifier, not a Word);
+--   2. each span classifies itself (above) and so knows its `lemma`: words by their lowercase form and their class (`dogs` -> `dog`), identifiers and paths
+--      by their exact text; `target` is the EDGE from the span to the entity it mentions (a `$ref` value): `Word:lemma:<lemma>`, `Identifier:name:<text>`,
+--      `Path:path:<text>` (not File: a `File` entity reads the disk and is RESIDENT, a mention must not);
+--   3. when every span is classified, `mention_table` groups them by entity and ONE setter makes each entity by a constructor (K = 1: every word becomes an
+--      entity at its first mention; a stored entity stays, nothing collects Words) and writes its `mentioned_in`, the edge FROM the entity:
+--      `[{text: <SemText eid>, sentence: <sentence number>}]`, one entry per (text, sentence), no copy of any text. Writing again replaces the text's own entries (no duplicates).
+--      The SemText keeps the edge the other way too: `mentions`, the list of the entities it mentions (`$ref` values).
+--   4. the spans are held by nothing (virtual): the engine collects them when the cascade ends. The durable edges are the `mentioned_in` lists and the SemTexts.
+-- COST of one mention of a text with W words, I identifiers and P paths: at most 2 x MENTION_CAP + ... spans (virtual, transient) and, for the distinct lemmas D,
+-- at most D new stored entities (D <= W) with one write of `mentioned_in` each. A 300-word message makes at most 300 transient spans and at most 300 new Word
+-- entities (a common word is already there: it costs only its list entry). `mentioned_in` of a very common word grows by one entry per text that holds it.
+-- MENTION_CAP is a threshold FLAGGED FOR THE OPERATOR (no value was given): 400 per layer.
+SemText.mention_cap getter: 400
+
+SemText.mention on-setter mention-spans:
+  WHEN this.mention != None:
+    cap = this.mention_cap
+    inner = concat(concat(this.identifiers, this.paths), this.urls)
+    ws = head([w for w in this.words if len([c for c in inner if c['start'] <= w['start'] and w['end'] <= c['end']]) == 0], cap)
+    ids = head(this.identifiers, cap)
+    ps = head(this.paths, cap)
+    this.mention_n = len(ws) + len(ids) + len(ps)
+    this.mention_spans = concat([{'l': 'w', 'start': r['start']} for r in ws], [{'l': 'i', 'start': r['start']} for r in ids], [{'l': 'p', 'start': r['start']} for r in ps])
+    FOR r IN ws:
+      Span:of[this.skey]['w'][r['start']] = Span(of: this, layer: 'word', start: r['start'], end: r['end'])
+      Span:of[this.skey]['w'][r['start']].armed = True
+    FOR r IN ids:
+      Span:of[this.skey]['i'][r['start']] = Span(of: this, layer: 'identifier', start: r['start'], end: r['end'])
+      Span:of[this.skey]['i'][r['start']].armed = True
+    FOR r IN ps:
+      Span:of[this.skey]['p'][r['start']] = Span(of: this, layer: 'path', start: r['start'], end: r['end'])
+      Span:of[this.skey]['p'][r['start']].armed = True
+
+Span.sentence_no getter: len([s for s in prop(this.of, 'sentences') if s['start'] <= this.start]) - 1
+Span.target getter:
+  WHEN this.classified != True: None
+  ELSE WHEN this.layer == 'word': Word:lemma[this.lemma]
+  ELSE WHEN this.layer == 'identifier': Identifier:name[this.lemma]
+  ELSE WHEN this.layer == 'path': Path:path[this.lemma]
+  ELSE: None
+
+-- the classified spans of this text, as rows; only while a mention is under way (a text that was mentioned, or never, reads nothing of the spans). It reads the spans the
+-- setter listed (`mention_spans`: layer letter + start), not every Span of the field, and their `forms` (that puts it above the spans' own getters in the level order, so it
+-- waits for all of them: about one evaluation per span, not one per span that classifies)
+-- `mentioned` is the `mention` value last finished (written ONCE per mention, by `record-mentions`: a field write a round already made is refused, so the setter above does not reset it): a new value of `mention` is a mention under way again.
+SemText.mention_done getter:
+  WHEN this.mention == None or this.mentioned == this.mention: []
+  ELSE: [{'id': s.layer + ':' + s.lemma, 'layer': s.layer, 'k': s.lemma, 'sent': s.sentence_no} for s in [Span:of[this.skey][r['l']][r['start']] for r in (this.mention_spans or [])] if s.forms != None and s.classified == True]
+SemText.mention_table getter:
+  WHEN this.mention_n == None or this.mention_n == 0 or len(this.mention_done) != this.mention_n: None
+  ELSE: group_by(this.mention_done, 'id')
+
+SemText.mention_table on-setter record-mentions:
+  WHEN this.mention_table != None:
+    FOR g IN [g for g in this.mention_table if g['rows'][0]['layer'] == 'word']:
+      k = g['rows'][0]['k']
+      Word:lemma[k] = Word(lemma: k)
+      Word:lemma[k].mentioned_in = concat([e for e in (prop('Word:lemma:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
+    FOR g IN [g for g in this.mention_table if g['rows'][0]['layer'] == 'identifier']:
+      k = g['rows'][0]['k']
+      Identifier:name[k] = Identifier(name: k)
+      Identifier:name[k].mentioned_in = concat([e for e in (prop('Identifier:name:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
+    FOR g IN [g for g in this.mention_table if g['rows'][0]['layer'] == 'path']:
+      k = g['rows'][0]['k']
+      Path:path[k] = Path(path: k)
+      Path:path[k].mentioned_in = concat([e for e in (prop('Path:path:' + k, 'mentioned_in') or []) if e['text'] != this.eid], [{'text': this.eid, 'sentence': n} for n in distinct([r['sent'] for r in sort_by(g['rows'], 'sent')])])
+    this.mentions = concat([Word:lemma[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'word'], [Identifier:name[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'identifier'], [Path:path[g['rows'][0]['k']] for g in this.mention_table if g['rows'][0]['layer'] == 'path'])
+    this.mentioned = this.mention
+
+-- how many texts mention an entity
+Word.texts getter: len(this.mentioned_in or [])
+Identifier.texts getter: len(this.mentioned_in or [])
+Path.texts getter: len(this.mentioned_in or [])
+-- the edges of an entity as JSON rows (`SemText.related` below): built ONCE per entity, when its `mentioned_in` changes, not once per ask; `w` = 1 / the number of its entries
+Word.edge_rows getter: join([str({'key': e['text'] + '#' + str(e['sentence']), 'text': e['text'], 'sent': e['sentence'], 'w': 1 / len(this.mentioned_in)}) for e in this.mentioned_in], ',') if this.mentioned_in else ''
+Identifier.edge_rows getter: join([str({'key': e['text'] + '#' + str(e['sentence']), 'text': e['text'], 'sent': e['sentence'], 'w': 1 / len(this.mentioned_in)}) for e in this.mentioned_in], ',') if this.mentioned_in else ''
+Path.edge_rows getter: join([str({'key': e['text'] + '#' + str(e['sentence']), 'text': e['text'], 'sent': e['sentence'], 'w': 1 / len(this.mentioned_in)}) for e in this.mentioned_in], ',') if this.mentioned_in else ''
+
+-- ---- RECALL BY EDGES: `SemText.related` ----------------------------------------------------------------------------------------------
+-- Which OTHER sentences, in other texts, mention the same things? Ask by writing the dial on a text:  `<semtext>.related_n = 5`  and read  `<semtext>.related`
+-- (entity_read, or `prop(<semtext>, 'related')` in run_cliff): at most `related_n` rows `{semtext, sentence_index, text, shared}`, best first.
+--   * The edges followed are the text's `mentions` (its Word / Identifier / Path entities) and their `mentioned_in` lists: nothing is searched, nothing is embedded.
+--   * `shared` is the number of the text's entities that sentence mentions (a plain count: the rows are the sentences that hold at least one).
+--   * THE RANK is frequency-weighted: each shared entity counts 1 / (the number of entries in its `mentioned_in`), so `the`, mentioned everywhere, adds almost
+--     nothing and a word two texts have between them adds half (the old BOILERPLATE idea: a word's weight falls with how often it is said). The sum is
+--     `dot(weights, ones)` (c1f has no sum). Ties keep the order the edges came in. No threshold: the divisor is the count itself.
+--   * It is computed only while `related_n` is set (a getter is eager: with no dial nothing is read, and no row of text or entity is touched). `related_n` has NO default: the
+--     asker says how many. A text that was never mentioned (no `mentions`) answers null.
+--   * COST: it reads the cached `edge_rows` of every entity of the text (built once per entity, not per ask), so a very common word makes it linear in the number of entries of that word; one evaluation
+--     past the step budget answers a reasoned null (`budget exceeded`), never a wrong list. Flagged for the operator: whether very common entities should be skipped by a cut.
+--   * The edges are flattened through JSON text (c1f has no nested comprehension): each entity makes the text of its rows (`edge_rows`), the texts are joined and parsed once; the asking text's own rows are dropped after the grouping.
+SemText.related getter:
+  WHEN this.related_n == None or this.mentions == None: None
+  ELSE:
+    parts = [prop(m, 'edge_rows') for m in this.mentions]
+    hj = json('[' + join([p for p in parts if p != ''], ',') + ']')
+    hits = None if hj is Error else hj
+    rows = [{'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'shared': len(g['rows']), 'score': dot([r['w'] for r in g['rows']], [1 for r in g['rows']])} for g in group_by(hits, 'key') if g['rows'][0]['text'] != this.eid]
+    [{'semtext': r['text'], 'sentence_index': r['sent'], 'text': prop(prop(r['text'], 'sentences')[r['sent']], 'text'), 'shared': r['shared']} for r in head(sort_by(rows, 'score', True), this.related_n)]
+
+-- ---- RECALL: what a text reminds of, ONE getter for every reader: `SemText.recall` (#1143, operator 2026-11-15) ------------------------------------------
+-- The banner part (`Banner:recall`, apps/barest.c1f/recall.c1f) reads it on the message a turn answers; a `Memory` note (below) reads it on itself. The ASK is the SemText; the caller gives
+-- no list of texts: the recall finds the rest in the graph. It is computed only while `recall_on` is true (a getter is eager: the banner writes it on its ask and takes it off the one before; a Memory is always on).
+--   THE WINDOW: a chat text (`<message>:body` or `<message>:turn:response:body`) reads the chat's texts counting back from itself, in chat order (newest first: the ask, the answer
+--     before it, that message, the answer before that, ...): the message keys of the chat come from the store's key order (key order is time order inside a chat, docs/chat-keys.md), the
+--     bodies are read by their ids. Any other text (a Memory note, a leg of a pack) is a window of itself alone. A text that is not there (a turn that never answered) is skipped.
+--     WEIGHTS: the k-th text back counts `r_ratio`^k (`r_weights`; the ask 1, then 1/2, 1/4, ...): the ratio is a getter a layer overrides, and the length of `r_weights` is the window's (6 texts).
+--   EDGES   the sentences that mention the Word / Identifier / Path entities of the window's texts: a shared entity adds (the weight of the window text that mentions it) x 1 / (the number
+--           of sentences that mention it) (`edge_rows`, above), at most `entity_pool_max` (a dial).
+--   COSINE  the sentences whose vectors are nearest the QUERY, at most `pool` (a dial): `near(r_query, 'Vector', pool)`; absent while there is no vector. The query is the weighted sum
+--           (`r_weights`) of the window's texts' vectors, each the unit of the sum of the text's sentence vectors; the ask's own come from its own embedding call (below) until its sentence
+--           vectors are made.
+--   THE VOTE (below): weighted Borda over the ballots of the move log (`movelog_votes`), entity recall (`entity_votes`), the cosine lane and the edge lane, ties by key;
+--   RERANK of the first `rerank_top` rows by the fitted weights `weights.legacy` over sim (the cosine score), inv_rank (1 / the voted place)
+--           and overlap (the share of the ask's own entities the sentence mentions); the features this seat does not have are 0, as the old seat scored a row the models had not scored.
+--   THE ASK ITSELF is never a hit; nothing else is left out (recent chat texts are hits: the model gets no chat history).
+--   NEAR DUPLICATES MERGE, greedy: a hit is dropped when it is a near duplicate of a better-placed hit that was KEPT (a `fold` over the hits): two hits are near duplicates when the shorter
+--           sentence has at least `dup_share` of its distinct words (lowercase, `plain`) in the other's. `dup_share` is a getter (a layer overrides it) that reads the dial `dup_share` (0.8).
+--   NO SCORE CUT-OFF: every hit is returned, best first, as `{semtext, start, text, score, sim, overlap}` (`score` the vote's points); the readers cut the count (`banner_n`, `assoc_n`).
+--   THE DIALS are the entity `recall:dials` (native/packs/recall-policy.json; its writes are guarded by the host).
+SemText.r_ratio getter: 0.5
+SemText.r_weights getter:
+  q = this.r_ratio
+  [1, q, q * q, q * q * q, q * q * q * q, q * q * q * q * q]
+SemText.dup_share getter: prop('recall:dials', 'dup_share')
+SemText.r_chat getter: startswith(this.eid, 'membrane::Chat:') and ':message:' in this.eid and tail(this.eid, 5) == ':body'
+SemText.r_msg getter: before(this.eid, ':message:') + ':message:' + before(after(this.eid, ':message:') + ':', ':') if this.r_chat else None
+-- the place of a chat text in the chat's order: the message key, then 1 for an answer (said after its message) and 0 for the message
+SemText.r_mine getter: this.r_msg + (' 1' if tail(this.eid, 19) == ':turn:response:body' else ' 0') if this.r_chat else None
+SemText.r_older getter:
+  WHEN this.recall_on != True or not this.r_chat: []
+  ELSE: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 AND instr(substr(k, length(?1) + 1), \':\') = 0 ORDER BY k DESC LIMIT ?3', before(this.eid, ':message:') + ':message:', this.r_msg, len(this.r_weights))
+SemText.r_win getter:
+  WHEN this.recall_on != True: None
+  ELSE WHEN not this.r_chat or this.r_older is Error: [{'t': this.eid, 'w': 1}]
+  ELSE WHEN this.r_older == None: None
+  ELSE:
+    ms = concat([this.r_msg], [prop(r, 'k') for r in this.r_older])
+    seq = sort_by(concat([{'t': m + ':turn:response:body', 's': m + ' 1'} for m in ms], [{'t': m + ':body', 's': m + ' 0'} for m in ms]), 's', True)
+    have = head([x for x in seq if x['s'] <= this.r_mine and prop(x['t'], 'text') != None], len(this.r_weights))
+    [{'t': x['t'], 'w': this.r_weights[len([y for y in have if y['s'] > x['s']])]} for x in have]
+
+-- THE EDGE LANE, as ranked rows {key, of, text, rank, sim, ov} (key = the text's eid + '#' + the sentence's start). The edges are flattened through JSON text (c1f has no nested
+-- comprehension): each row of an entity's `edge_rows` gets its part of the score `p` (the weight of the window text that mentions the entity x the entity's own weight `w`, the
+-- same for all its rows) and whether that text is the ask (`d`). `group_by` totals `p` and `d` per sentence (one step however many rows), so only the best are made rows: the
+-- `entity_pool_max` best plus as many as the ask has sentences (the ask's own are left out after the sort; the sort is stable, so the order is the one of all of them).
+SemText.r_edge getter:
+  WHEN this.r_win == None: []
+  ELSE:
+    parts = [join([replace(prop(m, 'edge_rows'), '{"key":', '{"p":' + str(x['w'] * (1 / prop(m, 'texts'))) + ',"d":' + ('1' if x['t'] == this.eid else '0') + ',"key":') for m in (prop(x['t'], 'mentions') or []) if (prop(m, 'edge_rows') or '') != ''], ',') for x in this.r_win]
+    hj = json('[' + join([p for p in parts if p != ''], ',') + ']')
+    hits = [] if hj is Error else hj
+    pool = prop('recall:dials', 'entity_pool_max') or 0
+    best = head(sort_by(sort_by(group_by(hits, 'key', ['p', 'd']), 'key'), 'p', True), pool + len(this.sentences or []))
+    head([{'k': g['key'], 'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'd': g['d'], 'score': g['p']} for g in best if g['rows'][0]['text'] != this.eid], pool)
+SemText.r_edge_keyed getter: [{'key': r['text'] + '#' + str(prop(prop(r['text'], 'sentences')[r['sent']], 'start')), 'of': r['text'], 'text': prop(prop(r['text'], 'sentences')[r['sent']], 'text'), 'd': r['d']} for r in this.r_edge]
+SemText.r_edge_rows getter:
+  ej = '|' + join([x['key'] for x in this.r_edge_keyed], '|') + '|'
+  n = len(this.mentions or [])
+  [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'rank': len(before(ej, '|' + x['key'] + '|')) - len(replace(before(ej, '|' + x['key'] + '|'), '|', '')) + 1, 'sim': 0, 'ov': x['d'] / n if n > 0 else 0} for x in this.r_edge_keyed]
+
+-- THE ASK'S OWN CALL: one embedding call to the local model server (the boot facts `seat_backend` and `embed_model`, the embedding pipeline's model, packs/embed.c1f), with its own
+-- 10 s limit (operator 2026-11-14: a hung server holds a reader for at most that long). What it embeds is `ask_input`: for a chat text and a Memory note (below)
+-- the list of its first sentences (at most the queue's batch of 64; operator 2026-11-15): then the call is the embedding pipeline's request for those sentences and writes their `Vector`s
+-- (packs/embed.c1f `embed-ask-vectors`), so the text is embedded once; any other text (a leg of a pack) embeds its whole text as ONE input (one vector, not kept).
+-- The call is the Fetch entity `ask_fetch` (the chat's asks share `Fetch:recall:ask`; each Memory note has its own, `Fetch:recall:note:<key>`); a receipt that names another text is
+-- not this one's. `in_flight` is true ONLY while this text's call is out (no backend, no model, no text, a refused or failed call: not; for a note, not once its vectors are made).
+SemText.ask_fetch getter: 'Fetch:recall:ask'
+SemText.ask_input getter: [s['text'] for s in head(this.sentences or [], 64)] if this.r_chat else str(this.text or '')
+SemText.ask_job getter:
+  WHEN this.recall_on != True: None
+  ELSE:
+    be =([b.seat_backend for b in instances('Boot') if b.seat_backend != None] or [''])[0]
+    root = head(be, len(be) - 1) if tail(be, 1) == '/' else be
+    md = ([b.embed_model for b in instances('Boot') if b.embed_model != None] or [None])[0]
+    inp = this.ask_input
+    sts = [s['start'] for s in head(this.sentences or [], len(inp))] if inp is List else None
+    {'id': {'ask': this.eid} if sts == None else {'ask': this.eid, 'starts': sts}, 'input': inp, 'url': root + '/api/embed', 'model': md} if root != '' and md != None and strip(str(this.text or '')) != '' and len(inp) > 0 else None
+SemText.ask_job on-setter recall-ask-embed:
+  WHEN this.ask_job != None:
+    (this.ask_fetch).request = {'id': this.ask_job['id'], 'url': this.ask_job['url'], 'method': 'POST', 'timeout_s': 10, 'headers': {'Content-Type': 'application/json'}, 'body': {'model': this.ask_job['model'], 'input': this.ask_job['input']}}
+-- (a call not made yet is a plain null: no reason that a write's reply would list)
+SemText.ask_rr getter:
+  WHEN this.recall_on != True: None
+  ELSE:
+    rr = prop(this.ask_fetch, 'request_result')
+    None if rr == None else rr
+SemText.in_flight getter: this.ask_job != None and prop(prop(this.ask_rr, 'id'), 'ask') != this.eid
+-- the vectors the call gave, one per input (a receipt with another count is no answer)
+SemText.ask_vecs getter:
+  WHEN this.ask_rr == None or prop(this.ask_rr, 'rc') != 0 or prop(this.ask_rr, 'http_status') != 200 or prop(prop(this.ask_rr, 'id'), 'ask') != this.eid: None
+  ELSE:
+    j = json(str(prop(this.ask_rr, 'body') or ''))
+    e = None if j is Error else prop(j, 'embeddings')
+    n = len(prop(prop(this.ask_rr, 'id'), 'starts') or [1])
+    e if e is List and len(e) == n and len([v for v in e if not (v is List) or len(v) == 0]) == 0 else None
+
+-- THE QUERY of the cosine lane (#1143, operator 2026-11-15): the window's texts' vectors, summed with the window's weights (`r_weights`, by `vsum`); a text's vector is the unit of the sum of
+-- its sentence vectors (`Vector:of:<key>:s:<start>`, the embedding pipeline's). The ask's own are its call's vectors while that receipt is there (a chat ask's and a note's: its sentences),
+-- else its sentence vectors. A window text with no vector yet is left out; with none at all there is no query and no cosine lane.
+SemText.r_qrows getter:
+  WHEN this.r_win == None: None
+  ELSE: [{'w': x['w'], 'vs': this.ask_vecs if x['t'] == this.eid and this.ask_vecs != None else [v for v in [prop('Vector:of:' + replace(x['t'], '::', '/') + ':s:' + str(s['start']), 'v') for s in (prop(x['t'], 'sentences') or [])] if v != None]} for x in this.r_win]
+SemText.r_query getter:
+  WHEN this.r_qrows == None: None
+  ELSE:
+    ok = [r for r in this.r_qrows if len(r['vs']) > 0]
+    vsum([unit(vsum(r['vs'])) for r in ok], [r['w'] for r in ok]) if len(ok) > 0 else None
+
+-- THE COSINE LANE: `near` answers a reasoned null (no vectors yet) or an Error (a wrong dimension) or a list; a missing lane is an empty one, never an error
+SemText.r_cos_raw getter: near(this.r_query, 'Vector', prop('recall:dials', 'pool')) if this.r_query != None and prop('recall:dials', 'pool') != None else []
+SemText.r_cos_keyed getter: [{'key': prop(h['eid'], 'of') + '#' + str(prop(h['eid'], 'start')), 'of': prop(h['eid'], 'of'), 'start': prop(h['eid'], 'start'), 'sim': h['score']} for h in ([] if (this.r_cos_raw is Error or this.r_cos_raw == None) else this.r_cos_raw) if prop(h['eid'], 'of') != this.eid]
+SemText.r_cos_rows getter:
+  cj = '|' + join([x['key'] for x in this.r_cos_keyed], '|') + '|'
+  [{'key': x['key'], 'of': x['of'], 'text': ([s['text'] for s in prop(x['of'], 'sentences') if s['start'] == x['start']] or [''])[0], 'rank': len(before(cj, '|' + x['key'] + '|')) - len(replace(before(cj, '|' + x['key'] + '|'), '|', '')) + 1, 'sim': x['sim'], 'ov': 0} for x in this.r_cos_keyed]
+
+-- THE VOTE (#1143, step 6; the old seat's `recall_vote.py`, operator 2026-11-11): weighted Borda over the voters' ballots. A voter's ballot is its first `vote_depth` rows; its i-th row
+-- (from 0) earns the voter's weight x (`vote_depth` - i). The voters and their weights (getters a layer overrides; the approved numbers, kept as they are with voters missing):
+--   the move log      `movelog_votes` (packs/movelog.c1f)       `ml_weight` 2 (its pack's)
+--   entity recall     `entity_votes` (packs/entityrecall.c1f)  `ent_weight` 0.75 (its pack's)
+--   the embedder      the cosine lane (`r_cos_rows`)           `r_cos_weight` 0.125
+--   the word lane     the edge lane (`r_edge_rows`)            `r_edge_weight` 0.125
+-- A voter that is not there (its pack not loaded, the recall off) or that failed (an Error, a budget exceeded) adds nothing; the others vote as they are. The points are summed per KEY
+-- (the text's eid + '#' + the start of the sentence: every voter names a sentence, so a text's sentences are separate hits). The lanes' rows past the depth stay hits with 0 points
+-- (no cut-off: they come after the voted ones); a voter's rows past the depth are not hits. The ask is never a row. Ties by key (the sort is stable: key first, points after).
+SemText.vote_depth getter: 20
+SemText.r_cos_weight getter: 0.125
+SemText.r_edge_weight getter: 0.125
+-- the ballots as one list of rows {key, of, text, p: the points, sim, ov}; a voter's place is counted by the fold (`len(acc)`)
+SemText.r_ballots getter:
+  WHEN this.r_win == None: None
+  ELSE:
+    d = this.vote_depth or 0
+    ew = this.r_edge_weight or 0
+    cw = this.r_cos_weight or 0
+    mw = this.ml_weight or 0
+    nw = this.ent_weight or 0
+    ed = this.r_edge_rows if this.r_edge_rows is List else []
+    co = this.r_cos_rows if this.r_cos_rows is List else []
+    ml = head(this.movelog_votes, d) if this.movelog_votes is List else []
+    er = head(this.entity_votes, d) if this.entity_votes is List else []
+    lanes = concat([{'key': x['key'], 'of': x['of'], 'text': x['text'], 'p': ew * (d - x['rank'] + 1) if x['rank'] <= d else 0, 'sim': x['sim'], 'ov': x['ov']} for x in ed], [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'p': cw * (d - x['rank'] + 1) if x['rank'] <= d else 0, 'sim': x['sim'], 'ov': x['ov']} for x in co])
+    voted = concat(fold([], [concat(acc, [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'p': mw * (d - len(acc)), 'sim': 0, 'ov': 0}]) for x in ml]), fold([], [concat(acc, [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'p': nw * (d - len(acc)), 'sim': 0, 'ov': 0}]) for x in er]))
+    [x for x in concat(lanes, voted) if x['of'] != this.eid]
+SemText.r_voted getter:
+  WHEN this.r_ballots == None: None
+  ELSE:
+    rows = [{'key': g['key'], 'of': g['rows'][0]['of'], 'text': ([x['text'] for x in g['rows'] if x['text'] != ''] or [''])[0], 'score': dot(pluck(g['rows'], 'p'), [1 for x in g['rows']]), 'sim': dot(pluck(g['rows'], 'sim'), [1 for x in g['rows']]), 'ov': dot(pluck(g['rows'], 'ov'), [1 for x in g['rows']])} for g in group_by(this.r_ballots, 'key')]
+    sort_by(sort_by(rows, 'key'), 'score', True)
+-- THE RERANK of the first `rerank_top` rows (the rest keep their voted order after them; `rerank: false` turns it off) by the `legacy` weight set of `weights` (operator 2026-11-15:
+-- it was fitted with neither the reply features nor `bge`, the closest to what this seat has)
+SemText.r_rw getter: prop(prop('recall:dials', 'weights'), 'legacy') if this.recall_on == True else None
+SemText.r_rn getter: (prop('recall:dials', 'rerank_top') if prop('recall:dials', 'rerank') != False else 0) if this.recall_on == True else None
+SemText.r_ranked getter:
+  WHEN this.r_voted == None: None
+  ELSE WHEN this.r_rw == None or this.r_rn == None or this.r_rn < 1: this.r_voted
+  ELSE:
+    rw = this.r_rw
+    rn = this.r_rn
+    fj = '|' + join([x['key'] for x in this.r_voted], '|') + '|'
+    top = [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'ov': x['ov'], 'z': prop(rw, 'bias') + prop(rw, 'sim') * x['sim'] + prop(rw, 'inv_rank') / (len(before(fj, '|' + x['key'] + '|')) - len(replace(before(fj, '|' + x['key'] + '|'), '|', '')) + 1) + prop(rw, 'overlap') * x['ov']} for x in head(this.r_voted, rn)]
+    concat(sort_by(top, 'z', True), tail(this.r_voted, len(this.r_voted) - rn) if len(this.r_voted) > rn else [])
+-- each hit with its place (`o`, from 0), its distinct words `ws` and their number `n`, for the merge of near duplicates (a sentence with no word gets its own key as its one word: it is
+-- never anybody's duplicate). The shared words of two hits are counted with builtins only (|A| + |B| - |A and B together, distinct|): a pair costs a few steps, so full pools fit one evaluation.
+SemText.r_words getter:
+  WHEN this.r_ranked == None: None
+  ELSE:
+    rj = '|' + join([x['key'] for x in this.r_ranked], '|') + '|'
+    rows = [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'ov': x['ov'], 'o': len(before(rj, '|' + x['key'] + '|')) - len(replace(before(rj, '|' + x['key'] + '|'), '|', '')), 'ws': distinct(words(replace(plain(x['text']) + ' ', '. ', ' ')))} for x in this.r_ranked]
+    [{'key': x['key'], 'of': x['of'], 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'ov': x['ov'], 'o': x['o'], 'ws': x['ws'] or [x['key']], 'n': len(x['ws']) or 1} for x in rows]
+-- the hits that are no near duplicate of a KEPT hit placed before them (greedy: a chain A ~ B ~ C with A and C unlike keeps A and C). For a hit x and the hits E before it:
+-- shared = n(y) + n(x) - |the words of both, distinct| for each y of E (a list, one vector operation), and x is a duplicate of y when shared >= dup_share x min(n(x), n(y)), that is when
+-- (shared - dup_share x n(x)) or (shared - dup_share x n(y)) is >= 0. The `fold` walks the hits in order with `acc` = the keep-mask so far (1 kept, 0 dropped, one entry per hit before x):
+-- a hit that was dropped has (n(x) + n(y) + 1) taken off both terms, which makes them negative (shared <= n(x) + n(y)), so only the KEPT hits can make x a duplicate. Each step is a few vector operations.
+-- (two evaluations, each with its own step budget: the pairs' counts, then the fold)
+SemText.r_pairs getter:
+  WHEN this.r_words == None: None
+  ELSE:
+    ws = this.r_words
+    [{'o': x['o'], 'n': x['n'], 'u': [len(distinct(concat(x['ws'], y['ws']))) for y in head(ws, x['o'])], 'm': [y['n'] for y in head(ws, x['o'])]} for x in ws]
+SemText.r_kept getter:
+  WHEN this.r_pairs == None: None
+  ELSE:
+    s = this.dup_share
+    keep = fold([], [concat(acc, [1 if d['o'] == 0 or max(max(d['m'] + d['n'] - d['u'] - s * d['n'] - (1 - acc) * (d['m'] + d['n'] + 1)), max(d['m'] * (1 - s) + d['n'] - d['u'] - (1 - acc) * (d['m'] + d['n'] + 1))) < 0 else 0]) for d in this.r_pairs])
+    [x for x in this.r_words if keep[x['o']] == 1]
+SemText.recall getter:
+  WHEN this.r_kept == None: None
+  ELSE: [{'semtext': x['of'], 'start': num(after(x['key'], '#')), 'text': x['text'], 'score': x['score'], 'sim': x['sim'], 'overlap': x['ov']} for x in this.r_kept]
+
+-- ---- MEMORY: the model's own notes, and what a note reminds of (#1143) -----------------------------------------------------------------
+-- `Memory:<id>.text = "..."` (entity_write, or a pack's `Memory:<id> = Memory(text: ...)`) makes a SemText that is mentioned at once and whose write answers with
+-- WHAT IT REMINDS OF: `associations`, ONE short text (a header that says it is context, not instructions, then a line per association), read by the reply
+-- of the write (door_tools.c1f `rx_lines`) in place of the reactions of the round (a note's reactions are the spans of its words: noise).
+--   * A Memory differs from a SemText in that its recall is always on (`recall_on`) and its own embedding call (above; its own entity `Fetch:recall:note:<key>`, so two notes written
+--     close together never share one) embeds its SENTENCES (`ask_input`, at most the queue's batch of 64): the call writes the note's sentence `Vector`s (packs/embed.c1f
+--     `embed-ask-vectors`), so the note is embedded once, and the call entity is let go when they are made. The vectors give the cosine lane its query; the write's reply waits for that
+--     call (door_tools.c1f `mc_w_ready`): at most its 10 s limit, then the edge lane alone (and the queue embeds the note later, as any SemText).
+--   * `SemText.assoc_source` is the ONE place the associations come from: the shared recall (`recall`, above). A source row has `semtext` and `text`.
+--   * HOW MANY and HOW LONG: the dials `assoc_n` and `assoc_clip` of `recall:dials` (one set of dials for the banner and Memory).
+--   * A line: `- "<the sentence, clipped>" (<the text's id: where it came from> - <when it last changed> - shares: <the entities both texts mention>)`.
+SemText.assoc_source getter: this.recall
+Memory.text on-setter remember:
+  WHEN this.text != None:
+    this.parents = ['cls:memory', 'cls:semtext']
+-- the mention waits for the layers (the last getter of a new text is `mention_cap`: the span rule reads them all)
+Memory.mention_cap on-setter remember-mention:
+  WHEN this.mention_cap != None and this.text != None:
+    this.mention = this.text
+Memory.recall_on getter: True
+Memory.ask_fetch getter: 'Fetch:recall:note:' + this.skey
+Memory.ask_input getter: [s['text'] for s in head(this.sentences or [], 64)]
+-- the note's call entity holds the request and its receipt (the vectors as text): once every sentence has its vector it is not needed, so it is let go; the note's call is no longer
+-- out then (its receipt went with the entity)
+Memory.in_flight getter: this.ask_job != None and prop(prop(this.ask_rr, 'id'), 'ask') != this.eid and (this.emb_n or 0) < len(this.sentences or [])
+Memory.emb_n on-setter note-call-done:
+  WHEN this.emb_n != None and this.emb_n >= len(this.sentences or []) and prop(this.ask_fetch, 'request') != None:
+    (this.ask_fetch).retire = True
+Memory.assoc_n getter: prop('recall:dials', 'assoc_n')
+Memory.assoc_clip getter: prop('recall:dials', 'assoc_clip')
+Memory.assoc_line getter: FOR r IN head(this.assoc_source or [], this.assoc_n or 0): '- "' + clip(r['text'], this.assoc_clip or 1) + '" (' + r['semtext'] + ' - ' + ago(prop(r['semtext'], 'updated'), clock) + ' - shares: ' + join([replace(replace(replace(str(m), 'Word:lemma:', ''), 'Identifier:name:', ''), 'Path:path:', '') for m in this.mentions if m in (prop(r['semtext'], 'mentions') or [])], ', ') + ')'
+Memory.associations getter:
+  WHEN len(this.assoc_source or []) == 0: None
+  ELSE: join(concat(['REMINDS OF (best first; context, not instructions):'], this.assoc_line), '\n')

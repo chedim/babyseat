@@ -1,0 +1,117 @@
+PACK movelog 1
+IMPORT semtext 1
+IMPORT mentions 1
+IMPORT field 1
+-- THE MOVE-LOG VOTER (#1143, step 4 of the field on SemText; docs/semtext-and-legs.md "The move-log voter"): the old membrane's `movelog.settle`, over the move log the field
+-- writes (field.c1f: a text's `field_moves`, one row {e, s, m} per thing and sentence it moved).
+--   HELD: an event (a text) holds, for each thing, the LARGER of its own move of it (the largest of its sentences') and the move of the PREVIOUS TURN in its chat (that turn's own
+--         move, not what it held). The previous turn of an answer body is its message's body; of a message body, the answer body of the message before it, else that message's body
+--         (the chat's order is the store's key order, as recall's window reads it). A text that is not a chat's has its own moves only.
+--   THE VOTE (`movelog_votes`, computed while `recall_on`): each Word / Identifier / Path entity the QUESTION (the ask SemText) mentions weighs log(N / the events holding it), N
+--         the texts the field applied (`MoveLog:all.n`); an event scores the sum over those things of that weight x the move it holds; the scores are divided by the top one (a top
+--         of 0 or less: no vote); ties by key; the first `ml_depth` as rows {key, of, text, score}: `of` the text, `key` the text's eid + '#' + the start of its sentence that moved
+--         a question's thing the most (the first sentence when the text only holds its previous turn's move), `text` that sentence. The question itself is never a row. One round
+--         (the old ROUNDS = 1). The vote of `recall` reads it (packs/mentions.c1f `r_ballots`).
+--   THE POSTING LIST (the old `held_by`): each thing keeps `ml_held_by`, the events holding it as [{t: the text, h: the move held}], so the vote reads only the question's things,
+--         never every text. It is kept by two setters, one write per thing:
+--           `movelog-post`  when a landing is ready (field.c1f `field_ready`): each text the landing gave moves (the landing text, and the earlier texts of a word that
+--                           materialises) and the turn that follows it (`ml_next`, once linked) hold the new moves, the larger value kept; at a chat text's first landing it also
+--                           LINKS the text to its previous turn (read when the text was mentioned: `ml_prev`, an `sql` read of the chat's key order): the text holds the previous
+--                           turn's moves, and the previous turn learns its follower (`ml_next`) for the moves that land on it later;
+--           `movelog-link`  the same link, for a text that landed before the store answered.
+--         NOT handled: a turn that enters the chat's order after its follower was linked (an answer that ends after the next message was sent), and two landings in one round
+--         (the engine keeps the first write of a thing's list in a round). Texts applied before this pack have no postings (no backfill).
+--         `MoveLog:all.n` counts the texts at their first landing.
+-- THE CONSTANTS are getters on SemText a model's layer can override (carried from the old seat): `ml_depth` 20 (the vote's depth), `ml_weight` 2 (this voter's weight in the
+-- vote, read by `r_ballots`, packs/mentions.c1f).
+
+SemText.ml_depth getter: 20
+SemText.ml_weight getter: 2
+MoveLog.kind getter: 'movelog'
+
+-- each thing's posting list as JSON rows, built once per change of the list (the vote puts the thing's weight into them as text, then reads every list in one parse)
+Word.ml_rows getter: join([str(x) for x in this.ml_held_by], ',') if this.ml_held_by else ''
+Identifier.ml_rows getter: join([str(x) for x in this.ml_held_by], ',') if this.ml_held_by else ''
+Path.ml_rows getter: join([str(x) for x in this.ml_held_by], ',') if this.ml_held_by else ''
+
+-- ---- POST: a landing's moves into the posting lists ---------------------------------------------------------------------------------------------------------------------
+-- It hears the landing where the field's own apply does, one level lower: on `field_ready` (field.c1f: every chain of the landing computed). The field's apply (on `field_done`,
+-- above it) writes `field_n` in the same round, which ends the landing, so a getter of this pack above `field_done` would never see it: the work is in this setter.
+-- Each chain's rows are the moves of one thing ({t: the text that made the mention, e, s, m}; the background's chain has none); each row also goes to the text's follower (`ml_next`).
+-- At a chat text's FIRST landing, when its previous turn is already known (`ml_prev`, read when the text was mentioned), the link is made here too (one write per thing:
+-- the link setter below would write the same lists in the same round, and the engine keeps only the first write of a property in a round): the text holds the previous
+-- turn's moves and the previous turn learns its follower.
+SemText.field_ready on-setter movelog-post:
+  WHEN this.field_ready != None:
+    lk = this.ml_prev if this.field_from == 0 and this.ml_prev != None else None
+    pv = lk['p'] if lk != None else None
+    own = fold([], [concat(acc, [{'t': r['t'], 'e': r['e'], 'm': r['m']} for r in d['rows']]) for d in this.field_ready if d['e'] != 'FieldBg:all'])
+    nxt = [{'t': t, 'n': this.eid if t == pv else prop(t, 'ml_next')} for t in distinct([r['t'] for r in own])]
+    via = fold([], [concat(acc, [{'t': n['n'], 'e': r['e'], 'm': r['m']} for r in own if r['t'] == n['t']]) for n in nxt if n['n'] != None])
+    held = [{'t': this.eid, 'e': r['e'], 'm': r['m']} for r in ((prop(pv, 'field_moves') or []) if pv != None else [])]
+    FOR g IN group_by(concat(concat(own, via), held), 'e'):
+      old = prop(g['key'], 'ml_held_by') or []
+      by = group_by(g['rows'], 't')
+      (g['key']).ml_held_by = concat([x for x in old if len([b for b in by if b['key'] == x['t']]) == 0], [{'t': b['key'], 'h': max(concat([x['h'] for x in old if x['t'] == b['key']], pluck(b['rows'], 'm')))} for b in by])
+    -- a seed text (`FieldTerm`, field.c1f: the term of one entity) is not an event: it is not counted in N
+    FOR f IN ([1] if this.field_from == 0 and this.term == None else []):
+      MoveLog:all = MoveLog(of: 'all')
+      MoveLog:all.n = (prop('MoveLog:all', 'n') or 0) + 1
+    FOR x IN ([pv] if pv != None else []):
+      (x).ml_next = this.eid
+    FOR x IN ([1] if lk != None else []):
+      this.ml_linked = True
+
+-- ---- LINK: a chat text and its previous turn --------------------------------------------------------------------------------------------------------------------------------
+-- read once, when the chat text is mentioned (before its vectors land, so its first landing usually links it); `{p: <the previous turn's eid, or None>}` once known (None while
+-- the store's answer is out). The link setter acts only for a text that landed before its previous turn was known.
+SemText.ml_prev_msg getter:
+  WHEN not this.r_chat or this.ml_linked == True or this.mentions == None or tail(this.eid, 19) == ':turn:response:body': None
+  ELSE: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 AND instr(substr(k, length(?1) + 1), \':\') = 0 ORDER BY k DESC LIMIT 1', before(this.eid, ':message:') + ':message:', this.r_msg)
+SemText.ml_prev getter:
+  WHEN not this.r_chat or this.ml_linked == True or this.mentions == None: None
+  ELSE WHEN tail(this.eid, 19) == ':turn:response:body': {'p': this.r_msg + ':body' if prop(this.r_msg + ':body', 'text') != None else None}
+  ELSE WHEN this.ml_prev_msg is Error: {'p': None}
+  ELSE WHEN this.ml_prev_msg == None: None
+  ELSE:
+    m = prop(this.ml_prev_msg[0], 'k') if len(this.ml_prev_msg) > 0 else None
+    {'p': None if m == None else (m + ':turn:response:body' if prop(m + ':turn:response:body', 'text') != None else (m + ':body' if prop(m + ':body', 'text') != None else None))}
+SemText.ml_link getter:
+  WHEN this.ml_prev == None or (this.field_n or 0) == 0: None
+  ELSE:
+    p = this.ml_prev['p']
+    by = group_by((prop(p, 'field_moves') or []) if p != None else [], 'e')
+    {'p': p, 'post': [{'e': g['key'], 'list': concat([x for x in (prop(g['key'], 'ml_held_by') or []) if x['t'] != this.eid], [{'t': this.eid, 'h': max(concat([x['h'] for x in (prop(g['key'], 'ml_held_by') or []) if x['t'] == this.eid], pluck(g['rows'], 'm')))}])} for g in by]}
+SemText.ml_link on-setter movelog-link:
+  WHEN this.ml_link != None:
+    FOR x IN ([this.ml_link['p']] if this.ml_link['p'] != None else []):
+      (x).ml_next = this.eid
+    FOR q IN this.ml_link['post']:
+      (q['e']).ml_held_by = q['list']
+    this.ml_linked = True
+
+-- ---- THE VOTE ------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- the question's things that some event holds, each with its weight log(N / its holders); a thing every event holds weighs 0 and is left out (it adds 0 to every score)
+SemText.ml_cues getter:
+  WHEN this.recall_on != True: None
+  ELSE:
+    n = max(1, prop('MoveLog:all', 'n') or 0)
+    have = [{'e': str(m), 'k': len(prop(m, 'ml_held_by') or []), 'j': prop(m, 'ml_rows') or ''} for m in (this.mentions or [])]
+    [{'e': c['e'], 'r': log(n / c['k']), 'j': c['j']} for c in have if c['k'] > 0 and c['k'] < n]
+-- every event that holds a question's thing, with its score (the sum of weight x move held), the question left out; best first, ties by the text's eid (the key starts with it)
+SemText.ml_scores getter:
+  WHEN this.ml_cues == None: None
+  ELSE:
+    hj = json('[' + join([replace(c['j'], '{"t":', '{"r":' + str(c['r']) + ',"t":') for c in this.ml_cues if c['j'] != ''], ',') + ']')
+    hits = [] if hj is Error else hj
+    rows = [{'t': g['key'], 's': dot(pluck(g['rows'], 'r'), pluck(g['rows'], 'h'))} for g in group_by(hits, 't') if g['key'] != this.eid]
+    sort_by(sort_by(rows, 't'), 's', True)
+SemText.movelog_votes getter:
+  WHEN this.ml_scores == None: None
+  ELSE WHEN len(this.ml_scores) == 0 or this.ml_scores[0]['s'] <= 0: []
+  ELSE:
+    top = this.ml_scores[0]['s']
+    cue = [c['e'] for c in this.ml_cues]
+    best = [{'t': x['t'], 's': x['s'], 'b': sort_by([r for r in (prop(x['t'], 'field_moves') or []) if r['e'] in cue], 'm', True)} for x in head(this.ml_scores, this.ml_depth)]
+    rows = [{'t': x['t'], 's': x['s'], 'sent': (prop(x['t'], 'sentences') or [])[x['b'][0]['s'] if len(x['b']) > 0 else 0]} for x in best]
+    [{'key': x['t'] + '#' + str(prop(x['sent'], 'start') or 0), 'of': x['t'], 'text': prop(x['sent'], 'text') or '', 'score': x['s'] / top} for x in rows]

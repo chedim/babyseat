@@ -1,0 +1,1221 @@
+[
+ {
+  "name": "/membrane/self/sheet is a 501: the sheet is computed by the Python seat (record, energy, the supervisor)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/self/sheet",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 501
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "not ported yet: the sheet is computed by the Python seat (record, energy, the supervisor)"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/self/sheet is read-only: a POST is a 405 with allow GET",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/self/sheet",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "GET"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/self/recent answers the released empty feed (no self record)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/self/recent",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.lines",
+    "equals": []
+   }
+  ]
+ },
+ {
+  "name": "/membrane/self/recent is read-only: a POST is a 405 with allow GET",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/self/recent",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "GET"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/toybox/state is a 501: the toys are the Python seat's files and clocks (toybox.py)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/toybox/state",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 501
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "not ported yet: the toys are the Python seat's files and clocks (toybox.py)"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/toybox/state is read-only: a POST is a 405 with allow GET",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/toybox/state",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "GET"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/toybox/poke is a 501: a poke changes the Python seat's toy files and clocks (toybox.py)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/toybox/poke",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 501
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "not ported yet: a poke changes the Python seat's toy files and clocks (toybox.py)"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/toybox/poke is write-only: a GET is a 405 with allow POST",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/toybox/poke",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/jsexec/register is a 501: the tab registry is the Python seat's live memory (jsexec.py)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/jsexec/register",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 501
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "not ported yet: the tab registry is the Python seat's live memory (jsexec.py)"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/jsexec/register is write-only: a GET is a 405 with allow POST",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/jsexec/register",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/jsexec/result is a 501: a job's answer returns to the Python seat's waiting run (jsexec.py)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/jsexec/result",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 501
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "not ported yet: a job's answer returns to the Python seat's waiting run (jsexec.py)"
+   }
+  ]
+ },
+ {
+  "name": "/membrane/jsexec/result is write-only: a GET is a 405 with allow POST",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/jsexec/result",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ },
+ {
+  "name": "a thumbs-up lands as a Feedback entity per reply",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"message\": \"msg_1\", \"kind\": \"up\", \"session\": \"ses_1\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body",
+    "equals": {
+     "ok": true,
+     "eid": "Feedback:msg_1",
+     "kind": "up"
+    }
+   },
+   {
+    "eid": "Feedback:msg_1",
+    "prop": "kind",
+    "equals": "up"
+   },
+   {
+    "eid": "Feedback:msg_1",
+    "prop": "session",
+    "equals": "ses_1"
+   },
+   {
+    "eid": "Feedback:msg_1",
+    "prop": "message",
+    "equals": "msg_1"
+   },
+   {
+    "eid": "Feedback:msg_1",
+    "prop": "by",
+    "equals": "alice"
+   },
+   {
+    "eid": "Feedback:msg_1",
+    "prop": "summary",
+    "equals": "Reply msg_1 rated helpful"
+   }
+  ]
+ },
+ {
+  "name": "a thumbs-down keeps the why, trimmed, and says so in the summary",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"message\": \"msg_2\", \"kind\": \"down\", \"why\": \"  too long  \"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Feedback:msg_2",
+    "prop": "why",
+    "equals": "too long"
+   },
+   {
+    "eid": "Feedback:msg_2",
+    "prop": "summary",
+    "equals": "Reply msg_2 rated not helpful: too long"
+   }
+  ]
+ },
+ {
+  "name": "the kind is matched in lower case, spaces ignored",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"message\": \"msg_3\", \"kind\": \" UP \"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Feedback:msg_3",
+    "prop": "kind",
+    "equals": "up"
+   }
+  ]
+ },
+ {
+  "name": "clear takes a verdict back (its own kind)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"message\": \"msg_4\", \"kind\": \"clear\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Feedback:msg_4",
+    "prop": "summary",
+    "equals": "Reply msg_4 rated cleared"
+   }
+  ]
+ },
+ {
+  "name": "a second press replaces the first",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Feedback:msg_5",
+    "class": "Feedback",
+    "props": {
+     "kind": "up",
+     "why": "",
+     "message": "msg_5"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"message\": \"msg_5\", \"kind\": \"down\", \"why\": \"w\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 200
+   },
+   {
+    "eid": "Feedback:msg_5",
+    "prop": "kind",
+    "equals": "down"
+   },
+   {
+    "eid": "Feedback:msg_5",
+    "prop": "why",
+    "equals": "w"
+   }
+  ]
+ },
+ {
+  "name": "no message is a 400",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"kind\": \"up\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "message (the reply's id) required"
+   }
+  ]
+ },
+ {
+  "name": "a message id over 200 characters is a 400",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"message\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\", \"kind\": \"up\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "message (the reply's id) required"
+   }
+  ]
+ },
+ {
+  "name": "an unknown kind is a 400",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "{\"message\": \"m\", \"kind\": \"meh\"}"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "kind is one of up, down, clear"
+   }
+  ]
+ },
+ {
+  "name": "a body that is not a JSON object is a 400",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Request:1",
+    "prop": "body",
+    "value": "[1,2]"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "a JSON object body is required"
+   }
+  ]
+ },
+ {
+  "name": "no body is a 400",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "POST",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 400
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.body.error",
+    "equals": "a JSON object body is required"
+   }
+  ]
+ },
+ {
+  "name": "GET /membrane/feedback is a 405 with allow POST",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/door_self.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Request:1",
+    "class": "Request",
+    "props": {
+     "method": "GET",
+     "path": "/membrane/feedback",
+     "query": "",
+     "headers": {},
+     "body": "",
+     "peer": "127.0.0.1:5",
+     "authed": true,
+     "sub": "alice",
+     "claims": {
+      "sub": "alice"
+     }
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Request:1",
+    "prop": "reply.status",
+    "equals": 405
+   },
+   {
+    "eid": "Request:1",
+    "prop": "reply.headers.allow",
+    "equals": "POST"
+   }
+  ]
+ }
+]

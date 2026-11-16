@@ -1,17 +1,16 @@
 //! #994 row 7: the seed packs (membrane/seedpack.py, #982) as FIELD DECLARATIONS, native VM only. DATA MOVES ONLY:
 //! a pack is a JSON file ({name, version, entities:[{eid, cls, properties}]}) shipped in native/packs/, and loading it
-//! is one generic step that declares each entity into the core. The banner rules and the recall dials no longer live
+//! is one generic step that declares each entity into the core. The recall dials no longer live
 //! as Rust literals; no new WHEN/WHERE/WRITE is added. The pack ledger, adoption and overlays stay in seedpack.py.
 //! Parity: tests/packs_994.rs checks the whole-field checksum of a pack load against the old hand-coded load.
 use serde_json::{Map, Value as J};
 
 use crate::vm::Core;
 
-pub const BANNER: &str = include_str!("../packs/banner.json");
 pub const RECALL_POLICY: &str = include_str!("../packs/recall-policy.json");
 
 /// every shipped pack, in load order
-pub fn shipped() -> Vec<&'static str> { vec![BANNER, RECALL_POLICY] }
+pub fn shipped() -> Vec<&'static str> { vec![RECALL_POLICY] }
 
 /// declare a pack's entities into the core; returns how many. A malformed pack declares nothing (Err).
 pub fn load_pack(core: &mut Core, text: &str) -> Result<usize, String> {
@@ -42,7 +41,7 @@ pub fn load_named(core: &mut Core, text: &str) -> usize { load_pack(core, text).
 pub const SCRIPTS: &str = include_str!("../packs/scripts.json");
 
 /// every shipped pack including the entity-script pack
-pub fn shipped_all() -> Vec<&'static str> { vec![BANNER, RECALL_POLICY, SCRIPTS] }
+pub fn shipped_all() -> Vec<&'static str> { vec![RECALL_POLICY, SCRIPTS] }
 
 /// an entity's script of one kind ("tick_script" | "watch_script" | "getter_script"), as the field holds it
 pub fn script_of(core: &Core, eid: &str, kind: &str) -> Option<String> {

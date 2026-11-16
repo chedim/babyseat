@@ -1,0 +1,1193 @@
+[
+ {
+  "event": "server.connected",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_e273a456c9f096b54a7cc673",
+    "type": "server.connected",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_9c5ede0a7cc21154c3b5bfe6",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "info": {
+      "id": "msg_51cec3a3ee171ffc71dd538d",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "role": "user",
+      "agent": "build",
+      "model": {
+       "providerID": "membrane",
+       "modelID": "claude"
+      },
+      "time": {
+       "created": 1794603477013
+      },
+      "summary": {
+       "diffs": []
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_ca241902fddfd582d70e172b",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_7bc1a3bd11044521a6cfbbf7",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_51cec3a3ee171ffc71dd538d",
+      "type": "text",
+      "text": "look at the probe"
+     },
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "time": 1794603477059
+    }
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_58202631732a33e2f49d8ba1",
+    "type": "session.updated",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "info": {
+      "id": "ses_69143f4fc8088e7ec097c182",
+      "projectID": "membrane",
+      "directory": "/srv/seat",
+      "path": "srv/seat",
+      "slug": "calm-cedar",
+      "title": "Renamed",
+      "version": "1.0",
+      "agent": "build",
+      "model": {
+       "id": "claude",
+       "providerID": "membrane",
+       "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+       "total": 0,
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "summary": {
+       "additions": 0,
+       "deletions": 0,
+       "files": 0
+      },
+      "time": {
+       "created": 1794603477007,
+       "updated": 1794603477011
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_f5e36620816654a3811cfe14",
+    "type": "session.diff",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "diff": []
+    }
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_3d75ebf74a5f967e5cfd82e7",
+    "type": "session.status",
+    "properties": {
+     "status": {
+      "type": "busy"
+     },
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_79a2abd2d52068f6fa1fc5cc",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "info": {
+      "id": "msg_6df5fad5796bc9e88435f705",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "role": "assistant",
+      "parentID": "msg_51cec3a3ee171ffc71dd538d",
+      "modelID": "claude",
+      "providerID": "membrane",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "/srv/seat",
+       "root": "/srv/seat"
+      },
+      "cost": 0.0,
+      "tokens": {
+       "total": 0,
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "time": {
+       "created": 1794603477062
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_1f372ae0fbb6b539dbaefe7f",
+    "type": "session.updated",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "info": {
+      "id": "ses_69143f4fc8088e7ec097c182",
+      "projectID": "membrane",
+      "directory": "/srv/seat",
+      "path": "srv/seat",
+      "slug": "calm-cedar",
+      "title": "Renamed",
+      "version": "1.0",
+      "agent": "build",
+      "model": {
+       "id": "claude",
+       "providerID": "membrane",
+       "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+       "total": 0,
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "summary": {
+       "additions": 0,
+       "deletions": 0,
+       "files": 0
+      },
+      "time": {
+       "created": 1794603477007,
+       "updated": 1794603477011
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_d813832ca4dd3ba162bd87c8",
+    "type": "session.diff",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "diff": []
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_1b396990ff583e676df8eeac",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_ef1fb42d60b49030b6b87bb5",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_6df5fad5796bc9e88435f705",
+      "type": "step-start"
+     },
+     "time": 1794603477066,
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_68c9bea061aa76b1c4d12d05",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_af3f281a1995ba129977577a",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_6df5fad5796bc9e88435f705",
+      "type": "text",
+      "text": "",
+      "time": {
+       "start": 1794603477066
+      }
+     },
+     "time": 1794603477066,
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.delta",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_647b5c00cc4658f729247f9a",
+    "type": "message.part.delta",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "partID": "prt_af3f281a1995ba129977577a",
+     "field": "text",
+     "delta": "Looking "
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.delta",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_98d6fad72aadb83f84738218",
+    "type": "message.part.delta",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "partID": "prt_af3f281a1995ba129977577a",
+     "field": "text",
+     "delta": "now."
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_09e72f3e39211ac70747641a",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_af3f281a1995ba129977577a",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_6df5fad5796bc9e88435f705",
+      "type": "text",
+      "text": "Looking now.",
+      "time": {
+       "start": 1794603477066,
+       "end": 1794603477066
+      }
+     },
+     "time": 1794603477066,
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_997b0b4a512cf88535bdf183",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_536c853cb7353b3b4eb5a077",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_6df5fad5796bc9e88435f705",
+      "type": "tool",
+      "callID": "toolu_1",
+      "tool": "entity_read",
+      "madeBy": "claude-agent",
+      "state": {
+       "status": "running",
+       "input": {},
+       "title": "entity_read()",
+       "time": {
+        "start": 1794603477066
+       }
+      },
+      "time": {
+       "start": 1794603477066
+      }
+     },
+     "time": 1794603477066,
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_f6df2a87fa8bedb119f4fc98",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_536c853cb7353b3b4eb5a077",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_6df5fad5796bc9e88435f705",
+      "type": "tool",
+      "callID": "toolu_1",
+      "tool": "entity_read",
+      "madeBy": "claude-agent",
+      "state": {
+       "status": "running",
+       "input": {
+        "spec": "Command:probe"
+       },
+       "title": "entity_read({\"spec\": \"Command:probe\"})",
+       "time": {
+        "start": 1794603477066
+       }
+      },
+      "time": {
+       "start": 1794603477066
+      }
+     },
+     "time": 1794603477066,
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_b167b9cff0f2156165e3703e",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_536c853cb7353b3b4eb5a077",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_6df5fad5796bc9e88435f705",
+      "type": "tool",
+      "callID": "toolu_1",
+      "tool": "entity_read",
+      "madeBy": "claude-agent",
+      "state": {
+       "status": "completed",
+       "input": {
+        "spec": "Command:probe"
+       },
+       "title": "entity_read({\"spec\": \"Command:probe\"})",
+       "time": {
+        "start": 1794603477066,
+        "end": 1794603477066
+       },
+       "output": "the result"
+      },
+      "time": {
+       "start": 1794603477066,
+       "end": 1794603477066
+      }
+     },
+     "time": 1794603477066,
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_ce3b4bb0e55667d81d3cbdef",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_ba3ee5ea7e1225313e9546f2",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_6df5fad5796bc9e88435f705",
+      "type": "text",
+      "text": "",
+      "time": {
+       "start": 1794603477066
+      }
+     },
+     "time": 1794603477066,
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.delta",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_8c3af46c1c87ae5308c3b1b3",
+    "type": "message.part.delta",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "partID": "prt_ba3ee5ea7e1225313e9546f2",
+     "field": "text",
+     "delta": "Done."
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_21ada63702246d6dbe3966a1",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_ba3ee5ea7e1225313e9546f2",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_6df5fad5796bc9e88435f705",
+      "type": "text",
+      "text": "Done.",
+      "time": {
+       "start": 1794603477066,
+       "end": 1794603477066
+      }
+     },
+     "time": 1794603477066,
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_2ec996d7cd7254d00c063de3",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_c961e78e0988f98df6a5d0fb",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "messageID": "msg_6df5fad5796bc9e88435f705",
+      "type": "step-finish",
+      "reason": "stop",
+      "cost": 0,
+      "tokens": {
+       "total": 8,
+       "input": 4,
+       "output": 4,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      }
+     },
+     "time": 1794603477066,
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_27dcc485ff5d768a2e6fd497",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "info": {
+      "id": "msg_6df5fad5796bc9e88435f705",
+      "sessionID": "ses_69143f4fc8088e7ec097c182",
+      "role": "assistant",
+      "parentID": "msg_51cec3a3ee171ffc71dd538d",
+      "modelID": "claude",
+      "providerID": "membrane",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "/srv/seat",
+       "root": "/srv/seat"
+      },
+      "cost": 0.0,
+      "tokens": {
+       "total": 8,
+       "input": 4,
+       "output": 4,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "time": {
+       "created": 1794603477062,
+       "completed": 1794603477066
+      },
+      "madeBy": "claude-agent",
+      "finish": "stop"
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_c78bb60a47ca72331265e224",
+    "type": "session.status",
+    "properties": {
+     "status": {
+      "type": "idle"
+     },
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "session.idle",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_7dc22a1f7e92e745beb3e97f",
+    "type": "session.idle",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_4e4a4ff9648589926dd34be3",
+    "type": "session.updated",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "info": {
+      "id": "ses_69143f4fc8088e7ec097c182",
+      "projectID": "membrane",
+      "directory": "/srv/seat",
+      "path": "srv/seat",
+      "slug": "calm-cedar",
+      "title": "Renamed",
+      "version": "1.0",
+      "agent": "build",
+      "model": {
+       "id": "claude",
+       "providerID": "membrane",
+       "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+       "total": 0,
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "summary": {
+       "additions": 0,
+       "deletions": 0,
+       "files": 0
+      },
+      "time": {
+       "created": 1794603477007,
+       "updated": 1794603477066
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_08134a2069d8964f2d325ab1",
+    "type": "session.diff",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "diff": []
+    }
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_d52ae4e16aee8f9164749a44",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "info": {
+      "id": "msg_2e18b1de361fed721f376e7f",
+      "sessionID": "ses_3678f92e6f574f341f5b0674",
+      "role": "user",
+      "agent": "build",
+      "model": {
+       "providerID": "membrane",
+       "modelID": "claude"
+      },
+      "time": {
+       "created": 1794603477431
+      },
+      "summary": {
+       "diffs": []
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_9fd2b2f5b569067e1e4366db",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_d4b79a2d8ba2f869260d9633",
+      "sessionID": "ses_3678f92e6f574f341f5b0674",
+      "messageID": "msg_2e18b1de361fed721f376e7f",
+      "type": "text",
+      "text": "this will fail"
+     },
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "time": 1794603477431
+    }
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_a8ac7701d954ffb157ed8f81",
+    "type": "session.updated",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "info": {
+      "id": "ses_3678f92e6f574f341f5b0674",
+      "projectID": "membrane",
+      "directory": "/srv/seat",
+      "path": "srv/seat",
+      "slug": "misty-meadow",
+      "title": "E",
+      "version": "1.0",
+      "agent": "build",
+      "model": {
+       "id": "",
+       "providerID": "membrane",
+       "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+       "total": 0,
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "summary": {
+       "additions": 0,
+       "deletions": 0,
+       "files": 0
+      },
+      "time": {
+       "created": 1794603477430,
+       "updated": 1794603477432
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_dbd51e40f452fba04ed38a35",
+    "type": "session.diff",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "diff": []
+    }
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_445ed0d79348ac74962b505d",
+    "type": "session.status",
+    "properties": {
+     "status": {
+      "type": "busy"
+     },
+     "sessionID": "ses_3678f92e6f574f341f5b0674"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_ee4fcb353302519aa888f791",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "info": {
+      "id": "msg_9cf9150711fb112fed38dbba",
+      "sessionID": "ses_3678f92e6f574f341f5b0674",
+      "role": "assistant",
+      "parentID": "msg_2e18b1de361fed721f376e7f",
+      "modelID": "claude",
+      "providerID": "membrane",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "/srv/seat",
+       "root": "/srv/seat"
+      },
+      "cost": 0.0,
+      "tokens": {
+       "total": 0,
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "time": {
+       "created": 1794603477431,
+       "completed": 1794603477432
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_9620511fa52445905b2197d1",
+    "type": "session.updated",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "info": {
+      "id": "ses_3678f92e6f574f341f5b0674",
+      "projectID": "membrane",
+      "directory": "/srv/seat",
+      "path": "srv/seat",
+      "slug": "misty-meadow",
+      "title": "E",
+      "version": "1.0",
+      "agent": "build",
+      "model": {
+       "id": "",
+       "providerID": "membrane",
+       "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+       "total": 0,
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "summary": {
+       "additions": 0,
+       "deletions": 0,
+       "files": 0
+      },
+      "time": {
+       "created": 1794603477430,
+       "updated": 1794603477432
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_a40b0d2538c3853e20a6e367",
+    "type": "session.diff",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "diff": []
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_3187843761838a2ab0ccc771",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_fcbaca2e5e868d5eaf959dab",
+      "sessionID": "ses_3678f92e6f574f341f5b0674",
+      "messageID": "msg_9cf9150711fb112fed38dbba",
+      "type": "step-start"
+     },
+     "time": 1794603477431,
+     "sessionID": "ses_3678f92e6f574f341f5b0674"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_62f439670a05f88937d52362",
+    "type": "message.part.updated",
+    "properties": {
+     "part": {
+      "id": "prt_02155348c0af5c503b366a13",
+      "sessionID": "ses_3678f92e6f574f341f5b0674",
+      "messageID": "msg_9cf9150711fb112fed38dbba",
+      "type": "text",
+      "text": "model ladder failed: AssertionError: buffered call not used",
+      "time": {
+       "start": 1794603477431,
+       "end": 1794603477431
+      }
+     },
+     "time": 1794603477431,
+     "sessionID": "ses_3678f92e6f574f341f5b0674"
+    }
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_d3dfcb92aa0a85c85f1f3cf5",
+    "type": "message.updated",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "info": {
+      "id": "msg_9cf9150711fb112fed38dbba",
+      "sessionID": "ses_3678f92e6f574f341f5b0674",
+      "role": "assistant",
+      "parentID": "msg_2e18b1de361fed721f376e7f",
+      "modelID": "claude",
+      "providerID": "membrane",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+       "cwd": "/srv/seat",
+       "root": "/srv/seat"
+      },
+      "cost": 0.0,
+      "tokens": {
+       "total": 17,
+       "input": 3,
+       "output": 14,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "time": {
+       "created": 1794603477431,
+       "completed": 1794603477432
+      },
+      "error": {
+       "name": "Error",
+       "data": {
+        "message": "buffered call not used"
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_bc9c8a689aaaab0e0215adb8",
+    "type": "session.status",
+    "properties": {
+     "status": {
+      "type": "idle"
+     },
+     "sessionID": "ses_3678f92e6f574f341f5b0674"
+    }
+   }
+  }
+ },
+ {
+  "event": "session.idle",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_509d4f3f7a5f50f6097e43d3",
+    "type": "session.idle",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674"
+    }
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_0e4a7186015e09a1c3fb6d74",
+    "type": "session.updated",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "info": {
+      "id": "ses_3678f92e6f574f341f5b0674",
+      "projectID": "membrane",
+      "directory": "/srv/seat",
+      "path": "srv/seat",
+      "slug": "misty-meadow",
+      "title": "E",
+      "version": "1.0",
+      "agent": "build",
+      "model": {
+       "id": "",
+       "providerID": "membrane",
+       "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+       "total": 0,
+       "input": 0,
+       "output": 0,
+       "reasoning": 0,
+       "cache": {
+        "read": 0,
+        "write": 0
+       }
+      },
+      "summary": {
+       "additions": 0,
+       "deletions": 0,
+       "files": 0
+      },
+      "time": {
+       "created": 1794603477430,
+       "updated": 1794603477432
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_52aaecf1266702b3d2344ec0",
+    "type": "session.diff",
+    "properties": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "diff": []
+    }
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_8c35ea0f6fe84e1d1051ebf5",
+    "type": "session.status",
+    "properties": {
+     "status": {
+      "type": "idle"
+     },
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "session.idle",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_3a287de3ed79c8c85bab1b75",
+    "type": "session.idle",
+    "properties": {
+     "sessionID": "ses_69143f4fc8088e7ec097c182"
+    }
+   }
+  }
+ },
+ {
+  "event": "session.deleted",
+  "data": {
+   "directory": "/srv/seat",
+   "project": "global",
+   "payload": {
+    "id": "evt_8b5e77ee25c5efacc9c75ff9",
+    "type": "session.deleted",
+    "properties": {
+     "info": {
+      "sessionID": "ses_3678f92e6f574f341f5b0674"
+     }
+    }
+   }
+  }
+ }
+]

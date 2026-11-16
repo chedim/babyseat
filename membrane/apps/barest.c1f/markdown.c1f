@@ -1,0 +1,297 @@
+PACK markdown 1
+IMPORT dom 1
+-- MARKDOWN AS c1f (#1143): a message's text becomes DomNodes (text nodes only, never HTML) by entities that parse and paint, so a malicious message is inert text and no
+-- evaluation can run long (each entity evaluates once per change of ITS text: a cached getter, then a setter that only writes). The stages, each its own class:
+--   Md:<id>        {src, into, full}: the message; `into` is the DomNode it draws in. It cuts the text at `cap` characters (the rest is a plain preview with a "Show all" button).
+--   MdChunk:<pre><n>  one region of the text: a fenced code block, or up to `K` lines of prose. It cuts the prose into blocks and hands the rest of the text to the next chunk (a chain).
+--   MdBlock:<key>  one block (paragraph, heading, hr, quote, list, table, a table row): it draws its nodes and hands its lines, items and cells to the stages below it.
+--   MdLine:<key>   the inline markup of ONE line (code, bold, italic, strikethrough, links, bare urls) as spans.
+--   MdPaint:<key>  the DomNodes of one entity: it writes them (the ONE table of how a node dict becomes a DomNode) and retires the ones that are gone.
+-- THE TEXT PRIMITIVES c1f has are `lines`, `replace`, `before`, `after`, `head`, `tail`, `startswith`, `in`, `join`, `strip`, `num` and a comprehension; there is no `split`, no index in a
+-- comprehension, no `%` and no nested `for`. What stands in for them is named here (the missing builtins are a decision, docs/ui-rebuild-plan.md "Markdown"):
+--   split(t, sep)      = lines(replace(t, sep, '\n')) on a text with no newline in it; a text with newlines first turns them into '\r' (the pack takes every '\r' and '\0' out of its input), and the pieces turn them back;
+--                        a TRAILING empty piece is lost (nothing here needs it)
+--   an index           = a list literal 0..63 (`idx`) cut by `head(idx, n)`
+--   a stream of tokens = one text with NUL (\0) delimiters, split by the trick above: text tokens are at even places and markers at odd places
+
+-- ---- the painter: the one place a node dict {k, parent, tag, class, text, href, lang, owner, act, before, tabindex, role, label, live} becomes a DomNode ----
+-- a node that was drawn before and is not in the new list is retired (its element leaves the page); `text` is written only where the dict has one (a text write on a node
+-- that has children would wipe them); a value that did not change is no write.
+MdPaint.nodes on-setter md-paint:
+  WHEN this.nodes != None:
+    keys = [prop(nd, 'k') for nd in this.nodes]
+    FOR e IN [x for x in (this.drawn or []) if x not in keys]:
+      (e).retire = True
+    this.drawn = keys
+    FOR nd IN this.nodes:
+      (prop(nd, 'k')).tag = prop(nd, 'tag')
+      (prop(nd, 'k')).class = prop(nd, 'class')
+      (prop(nd, 'k')).parent = prop(nd, 'parent')
+    FOR nd IN [x for x in this.nodes if prop(x, 'text') != None]:
+      (prop(nd, 'k')).text = prop(nd, 'text')
+    FOR nd IN [x for x in this.nodes if prop(x, 'href') != None]:
+      (prop(nd, 'k')).href = prop(nd, 'href')
+      (prop(nd, 'k')).target = '_blank'
+      (prop(nd, 'k')).rel = 'noopener noreferrer'
+    FOR nd IN [x for x in this.nodes if prop(x, 'lang') != None]:
+      (prop(nd, 'k')).data-lang = prop(nd, 'lang')
+    FOR nd IN [x for x in this.nodes if prop(x, 'owner') != None]:
+      (prop(nd, 'k')).owner = prop(nd, 'owner')
+    FOR nd IN [x for x in this.nodes if prop(x, 'act') != None]:
+      (prop(nd, 'k')).act = prop(nd, 'act')
+    FOR nd IN [x for x in this.nodes if prop(x, 'before') != None]:
+      (prop(nd, 'k')).before = prop(nd, 'before')
+    FOR nd IN [x for x in this.nodes if prop(x, 'tag') == 'button']:
+      (prop(nd, 'k')).type = 'button'
+    FOR nd IN [x for x in this.nodes if prop(x, 'tabindex') != None]:
+      (prop(nd, 'k')).tabindex = prop(nd, 'tabindex')
+    FOR nd IN [x for x in this.nodes if prop(x, 'role') != None]:
+      (prop(nd, 'k')).role = prop(nd, 'role')
+    FOR nd IN [x for x in this.nodes if prop(x, 'label') != None]:
+      (prop(nd, 'k')).aria-label = prop(nd, 'label')
+    FOR nd IN [x for x in this.nodes if prop(x, 'live') != None]:
+      (prop(nd, 'k')).aria-live = prop(nd, 'live')
+    FOR nd IN [x for x in this.nodes if prop(x, 'act') != None]:
+      (prop(nd, 'k')).act = prop(nd, 'act')
+
+-- ---- one line's inline markup ----
+-- the line is cut into text and markers in one text: a marker is NUL, its name, NUL. Markers: b, i, s (a toggle: bold, italic, strikethrough), C (the next text is code), U (the next text is a
+-- bare url), A<url> and Z (a link opens, closes), n (nothing: it only ends a code or url text). Text tokens are the even places of the split, markers the odd.
+MdLine.idx getter: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+MdLine.par getter: [False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True]
+MdLine.evens getter: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62]
+MdLine.odds getter: [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 45, 47, 49, 51, 53, 55, 57, 59, 61, 63]
+MdLine.s getter: head(replace(replace(str(this.src or ''), '\0', ''), '\r', ' '), 4000)
+MdLine.fast getter: not ('`' in this.s or '*' in this.s or '~~' in this.s or '[' in this.s or 'http' in this.s)
+MdLine.pieces getter: lines(replace(this.s, '`', '\n'))
+-- stage 1: bare urls (a word that starts with http:// or https://; one trailing . , ; : ! ? ) stays text)
+MdLine.st1 getter: [(this.pieces[i] if this.par[i] or 'http' not in this.pieces[i] else join([(('\0U\0' + (head(w, len(w) - 1) if tail(w, 1) in ['.', ',', ';', ':', '!', '?', ')'] else w) + '\0n\0' + (tail(w, 1) if tail(w, 1) in ['.', ',', ';', ':', '!', '?', ')'] else '')) if (startswith(w, 'http://') or startswith(w, 'https://')) else w) for w in lines(replace(this.pieces[i], ' ', '\n'))], ' ') + (' ' if tail(this.pieces[i], 1) == ' ' else '')) for i in head(this.idx, len(this.pieces))]
+-- stage 2: [label](url) links with an http(s) url (any other scheme: the label stays, as text)
+MdLine.qs getter: [lines(replace(x, '[', '\n')) for x in this.st1]
+MdLine.st2 getter: [(this.st1[i] if this.par[i] else join([(this.qs[i][j] if j == 0 else (('\0A' + before(after(this.qs[i][j], ']('), ')') + '\0' + before(this.qs[i][j], '](') + '\0Z\0' + after(after(this.qs[i][j], ']('), ')')) if ('](' in this.qs[i][j] and ')' in after(this.qs[i][j], '](') and (startswith(lower(before(after(this.qs[i][j], ']('), ')')), 'http://') or startswith(lower(before(after(this.qs[i][j], ']('), ')')), 'https://'))) else ('[' + this.qs[i][j]))) for j in head(this.idx, len(this.qs[i]))], '')) for i in head(this.idx, len(this.st1))]
+-- stage 3: the toggles; a code piece is wrapped in its marker
+MdLine.st3 getter: [(('\0C\0' + this.pieces[i] + '\0n\0') if this.par[i] else replace(replace(replace(this.st2[i], '**', '\0b\0'), '~~', '\0s\0'), '*', '\0i\0')) for i in head(this.idx, len(this.st2))]
+MdLine.T getter: lines(replace(join(this.st3, ''), '\0', '\n'))
+-- a line of more than 48 tokens, or with more than 60 pieces between its backticks or its '[', is not parsed: it is one plain text (the cost of one line is bounded)
+MdLine.big getter: len(this.T) > 48 or len(this.pieces) > 60 or max(concat([len(q) for q in this.qs], [0])) > 60
+MdLine.X getter: [this.T[j] for j in this.evens if j < len(this.T)]
+MdLine.M getter: [this.T[j] for j in this.odds if j < len(this.T)]
+-- a toggle with no partner (an odd count, and the last of its kind) is the literal characters, not a style
+MdLine.nb getter: len([m for m in this.M if m == 'b'])
+MdLine.ni getter: len([m for m in this.M if m == 'i'])
+MdLine.ns getter: len([m for m in this.M if m == 's'])
+MdLine.lb getter: max(concat([j for j in head(this.idx, len(this.M)) if this.M[j] == 'b'], [-1]))
+MdLine.li getter: max(concat([j for j in head(this.idx, len(this.M)) if this.M[j] == 'i'], [-1]))
+MdLine.ls getter: max(concat([j for j in head(this.idx, len(this.M)) if this.M[j] == 's'], [-1]))
+MdLine.vb getter: [(this.M[j] == 'b' and not (this.par[this.nb] and j == this.lb)) for j in head(this.idx, len(this.M))]
+MdLine.vi getter: [(this.M[j] == 'i' and not (this.par[this.ni] and j == this.li)) for j in head(this.idx, len(this.M))]
+MdLine.vs getter: [(this.M[j] == 's' and not (this.par[this.ns] and j == this.ls)) for j in head(this.idx, len(this.M))]
+-- text k: the literal of the marker before it when that marker had no partner, then the text
+MdLine.txt getter: [((('**' if this.M[k - 1] == 'b' and this.par[this.nb] and k - 1 == this.lb else ('*' if this.M[k - 1] == 'i' and this.par[this.ni] and k - 1 == this.li else ('~~' if this.M[k - 1] == 's' and this.par[this.ns] and k - 1 == this.ls else ''))) if k > 0 else '') + this.X[k]) for k in head(this.idx, len(this.X))]
+MdLine.fb getter: [this.par[len([j for j in head(this.idx, k) if this.vb[j]])] for k in head(this.idx, len(this.X))]
+MdLine.fi getter: [this.par[len([j for j in head(this.idx, k) if this.vi[j]])] for k in head(this.idx, len(this.X))]
+MdLine.fs getter: [this.par[len([j for j in head(this.idx, k) if this.vs[j]])] for k in head(this.idx, len(this.X))]
+MdLine.fc getter: [(k > 0 and this.M[k - 1] == 'C') for k in head(this.idx, len(this.X))]
+MdLine.fu getter: [(k > 0 and this.M[k - 1] == 'U') for k in head(this.idx, len(this.X))]
+MdLine.la getter: [max(concat([j for j in head(this.idx, k) if startswith(this.M[j], 'A')], [-1])) for k in head(this.idx, len(this.X))]
+MdLine.lz getter: [max(concat([j for j in head(this.idx, k) if this.M[j] == 'Z'], [-1])) for k in head(this.idx, len(this.X))]
+MdLine.href getter: [(tail(this.M[this.la[k]], len(this.M[this.la[k]]) - 1) if this.la[k] > this.lz[k] else (this.X[k] if this.fu[k] else None)) for k in head(this.idx, len(this.X))]
+MdLine.toks getter:
+  WHEN this.fast or this.big: [{'k': 0, 'text': this.s, 'tag': 'span', 'class': 'md-t', 'href': None}] if this.s != '' else []
+  ELSE: [{'k': k, 'text': this.txt[k], 'tag': ('a' if this.href[k] != None else ('code' if this.fc[k] else 'span')), 'class': 'md-t' + (' md-b' if this.fb[k] else '') + (' md-i' if this.fi[k] else '') + (' md-s' if this.fs[k] else '') + (' md-code' if this.fc[k] else ''), 'href': this.href[k]} for k in head(this.idx, len(this.X)) if this.txt[k] != '']
+MdLine.nodes getter: [{'k': this.base + ':' + str(prop(t, 'k')), 'parent': this.into, 'tag': prop(t, 'tag'), 'class': prop(t, 'class'), 'text': prop(t, 'text'), 'href': prop(t, 'href')} for t in this.toks] if this.into != None and this.base != None else None
+MdLine.nodes on-setter md-line-paint:
+  WHEN this.nodes != None:
+    ('MdPaint:l:' + after(this.eid, 'MdLine:')).nodes = this.nodes
+-- SHRINKING: a line, block or chunk its parent no longer draws is told `gone` (a counter: every write is a change): its nodes are retired and its text forgotten (so the same text drawn again draws again)
+MdLine.gone on-setter md-line-gone:
+  WHEN this.gone != None:
+    ('MdPaint:l:' + after(this.eid, 'MdLine:')).nodes = []
+    this.src = None
+
+-- ---- the message ----
+-- `cap`: how much of a message is parsed (the rest is a plain preview and a "Show all" button: 12000 characters is the value TRIED, not decided).
+Md.id getter: after(this.eid, 'Md:')
+Md.norm getter:
+  t = '\n' + replace(replace(replace(replace(str(this.src or ''), '\0', ''), '\r\n', '\n'), '\r', '\n'), '\t', '    ')
+  u = replace(replace(replace(replace(replace(t, '\n   ```', '\n```'), '\n  ```', '\n```'), '\n ```', '\n```'), '\n~~~', '\n```'), '\n  ~~~', '\n```')
+  tail(u, len(u) - 1)
+Md.cap getter: 1000000000 if this.full == True else 12000
+Md.shown getter: head(this.norm, this.cap)
+Md.over getter: len(this.norm) - len(this.shown)
+Md.plan getter:
+  WHEN this.into == None: None
+  ELSE: {'chunk': this.shown, 'nodes': concat([{'k': 'DomNode:md:' + this.id + ':body', 'parent': this.into, 'tag': 'div', 'class': 'md-slot'}], [{'k': 'DomNode:md:' + this.id + ':more', 'parent': this.into, 'tag': 'div', 'class': 'md-more'}, {'k': 'DomNode:md:' + this.id + ':more:txt', 'parent': 'DomNode:md:' + this.id + ':more', 'tag': 'span', 'class': 'md-plain', 'text': head(tail(this.norm, this.over), 600) + '…'}, {'k': 'DomNode:md:' + this.id + ':more:btn', 'parent': 'DomNode:md:' + this.id + ':more', 'tag': 'button', 'class': 'md-showall', 'text': 'Show all (' + str(this.over) + ' more characters)', 'owner': this.eid, 'act': 'md-more'}] if this.over > 0 else [])}
+Md.plan on-setter md-draw:
+  WHEN this.plan != None:
+    ('MdPaint:' + this.id).nodes = prop(this.plan, 'nodes')
+    ('MdChunk:' + this.id + ':c0').pre = this.id + ':'
+    ('MdChunk:' + this.id + ':c0').n = 0
+    ('MdChunk:' + this.id + ':c0').depth = 0
+    ('MdChunk:' + this.id + ':c0').into = 'DomNode:md:' + this.id + ':body'
+    ('MdChunk:' + this.id + ':c0').raw = prop(this.plan, 'chunk')
+
+-- ---- a chunk: a fenced code block, or up to 40 lines of prose (cut into blocks) ----
+MdChunk.idx getter: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+MdChunk.par getter: [False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True]
+MdChunk.key getter: after(this.eid, 'MdChunk:')
+MdChunk.r getter: str(this.raw or '')
+MdChunk.fence getter: startswith(this.r, '```')
+MdChunk.u getter: '\n' + after(this.r, '\n')
+MdChunk.body0 getter: before(this.u, '\n```')
+MdChunk.body getter: after(this.body0, '\n') if this.body0 != '' else ''
+MdChunk.lang getter: head(strip(replace(before(this.r, '\n'), '`', '')), 30)
+MdChunk.P getter: before(this.r, '\n```')
+MdChunk.hasf getter: len(this.P) < len(this.r)
+MdChunk.pl getter: lines(this.P)
+MdChunk.region getter: join(head(this.pl, 40), '\n')
+MdChunk.morep getter: join(tail(this.pl, len(this.pl) - 40), '\n') if len(this.pl) > 40 else ''
+MdChunk.rest getter:
+  WHEN this.fence: after(after(this.u, '\n```'), '\n')
+  ELSE: this.morep + ('\n' if this.morep != '' and this.hasf else '') + (('```' + after(this.r, '\n```')) if this.hasf else '')
+MdChunk.L getter: lines(this.region)
+MdChunk.kinds getter: [('b' if strip(l) == '' else ('h' if (startswith(strip(l), '# ') or startswith(strip(l), '## ') or startswith(strip(l), '### ') or startswith(strip(l), '#### ') or startswith(strip(l), '##### ') or startswith(strip(l), '###### ')) else ('r' if (len(replace(strip(l), ' ', '')) >= 3 and (replace(replace(strip(l), ' ', ''), '-', '') == '' or replace(replace(strip(l), ' ', ''), '*', '') == '' or replace(replace(strip(l), ' ', ''), '_', '') == '')) else ('q' if startswith(strip(l), '>') else ('l' if (startswith(strip(l), '- ') or startswith(strip(l), '* ') or startswith(strip(l), '+ ')) else ('o' if ((num(before(strip(l), '. ')) != None and before(strip(l), '. ') != strip(l)) or (num(before(strip(l), ') ')) != None and before(strip(l), ') ') != strip(l))) else ('t' if startswith(strip(l), '|') else 'p'))))))) for l in this.L]
+-- a new block where the kind changes (a list item, bullet or number, indented under the other kind belongs to the list above it)
+MdChunk.st getter: [(i > 0 and (this.kinds[i] != this.kinds[max(i - 1, 0)] or this.kinds[i] in ['h', 'r']) and not (this.kinds[i] in ['l', 'o'] and this.kinds[max(i - 1, 0)] in ['l', 'o'] and startswith(this.L[i], ' '))) for i in head(this.idx, len(this.L))]
+MdChunk.marked getter: join([(('\0' if this.st[i] else '') + this.L[i]) for i in head(this.idx, len(this.L))], '\n')
+MdChunk.pcs getter: lines(replace(replace(this.marked, '\n', '\r'), '\0', '\n'))
+MdChunk.kb getter: concat([this.kinds[0]] if len(this.kinds) > 0 else [], [this.kinds[i] for i in head(this.idx, len(this.L)) if this.st[i]])
+MdChunk.blocks getter: [{'i': b, 'raw': replace(this.pcs[b], '\r', '\n'), 'kind': this.kb[b]} for b in head(this.idx, len(this.pcs)) if this.kb[b] != 'b']
+MdChunk.nd getter: 'DomNode:md:' + this.key
+-- ORDER: nodes of different entities are made in whatever order the engine runs them (and a plan is computed before all its inputs are there), so each place a later entity draws into is a SLOT: a block's slot (made by its chunk, `before` the next slot) and `next`, where the next chunk draws. Nodes inside one block are made by that block's one plan, in order.
+MdChunk.nextslot getter: {'k': this.nd + ':next', 'parent': this.into, 'tag': 'div', 'class': 'md-slot'}
+-- the chunk past the 120th is not parsed: everything left is one plain text
+MdChunk.plan getter:
+  WHEN this.into == None or this.raw == None or this.n == None: None
+  ELSE WHEN this.n > 0 and this.r == '': {'nodes': [], 'blocks': [], 'rest': ''}
+  ELSE WHEN this.n >= 120: {'nodes': [{'k': this.nd, 'parent': this.into, 'tag': 'div', 'class': 'md-plain', 'text': this.r}], 'blocks': [], 'rest': ''}
+  ELSE WHEN this.fence: {'nodes': [{'k': this.nd, 'parent': this.into, 'tag': 'pre', 'class': 'md-pre', 'lang': this.lang, 'before': this.nd + ':next'}, {'k': this.nd + ':bar', 'parent': this.nd, 'tag': 'div', 'class': 'md-codebar'}, {'k': this.nd + ':lang', 'parent': this.nd + ':bar', 'tag': 'span', 'class': 'md-lang', 'text': this.lang or 'code'}, {'k': this.nd + ':copy', 'parent': this.nd + ':bar', 'tag': 'button', 'class': 'md-copy', 'text': 'Copy', 'label': 'Copy code', 'owner': this.eid, 'act': 'md-copy'}, {'k': this.nd + ':live', 'parent': this.nd + ':bar', 'tag': 'span', 'class': 'md-live', 'role': 'status', 'live': 'polite'}, {'k': this.nd + ':code', 'parent': this.nd, 'tag': 'code', 'class': 'md-codebody', 'text': this.body, 'tabindex': 0, 'role': 'region', 'label': (this.lang + ' code') if this.lang != '' else 'code'}, this.nextslot], 'blocks': [], 'rest': this.rest}
+  ELSE: {'nodes': concat([{'k': this.nd + ':s' + str(prop(bk, 'i')), 'parent': this.into, 'tag': 'div', 'class': 'md-slot', 'before': this.nd + ':next'} for bk in this.blocks], [this.nextslot]), 'blocks': this.blocks, 'rest': this.rest}
+MdChunk.plan on-setter md-chunk-draw:
+  WHEN this.plan != None:
+    ('MdPaint:' + this.key).nodes = prop(this.plan, 'nodes')
+    FOR i IN [x for x in (this.bids or []) if x not in [prop(b, 'i') for b in prop(this.plan, 'blocks')]]:
+      ('MdBlock:' + this.key + ':b' + str(i)).gone = (prop('MdBlock:' + this.key + ':b' + str(i), 'gone') or 0) + 1
+    this.bids = [prop(b, 'i') for b in prop(this.plan, 'blocks')]
+    FOR bk IN prop(this.plan, 'blocks'):
+      ('MdBlock:' + this.key + ':b' + str(prop(bk, 'i'))).depth = this.depth
+      ('MdBlock:' + this.key + ':b' + str(prop(bk, 'i'))).kind = prop(bk, 'kind')
+      ('MdBlock:' + this.key + ':b' + str(prop(bk, 'i'))).into = this.nd + ':s' + str(prop(bk, 'i'))
+      ('MdBlock:' + this.key + ':b' + str(prop(bk, 'i'))).raw = prop(bk, 'raw')
+MdChunk.gone on-setter md-chunk-gone:
+  WHEN this.gone != None:
+    ('MdPaint:' + this.key).nodes = []
+    this.raw = None
+    FOR i IN (this.bids or []):
+      ('MdBlock:' + this.key + ':b' + str(i)).gone = (prop('MdBlock:' + this.key + ':b' + str(i), 'gone') or 0) + 1
+    this.bids = []
+    FOR nx IN [x for x in ['MdChunk:' + this.pre + 'c' + str(this.n + 1)] if prop(x, 'raw') != None]:
+      (nx).gone = (prop(nx, 'gone') or 0) + 1
+-- the next chunk gets what this one left (an empty rest clears a next chunk that was there: the text got shorter)
+MdChunk.plan on-setter md-chunk-next:
+  WHEN this.plan != None and (prop(this.plan, 'rest') != '' or prop('MdChunk:' + this.pre + 'c' + str(this.n + 1), 'raw') != None):
+    ('MdChunk:' + this.pre + 'c' + str(this.n + 1)).pre = this.pre
+    ('MdChunk:' + this.pre + 'c' + str(this.n + 1)).n = this.n + 1
+    ('MdChunk:' + this.pre + 'c' + str(this.n + 1)).depth = this.depth
+    ('MdChunk:' + this.pre + 'c' + str(this.n + 1)).into = this.nd + ':next'
+    ('MdChunk:' + this.pre + 'c' + str(this.n + 1)).raw = prop(this.plan, 'rest')
+
+-- ---- a block: paragraph (p), heading (h), rule (r), quote (q), list (l), table (t); a table row (tr, trh) ----
+MdBlock.idx getter: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+MdBlock.par getter: [False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True, False, True]
+MdBlock.key getter: after(this.eid, 'MdBlock:')
+MdBlock.nd getter: 'DomNode:md:' + this.key + ':n'
+MdBlock.L getter: lines(str(this.raw or ''))
+MdBlock.S getter: [strip(l) for l in this.L]
+-- a table needs its separator row: without one it is a paragraph
+MdBlock.eff getter: ('l' if this.kind == 'o' else ('t' if (len(this.S) >= 2 and '-' in this.S[1] and strip(replace(replace(replace(replace(this.S[1], '|', ''), '-', ''), ':', ''), ' ', '')) == '') else 'p') if this.kind == 't' else this.kind)
+-- a heading: its level (the markdown level + 2, as the old page did: # is h3, ###### is h6) and its text
+MdBlock.hl getter: (6 if startswith(this.S[0], '######') else (5 if startswith(this.S[0], '#####') else (4 if startswith(this.S[0], '####') else (3 if startswith(this.S[0], '###') else (2 if startswith(this.S[0], '##') else 1))))) if len(this.S) > 0 else 1
+-- a quote: one level of '>' off each line
+MdBlock.qbody getter: join([(tail(after(s, '>'), len(after(s, '>')) - 1) if startswith(after(s, '>'), ' ') else after(s, '>')) for s in this.S], '\n')
+-- a list: the item lines (the indentation of the first line is the base) and what is indented under each
+MdBlock.W getter: [(8 if startswith(l, '        ') else (6 if startswith(l, '      ') else (4 if startswith(l, '    ') else (2 if startswith(l, '  ') else (1 if startswith(l, ' ') else 0))))) for l in this.L]
+MdBlock.lmarked getter: join([(('\0' if (i > 0 and this.W[i] <= this.W[0]) else '') + this.L[i]) for i in head(this.idx, len(this.L))], '\n')
+MdBlock.lp getter: lines(replace(replace(this.lmarked, '\n', '\r'), '\0', '\n'))
+MdBlock.heads getter: [strip(before(p, '\r')) for p in this.lp]
+MdBlock.isol getter: [((num(before(s, '. ')) != None and before(s, '. ') != s) or (num(before(s, ') ')) != None and before(s, ') ') != s)) for s in this.heads]
+MdBlock.items getter: [{'i': b, 'text': (strip(after(this.heads[b], ' ')) if this.isol[b] else (strip(tail(this.heads[b], len(this.heads[b]) - 2)) if (startswith(this.heads[b], '- ') or startswith(this.heads[b], '* ') or startswith(this.heads[b], '+ ')) else this.heads[b])), 'kids': replace(after(this.lp[b], '\r'), '\r', '\n')} for b in head(this.idx, len(this.lp))]
+-- a table row: its cells (at most 12)
+MdBlock.inner getter: (tail(this.S[0], len(this.S[0]) - 1) if startswith(this.S[0], '|') else this.S[0]) if len(this.S) > 0 else ''
+MdBlock.cells getter: head([strip(c) for c in lines(replace((head(this.inner, len(this.inner) - 1) if tail(this.inner, 1) == '|' else this.inner), '|', '\n'))], 12)
+-- a line of text drawn as spans in a node: a paragraph's lines, a deep quote's lines
+MdBlock.lnodes getter: [{'k': this.nd + ':l' + str(i), 'parent': this.nd, 'tag': 'span', 'class': 'md-ln'} for i in head(this.idx, len(this.S))]
+MdBlock.llines getter: [{'eid': 'MdLine:' + this.key + ':l' + str(i), 'base': 'DomNode:md:' + this.key + ':l' + str(i), 'into': this.nd + ':l' + str(i), 'src': this.S[i]} for i in head(this.idx, len(this.S))]
+MdBlock.ilines getter: [{'eid': 'MdLine:' + this.key + ':i' + str(prop(it, 'i')), 'base': 'DomNode:md:' + this.key + ':i' + str(prop(it, 'i')) + ':t', 'into': this.nd + ':i' + str(prop(it, 'i')) + ':t', 'src': (prop(it, 'text') if (this.depth < 4 or strip(prop(it, 'kids')) == '') else prop(it, 'text') + ' ' + replace(strip(prop(it, 'kids')), '\n', ' '))} for it in this.items]
+MdBlock.ikids getter: [{'eid': 'MdBlock:' + this.key + ':i' + str(prop(it, 'i')), 'kind': 'l', 'depth': this.depth + 1, 'into': this.nd + ':i' + str(prop(it, 'i')), 'raw': prop(it, 'kids')} for it in this.items if strip(prop(it, 'kids')) != '' and this.depth < 4]
+MdBlock.inodes getter: concat([{'k': this.nd, 'parent': this.into, 'tag': ('ol' if this.isol[0] else 'ul'), 'class': 'md-list'}], [{'k': this.nd + ':i' + str(prop(it, 'i')), 'parent': this.nd, 'tag': 'li', 'class': 'md-li'} for it in this.items], [{'k': this.nd + ':i' + str(prop(it, 'i')) + ':t', 'parent': this.nd + ':i' + str(prop(it, 'i')), 'tag': 'span', 'class': 'md-it'} for it in this.items])
+MdBlock.tnodes getter: concat([{'k': this.nd, 'parent': this.into, 'tag': 'div', 'class': 'md-tablewrap', 'tabindex': 0, 'role': 'region', 'label': 'table'}, {'k': this.nd + ':tb', 'parent': this.nd, 'tag': 'table', 'class': 'md-table'}, {'k': this.nd + ':th', 'parent': this.nd + ':tb', 'tag': 'thead'}, {'k': this.nd + ':r0', 'parent': this.nd + ':th', 'tag': 'tr'}, {'k': this.nd + ':tbd', 'parent': this.nd + ':tb', 'tag': 'tbody'}], [{'k': this.nd + ':r' + str(i), 'parent': this.nd + ':tbd', 'tag': 'tr'} for i in head(this.idx, len(this.L)) if i >= 2])
+MdBlock.trows getter: [{'eid': 'MdBlock:' + this.key + ':r' + str(i), 'kind': ('trh' if i == 0 else 'tr'), 'depth': this.depth + 1, 'into': this.nd + ':r' + str(i), 'raw': this.L[i]} for i in head(this.idx, len(this.L)) if i != 1]
+MdBlock.cnodes getter: [{'k': 'DomNode:md:' + this.key + ':c' + str(j), 'parent': this.into, 'tag': ('th' if this.kind == 'trh' else 'td'), 'class': 'md-cell'} for j in head(this.idx, len(this.cells))]
+MdBlock.clines getter: [{'eid': 'MdLine:' + this.key + ':c' + str(j), 'base': 'DomNode:md:' + this.key + ':c' + str(j), 'into': 'DomNode:md:' + this.key + ':c' + str(j), 'src': this.cells[j]} for j in head(this.idx, len(this.cells))]
+
+MdBlock.plan getter:
+  WHEN this.into == None or this.raw == None or this.kind == None or this.depth == None: None
+  ELSE WHEN this.eff == 'r': {'nodes': [{'k': this.nd, 'parent': this.into, 'tag': 'hr', 'class': 'md-hr'}], 'lines': [], 'blocks': [], 'chunks': []}
+  ELSE WHEN this.eff == 'h': {'nodes': [{'k': this.nd, 'parent': this.into, 'tag': 'h' + str(min(6, this.hl + 2)), 'class': 'md-h'}], 'lines': [{'eid': 'MdLine:' + this.key + ':l0', 'base': 'DomNode:md:' + this.key + ':l0', 'into': this.nd, 'src': strip(tail(this.S[0], len(this.S[0]) - this.hl))}], 'blocks': [], 'chunks': []}
+  ELSE WHEN this.eff == 'p': {'nodes': concat([{'k': this.nd, 'parent': this.into, 'tag': 'p', 'class': 'md-p'}], this.lnodes), 'lines': this.llines, 'blocks': [], 'chunks': []}
+  ELSE WHEN this.eff == 'q' and this.depth < 4: {'nodes': [{'k': this.nd, 'parent': this.into, 'tag': 'blockquote', 'class': 'md-q'}], 'lines': [], 'blocks': [], 'chunks': [{'eid': 'MdChunk:' + this.key + ':qc0', 'pre': this.key + ':q', 'n': 0, 'depth': this.depth + 1, 'into': this.nd, 'raw': this.qbody}]}
+  ELSE WHEN this.eff == 'q': {'nodes': concat([{'k': this.nd, 'parent': this.into, 'tag': 'blockquote', 'class': 'md-q'}], this.lnodes), 'lines': this.llines, 'blocks': [], 'chunks': []}
+  ELSE WHEN this.eff == 'l': {'nodes': this.inodes, 'lines': this.ilines, 'blocks': this.ikids, 'chunks': []}
+  ELSE WHEN this.eff == 't': {'nodes': this.tnodes, 'lines': [], 'blocks': this.trows, 'chunks': []}
+  ELSE WHEN this.eff == 'tr' or this.eff == 'trh': {'nodes': this.cnodes, 'lines': this.clines, 'blocks': [], 'chunks': []}
+  ELSE: None
+MdBlock.plan on-setter md-block-draw:
+  WHEN this.plan != None:
+    ('MdPaint:' + this.key).nodes = prop(this.plan, 'nodes')
+    ks = [prop(x, 'eid') for x in concat(prop(this.plan, 'lines'), prop(this.plan, 'blocks'), prop(this.plan, 'chunks'))]
+    FOR e IN [x for x in (this.kids or []) if x not in ks]:
+      (e).gone = (prop(e, 'gone') or 0) + 1
+    this.kids = ks
+    FOR ln IN prop(this.plan, 'lines'):
+      (prop(ln, 'eid')).base = prop(ln, 'base')
+      (prop(ln, 'eid')).into = prop(ln, 'into')
+      (prop(ln, 'eid')).src = prop(ln, 'src')
+    FOR bk IN prop(this.plan, 'blocks'):
+      (prop(bk, 'eid')).depth = prop(bk, 'depth')
+      (prop(bk, 'eid')).kind = prop(bk, 'kind')
+      (prop(bk, 'eid')).into = prop(bk, 'into')
+      (prop(bk, 'eid')).raw = prop(bk, 'raw')
+    FOR ck IN prop(this.plan, 'chunks'):
+      (prop(ck, 'eid')).pre = prop(ck, 'pre')
+      (prop(ck, 'eid')).n = prop(ck, 'n')
+      (prop(ck, 'eid')).depth = prop(ck, 'depth')
+      (prop(ck, 'eid')).into = prop(ck, 'into')
+      (prop(ck, 'eid')).raw = prop(ck, 'raw')
+
+MdBlock.gone on-setter md-block-gone:
+  WHEN this.gone != None:
+    ('MdPaint:' + this.key).nodes = []
+    this.raw = None
+    FOR e IN (this.kids or []):
+      (e).gone = (prop(e, 'gone') or 0) + 1
+    this.kids = []
+
+-- ---- the two buttons: "Show all" (a message over its cap) and "Copy" (a code block) ----
+-- Copy is the host's `copy` write on the button: {text, at} (`at` makes a second click a new value); the host puts the text on the clipboard (fieldvm.js) and answers with `copy_result` {ok, why}.
+-- The answer is shown as the button's text ("Copied" / "Copy failed") and SAID in the block's live region (polite); `MdClock` puts both back after `hold` seconds of the page's clock (no timer of its own).
+DomNode.clicked on-setter md-click:
+  WHEN this.act == 'md-more':
+    (this.owner).full = True
+  ELSE WHEN this.act == 'md-copy':
+    this.copy = {'text': prop(this.owner, 'body'), 'at': this.clicked}
+DomNode.copy_result on-setter md-copied:
+  WHEN this.act == 'md-copy' and this.copy_result != None:
+    this.text = 'Copied' if prop(this.copy_result, 'ok') == True else 'Copy failed'
+    ('DomNode:md:' + after(this.owner, 'MdChunk:') + ':live').text = 'Copied' if prop(this.copy_result, 'ok') == True else 'Copy failed: ' + str(prop(this.copy_result, 'why') or 'the browser refused')
+    ('MdClock:main').due = concat((prop('MdClock:main', 'due') or []), [{'eid': this.eid, 'live': 'DomNode:md:' + after(this.owner, 'MdChunk:') + ':live', 'at': clock}])
+-- `hold`: how long the answer stays (2 s is the value TRIED, not decided)
+MdClock.hold getter: 2
+MdClock.tick getter: clock
+MdClock.late getter: [d for d in (this.due or []) if this.tick - prop(d, 'at') >= this.hold]
+MdClock.late on-setter md-clock-revert:
+  WHEN len(this.late) > 0:
+    FOR d IN this.late:
+      (prop(d, 'eid')).text = 'Copy'
+      (prop(d, 'live')).text = ''
+    this.due = [d for d in this.due if this.tick - prop(d, 'at') < this.hold]

@@ -1,0 +1,254 @@
+# The c1f standard library: the contracts and the builtins
+
+Status: the contracts below are built and pinned by `native/tests/contracts.rs`; the builtin list is the one in `native/src/expr.rs` (`RESERVED`, kept in step with `call` by a test). Spec files: `tests/specs/*.json`.
+
+c1f has no functions and no macros. A pack is getters and setters over entities, so a "library" can only be **data contracts and
+shared getters on a class** that every pack imports. The standard library is therefore the contract of the classes the OS is
+built on, plus a small set of builtins. Principles:
+
+1. **Declare, don't restate.** A pack states what it is (allowed methods, whether it is public) as a property; the shared getter does
+   the work once. A route family never writes its own 405 or 401.
+2. **Data, not code, crosses packs.** Facts the launcher knows are one dict; a family reads a key.
+3. **No new builtin unless the language cannot say it.** A new builtin needs the operator's approval.
+4. **Every shared getter has a spec** (`tests/specs/*.json`) and every contract is documented here.
+
+## The Request contract (`membrane/packs/door.c1f` is the library for the class `Request`)
+A request is an entity `Request:<n>`. A family pack `IMPORT door 1` and defines, for its family `<f>` (the reserved names in `FAMILIES`,
+`native/tests/contracts.rs`):
+
+| getter | meaning | required |
+|---|---|---|
+| `Request.o_<f>` | True when the path is the family's | yes |
+| `Request.r_<f>` | the reply `{status, headers?, body?\|file?}`; None while an effect has not landed | yes |
+| `Request.m_<f>` | the allowed methods, a list, e.g. `['GET', 'POST']`; the door answers 405 + `allow` for any other | no (without it the family checks its own) |
+
+Shared getters a family may read (all on `Request`): `method path query headers body peer`, `is_read`, `authed`, `sub` and `who`
+(the verified caller: always `admin`), `entrant`, `https`, `facts` (the launcher's facts dict), `jbody` (the body parsed as JSON, `{}` when it is
+not), `qpairs` (the query as `[[k, v], ...]`), `ms` (now in epoch milliseconds, whole). Per-request outbound work is a per-request
+entity: `('Fetch:' + this.conn).request = {...}` and read its `request_result`.
+
+## Boot facts
+The launcher writes each fact as a property of `Boot:seat` and also the whole set as the dict `facts`; a pack reads
+`prop(this.facts, 'seat_name')` instead of a comprehension over `instances('Boot')`.
+`cliffvm` builds them (`native/src/cli.rs` `facts`, `serve_plan`, then `launcher.c1f`): a missing source leaves its fact out (never None); `door_port` comes from `--port`;
+`door_secret_file` is a path, never the secret; `anthropic_key_set` is a yes or no, never the key. `membrane/packs/facts.json` is the registry (name, `wired`, `why`): a fact a pack reads must be there,
+and a fact marked `wired` must be written by the launcher (cli.rs, host.rs, `scripts/seat` or `launcher.c1f`). Facts the router adds after the boot (`router_on`, `cloud_models`, `minds`) come with `launcher.c1f`'s setters on `Boot.started`.
+
+`tail(text, n)` (added with the reply cap, #1143) is the mirror of `head`: a text's last n characters, a list's last n.
+
+## Text builtins: `spans` (the tokenizer, #1143; needs the operator's approval as a new builtin)
+`spans(text, layer)` is the native tokenizer's door (`native/src/text.rs`, docs/semtext-and-legs.md "Tokenizer (built)"): it returns
+`[{start, end, text}]`, the layer's spans sorted and non-overlapping, `start`/`end` in chars (the unit of `len`, `head`, `tail`), `text`
+the surface. `layer` is one of `sentence word identifier path url number`; another name is an error that lists them. Typed
+`List(Dict)`; a pack cannot do this itself (UAX #29 tables are compiled in). `Msg.sents getter: spans(this.text, 'sentence')`.
+It is INTERNAL: only the SemText pack (`membrane/packs/semtext.c1f`) calls it, and a model reads a text's `sentences`, `words`, ... properties instead (`Help:semtext`, which never teaches `spans`).
+There is no `slice` builtin: a span's `text` is already cut, and `head(tail(t, len(t) - start), end - start)` cuts by offsets when a
+pack holds only the offsets.
+
+## The builtins (`native/src/expr.rs`, `RESERVED`)
+Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit vsum vmean near abs min max log fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
+lists and dicts `sort_by pluck distinct group_by concat fold`; time `ago epoch localtime num`; the field `instances referencing prop props why`; host functions `jsonl listdir read sql stat recall rerank pronoun`
+(`pronoun` is what a bare `it`, `that`, `they` ... asks the host; the seat's host answers none, so a pronoun reads as the reasoned error `the pronoun "it" is not bound here`).
+`near(<list of numbers>, '<Class>', k)` (#1143, operator 2026-11-14; the shipped MAPPED class is `Vector`, `membrane/packs/vector.c1f`: `Vector:<id>.v` holds a list of numbers) is the k nearest instances of a MAPPED class (`MAPPED Vector f16`, `docs/cliffvm.md`, "Storage modes") by COSINE, best first, as a list of `{eid, score}`
+dicts (`eid` text, `score` a float); a tie breaks by eid, never by position. Brute force on the CPU over the class's native store (no GPU path is reachable from it). A getter that calls it recomputes when a vector of the
+class is written, cleared or retired. An empty class is the reasoned null `empty: no vectors in class <Class>`; a query of another dimension, an all-zero query, `k < 1`, a non-number or a class name that is not text is an Error with
+its reason (as `dot` of two shapes). The browser engine answers `not available in the browser engine`. Determinism: vector results are NOT promised bit-identical across devices; on one device they are stable (the same inputs give the
+same answer, so a recompute stops the wave by early cutoff), and ties break by eid.
+`vsum(vectors, weights?)` (#1143, operator 2026-11-15: `+` adds two vectors, nothing added up a list) is the sum of a LIST of vectors, each times its weight when
+`weights` (a list of numbers, one per vector) is given: `vsum([[1, 0], [0, 1]], [2, 0.5])` is `[2.0, 0.5]`. The math is f32, element by element in list order (deterministic on every
+device; the result reads back as floats, `vsum([[0.1]])` is the f32 0.1). An Error with its reason (as `dot` of two shapes): no vector (`[]`), an item that is not a vector, vectors of
+different dimensions, a weight count that is not the vector count, a weight or element that is not a number, an f32 overflow. One step, like every builtin. Typed `List(Float)`.
+`fold(init, [step for x in xs if keep])` (#1143, operator 2026-11-15) carries a value across a list: `acc` is `init`, then for each `x` the `if` (it sees `acc` and `x`) may skip it,
+else `acc` becomes the step's value; the answer is the last `acc` (`init` for an empty or null list). `fold(0, [acc + x for x in [1, 2, 3]])` is 6; a greedy pass keeps state:
+`fold([], [concat(acc, [x]) for x in [1, 2, 3] if len([k for k in acc if abs(k - x) <= 1]) == 0])` is `[1, 3]` (2 is near the kept 1, 3 is near only the dropped 2).
+It is the comprehension's own shape (no lambda, no new syntax family: `lambda` stays refused); the one new name is `acc`, bound only inside the step and the `if` (it hides a local or a
+name of that name there; it is not reserved, so a local may still be called `acc` elsewhere); the loop's item may not be named `acc`. The call is one step and every node of `init`,
+`xs`, the `if` and each step costs its steps as anywhere else, so a long fold runs into the step budget like a long comprehension. An Error in the list, the `if` or a step is the
+answer at once. Any other shape (`fold(0, [1, 2])`, one argument) is an Error that shows the form. Typed `Any` (the step's `acc` is an untyped edge). Both are plain expression
+code (`native/src/expr.rs`), so the browser engine has them too. Tests: `native/tests/vsum_fold_1143.rs`.
+Rejected for the fold: `lambda` (a new syntax family, and the parser refuses it on purpose), a builtin that takes the step as TEXT (`fold(xs, init, 'acc + x')`: the getter ordering,
+the inferencer and the surface read strings as data, so the step's reads would be invisible), a builtin that names a getter to call per element (a getter is computed on an entity, never
+called with arguments), and an explicit accumulator name (`fold(init, 'acc', [...])`: the last string argument of a call is read as a property name).
+`log(x)` (#1143, operator 2026-11-15: the move-log voter's rarity is log(N / the events holding a thing), `membrane/packs/movelog.c1f`) is the natural log of a positive number: the f64 log
+rounded to f32, so two devices whose math libraries differ in the last bits of an f64 give the same answer (`log(1)` is 0.0). An Error with its reason on 0, a negative number, or anything that is
+not an Int or a Float (`log('e')`, `log(True)`, `log([1])`); a null gives a null (as every call). One step. Typed `Float`. Tests: `native/tests/log_1143.rs`.
+**Builtins over long lists** (#1143, operator 2026-11-15: the field's recall must scale; a comprehension pays steps per item, a builtin one step). Tests: `native/tests/props_vmean_1143.rs`;
+what they bought: `native/tests/recall_scale_1143.rs` and docs/semtext-and-legs.md ("Cost of the whole recall").
+- `props(ids, 'name')` is `[prop(e, 'name') for e in ids]` in one step: one property of every entity of a list (an entity or its id; a dict item reads its key, as `prop`; a null item
+  stays a null; a property an entity does not hold is its reasoned null `absent: ...`). `props(ids, at, 'name')` takes element `at[i]` of the i-th value, as `x[k]` does (a list by its
+  whole-number index, negative from the end; a dict by its key; a miss, a null value or a null index is a null): the GATHER a comprehension would write as `[prop(e, 'name')[k] ...]`.
+  The name is the LAST argument, so the getter ordering reads it as a property name (as `prop` and `pluck`). Each read is a read of the getter (it recomputes when one of those
+  properties changes). An Error with its reason: `ids` not a list, the name not text (or starting with `_`), `at` not a list or of another length than `ids` (one index per id), an item
+  that is not an entity, id, dict or null, an index that is a float, bool, list or dict. Typed `List(Any)`. Plain expression code (the browser engine has it).
+- `vmean(ids)` is the mean of the UNIT vectors `v` of a list of entities (each vector's direction counts the same, whatever its length), computed exactly as
+  `vsum([unit(prop(e, 'v')) for e in ids]) / n`: the unit in f64, the sum in f32 in list order (deterministic on every device), the division by the count in f64. The vectors are read
+  one at a time (for a MAPPED class, from the native store) and never held as a list. An id with no vector (`v` null or absent) and a null id are SKIPPED; when none has one the answer
+  is the reasoned null `empty: none of the N ids has a vector (v)`. An Error with its reason: `ids` not a list, an item that is not an entity or an id, a `v` that is not a list of
+  numbers (or failed), vectors of different dimensions, an f32 overflow. A zero vector counts as itself (as `unit` leaves it). Typed `List(Float)?`. Plain expression code.
+- `group_by(rows, key, sums)`: the optional third argument (a list of column names) adds to each group, beside `key` and `rows`, the TOTAL of each named column over the group's rows,
+  in row order from 0 (whole numbers stay whole until a float joins, as Python's `sum`; floats add in f64, the same value `dot(pluck(rows, c), ones)` gives). An Error with its reason: a
+  value that is not a number (or is missing), a column named `key` or `rows`, `sums` not a list of names. With no sums (or `[]`) the groups are as before.
+All three are one step however long the list (the reads and the arithmetic are the builtin's own cost, not counted: see Limits).
+There is NO `int()`, `dict()`, `merge`, `keys` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
+A new builtin needs the operator's approval; it is an arm of `call` and a name in `RESERVED`, with a Rust test.
+
+## Conventions (the traps that bit)
+- There is no size cap on an expression (the old 64-node / 400-character caps are gone). Name a part with a LOCAL (below) when it
+  reads better; an evaluation has a step budget instead (see Blocks and locals).
+- How getters are ordered (computed once per pack load, never per write): a getter sits above the getters it reads. The read is
+  class-aware: `this.n` is `n` of the getter's own class; `x.n`, `g.n` and `prop(x, 'n')` are `n` of x's class when it is known
+  (`this`, a loop variable over `instances('X')` or over a getter of known element type, a constructor, an entity literal, a
+  literal-key subscript `x['n']` of such an entity). Where x's class is unknown (a plain property, a dict) the read still orders
+  after every getter of that name, EXCEPT where that would close a cycle the known reads do not: a name shared with an unrelated
+  class can no longer make a getter compute from a stale input. Strings in dict literals and list elements are data, never reads
+  (a string is a name only as the last argument of a call). A cycle keeps the level it reached (its closing edge reads the
+  previous value). Never name a property `this`.
+- Lists are vectors: `+ - * /` on lists are element-wise and return floats; a length-1 list or a number broadcasts, so
+  `[1] * N` is the vector `[N]` (not N ones) and `[x + 1 for x in [1] * N]` is `[N + 1.0]`; lengths that do not match (neither 1)
+  are an error. There is no list repetition and no `range`: no construct builds a list of N copies (open decision).
+  Pinned by `native/tests/vector_arith_1143.rs`, shown in `Help:c1f`.
+- `concat` joins lists (`+` is vector addition); there is no `int()`; `clock` is epoch seconds.
+- Getters are eager and cached: a getter is recomputed when an input it read changes, a read returns the cache, and a recompute that gives the value it already held wakes none of its readers (early cutoff, docs/cliffhanger-fields.md rule 5).
+- A class a shipped pack declares is owned: other packs `IMPORT` it.
+
+## Blocks and locals (getters and setters)
+A bare line `name = expr` (no dotted target; a write always has one, like `this.x = ..`) defines a LOCAL:
+- visible to the LATER lines of its own block only; never a property, never stored, never readable as `this.name`, gone when the block ends;
+- a getter's body is a block: locals first (one line each), the LAST line is the value (cached on the entity as before). Each arm is
+  its own block (`X.f getter WHEN c:` with its lines indented below, or `WHEN c:` / `ELSE:` under `X.f getter:` with the lines below);
+  one arm cannot see another arm's locals. Example:
+  ```
+  Box.total getter:
+    base = this.w * this.h
+    tax = base / 10
+    base + tax
+  ```
+- a setter's body: locals feed the writes (and FOR loops) below them, per branch; a local made inside a FOR ends with it;
+- **Nulls and their reasons** (#1143; `native/tests/semantics_1143.rs`): reading a property an entity does not hold is the null `absent: <entity>.<property>`, an entity that is not there (not stored, not collected, not waiting to be loaded) the null `absent: <entity> does not exist` (`View::attr`; a getter that computed `None` is a plain null, `Core.nulled`; the help `Help:upgrade` says the same). A reasoned null inside a list or a dict is kept: in an expression it is the element itself; in a
+  value a getter STORED (JSON, where every null is plain: what is stored and sent is unchanged) the engine remembers the reason beside it in `Core.why` under `<prop> NUL <path>` (`expr::nested_nulls`, set by the getter that stores it, replaced with its next value, dropped with the entity) and a read of the stored list or dict puts the
+  reasoned nulls back (`overlay_nested`). `str` of a list or a dict writes such a null as `{"$null": "<reason>"}` (`expr::to_json_shown`; a null without a reason stays `null`), which is what `run_cliff` prints. Not covered: a nested null a SETTER wrote (setter values keep plain nulls).
+- **Error: a failure is not a null** (#1143; `docs/c1f-error.md`, `native/tests/error_*_1143.rs`). `null` = not initialised, absent, not applicable (it keeps its
+  `why`); `Error` = something FAILED: a value kind (`V::Error`) that carries its reason (the remedy is part of the text). `x == None` is False for an Error; `or`
+  stays the default operator and never hides an Error (there is no `??`); `x is Error` is the test, `why(x)` reads its text. An Error PROPAGATES: arithmetic,
+  `-x`, `x[i]`, `x.a`, comparisons (not `x == None`), `not`, `and`, `or`, an `if`/WHEN/comprehension condition and every call but `why` give that same Error
+  (first one wins, an Error wins over a plain null); a WHEN over an Error does NOT fall through to the next arm. A getter reading an Error returns the same Error
+  unchanged (no "via" chain). Stored, a derived Error is a plain null with its reason in the entity's `failed` property and the class `Error` on top of its `parents` (a REAL class owned by `entity.c1f`: `x is Error` follows the class list for an entity, `entity_query kind:Error` lists the failed ones; the getter keeps recomputing under it and a success clears the entry; both persist; the VM writes them as derived writes); so every old route sees null;
+  `entity_read` and `run_cliff` print `Error: <reason>`); a setter or constructor that writes an Error is refused with a `refused` receipt and the old value stays; an
+  Error inside a list or dict is kept inside one evaluation and is a plain null across a store. Made by: a failed cast (`not-a-type: ...`), a bad entity-literal key,
+  a getter body that raised, the step budget, a timed-out `Command` (`proc.c1f`), and a pack's own `Error('reason')`. Still null:
+  a missing property, `.x` of an absent value, `pending: ...`, a collected virtual entity, `f of a null`. `json(text)` of text that is not JSON is an Error (`not-json: ...`; the packs that meant "not JSON is fine" read `j = json(x)` then `{} if j is Error else j`). `Num` is a value kind that Int and Float extend: `x is Num` is true for an Int or a Float, `x is (Int, Num)` holds for an Int, `x is (Float, Text)` is a parse error. The names `Error` and `Num` are reserved (no class, no local).
+- a local that holds a reasoned null passes it on like any value; `Why(...)` (`why_chain`) lists the locals of the getter evaluation it explains
+  (`locals: {name: value}`, a null shows its reason);
+- the loader refuses a local that shadows a property of `this` (a name the class reads or writes as `this.<name>`, or a setter trigger),
+  a getter of the class, a builtin or reserved name (`len`, `recall`, `this`, `clock`, a pronoun ...), a loop name or an earlier local;
+  a local twice in one block is refused too; a block that ends in a local (no value) is refused; a local goes before the value.
+No other syntax was added (no `;`, no multi-line local).
+
+## Entity literals and `[key]` (operator, 2026-11-12)
+An entity name written WITHOUT quotes is an entity, in an expression and on the left of a write: `membrane::Config:voice:in`,
+`Goal:board`. `::` follows a namespace, `:` joins the segments. A colon is part of a name only when a name character follows it
+DIRECTLY (`Goal:board`, `Config:voice:in`); the colon that ends a line (`WHEN cond:`, `X.f getter:`) or is followed by a space is
+what it always was, and so is everything inside quotes. A segment after a colon may be a word that is an operator elsewhere
+(`voice:in` is a segment, not the `in` operator). Write named arguments with a space after the colon (`kind: 'in'`): `kind:x` would
+read as an entity.
+- `[expr]` directly after an entity literal appends `:<value>` as the last segment: `membrane::Chat:message[123]` is
+  `membrane::Chat:message:123`, `membrane::Config:voice:in[slug]` evaluates `slug` (a local, a getter or a loop name; a bare name
+  is NEVER a literal segment). The value must be an integer or non-empty text. A float, bool, list, dict, entity or null gives a
+  Error (`the key of <entity> is ...`) and, on the left of a write, creates and writes nothing; a null key passes on
+  its own reason.
+- The path may go on after a `]`: `:segment` (directly after the `]`) is a CHILD entity, `.name` is a PROPERTY.
+  `membrane::Chat:message[id]:response` is `membrane::Chat:message:<id>:response` (an entity); `message[id].response` reads the
+  property `response` of the message. A `]` then a colon then a space or the end of the line still ends a `WHEN` / header line.
+  Further `[key]`s may follow (`Chat:a[1]:b[2]`); `.prop` after the path reads a property: `membrane::Config:voice:in[slug].on`.
+- On a list or dict, `[x]` stays an index; it is a key only when its left operand is an entity literal.
+- The quoted spellings keep working unchanged: `('Goal:' + slug).status = ..` creates `Goal:<slug>` exactly as before (creation:
+  `<Class>:<key>` of a class the pack owns or imports). Inference: a literal is `Entity(Class)` (the first segment after a
+  namespace), nullable when a key may be null or is not an int or text.
+
+## Constructors (entity classes only)
+A call to a class name with NAMED arguments, on the right of a write whose left is an entity, makes that entity:
+`membrane::Config:voice:in[slug] = Voice(kind: 'in', person: p)`, `membrane::Chat:message[id]:response = Response(text: t)`.
+- **The identity comes from the target** (the left side). There is no `key` argument and no declared identity: the same class is
+  made at any eid the target names, and the same target is the same entity.
+- Creation is a write's creation path with a write's rules: the class must be one the pack OWNS (declares a getter or setter on) or
+  IMPORTS; otherwise nothing is created and a receipt says `error: constructor ...` (a reasoned refusal, never a crash). A null or
+  bad `[key]` creates nothing and the receipt carries its reason. The named arguments are set as the first properties (a null
+  argument sets nothing); arguments are all named (`Voice(1)` is not a constructor) and none repeats.
+- **Idempotent**: if the entity exists nothing is created again, and an argument fills only a property that has no value (an existing
+  value is never overwritten). So a setter may construct on every request.
+- **Foreign eid prefix**: when the target's first segment is not the class (`membrane::Config:...` built as `Voice(...)`; the class
+  cannot be read from the eid) the entity is created as the class its eid names (`Config`) and stamped
+  `parents: ['cls:config', 'cls:voice']` (the eid class first, then the constructor's: docs/cliffvm.md, "the class list"), so a `Voice`
+  getter and a `Voice` setter run on it.
+- Outside the right of such a write a constructor is a reasoned error. Inference: it is `Entity(Class)`, and its arguments are typed.
+- Out of scope: value classes (`Std.Url(raw: x)` natives), `Import`, identity declarations.
+
+## A write with a computed property name (#1143)
+`<target>.[<expr>] = value` writes the property whose NAME the expression gives (non-empty text; anything else writes nothing, no
+error). Everything else is a write: the creation path, the class ownership check (`IMPORT`), the receipt `refused`. The surface
+snapshot lists it as `<target>.[]`. It exists for the MCP door's `entity_write {spec, prop, value}` (`door_tools.c1f`); a pack that
+knows its property writes it by name.
+A constructor of a foreign-prefix entity (`Config:x = Voice(...)`) computes the kind's getters at once: the kind stamp (`parents`)
+is written after the birth, and the entity is born again for the getters. A setter of a kind fires when the kind is in the entity's class list.
+
+## Limits: the step budget (a dial); time limits nothing
+The old caps (an expression at most 64 nodes / 400 characters) are removed. Instead each evaluation has a STEP BUDGET: every node visited costs a step (a comprehension pays for each element it evaluates); past the budget the result is an Error `budget exceeded (N steps)` (a getter's
+`Why` shows it, a receipt says where), never a hang or a panic. The default is 100,000 steps (`DEFAULT_EVAL_BUDGET`), overridden by the env
+`MEMBRANE_EVAL_BUDGET`. `VEC_MAX` (8192) stays. Structural limits that are not size caps: expressions nest at most 64 deep and
+evaluate at most 256 deep (a long `a + b + c ...` is flat and unaffected). All accounting lives in `expr::Budget`.
+**A native builtin's own cost is not counted**: a call (`json(text)`, `sort`, `len` ...) is one step however large its input, so a getter that
+hands a 1 MB stream to one builtin spends a handful of steps (operator, 2026-11-13: no per-input charges for now). `vsum`, `vmean`, `props` and `log` are one step each (`vsum` and `vmean` however many vectors, `props` however many entities); `fold` is one step
+plus the steps of the c1f it runs (its start, its list, its `if` and its step, once per element).
+
+**Time decides no value** (operator, 2026-11-13). Until then a getter or setter evaluation whose self time passed 10 ms became an Error
+`timeout N ms (allowance M ms)` and was recorded as a `Trip:<eid>#<prop>` entity. That made a value depend on the machine's load (the same
+getter on the same data tripped or not; a real chat turn lost its answer to an 11 ms `ChatMessage.evs`) and broke "the journal is the image, replay
+is the test". Now a getter's result depends only on its inputs and the step budget; an evaluation that runs long returns its normal value, in the
+native VM and in the browser VM alike. The Trip class, its pack and the `field:driver:trip` writes are gone (a `Trip:*` row an old store
+still holds is an ordinary entity).
+
+Time stays MEASURED: `Stats:eval` (docs/cliffvm.md) keeps per-getter self time (the clock minus the time spent in host calls that wait
+on I/O, `expr::waiting`) and counts, and a `slow` counter per row: the evaluations whose own self time passed the FORMER allowance, a flag
+for the reader that changes nothing. The threshold is `DEFAULT_EVAL_TIME_MS` (10), overridden by the env `MEMBRANE_EVAL_TIME_MS`; the clock
+is injectable (`expr::set_clock`) for tests.
+
+## The contracts are executable
+`native/tests/contracts.rs` fails when a contract is broken: every shipped pack loads together (view packs that import `dom` are
+the browser's); a route family pack imports door, defines both `o_<f>` and `r_<f>`, is a reserved family, and does not redefine the
+door's getters; every Boot fact a pack reads is in `membrane/packs/facts.json` (with a `why`), and a fact marked `wired` is written
+by the launcher. A new fact = a registry entry; a new family =
+a reserved name in `FAMILIES` and in the door's chain.
+
+## The surface snapshot: a pack as a black box
+`membrane/packs/surface.json` records, per pack, everything it touches from outside: its imports, its declared classes (and a count
+of members), the Boot facts it reads, the paths it claims, and the properties it WRITES on other entities (`Goal:*.status`, `*.answer` for
+a dynamic target, `ref(goal).replan` through a reference). `native/tests/contracts.rs` recomputes it from the pack text and fails on any
+difference (unquoted entity targets count like quoted ones: a keyed `membrane::Config:voice:in[slug].on = ..` is `membrane:*.on`, and a constructor is listed as `membrane:*=Voice()`). Reviewing a pack, an agent's branch or Memo's edit means reading the surface diff, not the code: a pack that starts
+writing a new property, claiming a new path or importing a new pack fails the test until the change is reviewed and recorded
+(`SURFACE_UPDATE=1 cargo test --test contracts surface`). There is no `private` keyword: the contract is the surface.
+
+## Inferred types (a report, enforces nothing)
+c1f is dynamic at run time, but a getter's type follows from its definition. `native/src/infer.rs` (`infer_expr`, `infer_pack`,
+`infer_packs`) deduces it from literals, the builtins' signatures, the types of other getters it reads (any order; a cycle is `Any`
+and a finding), and the right-hand sides of setters (collected as the union of types WRITTEN to each `Class.prop`, shown next to
+the getter's type when the property has both). Plain properties written from outside (Boot facts, Request fields, driver receipts,
+JSON) are untyped edges: `Any`. A getter that reads its own name (`X.f getter: this.f`, the fallback arm) reads that written value:
+also an edge, not a cycle.
+
+Types: `Bool Int Float Num(=Int|Float) Text List(T) Dict Entity(Class) Any`, `?` for nullable, `|` for a union, `None` for the
+null alone, `Never` for the element of `[]`. Rules (they MODEL the null semantics, they never run them):
+- an operation on a nullable value is nullable (`Any + 1` is `Num?`); `x or d` strips the null of `x`; a getter whose last arm is
+  missing is nullable (`Text?`); a list or dict miss is a null (`l[0]` is `T?`);
+- `Int(x)`, `Text(x)` ... are checked casts: the target type, nullable unless `x` is already that type; `Int(x) or Text(x)` is not
+  null when the two casts together cover `x`'s kinds; `x == None` is a null test (`Bool`);
+- builtins have signatures (`len` is `Int` whatever it gets; `words` is `List(Text)`; `instances('Boot')` is `List(Entity(Boot))`;
+  host functions `stat sql read ...` are `Any`); `Entity(C).p` is `C.p`'s getter type, or `Any`;
+- a block's locals are typed in order: a local has the type of its value inside the lines below it (getters and setters alike).
+- not modelled: dict value types (`Dict` is a bare `Dict`), flow-sensitivity, the host functions' results.
+
+Findings are what is certainly wrong: text added to a number, an index or attribute on something that cannot take it, a builtin
+given an argument of the wrong kind (`len(3)`), a wrong argument count, `<` between text and a number, a loop over a non-list, a
+getter cycle. Nothing fails on them yet. `membrane/packs/types.json` is the snapshot of every shipped pack (`pack -> getters,
+writes, findings`); `native/tests/contracts.rs` compares it and `TYPES_UPDATE=1 cargo test --test contracts types` regenerates it.
+
+An append write for lists (several producers adding to one list in a round) is a design note, not built: `docs/append-write.md`.

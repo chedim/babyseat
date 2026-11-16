@@ -1,0 +1,3 @@
+PACK stats 1
+RESIDENT Stats
+-- `Stats:eval` is PROVIDED BY THE VM (native/src/stats.rs), read-only, told by the host every window; this pack only declares its class so the host mirrors it.

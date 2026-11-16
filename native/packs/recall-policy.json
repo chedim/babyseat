@@ -15,9 +15,11 @@
     "fact_chars": 200,
     "recent_turns": 8,
     "history_turns": 1,
-    "dedupe_jaccard": 0.8,
+    "dup_share": 0.8,
     "rrf_k": 60,
     "entity_pool_max": 24,
+    "assoc_n": 5,
+    "assoc_clip": 200,
     "rerank_top": 20,
     "rerank": true,
     "reply_keys": [

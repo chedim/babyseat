@@ -1,0 +1,6 @@
+PACK door_std_demo 1
+IMPORT door 1
+-- a family that states DATA (its allowed methods) and no 405 of its own
+Request.o_tools getter: startswith(this.path, '/demo')
+Request.m_tools getter: ['GET', 'POST'] if this.path == '/demo2' else ['GET']
+Request.r_tools getter: {'status': 200, 'body': {'ok': True, 'method': this.method}}

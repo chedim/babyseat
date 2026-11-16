@@ -1,0 +1,176 @@
+PACK decisions 1
+IMPORT goalgraph 1
+IMPORT fs 1
+IMPORT boot 1
+-- THE ANSWER TO A DECISION CARD (operator, 2026-11-12: everything moves to cliffhanger). A card asks ONE variable
+-- (`var`: int | float | bool | string | option); only the person decides it. Two ways in, one way through:
+--   Decision.relay  = {value, quote}   the model passes on what the person said in the chat. The proof: a message of the
+--                                      person's since the card was made holds the quote word for word (plain() on both).
+--   Decision.answer = {value, work?, conv?, message?, relayed?}   the person's own answer (the board, the chat's "N. value");
+--                                      the seat's doors write it, a model's write of it is refused at the door. `redo: true`
+--                                      (the person only) changes a decided card; the old value stays in `previous_value`.
+-- The receipt is `answer_result` ({id, ok, value | error}), kept in `answer_log` (a door looks for its own request's `id`); a
+-- refused relay leaves `relay_result`.
+-- (an on-setter sees the getters as they were before the write in the same round, so each step is a property the next
+-- one reads: relay -> relay_id -> relay_rows -> relay_hit -> answer -> answer_id -> verdict -> the decision)
+
+-- ---- the proof of a relayed answer ------------------------------------------------------------------------------
+Decision.relay on-setter relay-stamp:
+  ALWAYS:
+    this.relay_id = clock
+    this.relay_rid = str(clock)
+    this.relay_q = plain(prop(this.relay, 'quote'))
+
+-- the rows: a marker row first (so an empty result still says which request it answers), then the person's messages since
+-- the card was made, newest first; every row carries the request's id
+Decision.relay_rows getter:
+  WHEN this.relay == None: None
+  ELSE: sql("SELECT NULL AS text, NULL AS conv, ? AS rid, 0 AS o UNION ALL SELECT * FROM (SELECT json_extract(body,'$.d.text') AS text, json_extract(body,'$.d.conv') AS conv, ? AS rid, 1 AS o FROM c_events WHERE json_extract(body,'$.d.stream') = 'discourse' AND json_extract(body,'$.d.role') = 'user' AND json_extract(body,'$.d.author') = 'person' AND coalesce(json_extract(body,'$.d.status'), '') != 'forgotten' AND json_extract(body,'$.d.ts') >= ? ORDER BY json_extract(body,'$.d.seq') DESC LIMIT 300)", this.relay_rid, this.relay_rid, this.born or 0)
+-- one getter over plain properties and the rows only: None until the rows are this request's
+Decision.relay_hit getter:
+  WHEN this.relay == None or this.relay_rows == None: None
+  ELSE WHEN len([r for r in this.relay_rows if prop(r, 'rid') == this.relay_rid]) == 0: None
+  ELSE: {'id': this.relay_id, 'convs': [prop(r, 'conv') for r in this.relay_rows if prop(r, 'rid') == this.relay_rid and (' ' + this.relay_q + ' ') in (' ' + plain(prop(r, 'text')) + ' ')]}
+
+Decision.relay_hit on-setter relay-pass:
+  WHEN len(prop(this.relay_hit, 'convs')) > 0 and this.relay_q != '' and prop(this.relay_result, 'id') != prop(this.relay_hit, 'id'):
+    this.relay_result = {'id': prop(this.relay_hit, 'id'), 'ok': True}
+    this.answer = {'value': prop(this.relay, 'value'), 'tell': this.chat == None or this.chat == '', 'relayed': {'quote': prop(this.relay, 'quote'), 'sid': prop(this.relay_hit, 'convs')[0]}}
+  ELSE WHEN prop(this.relay_hit, 'convs') != None and prop(this.relay_result, 'id') != prop(this.relay_hit, 'id'):
+    this.relay_result = {'id': prop(this.relay_hit, 'id'), 'ok': False, 'error': "no message of the person's since this card was made says those words: quote them word for word, or ask them"}
+
+-- ---- the answer: validate, then decide -----------------------------------------------------------------------------
+Decision.answer on-setter answer-stamp:
+  ALWAYS:
+    this.answer_id = prop(this.answer, 'id') or clock
+
+Decision.vtype getter: prop(this.var, 'type')
+Decision.ans_in getter: prop(this.answer, 'value')
+Decision.ans_text getter: strip(str(this.ans_in)) if this.ans_in != None else ''
+Decision.ans_low getter: lower(this.ans_text)
+Decision.ans_num getter: num(this.ans_in)
+Decision.ans_opts getter: [str(o) for o in (prop(this.var, 'options') or [])]
+Decision.ans_value getter:
+  WHEN this.vtype == 'bool': True if this.ans_in == True or this.ans_low in ['true', 'yes', 'y', 'on', '1'] else (False if this.ans_in == False or this.ans_low in ['false', 'no', 'n', 'off', '0'] else None)
+  ELSE WHEN this.vtype == 'int': this.ans_num if this.ans_num != None and not ('.' in str(this.ans_num)) else None
+  ELSE WHEN this.vtype == 'float': this.ans_num
+  ELSE WHEN this.vtype == 'option': this.ans_text if this.ans_text != '' and this.ans_text in this.ans_opts else None
+  ELSE WHEN this.vtype == 'string': clip(this.ans_text, 2000) if this.ans_text != '' else None
+  ELSE: None
+Decision.ans_error getter:
+  WHEN this.answer == None: None
+  ELSE WHEN not (this.vtype in ['int', 'float', 'bool', 'string', 'option']): "the card's var type " + str(this.vtype) + ' is not one of int, float, bool, string, option'
+  ELSE WHEN this.ans_value != None: None
+  ELSE WHEN this.vtype == 'bool': str(this.ans_in) + ' is not yes or no'
+  ELSE WHEN this.vtype == 'int' and this.ans_num != None: str(this.ans_in) + ' is not a whole number'
+  ELSE WHEN this.vtype == 'int' or this.vtype == 'float': str(this.ans_in) + ' is not a number'
+  ELSE WHEN this.vtype == 'option': this.ans_text + ' is not one of ' + join(this.ans_opts, ', ')
+  ELSE: 'the value is empty'
+
+Decision.cur_status getter: this.status if this.status in ['open', 'in_flight', 'decided', 'closed', 'dropped'] else 'decided'
+Decision.answerable getter: this.cur_status == 'open' or (this.cur_status == 'in_flight' and this.value == None) or (prop(this.answer, 'redo') == True and this.cur_status in ['decided', 'closed'])
+
+Decision.verdict getter:
+  WHEN this.answer == None or this.answer_id == None: None
+  ELSE WHEN not this.answerable: {'id': this.answer_id, 'ok': False, 'conflict': True, 'error': 'this card is already decided (changing a past decision comes with timelines, #470 step 3)'}
+  ELSE WHEN this.ans_error != None: {'id': this.answer_id, 'ok': False, 'error': this.ans_error}
+  ELSE: {'id': this.answer_id, 'ok': True, 'value': this.ans_value, 'ledger': this.ledger_text, 'body': this.notify_body}
+
+-- the answer is refused: the receipt says why (once per answer: the card's own change does not re-fire it)
+Decision.verdict on-setter answer-refused:
+  WHEN prop(this.verdict, 'ok') == False and prop(this.answer_result, 'id') != prop(this.verdict, 'id'):
+    this.answer_result = this.verdict
+    this.answer_log = concat(this.answer_log or [], [this.verdict])
+
+-- the answer is decided: the card, the ledger line, the message to whoever waits on it
+Decision.verdict on-setter answer-previous:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id') and prop(this.answer, 'redo') == True and this.value != None:
+    this.previous_value = this.value
+Decision.verdict on-setter answer-decided:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id'):
+    this.value = prop(this.verdict, 'value')
+    this.status = 'closed' if (prop(this.answer, 'work') == False or (prop(this.answer, 'work') == None and this.work_needed == False)) else 'decided'
+    this.set_by = 'operator'
+    this.value_ts = clock
+    this.set_at = prop(localtime(clock), 'date') + ' ' + prop(localtime(clock), 'clock') + ' ' + prop(localtime(clock), 'zone')
+Decision.verdict on-setter answer-work:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id') and prop(this.answer, 'work') != None:
+    this.work_needed = prop(this.answer, 'work')
+Decision.verdict on-setter answer-relayed:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id') and prop(this.answer, 'relayed') != None:
+    this.relayed_by = 'llm'
+    this.answer_quote = clip(prop(prop(this.answer, 'relayed'), 'quote'), 2000)
+    this.answer_chat = prop(prop(this.answer, 'relayed'), 'sid')
+Decision.verdict on-setter answer-chat:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id') and prop(this.answer, 'conv') != None:
+    this.chat = this.chat or prop(this.answer, 'conv')
+    this.message = prop(this.answer, 'message') if (this.chat or prop(this.answer, 'conv')) == prop(this.answer, 'conv') and prop(this.answer, 'message') != None else this.message
+Decision.verdict on-setter answer-speculative:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id') and this.speculative != None and str(prop(this.verdict, 'value')) != str(this.pick):
+    this.speculative_discarded = this.speculative
+    this.speculative = None
+-- what is told and written is computed from the answer and CARRIED BY the verdict (a getter sits above the getters it reads;
+-- a setter fires when its getter is written, mid-settle, so it may read only that getter's own value)
+Decision.shown getter: ('yes' if this.ans_value else 'no') if this.vtype == 'bool' else str(this.ans_value)
+Decision.shown_unit getter: this.shown + ((' ' + this.var['unit']) if this.var['unit'] else '')
+Decision.relayed_suffix getter: (' (relayed from the chat: "' + clip(prop(prop(this.answer, 'relayed'), 'quote'), 160) + '")') if prop(this.answer, 'relayed') != None else ''
+Decision.ledger_text getter: 'decided: ' + this.title_short + ' = ' + this.shown_unit + this.relayed_suffix
+Decision.kept getter: (str(this.ans_value) == str(this.pick)) if this.speculative != None else None
+Decision.title_short getter: clip(join(words(str(this.name or this.eid)), ' '), 160)
+Decision.work_flag getter: prop(this.answer, 'work') == True or (prop(this.answer, 'work') == None and this.work_needed == True)
+Decision.notify_body getter: {'card': this.eid, 'kind': 'decision', 'title': this.title_short, 'value': this.shown_unit, 'blocks': this.blocks or [], 'work_needed': this.work_flag, 'speculative_kept': this.kept}
+
+Decision.verdict on-setter answer-ledger:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id'):
+    ('File:operator-ledger').write = {'id': prop(this.verdict, 'id'), 'append': True, 'content': str({'ts': clock, 'text': prop(this.verdict, 'ledger'), 'conv': prop(this.answer, 'conv') or ''}) + '\n'}
+Decision.verdict on-setter answer-notify:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id') and prop(this.answer, 'tell') != False:
+    ('Notify:seat').tell = {'body': prop(this.verdict, 'body'), 'ts': clock}
+
+-- the receipt LAST: setters run in the order written here and see each other's plain writes, so every setter above still
+-- sees this answer as undecided
+Decision.verdict on-setter answer-done:
+  WHEN prop(this.verdict, 'ok') == True and prop(this.answer_result, 'id') != prop(this.verdict, 'id'):
+    this.answer_result = {'id': prop(this.verdict, 'id'), 'ok': True, 'value': prop(this.verdict, 'value')}
+    this.answer_log = concat(this.answer_log or [], [{'id': prop(this.verdict, 'id'), 'ok': True, 'value': prop(this.verdict, 'value')}])
+
+-- ---- the drop: the person drops an OPEN card without answering it ----------------------------------------------------------------
+--   Decision.drop = {id?, by?}   the person's own drop (the board's Drop; the seat's door writes it). Only an open card drops (an agent's
+--                                drop is a status edit with a dropped_why, refused or allowed by the entity tools, not this).
+-- The receipt is `drop_result` ({id, ok, error?, conflict?}), kept in `drop_log` (a door looks for its own request's `id`).
+Decision.drop on-setter drop-stamp:
+  ALWAYS:
+    this.drop_id = prop(this.drop, 'id') or clock
+Decision.drop_verdict getter:
+  WHEN this.drop == None or this.drop_id == None: None
+  ELSE WHEN this.cur_status != 'open': {'id': this.drop_id, 'ok': False, 'conflict': True, 'error': 'only an open card can be dropped'}
+  ELSE: {'id': this.drop_id, 'ok': True, 'body': {'card': this.eid, 'kind': 'decision', 'title': this.title_short, 'value': 'dropped', 'blocks': this.blocks or [], 'work_needed': False}}
+Decision.drop_verdict on-setter drop-refused:
+  WHEN prop(this.drop_verdict, 'ok') == False and prop(this.drop_result, 'id') != prop(this.drop_verdict, 'id'):
+    this.drop_result = this.drop_verdict
+    this.drop_log = concat(this.drop_log or [], [this.drop_verdict])
+Decision.drop_verdict on-setter drop-decided:
+  WHEN prop(this.drop_verdict, 'ok') == True and prop(this.drop_result, 'id') != prop(this.drop_verdict, 'id'):
+    this.status = 'dropped'
+    this.set_by = 'operator'
+    this.dropped_by = 'operator'
+    this.value_ts = clock
+    this.set_at = prop(localtime(clock), 'date') + ' ' + prop(localtime(clock), 'clock') + ' ' + prop(localtime(clock), 'zone')
+Decision.drop_verdict on-setter drop-notify:
+  WHEN prop(this.drop_verdict, 'ok') == True and prop(this.drop_result, 'id') != prop(this.drop_verdict, 'id'):
+    ('Notify:seat').tell = {'body': prop(this.drop_verdict, 'body'), 'ts': clock}
+-- the receipt LAST (see answer-done)
+Decision.drop_verdict on-setter drop-done:
+  WHEN prop(this.drop_verdict, 'ok') == True and prop(this.drop_result, 'id') != prop(this.drop_verdict, 'id'):
+    this.drop_result = {'id': prop(this.drop_verdict, 'id'), 'ok': True}
+    this.drop_log = concat(this.drop_log or [], [{'id': prop(this.drop_verdict, 'id'), 'ok': True}])
+
+-- ---- the nodes the decisions use ---------------------------------------------------------------------------------------
+-- Notify:seat is the seat's delivery of a decision event (the watcher pool, or one message into the card's chat); a
+-- driver. File:operator-ledger is the operator's ledger file (the seat tells its path at start).
+Notify.sent getter: this.tell_rc == 0 if this.tell_rc != None else None
+
+Boot.started on-setter decision-nodes:
+  ALWAYS:
+    ('Notify:seat').summary = "Delivery of a decision event: the seat's own driver (write tell = {...})."
+    ('File:operator-ledger').path = this.ledger

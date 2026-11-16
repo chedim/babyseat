@@ -1,0 +1,38 @@
+send_message:
+  name: Send a message to the seat
+  description: Hand the seat a message and do not wait for its answer (the seat answers in its own time, in its chat). The seat session is named by `session`.
+  fields:
+    text:
+      name: Text
+      description: What to tell the seat.
+      required: true
+      example: "The front door was left open."
+      selector:
+        text:
+          multiline: true
+    session:
+      name: Session
+      description: A name for the conversation; the same name continues the same seat session (default `service`).
+      required: false
+      example: "doorbell"
+      selector:
+        text:
+ask:
+  name: Ask the seat
+  description: Ask the seat something and get its answer back as the service's response data ({answer, session}). Runs a turn of the seat's model, which can take minutes.
+  fields:
+    text:
+      name: Text
+      description: The question.
+      required: true
+      example: "Is anything on in the house that should be off at night?"
+      selector:
+        text:
+          multiline: true
+    session:
+      name: Session
+      description: A name for the conversation; the same name continues the same seat session (default `service`).
+      required: false
+      example: "night-check"
+      selector:
+        text:

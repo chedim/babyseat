@@ -1,0 +1,58 @@
+{
+ "status": 200,
+ "body": {
+  "now": 1794629025.6490629,
+  "midnight": 1794546000.0,
+  "today": {
+   "total": {
+    "calls": 0,
+    "input": 0,
+    "output": 0
+   },
+   "minds": {},
+   "models": {}
+  },
+  "hour": {
+   "total": {
+    "calls": 0,
+    "input": 0,
+    "output": 0
+   },
+   "minds": {},
+   "models": {}
+  },
+  "claude": {
+   "answers": 0,
+   "steps": 0,
+   "total": {
+    "cache_read": 0,
+    "cache_write": 0,
+    "input": 0,
+    "output": 0,
+    "effective": 0
+   },
+   "per_answer": {
+    "cache_read": 0,
+    "cache_write": 0,
+    "input": 0,
+    "output": 0,
+    "effective": 0
+   },
+   "first_step": {
+    "cache_read": 0,
+    "cache_write": 0,
+    "input": 0,
+    "output": 0,
+    "effective": 0
+   },
+   "later_step": {
+    "cache_read": 0,
+    "cache_write": 0,
+    "input": 0,
+    "output": 0,
+    "effective": 0
+   }
+  },
+  "paused": []
+ }
+}

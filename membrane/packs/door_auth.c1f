@@ -1,0 +1,32 @@
+PACK door_auth 1
+IMPORT door 1
+-- `Person` stays declared for ONE reader: legacy_persons.c1f (the imported history names the owners of its old sessions). The door makes no `Person` any more.
+RESIDENT Person
+-- THE PAGE'S OWN TOKEN (operator decisions 2026-11-13: the released seat's two auth modes are a JWT and the loopback admin cookie; the seat-token
+-- mode and the LAN guard are dropped). docs/auth.md; the released shape is `ui_serve.py` `intercept`.
+--   * a JWT (Bearer, Basic password or the seat's cookie) is verified by the door before any pack sees the request (`authed`, `sub`, `claims`);
+--   * the page fetched from THIS machine (a loopback peer with no forwarding header) is given the ADMIN cookie: a token whose `sub` is `admin`,
+--     signed by the door with its own secret (`Request.mint`, a driver verb: the pack never holds the secret), HttpOnly, SameSite=Strict;
+--   * the page's own calls (`/ui/serve/...`, door.c1f) and every route but the public shell need a verified token: a tokenless request through
+--     the prefix is refused even from loopback, and a request from another address (or with a proxy header) has no way in but a JWT.
+-- The 401 (`Request.unauthorized`) is in door.c1f. `cliffvm token mint` makes more tokens, and each is the admin too (no users in this release: docs/auth.md).
+
+-- how long the admin cookie lives: 7 days, as the released seat minted it (ui_serve.py) -- a threshold carried over, flagged for the operator
+Request.admin_ttl getter: 604800
+Request.page getter: this.route in ['/', '/index.html', '/membrane'] and not this.ui_served
+-- THE HOST CHECK (operator 2026-11-14, DNS rebinding): a hostile site can point its own name at 127.0.0.1, so "the peer is loopback" is not enough to hand out the cookie.
+-- The page cookie is given only when the request's `Host` (lower case, the port cut off, an IPv6 name in brackets) is `localhost`, `127.0.0.1`, `[::1]` or a name the launch fact
+-- `host_names` lists (a JSON list or comma text; no other default). Any other Host, or none, gets NO cookie and the protected routes stay 401. A token in an Authorization header
+-- is not affected: it is checked by the door whatever Host the request names.
+Request.host getter: lower(str(prop(this.headers, 'host') or ''))
+Request.host_extra getter: ([b.host_names for b in instances('Boot') if b.host_names != None] or [[]])[0]
+Request.host_allowed getter: concat(['localhost', '127.0.0.1', '[::1]'], [lower(strip(x)) for x in (this.host_extra if this.host_extra is List else words(replace(str(this.host_extra), ',', ' ')))])
+Request.host_ok getter: len([a for a in this.host_allowed if a != '' and (this.host == a or startswith(this.host, a + ':'))]) > 0
+Request.admin_page getter: this.page and this.is_read and this.loop and not this.fwd and this.host_ok
+Request.admin_ask getter: {'id': 'admin', 'sub': 'admin', 'name': 'admin', 'ttl': this.admin_ttl} if this.admin_page else None
+Request.admin_ask on-setter admin-mint:
+  WHEN this.admin_ask != None:
+    this.mint = this.admin_ask
+-- the page waits for the receipt (door.c1f `static_reply`); a door with no secret answers rc 2 and the page is served with no cookie
+Request.page_hold getter: True if this.admin_page and this.mint_result == None else None
+Request.page_cookie getter: (this.cookie_name + '=' + str(prop(this.mint_result, 'token')) + '; Path=/; Max-Age=' + str(this.admin_ttl) + '; HttpOnly; SameSite=Strict' + this.secure) if prop(this.mint_result, 'rc') == 0 else None

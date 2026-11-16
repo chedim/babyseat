@@ -1,0 +1,13 @@
+PACK collector 1
+IMPORT door 1
+IMPORT boot 1
+-- THE START-UP SWEEP (#1143). A door request is the VIRTUAL entity `Request:<n>`: the engine collects it by itself once nothing holds it (docs/cliffvm.md, "Garbage collection"),
+-- so this pack no longer retires anything for it. What is left is the STORED text an older run left behind: a Request row the store kept (before the class was virtual)
+-- is retired when the seat starts. `Boot.started` is written once, after the engine is up. (The old `request_keep_s` fact is accepted and does nothing.)
+Boot.old_requests getter: sql('SELECT k FROM c_field WHERE json_extract(body, \'$.cls\') = \'Request\'') if this.started != None else None
+
+Boot.old_requests on-setter sweep-old-requests:
+  WHEN this.old_requests != None and this.swept != True:
+    this.swept = True
+    FOR r IN this.old_requests:
+      (prop(r, 'k')).retire = True

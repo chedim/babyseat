@@ -1,4 +1,6 @@
 PACK fs 1
+RESIDENT File
+RESIDENT Dir
 -- THE fs STDLIB PACK (#1044): files and folders as entities, read by getters, changed by writes. Native, no Python.
 --   File:<name> {path}: text (the file's text), info {exists, kind, size, mtime}
 --   Dir:<name>  {path}: entries [{name, kind, size, mtime}], names

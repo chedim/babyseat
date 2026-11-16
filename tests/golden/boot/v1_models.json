@@ -1,0 +1,23 @@
+{
+ "status": 200,
+ "body": {
+  "object": "list",
+  "data": [
+   {
+    "id": "@explore",
+    "object": "model",
+    "owned_by": "membrane->ollama"
+   },
+   {
+    "id": "autoselect",
+    "object": "model",
+    "owned_by": "membrane-router"
+   },
+   {
+    "id": "claude-agent:sonnet",
+    "object": "model",
+    "owned_by": "membrane->claude-agent"
+   }
+  ]
+ }
+}

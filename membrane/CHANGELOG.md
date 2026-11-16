@@ -1,3 +1,56 @@
+## v0.7.61 (2026-11-15) — The standalone seat, a memory that finds by meaning, and Home Assistant
+
+
+### Upgrading from 0.7.53 (read this first)
+- **Home Assistant.** The HACS component runs the seat itself again: *Add integration* offers "Run a seat inside Home Assistant" (the default: Anthropic with an API key, an OpenAI-compatible endpoint, or Ollama; Home Assistant's own Ollama server is filled in) or "Connect to a seat I run". It downloads the seat of its own release for the machine (Linux x86_64/aarch64 static musl, macOS), checks its sha256, keeps its data in `<config>/membrane/` and runs it on 127.0.0.1; *Configure* changes the provider, model or key (Configure's model wins at every start). The 0.7.53 inside entries migrate and keep their Ollama URL and model. The release must carry the tarballs and `.sha256` files (publish with `github_release=true`). Old seat tokens are not valid on the new seat.
+- **The command line changed.** `membrane serve` takes `--port`, `--data-dir`, `--bind` and `--fact name=value`. The removed 0.7.x flags (`--cortex`, `--cells`, `--backend` and others) and the old subcommands (`stop`, `doctor`, ...) are gone; a unit file that passes them will not start the seat, and the launcher says so.
+- **What carries over:** the chat history is found and imported automatically (from `<data dir>`, `<data dir>/.membrane`, `/config/membrane/.membrane`, or `--legacy <path>`), and the seat's old name is offered to the model once. **What does not:** entities, goals, settings, the cloud-model and Ollama setup, tokens, and the Home Assistant allow-lists (`HaAllow`, default deny: recreate them).
+- **Docker.** The image is now the Rust seat. `latest` and the minor tags are moved only by a release pushed as stable; the image does not contain the `claude` CLI (mount it, or use an OpenAI-compatible endpoint).
+- **Chat backends:** the `claude` CLI (an Anthropic API key in the environment), or any OpenAI-compatible endpoint (set `cloud_models`; a local Ollama is `seat_backend`). Termux/Android has no build.
+
+### The seat
+- **The seat is one Rust program, `cliffvm`.** The Python seat is retired: no Python logic runs. What is left of Python is a 60-line launcher in the pip package, the Home Assistant component and the pip shim. The last Python seat is the tag `python-seat-last`; 0.7.53 is the branch `release-0.7.53`. About 874 Python files and 203,000 lines are gone.
+- **Everything the model and the page do is c1f.** The packs `apps/barest.packs` lists, the launcher and `boot.json` ship with the binary, and the page (Chat, Settings, the GraphLink link) is c1f view packs on the wasm engine.
+- **Packages:** wheels for six targets, an installer, a Docker image and the publish workflow (dispatch only). Checked locally for macOS arm64 only; the other targets are built by CI at the release tag.
+- **Home Assistant:** the component runs the seat itself (or connects to one you run), Assist conversation agent, entities, services, the seat's use of the house, Supervisor discovery of a seat that announces itself, and a hint from Home Assistant's own Ollama integration. Tested against fakes and against a throwaway real Home Assistant Core (76 of 76 checks); not run on a real Home Assistant OS, Supervised or Container, nor against a real GitHub download. The add-on was built but is not in this release.
+- **Chat backends:** the Claude CLI, and any OpenAI-compatible endpoint (including a local model server such as Ollama's), written fresh in c1f. `chat_oai` is now in the shipped pack list.
+- **The turn:** the system prompt is the doctrine only; the banner and the message are two blocks of one stdin user message.
+
+### Memory that finds by meaning
+- **One recall on SemText.** The banner and `Memory` read the same `SemText.recall`. Its query is a window of the chat's last six texts counting back from the ask, each older text counting half as much; the ask itself is left out; no score cut-off; near-duplicates merge greedily at 0.8.
+- **The membrane field, rewritten in c1f.** Entities carry stored states (identifiers and paths at first mention, words after three sentences), a move log, episodes and a background mean. Recall now ranks by the old seat's weighted vote (move log 2, entity recall 0.75, vector lane 0.125, word lane 0.125) over those, with the `legacy` scoring weights. Instance histories and the reranker are not built.
+- **Every SemText embeds by default.** Sentence vectors (`Vector`, a MAPPED f16 class with a native `near`) are made in the background; a chat message is embedded once, by its ask's own call.
+- **`Memory`** is a SemText that auto-mentions itself and returns what it reminds of when written.
+- **New language surface** (each approved): `MAPPED <Class> f16 derived` (rule writes stored, not journalled, not replayed), and the builtins `vsum`, `fold`, `log`, `props` and `vmean` (plus an optional column sum on `group_by`), each one step however long the list.
+- **Not measured:** the field has not been measured on a real corpus, and the old numbers came from an offline benchmark that is not on disk. At 600 test texts the recall fits the step budget only with the new builtins (see the measurements table).
+
+### The model
+- **Doctrine:** "You are the graph … it is programmable: use cliffhanger to maintain it as your memory and to interact with the environment." Editing the graph and the banner needs no confirmation; ask first only before something that reaches outside the graph. "Every message continues the conversation on the graph." Search the ChatMessage entities before saying "I do not know"; do not guess.
+- **A model's own layer can answer a message without starting a model** (a pack with `plan` and `answer` arms); `Help:packs` has the recipe.
+- **A failed turn keeps what it had streamed** as an interrupted response (a SemText, found by recall); the page marks it.
+- **The name:** the doctrine opens with it (`Setting:chat.name`, else the `seat_name` launch fact, else Bob). `--fact seat_name=<name>` now works (it used to be overwritten by the default). An upgrade from the Python seat sends the model one message with the old store's stored name, once.
+- **`born_by` / `births_to`:** every entity a turn makes records which chat message caused it, both ways.
+
+### Smaller changes
+- **A seat with a big history no longer freezes when entities retire:** retired rows are deleted by key range (not a scan of the whole table), and removals touch only what the removed entity read. A 1.4 GB, 74,000-message store with embeddings on used to sit at 100% CPU and never answer; it now catches up and answers. A cargo feature `phase-trace` (off by default) prints the engine's phases to stderr every 2 s.
+- **Memory policy:** a default memory budget (10% of the machine, hard line 90%, batch 200).
+- **Foot-guns fixed loudly:** `unload = true` and the memory sensor are gone, `retire = true` is `Entity = None`, `parents` is hidden from the model, and the other silent magic properties now answer with a reason.
+- **Page:** a "sent by the seat" label and an "interrupted" mark on chat rows.
+- **Docs:** every page in `docs/` was checked against the code; three finished process docs were deleted.
+
+### Known gaps (not in 0.7.61)
+- Entity recall's cost still grows with the mentions of the question's words on very large fields; the common-word cut was declined for now.
+- `measure_recall_arms.py` reads properties the new recall no longer has.
+- A raw-exchange view of the model's input and output is shelved.
+- `pronoun` is reserved but never bound on this seat; the 18 packs that `barest.packs` does not list await an audit; the five unreferenced images are removed from the repo.
+
+### For 0.7.62 (suggested)
+- A cliff debugger (the `phase-trace` feature is its seed): breakpoints and a status view for a stuck seat.
+- The model-change fix in the seat itself (`minds` fact wins at every start; `pickable` lists every cloud rung), so Configure and the add-on need no workaround; delete old `app/<version>` folders after a verified install.
+- Cliff-only answers: a shadow comparison between a rule and the model before a rule may answer alone.
+- A survey of dynamic model routing with per-model caches, adapters per memory cluster, and a MoE-aware runner.
+- The Home Assistant page VM prototype; `--name` on `serve`; `sum`, `keys`, `flatten` builtin proposals.
+
 ## v0.7.53 (2026-11-11) — Big fields answer again
 
 A hotfix on 0.7.52.

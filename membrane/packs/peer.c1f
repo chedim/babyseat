@@ -1,0 +1,13 @@
+PACK peer 1
+IMPORT boot 1
+RESIDENT Peer
+-- THE PEER CHANNEL as a node (operator, 2026-11-12: everything moves to cliffhanger). A chat lane between the models on
+-- the connected seats, visible to the person on each. You post by WRITING its `post`; the seat's peer driver sends it
+-- and leaves the receipt. The seat makes the node at start.
+
+Peer.sent getter: this.post_rc == 0 if this.post_rc != None else None
+
+Boot.started on-setter peer-channel:
+  ALWAYS:
+    ('Peer:channel').name = 'the peer channel'
+    ('Peer:channel').summary = 'Post to the other seats: write post = {text, reply_to} (a bare string is the text; at most 2000 characters; reply_to is a seat id). Handoffs, questions to another seat, announcements. The receipt lands in post_result / post_rc. Unread messages from other seats ride your banner.'

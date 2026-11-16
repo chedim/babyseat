@@ -1,0 +1,1017 @@
+[
+ {
+  "event": "server.connected",
+  "data": {
+   "id": "evt_988c3917f4296f9832bb2c1a",
+   "type": "server.connected",
+   "properties": {}
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "id": "evt_0ad81b740e2ba06aed86e6d8",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "info": {
+     "id": "msg_51cec3a3ee171ffc71dd538d",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "role": "user",
+     "agent": "build",
+     "model": {
+      "providerID": "membrane",
+      "modelID": "claude"
+     },
+     "time": {
+      "created": 1794603477013
+     },
+     "summary": {
+      "diffs": []
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_5cc2973b16e2a0c4ad65caa5",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_7bc1a3bd11044521a6cfbbf7",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_51cec3a3ee171ffc71dd538d",
+     "type": "text",
+     "text": "look at the probe"
+    },
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "time": 1794603477059
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "id": "evt_02faa9cba192e0367a9c4d6f",
+   "type": "session.updated",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "info": {
+     "id": "ses_69143f4fc8088e7ec097c182",
+     "projectID": "membrane",
+     "directory": "/srv/seat",
+     "path": "srv/seat",
+     "slug": "calm-cedar",
+     "title": "Renamed",
+     "version": "1.0",
+     "agent": "build",
+     "model": {
+      "id": "claude",
+      "providerID": "membrane",
+      "variant": "default"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 0,
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+     },
+     "time": {
+      "created": 1794603477007,
+      "updated": 1794603477011
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "id": "evt_cb83d5cebb7e14dd61cb2313",
+   "type": "session.diff",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "diff": []
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "id": "evt_ca1d2457852d2dce71d4c8f3",
+   "type": "session.status",
+   "properties": {
+    "status": {
+     "type": "busy"
+    },
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "id": "evt_ed7a149e7ec621a4ef131eb9",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "info": {
+     "id": "msg_6df5fad5796bc9e88435f705",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "role": "assistant",
+     "parentID": "msg_51cec3a3ee171ffc71dd538d",
+     "modelID": "claude",
+     "providerID": "membrane",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/srv/seat",
+      "root": "/srv/seat"
+     },
+     "cost": 0.0,
+     "tokens": {
+      "total": 0,
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "time": {
+      "created": 1794603477062
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "id": "evt_fd47d4ff51c54f5ad48ebede",
+   "type": "session.updated",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "info": {
+     "id": "ses_69143f4fc8088e7ec097c182",
+     "projectID": "membrane",
+     "directory": "/srv/seat",
+     "path": "srv/seat",
+     "slug": "calm-cedar",
+     "title": "Renamed",
+     "version": "1.0",
+     "agent": "build",
+     "model": {
+      "id": "claude",
+      "providerID": "membrane",
+      "variant": "default"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 0,
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+     },
+     "time": {
+      "created": 1794603477007,
+      "updated": 1794603477011
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "id": "evt_79eee23219284aa33f0fe526",
+   "type": "session.diff",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "diff": []
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_22f8c46d6c362d32cd111e33",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_ef1fb42d60b49030b6b87bb5",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "type": "step-start"
+    },
+    "time": 1794603477066,
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_32a38468846b230bed3566fc",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_af3f281a1995ba129977577a",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "type": "text",
+     "text": "",
+     "time": {
+      "start": 1794603477066
+     }
+    },
+    "time": 1794603477066,
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.part.delta",
+  "data": {
+   "id": "evt_d0063c0486b277a12fc2a909",
+   "type": "message.part.delta",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "messageID": "msg_6df5fad5796bc9e88435f705",
+    "partID": "prt_af3f281a1995ba129977577a",
+    "field": "text",
+    "delta": "Looking "
+   }
+  }
+ },
+ {
+  "event": "message.part.delta",
+  "data": {
+   "id": "evt_b746a6be63a9ff7db8e63fbc",
+   "type": "message.part.delta",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "messageID": "msg_6df5fad5796bc9e88435f705",
+    "partID": "prt_af3f281a1995ba129977577a",
+    "field": "text",
+    "delta": "now."
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_1cde9189d85c3d0334aa5f0c",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_af3f281a1995ba129977577a",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "type": "text",
+     "text": "Looking now.",
+     "time": {
+      "start": 1794603477066,
+      "end": 1794603477066
+     }
+    },
+    "time": 1794603477066,
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_0677a1020a7d0978b16e7489",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_536c853cb7353b3b4eb5a077",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "type": "tool",
+     "callID": "toolu_1",
+     "tool": "entity_read",
+     "madeBy": "claude-agent",
+     "state": {
+      "status": "running",
+      "input": {},
+      "title": "entity_read()",
+      "time": {
+       "start": 1794603477066
+      }
+     },
+     "time": {
+      "start": 1794603477066
+     }
+    },
+    "time": 1794603477066,
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_5c55a9404f3150992f4efeba",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_536c853cb7353b3b4eb5a077",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "type": "tool",
+     "callID": "toolu_1",
+     "tool": "entity_read",
+     "madeBy": "claude-agent",
+     "state": {
+      "status": "running",
+      "input": {
+       "spec": "Command:probe"
+      },
+      "title": "entity_read({\"spec\": \"Command:probe\"})",
+      "time": {
+       "start": 1794603477066
+      }
+     },
+     "time": {
+      "start": 1794603477066
+     }
+    },
+    "time": 1794603477066,
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_e390b9d06d4f35fe395cdf7c",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_536c853cb7353b3b4eb5a077",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "type": "tool",
+     "callID": "toolu_1",
+     "tool": "entity_read",
+     "madeBy": "claude-agent",
+     "state": {
+      "status": "completed",
+      "input": {
+       "spec": "Command:probe"
+      },
+      "title": "entity_read({\"spec\": \"Command:probe\"})",
+      "time": {
+       "start": 1794603477066,
+       "end": 1794603477066
+      },
+      "output": "the result"
+     },
+     "time": {
+      "start": 1794603477066,
+      "end": 1794603477066
+     }
+    },
+    "time": 1794603477066,
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_a65ffe125dc987323e0dc9fb",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_ba3ee5ea7e1225313e9546f2",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "type": "text",
+     "text": "",
+     "time": {
+      "start": 1794603477066
+     }
+    },
+    "time": 1794603477066,
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.part.delta",
+  "data": {
+   "id": "evt_f2695539619285b5bb7ce8f0",
+   "type": "message.part.delta",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "messageID": "msg_6df5fad5796bc9e88435f705",
+    "partID": "prt_ba3ee5ea7e1225313e9546f2",
+    "field": "text",
+    "delta": "Done."
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_490136a24e076134eb192ef5",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_ba3ee5ea7e1225313e9546f2",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "type": "text",
+     "text": "Done.",
+     "time": {
+      "start": 1794603477066,
+      "end": 1794603477066
+     }
+    },
+    "time": 1794603477066,
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_a33443274081a45b587b87ca",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_c961e78e0988f98df6a5d0fb",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "messageID": "msg_6df5fad5796bc9e88435f705",
+     "type": "step-finish",
+     "reason": "stop",
+     "cost": 0,
+     "tokens": {
+      "total": 8,
+      "input": 4,
+      "output": 4,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     }
+    },
+    "time": 1794603477066,
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "id": "evt_536286dccb30778123cec27a",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "info": {
+     "id": "msg_6df5fad5796bc9e88435f705",
+     "sessionID": "ses_69143f4fc8088e7ec097c182",
+     "role": "assistant",
+     "parentID": "msg_51cec3a3ee171ffc71dd538d",
+     "modelID": "claude",
+     "providerID": "membrane",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/srv/seat",
+      "root": "/srv/seat"
+     },
+     "cost": 0.0,
+     "tokens": {
+      "total": 8,
+      "input": 4,
+      "output": 4,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "time": {
+      "created": 1794603477062,
+      "completed": 1794603477066
+     },
+     "madeBy": "claude-agent",
+     "finish": "stop"
+    }
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "id": "evt_62487173d938e847d85e5089",
+   "type": "session.status",
+   "properties": {
+    "status": {
+     "type": "idle"
+    },
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "session.idle",
+  "data": {
+   "id": "evt_83000510249fe0bb9ec2b8cd",
+   "type": "session.idle",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "id": "evt_11699347fc513f693524564d",
+   "type": "session.updated",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "info": {
+     "id": "ses_69143f4fc8088e7ec097c182",
+     "projectID": "membrane",
+     "directory": "/srv/seat",
+     "path": "srv/seat",
+     "slug": "calm-cedar",
+     "title": "Renamed",
+     "version": "1.0",
+     "agent": "build",
+     "model": {
+      "id": "claude",
+      "providerID": "membrane",
+      "variant": "default"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 0,
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+     },
+     "time": {
+      "created": 1794603477007,
+      "updated": 1794603477066
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "id": "evt_c561d3ba76c8055e945d0d38",
+   "type": "session.diff",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182",
+    "diff": []
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "id": "evt_2d158767db33dd73d433dc59",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "info": {
+     "id": "msg_2e18b1de361fed721f376e7f",
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "role": "user",
+     "agent": "build",
+     "model": {
+      "providerID": "membrane",
+      "modelID": "claude"
+     },
+     "time": {
+      "created": 1794603477431
+     },
+     "summary": {
+      "diffs": []
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_559288db0d039dfcb4041194",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_d4b79a2d8ba2f869260d9633",
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "messageID": "msg_2e18b1de361fed721f376e7f",
+     "type": "text",
+     "text": "this will fail"
+    },
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "time": 1794603477431
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "id": "evt_972d3c7646e728a30c6d8a30",
+   "type": "session.updated",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "info": {
+     "id": "ses_3678f92e6f574f341f5b0674",
+     "projectID": "membrane",
+     "directory": "/srv/seat",
+     "path": "srv/seat",
+     "slug": "misty-meadow",
+     "title": "E",
+     "version": "1.0",
+     "agent": "build",
+     "model": {
+      "id": "",
+      "providerID": "membrane",
+      "variant": "default"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 0,
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+     },
+     "time": {
+      "created": 1794603477430,
+      "updated": 1794603477430
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "id": "evt_2529355929cb029d54bbe3ba",
+   "type": "session.diff",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "diff": []
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "id": "evt_7eeaa93c2a97f2be42439f91",
+   "type": "session.status",
+   "properties": {
+    "status": {
+     "type": "busy"
+    },
+    "sessionID": "ses_3678f92e6f574f341f5b0674"
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "id": "evt_1c18ce5a98d55126727687cc",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "info": {
+     "id": "msg_9cf9150711fb112fed38dbba",
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "role": "assistant",
+     "parentID": "msg_2e18b1de361fed721f376e7f",
+     "modelID": "claude",
+     "providerID": "membrane",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/srv/seat",
+      "root": "/srv/seat"
+     },
+     "cost": 0.0,
+     "tokens": {
+      "total": 0,
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "time": {
+      "created": 1794603477431,
+      "completed": 1794603477432
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "id": "evt_e0b92b669ea88119fac5ef08",
+   "type": "session.updated",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "info": {
+     "id": "ses_3678f92e6f574f341f5b0674",
+     "projectID": "membrane",
+     "directory": "/srv/seat",
+     "path": "srv/seat",
+     "slug": "misty-meadow",
+     "title": "E",
+     "version": "1.0",
+     "agent": "build",
+     "model": {
+      "id": "",
+      "providerID": "membrane",
+      "variant": "default"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 0,
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+     },
+     "time": {
+      "created": 1794603477430,
+      "updated": 1794603477432
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "id": "evt_d7e9219e68ea549cc92bf59c",
+   "type": "session.diff",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "diff": []
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_81470d028e71770610d2538f",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_fcbaca2e5e868d5eaf959dab",
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "messageID": "msg_9cf9150711fb112fed38dbba",
+     "type": "step-start"
+    },
+    "time": 1794603477431,
+    "sessionID": "ses_3678f92e6f574f341f5b0674"
+   }
+  }
+ },
+ {
+  "event": "message.part.updated",
+  "data": {
+   "id": "evt_d038504c5544b58805d28b3f",
+   "type": "message.part.updated",
+   "properties": {
+    "part": {
+     "id": "prt_02155348c0af5c503b366a13",
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "messageID": "msg_9cf9150711fb112fed38dbba",
+     "type": "text",
+     "text": "model ladder failed: AssertionError: buffered call not used",
+     "time": {
+      "start": 1794603477431,
+      "end": 1794603477431
+     }
+    },
+    "time": 1794603477431,
+    "sessionID": "ses_3678f92e6f574f341f5b0674"
+   }
+  }
+ },
+ {
+  "event": "message.updated",
+  "data": {
+   "id": "evt_55850f6d78b679209df58fae",
+   "type": "message.updated",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "info": {
+     "id": "msg_9cf9150711fb112fed38dbba",
+     "sessionID": "ses_3678f92e6f574f341f5b0674",
+     "role": "assistant",
+     "parentID": "msg_2e18b1de361fed721f376e7f",
+     "modelID": "claude",
+     "providerID": "membrane",
+     "mode": "build",
+     "agent": "build",
+     "path": {
+      "cwd": "/srv/seat",
+      "root": "/srv/seat"
+     },
+     "cost": 0.0,
+     "tokens": {
+      "total": 17,
+      "input": 3,
+      "output": 14,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "time": {
+      "created": 1794603477431,
+      "completed": 1794603477432
+     },
+     "error": {
+      "name": "Error",
+      "data": {
+       "message": "buffered call not used"
+      }
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "id": "evt_7ce76768f3cae2e875628449",
+   "type": "session.status",
+   "properties": {
+    "status": {
+     "type": "idle"
+    },
+    "sessionID": "ses_3678f92e6f574f341f5b0674"
+   }
+  }
+ },
+ {
+  "event": "session.idle",
+  "data": {
+   "id": "evt_415c6ee285956a349d1e383e",
+   "type": "session.idle",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674"
+   }
+  }
+ },
+ {
+  "event": "session.updated",
+  "data": {
+   "id": "evt_320dc4e3eb25c750357c736f",
+   "type": "session.updated",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "info": {
+     "id": "ses_3678f92e6f574f341f5b0674",
+     "projectID": "membrane",
+     "directory": "/srv/seat",
+     "path": "srv/seat",
+     "slug": "misty-meadow",
+     "title": "E",
+     "version": "1.0",
+     "agent": "build",
+     "model": {
+      "id": "",
+      "providerID": "membrane",
+      "variant": "default"
+     },
+     "cost": 0,
+     "tokens": {
+      "total": 0,
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+       "read": 0,
+       "write": 0
+      }
+     },
+     "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+     },
+     "time": {
+      "created": 1794603477430,
+      "updated": 1794603477432
+     }
+    }
+   }
+  }
+ },
+ {
+  "event": "session.diff",
+  "data": {
+   "id": "evt_6ba93b457942f55245053a8d",
+   "type": "session.diff",
+   "properties": {
+    "sessionID": "ses_3678f92e6f574f341f5b0674",
+    "diff": []
+   }
+  }
+ },
+ {
+  "event": "session.status",
+  "data": {
+   "id": "evt_4b866b54078c73384ea28c7f",
+   "type": "session.status",
+   "properties": {
+    "status": {
+     "type": "idle"
+    },
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "session.idle",
+  "data": {
+   "id": "evt_f66178b96ec9ab3da105c6a2",
+   "type": "session.idle",
+   "properties": {
+    "sessionID": "ses_69143f4fc8088e7ec097c182"
+   }
+  }
+ },
+ {
+  "event": "session.deleted",
+  "data": {
+   "id": "evt_47187e9fff206c3806410c5d",
+   "type": "session.deleted",
+   "properties": {
+    "info": {
+     "sessionID": "ses_3678f92e6f574f341f5b0674"
+    }
+   }
+  }
+ }
+]

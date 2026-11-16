@@ -1,0 +1,144 @@
+[
+ {
+  "name": "a tree loaded whole: depth and the in-order walk recurse through the references",
+  "packs": [
+   "tests/specs/fixtures/tree.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Node:1",
+    "class": "Node",
+    "props": {
+     "v": 5,
+     "left": {
+      "$ref": "Node:2"
+     },
+     "right": {
+      "$ref": "Node:3"
+     }
+    }
+   },
+   {
+    "eid": "Node:2",
+    "class": "Node",
+    "props": {
+     "v": 2,
+     "left": {
+      "$ref": "Node:4"
+     }
+    }
+   },
+   {
+    "eid": "Node:3",
+    "class": "Node",
+    "props": {
+     "v": 8
+    }
+   },
+   {
+    "eid": "Node:4",
+    "class": "Node",
+    "props": {
+     "v": 1
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Node:1",
+    "prop": "depth",
+    "equals": 3
+   },
+   {
+    "eid": "Node:1",
+    "prop": "walk",
+    "equals": [
+     1,
+     2,
+     5,
+     8
+    ]
+   },
+   {
+    "eid": "Node:3",
+    "prop": "depth",
+    "equals": 1
+   },
+   {
+    "eid": "Node:2",
+    "prop": "walk",
+    "equals": [
+     1,
+     2
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a change deep in the tree reaches the root (live)",
+  "packs": [
+   "tests/specs/fixtures/tree.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Node:1",
+    "class": "Node",
+    "props": {
+     "v": 5,
+     "left": {
+      "$ref": "Node:2"
+     },
+     "right": {
+      "$ref": "Node:3"
+     }
+    }
+   },
+   {
+    "eid": "Node:2",
+    "class": "Node",
+    "props": {
+     "v": 2,
+     "left": {
+      "$ref": "Node:4"
+     }
+    }
+   },
+   {
+    "eid": "Node:3",
+    "class": "Node",
+    "props": {
+     "v": 8
+    }
+   },
+   {
+    "eid": "Node:4",
+    "class": "Node",
+    "props": {
+     "v": 1
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Node:3",
+    "prop": "right",
+    "value": {
+     "$ref": "Node:5"
+    }
+   },
+   {
+    "eid": "Node:5",
+    "prop": "v",
+    "value": 9
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Node:1",
+    "prop": "depth",
+    "equals": 3
+   }
+  ]
+ }
+]
