@@ -1,0 +1,98 @@
+PACK edit 1
+IMPORT fs 1
+-- THE edit PACK: a change to a file as a hunk, applied by a write, guarded and undoable. Plain c1f over the fs stdlib; no new builtin, no Rust.
+--   Edit:<name> {path, old, new, base_mtime}   a hunk: `old` (text that must occur in the file exactly once) becomes `new`
+--   Edit.apply  = {id}    apply the hunk: the file is read again, then the hunk is checked against it and written (refused, with the reason in `refused`, unless `problem` is empty)
+--   Edit.revert = {id}    put the pre-image back (the file is read again; refused if it is no longer as the edit left it)
+--   Edit.seen   = <any>   read the file again (the entity reads it when `path` is written, and after its own writes)
+-- Reads of an edit (all getters; a draft changes nothing, so reading `diff` and `problem` IS the dry run):
+--   text, info     the file as it is (the fs stdlib's read and stat)
+--   hits           how many times `old` occurs in the file
+--   problem        why the hunk cannot be applied now, or none: no path, empty old, no new, not found, matches N times, changed since
+--   diff           the hunk as `- old` / `+ new` lines (what the agent sends and reads back: never the whole file)
+--   status         draft | ready | pending | applied | reverted | refused | failed
+--   pre, post      the file before and after the edit (the revert's pre-image, and what the file must still be to revert)
+-- base_mtime is the optional lock: the `mtime` of `info` as the agent read it; a file that has another mtime when the edit is applied is
+-- refused, so an edit never lands on a file that changed under the agent. The file is changed by an ordinary File.write (File:edit:<name>),
+-- whose receipt wakes this entity (File.write_result below); there is no other path to the disk.
+--
+-- apply and revert are two steps, because a read lands later (fs.c1f): the write sets `want` = {op, id, token} and writes `seen` = token, which
+-- makes the entity read the file again; `snap` is the fresh text, its checks and the token it was read for, and when it says `ready` the
+-- setter on `snap` decides and writes. So the checks are made against the file as it is when the edit is applied, never a cached read.
+
+Edit.text getter: read(this.path) if this.path and (this.seen or True) else None
+Edit.info getter: stat(this.path) if this.path and (this.seen or True) else None
+Edit.hits getter:
+  WHEN this.text == None or not this.old: None
+  ELSE: (len(this.text) - len(replace(this.text, this.old, ''))) / len(this.old)
+Edit.problem getter:
+  WHEN not this.path: 'no path: say which file'
+  ELSE WHEN not this.old: 'old is empty: say the text to replace'
+  ELSE WHEN this.new == None: 'no new: say the replacement (an empty text deletes the hunk)'
+  ELSE WHEN this.info == None: 'the file is not read yet'
+  ELSE WHEN prop(this.info, 'exists') == False: 'no such file: ' + this.path
+  ELSE WHEN this.text == None: 'the file is not read yet'
+  ELSE WHEN this.base_mtime != None and prop(this.info, 'mtime') != this.base_mtime: 'the file changed since you read it (mtime ' + str(prop(this.info, 'mtime')) + ', you read ' + str(this.base_mtime) + '): read it again'
+  ELSE WHEN this.hits == 0: 'old was not found in ' + this.path
+  ELSE WHEN this.hits > 1: 'old matches ' + words(replace(str(this.hits), '.', ' '))[0] + ' times in ' + this.path + ': add context so it matches once'
+  ELSE: None
+Edit.after getter: replace(this.text, this.old, this.new) if this.problem == None else None
+Edit.diff getter:
+  WHEN this.old == None or this.new == None: None
+  ELSE: '--- ' + str(this.path) + '\n' + join(['- ' + l for l in lines(this.old)], '\n') + '\n' + join(['+ ' + l for l in lines(this.new)], '\n')
+Edit.revert_problem getter:
+  WHEN this.applied != True: 'nothing to revert: no edit has been applied'
+  ELSE WHEN this.text != this.post: 'the file changed since the edit was applied: revert refused, it would undo someone else'
+  ELSE: None
+Edit.status getter:
+  WHEN this.want != None: 'pending'
+  ELSE WHEN this.refused: 'refused'
+  ELSE WHEN this.landed != None and this.landed != 0: 'failed'
+  ELSE WHEN this.applied == True: 'applied'
+  ELSE WHEN this.applied == False: 'reverted'
+  ELSE WHEN this.problem != None: 'draft'
+  ELSE: 'ready'
+-- the file as it was read for the wanted step: ready once both reads (text, stat) of that step's token have landed
+Edit.snap getter:
+  w = this.want
+  ready = w != None and prop(w, 'token') == this.seen and this.info != None and this.text != None
+  {'ready': ready, 'op': prop(w, 'op'), 'id': prop(w, 'id'), 'text': this.text, 'problem': this.problem, 'after': this.after, 'revert_problem': this.revert_problem}
+
+-- step one: ask for a fresh read of the file
+Edit.apply on-setter apply-edit:
+  ALWAYS:
+    token = 'apply:' + str(prop(this.apply, 'id')) + ':' + str(clock)
+    this.want = {'op': 'apply', 'id': prop(this.apply, 'id'), 'token': token}
+    this.seen = token
+Edit.revert on-setter revert-edit:
+  ALWAYS:
+    token = 'revert:' + str(prop(this.revert, 'id')) + ':' + str(clock)
+    this.want = {'op': 'revert', 'id': prop(this.revert, 'id'), 'token': token}
+    this.seen = token
+-- step two: the fresh file is here; check the hunk against it and write, or refuse with the reason. The pre-image is the text that was checked.
+Edit.snap on-setter run-wanted:
+  WHEN prop(this.snap, 'ready') and prop(this.snap, 'op') == 'apply' and prop(this.snap, 'problem') == None:
+    this.pre = prop(this.snap, 'text')
+    this.post = prop(this.snap, 'after')
+    this.applied = True
+    this.refused = ''
+    this.want = None
+    ('File:edit:' + this.eid) = File(path: this.path, edit_eid: this.eid)
+    ('File:edit:' + this.eid).write = {'id': 'apply', 'content': prop(this.snap, 'after')}
+  ELSE WHEN prop(this.snap, 'ready') and prop(this.snap, 'op') == 'apply':
+    this.refused = prop(this.snap, 'problem')
+    this.want = None
+  ELSE WHEN prop(this.snap, 'ready') and prop(this.snap, 'op') == 'revert' and prop(this.snap, 'revert_problem') == None:
+    this.applied = False
+    this.refused = ''
+    this.want = None
+    ('File:edit:' + this.eid) = File(path: this.path, edit_eid: this.eid)
+    ('File:edit:' + this.eid).write = {'id': 'revert', 'content': this.pre}
+  ELSE WHEN prop(this.snap, 'ready') and prop(this.snap, 'op') == 'revert':
+    this.refused = prop(this.snap, 'revert_problem')
+    this.want = None
+-- the receipt of the edit's write wakes the edit: it reads the file again and says how the write went
+File.write_result on-setter edit-landed:
+  WHEN this.edit_eid != None:
+    (this.edit_eid).landed = this.write_rc
+    (this.edit_eid).seen = prop(this.write_result, 'finished')

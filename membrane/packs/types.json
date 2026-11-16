@@ -1242,6 +1242,31 @@
     },
     "findings": []
   },
+  "edit": {
+    "getters": {
+      "Edit.after": "Text?",
+      "Edit.diff": "Text?",
+      "Edit.hits": "Float?",
+      "Edit.info": "Any",
+      "Edit.problem": "Text?",
+      "Edit.revert_problem": "Text?",
+      "Edit.snap": "Dict",
+      "Edit.status": "Text",
+      "Edit.text": "Any"
+    },
+    "writes": {
+      "*.landed": "Any",
+      "*.seen": "Any",
+      "Edit.applied": "Bool",
+      "Edit.post": "Any",
+      "Edit.pre": "Any",
+      "Edit.refused": "Any",
+      "Edit.seen": "Text",
+      "Edit.want": "Dict?",
+      "File.write": "Dict"
+    },
+    "findings": []
+  },
   "embed": {
     "getters": {
       "EmbedAsk.kind": "Text",

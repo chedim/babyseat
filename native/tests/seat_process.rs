@@ -339,9 +339,9 @@ fn request_rows_of_an_earlier_run_are_retired_when_the_seat_starts() {
 #[test]
 fn help_topics_are_entities_the_model_lists_and_reads() {
     let (mut run, port) = seat("help", true);
-    let (list, _) = wait("the help topics", || { let (l, e) = call(port, "entity_query", json!({"q": "kind:Help"})); (l.lines().count() == 13).then_some((l, e)) });
-    for t in ["start", "c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
-    for t in ["start", "c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment"] {
+    let (list, _) = wait("the help topics", || { let (l, e) = call(port, "entity_query", json!({"q": "kind:Help"})); (l.lines().count() == 14).then_some((l, e)) });
+    for t in ["start", "c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment", "edit"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
+    for t in ["start", "c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment", "edit"] {
         let disk = std::fs::read_to_string(repo().join(format!("membrane/apps/barest.c1f/help/{t}.md"))).unwrap();
         let (text, err) = wait("the topic's text", || { let (x, e) = call(port, "entity_read", json!({"spec": format!("Help:{t}"), "prop": "text"})); (x.len() > 100).then_some((x, e)) });
         assert!(!err && text == disk, "Help:{t}.text is the file's text");

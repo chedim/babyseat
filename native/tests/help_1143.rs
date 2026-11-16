@@ -9,7 +9,7 @@ use serde_json::Value as J;
 use std::path::PathBuf;
 
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
-const TOPICS: [&str; 13] = ["start", "c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment"];
+const TOPICS: [&str; 14] = ["start", "c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment", "edit"];
 
 struct Block { topic: String, kind: String, body: String, line: usize }
 
