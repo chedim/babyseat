@@ -425,3 +425,17 @@ fn one_send_may_carry_several_frames_that_arrive_in_order() {
     assert_eq!(body, "event: hello\ndata: {\"n\":1}\n\nevent: a\ndata: 1\n\ndata: \"two\"\n\nevent: c\ndata: {\"k\":[3]}\n\n");
     expr::set_clock(None);
 }
+
+/// The door stamps a request with the system clock (`ts`, a non-integer f64). serde_json without `float_roundtrip` parses some such numbers one ULP off, so the stored
+/// journal (what a replay reads) differed from the live one: the flake in CI. 1700000000.0000021 is one that default parsing gets wrong.
+#[test]
+fn a_float_stamp_survives_the_store_exactly() {
+    use_clock(0);
+    let tricky = 1700000000.0000021_f64;
+    let h = Host::open({ let mut o = Options::new(None); o.clock = Box::new(move || tricky); o }).unwrap();
+    h.rebuild();
+    h.born("Box:a", "Box", props(json!({"seen": tricky})), "person");
+    h.write("Box:a", "w", json!(tricky), "person");
+    let j = h.journal();
+    assert_eq!(h.journal_stored().unwrap(), j, "the stored journal is the live one, bit for bit");
+}
