@@ -1462,8 +1462,8 @@ impl Fields {
         for (e, verb, rec) in core.effect_receipts() {                                       // a driver effect finished
             if !core.docs.contains_key(&e) { continue; }
             let rc = rec.get("rc").cloned().unwrap_or(J::Null);
-            // the Sql driver's receipts are journalled (writer `record:`, host.rs stamp_writer): a replay has no file to ask and reads what was answered
-            let w = if e.starts_with("SqlQuery:") || e.starts_with("SqlSource:") { format!("record:{verb}") } else { format!("driver:{verb}") };
+            // the Sql driver's and the Cron driver's receipts are journalled (writer `record:`, host.rs stamp_writer): a replay has no file to ask and no timer to wait for, and reads what was answered
+            let w = if e.starts_with("SqlQuery:") || e.starts_with("SqlSource:") || e.starts_with("Cron:") { format!("record:{verb}") } else { format!("driver:{verb}") };
             self.emit_unchecked(core, &mut work, &e, &format!("{}_result", verb), rec, &w, seq, now);
             self.emit_unchecked(core, &mut work, &e, &format!("{}_rc", verb), rc, &w, seq, now);
         }

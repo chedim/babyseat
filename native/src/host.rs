@@ -565,6 +565,7 @@ impl Host {
     pub fn pump(&self) {
         for _ in 0..16 {
             let now = self.now();
+            { let g = self.eng(); if let Some(st) = &g.0.store { st.fire_due(now); } }   // the Cron timers that are due at THIS host's clock answer (a fake clock in a test; no thread waits)
             let inbound = { let g = self.eng(); g.0.inbound() };
             let had = !inbound.is_empty();
             for (e, cls, props) in inbound { self.born_at(now, &e, &cls, props, DOOR_WRITER); }

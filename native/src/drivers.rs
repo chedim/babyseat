@@ -12,6 +12,8 @@
 //!     SqlQuery:<...>.run = {id, args, max_rows}  (a prepared statement on a second SQLite file, sqldrv.rs; the receipt carries the rows)
 //!                                     the run value's optional `stdin` (text) is the child's standard input: written on its own thread, then the pipe is
 //!                                     CLOSED (end of input); without it stdin is null. It is part of the request like `args` (journalled with the run write), not a secret channel.
+//!     Cron:<...>.arm    = {id, at}    (a timer: at the epoch second `at` the receipt `arm_result` = {id, status, rc, at, fired} lands, once; no `at` (null) disarms;
+//!                                     a second arm replaces the first. The host's loop fires it with its own clock (store.rs `fire_due`); the pack `cron.c1f` decides everything else)
 //!     Command.stop      = {id}        (kills the running child; its run's receipt says so)
 //! - Reach (the operator): everything the VM's OS user can do. Entity scripts and peers never trigger an effect
 //!   (fields.rs checks the writer). Per-token scopes are a later release.
@@ -137,7 +139,7 @@ fn receipt(id: &J, rc: i64, head: String, extra: Map<String, J>) -> J {
 }
 
 /// The driver verbs the engine runs: (class, verb).
-pub const VERBS: [(&str, &str); 15] = [("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run"), ("Http", "listen"), ("Request", "respond"), ("Request", "verify"), ("Request", "mint"), ("Request", "stream"), ("Request", "send"), ("Request", "end"), ("Fetch", "request"), ("SqlQuery", "run")];
+pub const VERBS: [(&str, &str); 16] = [("Cron", "arm"), ("File", "write"), ("File", "move"), ("File", "delete"), ("Command", "run"), ("Command", "stop"), ("Store", "run"), ("Http", "listen"), ("Request", "respond"), ("Request", "verify"), ("Request", "mint"), ("Request", "stream"), ("Request", "send"), ("Request", "end"), ("Fetch", "request"), ("SqlQuery", "run")];
 
 /// Run one effect (the engine calls this for a write of a driver verb). `props` are the entity's.
 pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map<String, J>) {
@@ -209,6 +211,9 @@ pub fn effect(st: &Store, eid: &str, cls: &str, verb: &str, req: &J, props: &Map
                     Err(e) => receipt(&id, 2, e, Map::new()),
                 }
             }));
+        }
+        ("Cron", "arm") => {                               // a timer (store.rs `arm_timer`): no effect thread; the host's loop fires it
+            st.arm_timer(eid, &id, req.get("at").and_then(|a| a.as_f64()));
         }
         ("Command", "stop") => {
             let killed = st.kill(eid);

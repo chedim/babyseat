@@ -235,6 +235,22 @@
       "Chunk"
     ]
   },
+  "cron": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "Cron"
+    ],
+    "members": 34,
+    "writes": [],
+    "claims": [],
+    "boot_facts": [],
+    "resident": [
+      "Cron"
+    ]
+  },
   "decisions": {
     "imports": [
       "goalgraph",
