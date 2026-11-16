@@ -70,7 +70,13 @@ jobs:
         run: sudo softwareupdate --install-rosetta --agree-to-license
       - name: "smoke test: install into a fresh venv, --version, --help, serve --port 0, /global/health"
         if: ${{ !matrix.musl }}
-        run: sh scripts/dist/smoke_wheel.sh dist-wheels/*.whl
+        # the x86_64 wheel on an Apple-silicon runner: the whole smoke runs under Rosetta with the system Python (universal), so pip and the venv are x86_64 and accept the wheel
+        run: |
+          if [ -n "${{ matrix.rosetta }}" ]; then
+            PYTHON=/usr/bin/python3 arch -x86_64 sh scripts/dist/smoke_wheel.sh dist-wheels/*.whl
+          else
+            sh scripts/dist/smoke_wheel.sh dist-wheels/*.whl
+          fi
       - name: "smoke test on musl: the same inside Alpine (python + curl from apk)"
         if: matrix.musl
         run: |
