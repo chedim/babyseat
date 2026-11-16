@@ -33,5 +33,5 @@ so `failed` names only properties whose CURRENT result is the failure. `x is Err
 
 Loop safety: the class entry wakes the readers of the class list (`x is Error`, `instances('Error')`) but none of the entity's own getters; an entity's class entry flips at most twice (gain, lose) in one run, and a third flip waits for the end of the run.
 
-`entity_read` and `entity_query full:true` show a failed property as `Error: <reason>`; `run_cliff` answers an Error as `Error: <reason>` (an error result) and a null with a reason as `null: <reason>` (not an error). The JSON routes read named properties and show an Error as null.
+`entity_read` and `entity_query` with `full: true` or `props` show a failed property as `Error: <reason>`; `run_cliff` answers an Error as `Error: <reason>` (an error result) and a null with a reason as `null: <reason>` (not an error). The JSON routes read named properties and show an Error as null.
 The browser page's entity JSON (`native/src/web.rs`) carries `parents` and `failed`.

@@ -331,7 +331,7 @@ side with your other calls.
 
 ## Finding entities: the query line of entity_query
 
-`entity_query {q, k, offset, full, count}` reads the store, so it finds every stored entity, loaded or not (a `VIRTUAL` class is in memory only and is read with `instances` instead). The line `q` holds terms
+`entity_query {q, k, offset, props, full, count}` reads the store, so it finds every stored entity, loaded or not (a `VIRTUAL` class is in memory only and is read with `instances` instead). The line `q` holds terms
 joined with `&`; an empty `q` (or `kind:*`) is every entity. The terms:
 
 - `kind:<Class>`: the entities whose class is `<Class>` or that carry it on their `parents` list (`kind:ChatMessage` finds the messages, whose id names the class `Chat`);
@@ -339,13 +339,13 @@ joined with `&`; an empty `q` (or `kind:*`) is every entity. The terms:
 - `name~:<eid prefix>`: the entities whose id starts with that text (a prefix, letter for letter).
 
 The first term of each form counts. Any other term is answered with `entity_query: unsupported term <the term> (...)` and the forms. The rows come in id order, one line each, `<eid> (<class>)`; `k` is the
-number of rows (20 unless you say, at most 100), `offset` skips that many (the next page), `full: true` adds each row's stored properties, `count: true` answers only the number (`12 entity(ies)`).
+number of rows (20 unless you say, at most 100), `offset` skips that many (the next page), `props: ["text", "state"]` adds just those stored properties to each row (a name that is missing from a row is left out of it, with no error; stored values: a getter's value is read with `entity_read` and `prop`), `full: true` adds ALL the stored properties (a row can be big: on a class such as ChatMessage, whole turns, 10 rows can come back as hundreds of thousands of characters and the reply is not usable; use `props` instead), `count: true` answers only the number (`12 entity(ies)`).
 
 ```
 entity_query {q: "kind:Note"}                                      every Note
 entity_query {q: "kind:Note & kind!:Error"}                        the Notes with no failed property
 entity_query {q: "name~:Stop:"}                                    the ids that start with Stop:
-entity_query {q: "kind:ChatMessage", k: 50, offset: 50, full: true}   the second page of 50 messages, with their properties
+entity_query {q: "kind:ChatMessage", k: 50, offset: 50, props: ["text", "state"]}   the second page of 50 messages, with those two properties
 entity_query {q: "kind:Memory", count: true}                       how many notes you keep
 ```
 
