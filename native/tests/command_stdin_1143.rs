@@ -14,7 +14,10 @@ struct Run { child: Child, _lines: Receiver<String>, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
 
 fn start() -> (Run, u16) {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    // pid + clock is not unique: the clock ticks in microseconds on macOS, so tests starting in the same microsecond (parallel threads, one pid) shared ONE dir and ONE store
+    // (two migrations raced: "duplicate column name: cls"); a process-wide counter makes every start its own dir
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!("cliffvm-stdin-{}-{n}", std::process::id()));
     let pd = dir.join("packs");
     std::fs::create_dir_all(&pd).unwrap();
@@ -22,12 +25,12 @@ fn start() -> (Run, u16) {
     for f in ["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f"] { std::fs::copy(format!("{src}/{f}"), pd.join(f)).unwrap(); }
     let mut child = Command::new(BIN).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
-        .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+        .stdout(Stdio::piped()).stderr(std::fs::File::create(dir.join("stderr.txt")).unwrap()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
     let run = Run { child, _lines: rx, dir };
-    let line = run._lines.recv_timeout(common::DOOR_UP).expect("the door came up");
+    let line = run._lines.recv_timeout(common::DOOR_UP).unwrap_or_else(|e| panic!("the door came up: {e}; the child's stderr: {}", std::fs::read_to_string(run.dir.join("stderr.txt")).unwrap_or_default()));
     let port: u16 = line.rsplit(':').next().unwrap().trim().parse().unwrap();
     (run, port)
 }
