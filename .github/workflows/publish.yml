@@ -6,7 +6,7 @@ name: publish
 #      and the last `membrane-seat` shim (same version, pins babyseat==version, carries the launcher files so `pip install -U membrane-seat` ends with both commands in place);
 #   2. only after PyPI: when `github_release` is ticked, the GitHub release of the tag (notes from membrane/CHANGELOG.md) with the release tarballs and their .sha256 files (what install.sh downloads and checks).
 # The Docker image is a separate dispatch (docker.yml). No credentials live in this file: PYPI_TOKEN is the repo secret the operator set (read only by the one upload step).
-#   gh workflow run publish.yml --ref v0.7.61 -f tag=v0.7.61 -f confirm="publish v0.7.61" [-f github_release=true]
+#   gh workflow run publish.yml --ref v0.7.62 -f tag=v0.7.62 -f confirm="publish v0.7.62" [-f github_release=true]
 #   A pre-release (`-f github_release=true -f prerelease=true`) is not GitHub's "latest" release: HACS (which offers the latest release) and /releases/latest keep naming the stable one,
 #   while install.sh (newest release, a pre-release included) and docker.yml (by tag) can use it.
 
@@ -14,10 +14,10 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "the tag to publish (e.g. v0.7.61): it must be pyproject.toml's version"
+        description: "the tag to publish (e.g. v0.7.62): it must be pyproject.toml's version"
         required: true
       confirm:
-        description: 'type exactly: publish <tag>   (e.g. "publish v0.7.61")'
+        description: 'type exactly: publish <tag>   (e.g. "publish v0.7.62")'
         required: true
       github_release:
         description: "after PyPI, also create the GitHub release of the tag with the release tarballs"

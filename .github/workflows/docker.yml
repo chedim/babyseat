@@ -5,7 +5,7 @@ name: docker
 #   pull request touching the image: builds it from a linux x86_64 dist made right here, runs it, and checks it (health 401/200, non-root, no runtime state in it). Build only.
 #   workflow_dispatch (the operator's `!` line): builds the image from the tag's PUBLISHED release tarballs (publish.yml with github_release; each checked against its .sha256) and pushes ONLY when `push` is
 #   ticked and `confirm` says "push <tag>"; otherwise it builds and checks and stops.
-#       gh workflow run docker.yml --ref v0.7.61 -f tag=v0.7.61 -f push=true -f confirm="push v0.7.61"   (add -f stable=true only for a stable release: it moves X.Y and latest)
+#       gh workflow run docker.yml --ref v0.7.62 -f tag=v0.7.62 -f push=true -f confirm="push v0.7.62"   (add -f stable=true only for a stable release: it moves X.Y and latest)
 # Pushes chedim/babyseat and the same image to chedim/membrane (the project's name before 0.7, so existing pulls keep updating): X.Y.Z always, and X.Y and latest only with `stable` ticked
 # (a pre-release must not move the tags that existing pulls follow).
 # Repo secrets (read only by the login step of a confirmed push): DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (write access to BOTH repositories).
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "the release tag whose tarballs the image is built from (e.g. v0.7.61)"
+        description: "the release tag whose tarballs the image is built from (e.g. v0.7.62)"
         required: true
       push:
         description: "push the image to Docker Hub (needs the confirmation below)"
