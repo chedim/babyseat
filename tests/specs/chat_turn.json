@@ -17,7 +17,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "chat_max_turns": 7,
      "anthropic_key_set": true
     }
@@ -261,7 +261,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "anthropic_key_set": true
     }
    },
@@ -363,7 +363,8 @@
     "eid": "Boot:seat",
     "class": "Boot",
     "props": {
-     "ui_dir": "/x"
+     "ui_dir": "/x",
+     "seat_default": "claude"
     }
    },
    {
@@ -451,7 +452,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/nonexistent/claude-fake",
+     "seat_default": "claude", "chat_claude_bin": "/nonexistent/claude-fake",
      "anthropic_key_set": true,
      "chat_auth": "login"
     }
@@ -546,7 +547,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "anthropic_key_set": true
     }
    },
@@ -686,7 +687,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "anthropic_key_set": true
     }
    },
@@ -783,7 +784,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "anthropic_key_set": true
     }
    },
@@ -885,7 +886,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "chat_max_turns": 7,
      "anthropic_key_set": true
     }
@@ -983,7 +984,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "anthropic_key_set": true
     }
    },
@@ -1080,7 +1081,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "anthropic_key_set": true
     }
    },
@@ -1159,7 +1160,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "anthropic_key_set": false
     }
    },
@@ -1238,7 +1239,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude"
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude"
     }
    },
    {
@@ -1316,7 +1317,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "chat_auth": "login",
      "anthropic_key_set": true
     }
@@ -1450,7 +1451,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "chat_max_turns": 7,
      "anthropic_key_set": true
     }
@@ -1524,7 +1525,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "chat_max_turns": 7,
      "anthropic_key_set": true
     }
@@ -1598,7 +1599,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "chat_max_turns": 7,
      "anthropic_key_set": true
     }
@@ -1672,7 +1673,7 @@
     "class": "Boot",
     "props": {
      "ui_dir": "/x",
-     "chat_claude_bin": "/opt/fake/claude",
+     "seat_default": "claude", "chat_claude_bin": "/opt/fake/claude",
      "chat_max_turns": 7,
      "anthropic_key_set": true
     }

@@ -68,7 +68,7 @@ fn the_first_run_makes_a_private_secret_and_serves_the_page_with_its_cookie_and_
     // the facts the dry run said were needed: the minds' models answer (503 without `minds`), claude is the model
     let (h, b) = get(run.port, "/ui/serve/membrane/models", &format!("Cookie: {ck}\r\n"));
     assert!(h.starts_with("HTTP/1.1 200"), "{h} {b}");
-    assert!(b.contains("claude"), "{b}");
+    assert!(b.contains("\"seat_default\":\"\""), "no model is chosen by default: {b}");
     drop(run);
     // a second run keeps the secret: the cookie a person holds still works
     let before = text;

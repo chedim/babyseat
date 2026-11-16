@@ -140,8 +140,7 @@ html, body { height: 100%; }
 .setview input:focus-visible, .setview select:focus-visible { border-color: var(--accent); }
 .setrow[data-kind="number"] .setinput { width: 11ch; }
 .setrow[data-kind="text"] .setinput { flex: 1 1 14ch; max-width: 360px; }
-.setchoices { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
-.setchoice { padding: 2px 8px; font-size: 12px; color: var(--mute); }
+.setrow[data-kind="model"] .setinput { flex: 1 1 14ch; max-width: 360px; }
 .setunit { color: var(--mute); font-size: 12px; }
 .setsave { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); padding: 6px 16px; }
 .setrow[data-kind="list"] .setform, .setrow[data-kind="allowlist"] .setform { flex-direction: column; align-items: stretch; }
@@ -226,3 +225,17 @@ code.md-code { font: .92em var(--mono); background: rgb(127 127 127 / .18); padd
 .art-pic { padding: 18px 28px 6px; text-align: center; color: var(--accent); }
 .art-line { font: 15px/1.2 var(--mono); white-space: pre; }
 .art-hint { margin: 0; padding: 8px 14px 12px; text-align: center; color: var(--mute); font-size: 12px; }
+
+/* the first-run window (firstrun_view.c1f): open while the model or the name is not chosen */
+.frback { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.45); }
+.frback[hidden] { display: none; }
+.frwin { width: min(440px, 100%); max-height: 100%; overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); }
+.frwin h2 { margin: 0 0 6px; font-size: 18px; }
+.frlead, .frhint { margin: 0 0 12px; font-size: 13px; color: var(--mute); }
+.frform { display: flex; flex-direction: column; gap: 8px; }
+.frform label { font-size: 12px; color: var(--mute); }
+.frform select, .frform input { padding: 6px 8px; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.frform select:focus-visible, .frform input:focus-visible { border-color: var(--accent); }
+.frrefresh { align-self: flex-start; }
+.frerror { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--note); color: var(--note-ink); font-size: 12px; }
+.frgo { align-self: flex-start; background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); padding: 6px 16px; border-radius: 6px; }

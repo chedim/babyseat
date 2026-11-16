@@ -34,7 +34,7 @@ fn watch(mut child: Child, data: std::path::PathBuf) -> Run {
 /// the one launcher, scripts/seat, on its own data folder
 fn launcher(tag: &str) -> Run {
     let data = tmp(tag);
-    let child = Command::new("sh").arg(repo().join("scripts/seat")).args(["--data-dir", data.to_str().unwrap(), "--port", "0"])
+    let child = Command::new("sh").arg(repo().join("scripts/seat")).args(["--data-dir", data.to_str().unwrap(), "--port", "0", "--fact", "seat_default=claude"])
         .env("CLIFFVM", BIN).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     watch(child, data)
 }

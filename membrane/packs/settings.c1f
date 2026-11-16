@@ -6,7 +6,7 @@ RESIDENT Setting
 -- THE SETTINGS (#1143, docs/settings-groups.md, "Built: the server side"): one entity per setting, `Setting:<group>.<key>`, listed whole by a window that groups them by `group` and sorts by `order`.
 -- A row is DATA (written once at start, again only when this pack changes it): group, key, label, help, kind, live, order, and for a number `min`, `max`, `whole`, `unit`; `default`; `how` (what a launch-only row says
 -- about changing it); `fact` (the launch fact the value comes from); `source` + `source_prop` (the entity a write goes to, when the value belongs to another entity).
---   kind   text | number | list | allowlist (editable)        readonly (shown, never written here)
+--   kind   text | model (the chat's model: a name from the backend's list, a dropdown in the window) | number | list | allowlist (editable)        readonly (shown, never written here)
 --   live   `live` (a write is in force at once: the next message, the next feed read)        `restart` (shown with its launch line; a change needs a restart)
 -- `current` is a GETTER over the one source of the value, so nothing drifts: the chat's model reads `Minds:seat.loops` (the entity every other reader already uses), a live number or list is the row's own `value`
 -- (the setting IS the source; the pack's readers (chat_turn.c1f, door_fieldvm.c1f) read `current` first), and a row that was never written reads its launch fact, then its default.
@@ -25,8 +25,8 @@ Setting.fact_val getter:
   ELSE: this.boot_val
 -- the rows whose value is computed from other entities (they are read-only, except the chat's model and the allow-list, whose write goes to their source)
 Setting.current getter:
-  WHEN this.eid == 'Setting:model.chat': prop('Minds:seat', 'loops') or prop('Minds:seat', 'seat_default') or this.default
-  ELSE WHEN this.eid == 'Setting:model.default': prop('Minds:seat', 'seat_default') or this.default
+  WHEN this.eid == 'Setting:model.chat': prop('Minds:seat', 'loops') or prop('Minds:seat', 'seat_default') or ([b.seat_default for b in instances('Boot') if b.seat_default != None] or [''])[0]
+  ELSE WHEN this.eid == 'Setting:model.default': prop('Minds:seat', 'seat_default') or ''
   ELSE WHEN this.eid == 'Setting:model.list': [m.name for m in instances('Model') if (m.listed == True and m.chat_ok == True) or m.rung == True]
   ELSE WHEN this.eid == 'Setting:model.cloud': [{'name': prop(c, 'name'), 'backend': prop(c, 'backend'), 'api_key_env': prop(c, 'api_key_env')} for c in (([prop(b, 'cloud_models') for b in instances('Boot') if prop(b, 'cloud_models') != None] or [[]])[0])]
   ELSE WHEN this.eid == 'Setting:home.allow': [{'name': replace(replace(a.eid, 'membrane::', ''), 'HaAllow:', ''), 'services': a.services or [], 'entities': a.entities or []} for a in instances('HaAllow')]
@@ -38,6 +38,13 @@ Setting.current getter:
   ELSE WHEN this.value != None: this.value
   ELSE WHEN this.fact_val != None: this.fact_val
   ELSE: this.default
+
+-- IS IT CHOSEN (the page's first-run window reads it, one per row, no flag of its own): the chat's model is chosen when a model is in force; the name only when a person or a launch fact named it (the default Bob is not a
+-- choice). The window is open exactly while one of the two is not chosen.
+Setting.chosen getter:
+  WHEN this.eid == 'Setting:model.chat': (this.current or '') != ''
+  ELSE WHEN this.eid == 'Setting:chat.name': strip(str(this.value or '')) != '' or strip(str(this.fact_val or '')) != ''
+  ELSE: None
 
 -- ---- writing: the one door -------------------------------------------------------------------------------------------------------------------
 -- The checks are IN the setter, in order, each arm refusing with its reason and writing nothing else (a getter that read `set` would be stale inside its own setter: the loader refuses it).
@@ -59,9 +66,9 @@ Setting.set on-setter setting-set:
     this.refused = 'the name must be text, not ' + str(this.set)
   ELSE WHEN this.eid == 'Setting:chat.name' and ('\n' in this.set or '\r' in this.set or len(this.set) > 120):
     this.refused = 'the name is one line of at most 120 characters (it goes into the prompt, so no line breaks); spaces are fine'
-  ELSE WHEN this.kind == 'text' and this.eid != 'Setting:chat.name' and not (this.set is Text):
+  ELSE WHEN (this.kind == 'text' or this.kind == 'model') and this.eid != 'Setting:chat.name' and not (this.set is Text):
     this.refused = str(this.label) + ' must be text (a model name), not ' + str(this.set)
-  ELSE WHEN this.kind == 'text' and this.eid != 'Setting:chat.name' and this.set != '' and (plain(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) != lower(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) or '#' in this.set or ' ' in this.set or len(this.set) > 120):
+  ELSE WHEN (this.kind == 'text' or this.kind == 'model') and this.eid != 'Setting:chat.name' and this.set != '' and (plain(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) != lower(replace(replace(replace(this.set, '@', 'x'), '~', 'x'), '+', 'x')) or '#' in this.set or ' ' in this.set or len(this.set) > 120):
     this.refused = str(this.label) + ' is not a model name: ' + this.set + ' (1 to 120 characters: letters, digits and _.:/@~+-)'
   ELSE WHEN this.kind == 'list' and not (this.set is List):
     this.refused = str(this.label) + ' must be a list of names'
@@ -93,9 +100,9 @@ Setting.set on-setter setting-set:
 -- (an id is `<group>.<key>`; the order is the window's: Model, Chat, Map, Home, Import, Access, Limits)
 Boot.setting_keys getter: ['label', 'help', 'kind', 'live', 'order', 'default', 'min', 'max', 'whole', 'unit', 'fact', 'source', 'source_prop', 'how', 'hidden']
 Boot.setting_rows getter:
-  [{'id': 'model.chat', 'order': 1, 'label': 'Model', 'help': 'The model that answers your messages. Empty means the seat falls back to its own default.', 'kind': 'text', 'live': 'live', 'default': 'claude', 'source': 'Minds:seat', 'source_prop': 'loops'},
-   {'id': 'model.default', 'order': 2, 'label': 'Fallback model', 'help': 'The model used when none is picked.', 'kind': 'readonly', 'live': 'restart', 'default': 'claude', 'how': 'the launcher sets it with the minds fact'},
-   {'id': 'model.list', 'order': 3, 'label': 'Available models', 'help': 'The models the seat can run, as it last saw them.', 'kind': 'readonly', 'live': 'restart', 'how': 'the backend and the cloud_models fact decide it'},
+  [{'id': 'model.chat', 'order': 1, 'label': 'Model', 'help': 'The model that answers your messages: one the local model server (Ollama) lists. None is picked until you pick one.', 'kind': 'model', 'live': 'live', 'source': 'Minds:seat', 'source_prop': 'loops'},
+   {'id': 'model.default', 'order': 2, 'label': 'Fallback model', 'help': 'The model used when none is picked. Normally none: the seat asks you to pick one. The developer mode sets it.', 'kind': 'readonly', 'live': 'restart', 'how': 'start the seat with --fact seat_default=<model> (claude: the claude CLI, developer mode) or with the minds fact'},
+   {'id': 'model.list', 'order': 3, 'label': 'Available models', 'help': 'The models the seat can run, as it last saw them.', 'kind': 'readonly', 'live': 'restart', 'how': 'the local model server (seat_backend) and the cloud_models fact decide it'},
    {'id': 'model.cloud', 'order': 4, 'label': 'Other providers', 'help': 'Providers added at launch: name, backend and the NAME of the environment variable that holds the key. The key itself is never shown.', 'kind': 'readonly', 'live': 'restart', 'fact': 'cloud_models', 'how': 'start the seat with --fact cloud_models=<list>'},
    {'id': 'model.signin', 'order': 5, 'label': 'Sign-in', 'help': 'How the answering program signs in: api_key (the key of the environment variable ANTHROPIC_API_KEY) or login (the own login of the program).', 'kind': 'readonly', 'live': 'restart', 'fact': 'chat_auth', 'default': 'api_key', 'how': 'start the seat with --fact chat_auth=login'},
    {'id': 'model.cli', 'order': 6, 'label': 'Answering program', 'help': 'The path of the program that answers a message.', 'kind': 'readonly', 'live': 'restart', 'fact': 'chat_claude_bin', 'how': 'start the seat with --fact chat_claude_bin=<path>'},
@@ -137,12 +144,12 @@ Boot.started on-setter settings-seed:
 -- ---- the page's read feed: GET /ui/settings (#1143, the settings view apps/barest.c1f/settings_view.c1f) ------------------------------------------
 -- The browser VM cannot read entities by itself, so the seat tells it: `{settings: [row, ...]}`, every row in the window's order (`order` runs through the groups: Model, Chat, Map, Home, Import, Access, Limits), each
 -- row its descriptor (id, group, key, label, help, kind, live, order, default, min, max, whole, unit, how, hidden) and what is true now (`current`, `refused` as text, `applied` as a time). A row with `hidden` is listed so
--- the view can say it leaves it out. `choices` (the chat model row only) is the seat's list of models, when it has one. Nothing here is a secret: a row's `current` is the seat's own value (the key rows hold only an
+-- the view can say it leaves it out. `chosen` (the chat model and the name: set by a person or a launch fact, so the first-run window knows to open), `choices` (the chat model row only) is the seat's list of models, when it has one. Nothing here is a secret: a row's `current` is the seat's own value (the key rows hold only an
 -- environment variable's NAME). Every verified token reads it, and a write is the same door for everyone (POST /mcp entity_write).
 Request.o_settings getter: this.route == '/ui/settings'
 Request.m_settings getter: ['GET']
 -- (the rows are built here, not as a getter of the row: a getter of a Setting would be one more property on every stored row)
-Request.st_rows getter: sort_by([{'id': replace(s.eid, 'Setting:', ''), 'group': s.group, 'key': s.key, 'label': s.label, 'help': s.help, 'kind': s.kind, 'live': s.live, 'order': s.order, 'default': s.default, 'min': s.min, 'max': s.max, 'whole': s.whole == True, 'unit': s.unit, 'how': s.how, 'hidden': s.hidden == True, 'current': s.current, 'refused': s.refused or '', 'applied': s.applied, 'choices': (prop('Setting:model.list', 'current') if s.eid == 'Setting:model.chat' else None)} for s in instances('Setting') if s.group != None], 'order')
+Request.st_rows getter: sort_by([{'id': replace(s.eid, 'Setting:', ''), 'group': s.group, 'key': s.key, 'label': s.label, 'help': s.help, 'kind': s.kind, 'live': s.live, 'order': s.order, 'default': s.default, 'min': s.min, 'max': s.max, 'whole': s.whole == True, 'unit': s.unit, 'how': s.how, 'hidden': s.hidden == True, 'current': s.current, 'chosen': s.chosen, 'refused': s.refused or '', 'applied': s.applied, 'choices': (prop('Setting:model.list', 'current') if s.eid == 'Setting:model.chat' else None)} for s in instances('Setting') if s.group != None], 'order')
 -- THE MODEL ROW'S LIST is the backend's: the feed asks the backend for its tags the way `GET /v1/models` does (packs/router.c1f: `Router:seat.refresh`), once per request, and the reply waits for them
 -- (`models_ready`), so the chat model row's `choices` lists the backend's chat models and the rungs with nothing else asking first. A seat with no backend address asks nothing and waits for nothing.
 Request.sf_ask getter: {'id': this.eid} if (this.entrant and this.o_settings == True and this.models_asked != True and str(([bk.seat_backend for bk in instances('Boot') if bk.seat_backend != None] or [''])[0]) != '') else None

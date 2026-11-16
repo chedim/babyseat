@@ -38,7 +38,7 @@ function folder() { const d = mkdtempSync(path.join(tmpdir(), 'release-verify-')
 // the release launcher: strict door, loopback only
 function launcher() {
   const [dir, fake] = folder(); const port = 25000 + Math.floor(Math.random() * 900) + 11 * nseat++;
-  const child = spawn('sh', [path.join(repo, 'scripts/seat'), '--data-dir', dir, '--port', String(port), '--fact', 'seat_backend=http://127.0.0.1:9'], { cwd: repo, stdio: 'ignore', env: { ...process.env, CLIFFVM: bin, CLAUDE_BIN: fake, ANTHROPIC_API_KEY: 'sk-ant-harness-default-0000' } });
+  const child = spawn('sh', [path.join(repo, 'scripts/seat'), '--data-dir', dir, '--port', String(port), '--fact', 'seat_backend=http://127.0.0.1:9', '--fact', 'seat_default=claude', '--fact', 'seat_name=Rosie'], { cwd: repo, stdio: 'ignore', env: { ...process.env, CLIFFVM: bin, CLAUDE_BIN: fake, ANTHROPIC_API_KEY: 'sk-ant-harness-default-0000' } });
   children.push(child);
   return { dir, port, child };
 }
@@ -47,7 +47,7 @@ function lanSeat() {
   const [dir, fake] = folder(); const port = 25000 + Math.floor(Math.random() * 900) + 11 * nseat++;
   const packs = readFileSync(path.join(repo, 'membrane/apps/barest.packs'), 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).map((n) => `membrane/packs/${n}.c1f`);
   const child = spawn(bin, ['run', ...packs, 'membrane/apps/barest.c1f', '--store', path.join(dir, 'seat.sqlite'), '--port', String(port), '--ui-dir', 'membrane/ui', '--bind', '0.0.0.0',
-    '--fact', `door_secret_file=${path.join(dir, 'door.secret')}`, '--fact', `seat_data_dir=${dir}`, '--fact', `chat_claude_bin=${fake}`], { cwd: repo, stdio: 'ignore', env: { ...process.env, ANTHROPIC_API_KEY: 'sk-ant-harness-default-0000' } });
+    '--fact', `door_secret_file=${path.join(dir, 'door.secret')}`, '--fact', `seat_data_dir=${dir}`, '--fact', `chat_claude_bin=${fake}`, '--fact', 'minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude"}', '--fact', 'seat_name=Rosie'], { cwd: repo, stdio: 'ignore', env: { ...process.env, ANTHROPIC_API_KEY: 'sk-ant-harness-default-0000' } });
   children.push(child);
   return { dir, port, child };
 }

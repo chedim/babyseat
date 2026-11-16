@@ -27,13 +27,29 @@ try {
   const snap = await r.json();
   assert.ok(snap.packs && typeof snap.packs === 'object' && Array.isArray(snap.entities), 'the shape connect() reads');
   // what connect() does with it: the page's `dom` first (a stub of it here, as tests/js/about_view.test.mjs has), then each pack of the snapshot, then the entities
-  const f = new Field();
+  const f = new Field(); const errs = {};
   f.set_pack('dom', "PACK dom 1\nDomNode.tag getter: this.tag or 'div'\n");
   // the app folder's packs that import `dom` (a pack that imports another loads after it)
   f.set_pack('fetch', "PACK fetch 1\nFetch.request getter: None\n");   // the page's own Fetch host pack, stubbed
-  const names = Object.keys(snap.packs).sort((a, b) => (/IMPORT (shell_view|chat_view) /.test(snap.packs[a]) ? 1 : 0) - (/IMPORT (shell_view|chat_view) /.test(snap.packs[b]) ? 1 : 0));
-  for (const name of names) f.set_pack(name, snap.packs[name]);
-  assert.deepEqual(JSON.parse(f.pack_errors()), {}, 'the page loads every pack of the snapshot');
+  // the real loader (ui/boot.js `loadPacks`): the packs of the snapshot in the snapshot's order; a pack whose IMPORT is not loaded yet is refused and TRIED AGAIN in the next round, until a round loads none more
+  const load = (names) => {
+    let todo = names;
+    for (let more = true; more && todo.length;) {
+      const left = [];
+      for (const name of todo) { try { f.set_pack(name, snap.packs[name]); delete errs[name]; } catch (e) { errs[name] = String(e); left.push(name); } }
+      more = left.length < todo.length; todo = left;
+    }
+  };
+  const order = Object.keys(snap.packs);
+  // the order must not matter: the seat's own order (alphabetical, so a view comes before the shell it imports, and the first-run window before the settings view it imports), then the reverse
+  load(order);
+  assert.deepEqual(errs, {}, `the page loads every pack of the snapshot (${order.join(' ')})`);
+  assert.deepEqual(JSON.parse(f.pack_errors()), {}, 'and the engine holds no pack error');
+  assert.ok(order.indexOf('firstrun_view') < order.indexOf('settings_view'), 'this snapshot sends the first-run window BEFORE the settings view it imports (the retry is what loads it)');
+  const g = new Field();
+  g.set_pack('dom', "PACK dom 1\nDomNode.tag getter: this.tag or 'div'\n"); g.set_pack('fetch', "PACK fetch 1\nFetch.request getter: None\n");
+  { let todo = [...order].reverse(); for (let more = true; more && todo.length;) { const left = []; for (const n of todo) { try { g.set_pack(n, snap.packs[n]); } catch { left.push(n); } } more = left.length < todo.length; todo = left; } }
+  assert.deepEqual(JSON.parse(g.pack_errors()), {}, 'the reverse order loads too');
   assert.ok('shell_view' in snap.packs && 'chat_view' in snap.packs, 'the view packs of the app folder');
   assert.equal(snap.views, undefined, 'no per-view switch any more');
   for (const e of snap.entities) f.load(e.eid, e.cls, JSON.stringify(e.props));

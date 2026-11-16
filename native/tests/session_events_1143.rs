@@ -59,7 +59,7 @@ fn seat_with(tag: &str, script: &str) -> Seat {
     std::fs::copy(format!("{}/../membrane/apps/barest.c1f/default_banner.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("default_banner.c1f")).unwrap();
     std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000");
     let r = RunArgs { apps: vec![pd.join("boot.c1f").display().to_string(), pd.display().to_string()], store: dir.join("field.sqlite3").display().to_string(), port: Some(0), bind: None,
-                      ui_dir: Some(dir.display().to_string()), facts: vec![("chat_claude_bin".into(), json!(bin.display().to_string())), ("seat_cwd".into(), json!("/srv/seat")), ("seat_project".into(), json!("membrane")), ("seat_version".into(), json!("1.0"))] };
+                      ui_dir: Some(dir.display().to_string()), facts: vec![("chat_claude_bin".into(), json!(bin.display().to_string())), ("seat_default".into(), json!("claude")), ("seat_cwd".into(), json!("/srv/seat")), ("seat_project".into(), json!("membrane")), ("seat_version".into(), json!("1.0"))] };
     let hold = Arc::new(AtomicUsize::new(0));
     let stop = Arc::new(AtomicBool::new(false));
     let (tx, rx) = std::sync::mpsc::channel();

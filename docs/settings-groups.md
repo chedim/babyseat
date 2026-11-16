@@ -15,11 +15,11 @@ by the operator on 2026-11-14 and are recorded as the rules below.
 ## The rows (what `settings.c1f` declares)
 
 `Setting:<group>.<key>` is one RESIDENT entity per setting. A row is data (`group`, `key`, `label`, `help`, `kind`, `live`, `order`, `default`, `min`, `max`, `whole`, `unit`, `how`, `fact`, `owner` + `owner_prop`) and a getter `current`
-over the one place the value lives, so nothing drifts. `kind` is `text | number | list | allowlist` (editable) or `readonly` (shown, never written, `how` says what changes it); `live` is `live` (in force at once) or `restart`.
+over the one place the value lives, so nothing drifts. `kind` is `text | model | number | list | allowlist` (editable; `model` is the chat's model: a dropdown of the models the seat lists, `choices` in the feed) or `readonly` (shown, never written, `how` says what changes it); `live` is `live` (in force at once) or `restart`.
 
 | group | rows | where the value lives | change |
 |---|---|---|---|
-| Model | `model.chat` (the model that answers) | `Minds:seat.loops` | live |
+| Model | `model.chat` (the model that answers: a dropdown of the local Ollama's chat models; none until picked; a set name that is not listed stays as an option marked not available) | `Minds:seat.loops` | live |
 | | `model.default`, `model.list`, `model.cloud` (fact `cloud_models`), `model.signin` (fact `chat_auth`: `api_key` or `login`), `model.cli` (fact `chat_claude_bin`) | the launch | read-only, restart |
 | Chat | `chat.name` (fact `seat_name`, default Bob: the doctrine's "Your name is ...", docs/doctrine-barest.md; one line of at most 120 characters), `chat.max_steps` (fact `chat_max_turns`, default 2048, 1 to 100000), `chat.timeout` (fact `chat_turn_timeout_s`, default 21600 s, 1 to 604800) | the row's own `value` (journalled, survives a restart) | live |
 | Map | `map.hidden`, `map.hidden_prefix` (lists), `map.window` (default 150, 1 to 10000), `map.poll_ms` (default 2000, 200 to 600000); `map.fade_s` (read-only) | the row's own `value` | live; the Map rows are hidden in the window while the field view is disabled |
@@ -50,3 +50,10 @@ then the pack's own default. `GET /ui/fieldvm/active` with no `m` uses `map.wind
 ## Not built
 
 Live host limits (a verb for the command timeout, the worker count, the memory lines), minting tokens from the window, recording who changed a value, and the minds' settings that nothing reads. They return only when something reads them.
+
+## The first-run window (`membrane/apps/barest.c1f/firstrun_view.c1f`)
+
+The feed `GET /ui/settings` says per row whether it is `chosen` (`Setting.chosen`: the chat's model is in force; the name was set by a person, by `--fact seat_name` or by an imported old name: the default Bob is not a choice). The page reads it at every load and opens a window
+while the model or the name is not chosen (a function of those two values, no "first run" flag): a dropdown of the listed models and a name field (prefilled when a name is chosen already; an empty name keeps the window open). One submit writes both
+through the rows' own door (`entity_write` of `Setting:model.chat.set` and `Setting:chat.name.set`); the seat's reason for a refusal is shown in the window. With no model listed it says how to pull one (`ollama pull <name>`) and has *Refresh*.
+Tests: `tests/js/firstrun_view.test.mjs` (the page side), `native/tests/ollama_default_1143.rs` (the seat side).

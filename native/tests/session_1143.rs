@@ -47,7 +47,7 @@ fn seat_facts(tag: &str, script: &str, strict: bool, facts: &[&str]) -> (Run, u1
     std::fs::copy(format!("{}/../membrane/apps/barest.c1f/default_banner.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("default_banner.c1f")).unwrap();
     let fact = format!("chat_claude_bin={}", bin.display());
     let mut child = Command::new(BIN).current_dir(&dir).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000")   // the default mode is the API key
-        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact,
+        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact, "--fact", "seat_default=claude",
                "--fact", "seat_cwd=/srv/seat", "--fact", "seat_project=membrane", "--fact", "seat_version=1.0"])
         .args(facts.iter().flat_map(|f| ["--fact".to_string(), f.to_string()]))
         .args(if strict { vec!["--fact".to_string(), format!("door_secret_file={}", dir.join("door.secret").display()), "--fact".to_string(), format!("seat_data_dir={}", dir.display())] } else { vec![] })

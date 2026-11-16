@@ -1,0 +1,176 @@
+PACK firstrun_view 1
+IMPORT dom 1
+IMPORT fetch 1
+IMPORT shell_view 1
+IMPORT settings_view 1
+-- THE FIRST-RUN WINDOW, A VIEW PACK (#1143, operator 2026-11-16: the seat's default backend is the local Ollama and no model is chosen until the person picks one). It runs in the PAGE's field engine (it imports `dom`).
+-- It is a window over the page with TWO fields: a DROPDOWN (a real select) of the models the seat lists (the local Ollama's chat models: no embedding model), and the seat's NAME (the setting the doctrine opens with,
+-- `Setting:chat.name`). One submit writes both through the one write door the Settings rows use (ONE `POST /mcp`, `entity_write` of `Setting:<id>.set`), then the window closes.
+-- THE WINDOW IS A FUNCTION OF TWO VALUES, NOTHING ELSE (operator: no "first run" flag): the page reads `GET /ui/settings` at every load, and the window is open while the seat says the chat's model is not `chosen` or
+-- the name is not `chosen` (a person's name, or a `--fact seat_name`, or an imported old name counts as chosen: it is then shown in the field). The name has no silent fallback here: an empty name keeps the window open.
+-- Empty list (Ollama not running, or nothing pulled): the window says how to get a model (`ollama pull <name>`) and has a Refresh button that asks the seat again (the seat asks Ollama on every read).
+-- The seat's own reason for a refused value is shown in the window (the rows' `refused`).
+--   FirstRun:main   {want, seq, loaded, note, choices, model_cur, model_chosen, name_cur, name_chosen, model_refused, name_refused, draft_model, draft_name, local, busy_m, busy_n, go}
+--   Fetch:firstrun  the read (GET /ui/settings)        Fetch:frw:model, Fetch:frw:name   the writes
+-- DOM ids: `DomNode:fr:*`.
+
+Shell.open on-setter firstrun-read:
+  WHEN this.open:
+    ('FirstRun:main').want = 1
+
+FirstRun.want on-setter firstrun-load:
+  WHEN this.want != None:
+    n = (this.seq or 0) + 1
+    this.seq = n
+    ('Fetch:firstrun').request = {'timeout_s': 10, 'id': 'frfeed-' + str(n), 'url': '/ui/settings'}
+
+-- the read lands (`Fetch.gv` is the receipt reader of settings_view.c1f): the two rows, as the seat tells them
+Fetch.gv on-setter firstrun-feed:
+  WHEN this.eid == 'Fetch:firstrun' and prop(this.gv, 'rid') == prop(prop('Fetch:firstrun', 'request'), 'id') and prop(this.gv, 'ok') and prop(this.gv, 'rows') is List:
+    mr = [r for r in prop(this.gv, 'rows') if prop(r, 'id') == 'model.chat']
+    nr = [r for r in prop(this.gv, 'rows') if prop(r, 'id') == 'chat.name']
+    ('FirstRun:main').note = ''
+    ('FirstRun:main').choices = [str(c) for c in (prop(mr[0], 'choices') or [])] if len(mr) > 0 else []
+    ('FirstRun:main').model_cur = str(prop(mr[0], 'current') or '') if len(mr) > 0 else ''
+    ('FirstRun:main').model_chosen = prop(mr[0], 'chosen') == True if len(mr) > 0 else True
+    ('FirstRun:main').model_refused = str(prop(mr[0], 'refused') or '') if len(mr) > 0 else ''
+    ('FirstRun:main').name_cur = str(prop(nr[0], 'current') or '') if len(nr) > 0 else ''
+    ('FirstRun:main').name_chosen = prop(nr[0], 'chosen') == True if len(nr) > 0 else True
+    ('FirstRun:main').name_refused = str(prop(nr[0], 'refused') or '') if len(nr) > 0 else ''
+    ('FirstRun:main').loaded = True
+  ELSE WHEN this.eid == 'Fetch:firstrun' and prop(this.gv, 'rid') == prop(prop('Fetch:firstrun', 'request'), 'id'):
+    ('FirstRun:main').note = 'The seat could not be asked which models it has: ' + str(prop(this.gv, 'why')) + '.'
+
+-- what the window shows
+FirstRun.shown getter: this.loaded == True and (this.model_chosen != True or this.name_chosen != True)
+FirstRun.model_now getter: this.draft_model if this.draft_model != None else (this.model_cur or '')
+FirstRun.name_now getter: this.draft_name if this.draft_name != None else (this.name_cur if this.name_chosen == True else '')
+-- the dropdown: an empty option while none is chosen, the model in force when the list lacks it (marked not available), then the listed models
+FirstRun.opts getter: concat(concat([{'v': '', 't': 'Choose a model…'}] if (this.model_cur or '') == '' else [], [{'v': this.model_cur, 't': this.model_cur + ' (not available)'}] if (this.model_cur or '') != '' and not (this.model_cur in (this.choices or [])) else []), [{'v': c, 't': c} for c in (this.choices or [])])
+FirstRun.hint getter: '' if len(this.choices or []) > 0 else 'Ollama, the seat\'s model server, lists no chat model: it may not be running, or no model is pulled yet. Start it and pull one with: ollama pull <name>. Then press Refresh.'
+-- what to write: only what is given and differs from what is in force
+FirstRun.name_out getter: strip(str(this.name_now or ''))
+FirstRun.problem getter:
+  WHEN (this.model_now or '') == '': 'Choose a model first.' if len(this.choices or []) > 0 else 'There is no model to choose yet: pull one with Ollama, then press Refresh.'
+  ELSE WHEN this.name_out == '': 'Give the seat a name.'
+  ELSE: ''
+FirstRun.err getter: join([x for x in [this.note, this.local, this.model_refused, this.name_refused] if x], ' ')
+
+-- ---- the window ----
+-- (drawn once the rows have landed; what the parts show is `view`, below)
+FirstRun.loaded on-setter firstrun-draw:
+  WHEN this.loaded == True:
+    ('DomNode:fr:back').parent = 'DomNode:shell:root'
+    ('DomNode:fr:back').tag = 'div'
+    ('DomNode:fr:back').class = 'frback'
+    ('DomNode:fr:win').parent = 'DomNode:fr:back'
+    ('DomNode:fr:win').tag = 'div'
+    ('DomNode:fr:win').class = 'frwin'
+    ('DomNode:fr:win').role = 'dialog'
+    ('DomNode:fr:win').aria-label = 'Set up the seat'
+    ('DomNode:fr:title').parent = 'DomNode:fr:win'
+    ('DomNode:fr:title').tag = 'h2'
+    ('DomNode:fr:title').text = 'Set up your seat'
+    ('DomNode:fr:lead').parent = 'DomNode:fr:win'
+    ('DomNode:fr:lead').tag = 'p'
+    ('DomNode:fr:lead').class = 'frlead'
+    ('DomNode:fr:lead').text = 'Choose the model that answers your messages (from the models your local Ollama has) and give the seat a name. You can change both later in Settings.'
+    ('DomNode:fr:form').parent = 'DomNode:fr:win'
+    ('DomNode:fr:form').tag = 'form'
+    ('DomNode:fr:form').class = 'frform'
+    ('DomNode:fr:form').aria-label = 'Set up the seat'
+    ('DomNode:fr:mlabel').parent = 'DomNode:fr:form'
+    ('DomNode:fr:mlabel').tag = 'label'
+    ('DomNode:fr:mlabel').for = 'fr-model'
+    ('DomNode:fr:mlabel').text = 'Model'
+    ('DomNode:fr:model').parent = 'DomNode:fr:form'
+    ('DomNode:fr:model').tag = 'select'
+    ('DomNode:fr:model').aria-label = 'Model'
+    ('DomNode:fr:hint').parent = 'DomNode:fr:form'
+    ('DomNode:fr:hint').tag = 'p'
+    ('DomNode:fr:hint').class = 'frhint'
+    ('DomNode:fr:refresh').parent = 'DomNode:fr:form'
+    ('DomNode:fr:refresh').tag = 'button'
+    ('DomNode:fr:refresh').type = 'button'
+    ('DomNode:fr:refresh').class = 'frrefresh'
+    ('DomNode:fr:refresh').text = 'Refresh the list'
+    ('DomNode:fr:nlabel').parent = 'DomNode:fr:form'
+    ('DomNode:fr:nlabel').tag = 'label'
+    ('DomNode:fr:nlabel').text = 'Name'
+    ('DomNode:fr:name').parent = 'DomNode:fr:form'
+    ('DomNode:fr:name').tag = 'input'
+    ('DomNode:fr:name').type = 'text'
+    ('DomNode:fr:name').aria-label = 'Name'
+    ('DomNode:fr:error').parent = 'DomNode:fr:form'
+    ('DomNode:fr:error').tag = 'p'
+    ('DomNode:fr:error').class = 'frerror'
+    ('DomNode:fr:error').role = 'alert'
+    ('DomNode:fr:go').parent = 'DomNode:fr:form'
+    ('DomNode:fr:go').tag = 'button'
+    ('DomNode:fr:go').type = 'submit'
+    ('DomNode:fr:go').class = 'frgo'
+    ('DomNode:fr:go').text = 'Start'
+    this.drawn = True
+-- (the parts that follow the state: ONE rule over one getter that exists once the window is drawn, so every part is read fresh and none is written before its node exists)
+FirstRun.view getter: {'shown': this.shown == True, 'name': this.name_now, 'hint': this.hint, 'err': this.err, 'opts': this.opts, 'sel': this.model_now, 'off': len(this.choices or []) == 0 and (this.model_cur or '') == ''} if this.drawn == True else None
+FirstRun.view on-setter firstrun-parts:
+  WHEN this.view != None:
+    v = this.view
+    ('DomNode:fr:back').hidden = not prop(v, 'shown')
+    ('DomNode:fr:name').value = prop(v, 'name')
+    ('DomNode:fr:hint').text = prop(v, 'hint')
+    ('DomNode:fr:hint').hidden = prop(v, 'hint') == ''
+    ('DomNode:fr:error').text = prop(v, 'err')
+    ('DomNode:fr:error').hidden = prop(v, 'err') == ''
+    FOR o IN prop(v, 'opts'):
+      ('DomNode:fr:o:' + prop(o, 'v')).parent = 'DomNode:fr:model'
+      ('DomNode:fr:o:' + prop(o, 'v')).tag = 'option'
+      ('DomNode:fr:o:' + prop(o, 'v')).value = prop(o, 'v')
+      ('DomNode:fr:o:' + prop(o, 'v')).text = prop(o, 't')
+      ('DomNode:fr:o:' + prop(o, 'v')).selected = prop(o, 'v') == prop(v, 'sel')
+    keep = ['DomNode:fr:o:' + prop(o, 'v') for o in prop(v, 'opts')]
+    FOR x IN [x for x in instances('DomNode') if startswith(x.eid, 'DomNode:fr:o:') and not (x.eid in keep)]:
+      (x.eid).retire = True
+    ('DomNode:fr:model').disabled = prop(v, 'off')
+
+-- ---- the person: the dropdown and the name are drafts until the submit; Refresh asks the seat again ----
+DomNode.value on-setter firstrun-typed:
+  WHEN this.eid == 'DomNode:fr:model':
+    ('FirstRun:main').draft_model = this.value
+    ('FirstRun:main').local = ''
+  ELSE WHEN this.eid == 'DomNode:fr:name':
+    ('FirstRun:main').draft_name = this.value
+    ('FirstRun:main').local = ''
+DomNode.clicked on-setter firstrun-refresh:
+  WHEN this.eid == 'DomNode:fr:refresh':
+    ('FirstRun:main').want = (prop('FirstRun:main', 'want') or 0) + 1
+DomNode.submitted on-setter firstrun-submit:
+  WHEN this.eid == 'DomNode:fr:form':
+    ('FirstRun:main').go = (prop('FirstRun:main', 'go') or 0) + 1
+
+-- ---- one submit, both writes (the Settings rows' door: POST /mcp, entity_write of `Setting:<id>.set`); a missing value writes nothing and says so ----
+FirstRun.go on-setter firstrun-validate:
+  WHEN this.go != None:
+    this.local = this.problem
+FirstRun.go on-setter firstrun-write-model:
+  WHEN this.go != None and this.problem == '' and not this.busy_m and (this.model_chosen != True or this.model_now != this.model_cur):
+    n = (this.seq or 0) + 1
+    this.seq = n
+    this.busy_m = True
+    ('Fetch:frw:model').request = {'timeout_s': 10, 'id': 'frm-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': 'Setting:model.chat', 'prop': 'set', 'value': this.model_now}}})}
+FirstRun.go on-setter firstrun-write-name:
+  WHEN this.go != None and this.problem == '' and not this.busy_n and (this.name_chosen != True or this.name_out != this.name_cur):
+    n = (this.seq or 0) + 1
+    this.seq = n + 1
+    this.busy_n = True
+    ('Fetch:frw:name').request = {'timeout_s': 10, 'id': 'frn-' + str(n + 1), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n + 1, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': 'Setting:chat.name', 'prop': 'set', 'value': this.name_out}}})}
+-- a write is answered: the rows are read again (the window closes when the seat says both are chosen); a refusal of the value is the row's `refused`, read back; a failed call is said here
+Fetch.gv on-setter firstrun-write-done:
+  WHEN startswith(this.eid, 'Fetch:frw:') and this.gv != None and prop(this.gv, 'ok'):
+    ('FirstRun:main').busy_m = False if this.eid == 'Fetch:frw:model' else prop('FirstRun:main', 'busy_m')
+    ('FirstRun:main').busy_n = False if this.eid == 'Fetch:frw:name' else prop('FirstRun:main', 'busy_n')
+    ('FirstRun:main').want = (prop('FirstRun:main', 'want') or 0) + 1
+  ELSE WHEN startswith(this.eid, 'Fetch:frw:') and this.gv != None:
+    ('FirstRun:main').busy_m = False if this.eid == 'Fetch:frw:model' else prop('FirstRun:main', 'busy_m')
+    ('FirstRun:main').busy_n = False if this.eid == 'Fetch:frw:name' else prop('FirstRun:main', 'busy_n')
+    ('FirstRun:main').local = 'Not saved: the seat answered: ' + str(prop(this.gv, 'why'))

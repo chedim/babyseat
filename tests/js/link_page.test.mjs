@@ -28,7 +28,7 @@ let nseat = 0;
 function startSeat({ apps = [], facts = [], port: at, dir: reuse } = {}) {
   const port = at || 24000 + Math.floor(Math.random() * 1000) + 7 * nseat++;
   const dir = reuse || mkdtempSync(path.join(tmpdir(), 'link-page-'));
-  const args = ['run', ...packs, 'membrane/apps/barest.c1f', ...apps, '--store', path.join(dir, 'field.sqlite3'), '--port', String(port), ...facts.flatMap((f) => ['--fact', f])];
+  const args = ['run', ...packs, 'membrane/apps/barest.c1f', ...apps, '--store', path.join(dir, 'field.sqlite3'), '--port', String(port), '--fact', 'minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude"}', '--fact', 'seat_name=Rosie', ...facts.flatMap((f) => ['--fact', f])];
   const child = spawn(bin, args, { cwd: repo, stdio: 'ignore', env: { ...process.env } });
   return { port, dir, url: `http://127.0.0.1:${port}`, down: () => { child.kill(); }, stop: () => { child.kill(); rmSync(dir, { recursive: true, force: true }); } };
 }

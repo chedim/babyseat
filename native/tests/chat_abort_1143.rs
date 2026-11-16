@@ -47,7 +47,7 @@ fn seat(tag: &str) -> (Run, u16, std::path::PathBuf) {
     std::fs::copy(format!("{}/../membrane/apps/barest.c1f/default_banner.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("default_banner.c1f")).unwrap();
     let mut child = Command::new(BIN).current_dir(&dir).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000")
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(),
-               "--fact", &format!("chat_claude_bin={}", bin.display())])
+               "--fact", &format!("chat_claude_bin={}", bin.display()), "--fact", "seat_default=claude"])
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();

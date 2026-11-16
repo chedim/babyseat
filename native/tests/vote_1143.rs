@@ -42,7 +42,7 @@ fn seat_with(layers: &[&str]) -> Host {
     for l in layers { let name = l.lines().next().unwrap().split_whitespace().nth(1).unwrap(); h.load_pack(name, l).unwrap(); }
     h.rebuild();
     let mut f = Map::new();
-    f.insert("chat_claude_bin".into(), json!("/usr/bin/true"));
+    f.insert("chat_claude_bin".into(), json!("/usr/bin/true")); f.insert("seat_default".into(), json!("claude"));
     f.insert("chat_auth".into(), json!("login"));
     f.insert("seat_backend".into(), json!("http://127.0.0.1:9"));
     f.insert("embed_model".into(), json!("m"));

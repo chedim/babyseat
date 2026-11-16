@@ -75,14 +75,14 @@ fn try_start(dir: &Path, bind: Option<&str>, facts: &[&str]) -> Result<Seat, Ref
     if bind.is_none() {
         cmd = Command::new("sh");
         cmd.arg(r.join("scripts/seat")).args(["--data-dir", dir.to_str().unwrap(), "--port", "0"]);
-        cmd.args(["--fact", "seat_backend=http://127.0.0.1:9"]);   // serve defaults the model server to the real Ollama's port: a dead one, so no message of a test ever reaches it
+        cmd.args(["--fact", "seat_backend=http://127.0.0.1:9", "--fact", "seat_default=claude"]);   // serve defaults the model server to the real Ollama's port: a dead one, so no message of a test ever reaches it
         for f in facts { cmd.arg("--fact").arg(f); }
         cmd.env("CLIFFVM", BIN).env("CLAUDE_BIN", &fake);
     } else {
         cmd = Command::new(BIN);
         cmd.arg("run").args(barest_packs()).arg(r.join("membrane/apps/barest.c1f"))
             .args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0", "--ui-dir", r.join("membrane/ui").to_str().unwrap(), "--bind", bind.unwrap()])
-            .args(["--fact", &format!("door_secret_file={}", dir.join("door.secret").display()), "--fact", &format!("seat_data_dir={}", dir.display()), "--fact", &format!("chat_claude_bin={}", fake.display())]);
+            .args(["--fact", &format!("door_secret_file={}", dir.join("door.secret").display()), "--fact", &format!("seat_data_dir={}", dir.display()), "--fact", &format!("chat_claude_bin={}", fake.display()), "--fact", "seat_default=claude"]);
         for f in facts { cmd.arg("--fact").arg(f); }
     }
     cmd.current_dir(&r).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000");

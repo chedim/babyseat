@@ -12,7 +12,7 @@ fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
 const MAKER: &str = "PACK recallmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nBox.go on-setter make:\n  ALWAYS:\n    membrane::Chat:main:message[this.k] = ChatMessage(text: this.t, at: this.at)\n    membrane::Chat:main:message[this.k]:body = SemText(text: this.t)\n    membrane::Chat:main:message[this.k]:body.mention = True\n    membrane::Chat:main:message[this.k]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.k, queued_at: this.at)\n    FOR a IN ([1] if this.q == True else []):\n      membrane::Chat:main:message[this.k].queued = True\n";
 
-fn seat() -> Host { seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login"}))) }
+fn seat() -> Host { seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "seat_default": "claude", "chat_auth": "login"}))) }
 fn seat_with(facts: &Map<String, J>) -> Host { seat_opts(facts, false) }
 fn seat_with_effects(facts: &Map<String, J>) -> Host { seat_opts(facts, true) }
 fn seat_opts(facts: &Map<String, J>, effects: bool) -> Host {
@@ -291,7 +291,7 @@ fn slow_claude() -> String {
     p.to_string_lossy().to_string()
 }
 fn turn_seat(backend: Option<&str>) -> Host {
-    let mut f = props(json!({"chat_claude_bin": slow_claude(), "chat_auth": "login"}));
+    let mut f = props(json!({"chat_claude_bin": slow_claude(), "seat_default": "claude", "chat_auth": "login"}));
     if let Some(b) = backend { f.insert("seat_backend".into(), json!(b)); }
     let h = seat_opts(&f, true);
     h.hold("Http:fake");
@@ -364,7 +364,7 @@ fn two_messages_queued_quickly_each_wait_for_their_own_ask_in_order() {
 /// a chat ask's own call embeds the message's SENTENCES and writes their vectors (operator 2026-11-15): the queue settles the body and never embeds it again
 #[test]
 fn a_chat_asks_own_call_writes_the_sentence_vectors_of_its_message() {
-    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
+    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "seat_default": "claude", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
     post(&h, "m1", "Quokkas eat grass. They sleep at noon.", 1.0);
     let b = format!("{M}m1:body");
     let job = h.get(&b, "ask_job");

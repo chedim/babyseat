@@ -326,6 +326,7 @@
       "ChatMessage.final": "Any",
       "ChatMessage.finals": "List(Any)",
       "ChatMessage.key_set": "Bool?",
+      "ChatMessage.listed_chat": "List(Any)",
       "ChatMessage.max_turns": "Any",
       "ChatMessage.mcp_host": "Any",
       "ChatMessage.mcp_json": "Text?",
@@ -333,6 +334,7 @@
       "ChatMessage.mcp_url": "Text?",
       "ChatMessage.model_args": "List(Any)",
       "ChatMessage.model_eff": "Any",
+      "ChatMessage.no_model_text": "Text",
       "ChatMessage.note": "Text?",
       "ChatMessage.oai_acc": "Text",
       "ChatMessage.over": "Bool",
@@ -2146,6 +2148,7 @@
       "Request.sf_ask": "Dict?",
       "Request.st_rows": "List(Dict)",
       "Setting.boot_val": "Any",
+      "Setting.chosen": "Bool?",
       "Setting.current": "Any",
       "Setting.fact_val": "Any"
     },

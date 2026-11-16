@@ -151,12 +151,16 @@ SetRow.cur getter: this.live if this.live != None else prop(this.raw, 'current')
 -- each row says which row it sits above (`before`), as the shell's nav does
 SetRow.next_id getter: ([prop(x, 'rid') for x in sort_by([{'rid': r.rid, 'order': prop(r.raw, 'order'), 'g': prop(r.raw, 'group')} for r in instances('SetRow') if r.raw != None], 'order') if prop(x, 'g') == prop(this.raw, 'group') and prop(x, 'order') > prop(this.raw, 'order')] or [None])[0]
 SetRow.edit getter: this.raw != None and this.kind != 'readonly'
--- the seat's model list, when it has one (the chat model row): a choice; with none the row is a text input
+-- the seat's model list (the chat model row, kind `model`): the DROPDOWN's options; the model in force that the list does not hold is one more option, marked not available (`gone`)
 SetRow.choices getter: [str(c) for c in (prop(this.raw, 'choices') or [])]
 SetRow.unit_txt getter: (' ' + str(prop(this.raw, 'unit'))) if prop(this.raw, 'unit') else ''
+SetRow.gone getter: [str(this.cur)] if this.kind == 'model' and (this.cur or '') != '' and not (str(this.cur) in this.choices) else []
+-- the dropdown's options: {v, t}: the value and the words (the one in force first when the list lacks it, a row with none chosen starts with an empty option)
+SetRow.opts getter: concat(concat([{'v': '', 't': 'Choose a model…'}] if (this.cur or '') == '' else [], [{'v': g, 't': g + ' (not available)'} for g in this.gone]), [{'v': c, 't': c} for c in this.choices])
 -- the value in force, as a line (an editable row)
 SetRow.now getter:
   WHEN this.raw == None: None
+  ELSE WHEN this.kind == 'model': str(this.cur) if this.cur else 'no model is chosen yet'
   ELSE WHEN this.kind == 'text': str(this.cur) if this.cur else 'empty (the seat uses its own default)'
   ELSE WHEN this.kind == 'number': str(this.cur) + this.unit_txt
   ELSE WHEN this.kind == 'list': join(this.cur, ', ') if len(this.cur or []) > 0 else 'empty'
@@ -173,12 +177,13 @@ SetRow.shown getter:
 SetRow.limits getter:
   WHEN this.raw == None: None
   ELSE WHEN this.kind == 'number': 'Allowed: ' + (str(prop(this.raw, 'min')) if prop(this.raw, 'min') != None else 'any') + ' to ' + (str(prop(this.raw, 'max')) if prop(this.raw, 'max') != None else 'any') + this.unit_txt + (', whole numbers' if prop(this.raw, 'whole') == True else '') + ('. Default: ' + str(prop(this.raw, 'default')) if prop(this.raw, 'default') != None else '.')
+  ELSE WHEN this.kind == 'model': ''
   ELSE WHEN this.kind == 'text': ('Default: ' + str(prop(this.raw, 'default'))) if prop(this.raw, 'default') != None else ''
   ELSE WHEN this.kind == 'list': 'One value per line; an empty line is left out.'
   ELSE WHEN this.kind == 'allowlist': 'Services and entities are separated by commas, for example light.turn_on, light.*. An entry with no name is refused.'
   ELSE: ''
 SetRow.how_txt getter: ('How to change it: ' + str(prop(this.raw, 'how')) + '.') if prop(this.raw, 'how') else 'It is set when the seat starts; a change needs a restart.'
-SetRow.view getter: {'id': this.rid, 'group': str(prop(this.raw, 'group')), 'label': str(prop(this.raw, 'label') or this.rid), 'help': str(prop(this.raw, 'help') or ''), 'kind': this.kind, 'live': prop(this.raw, 'live'), 'badge': 'Applies now' if prop(this.raw, 'live') == 'live' else 'Needs a restart', 'edit': this.edit, 'now': this.now, 'shown': this.shown, 'limits': this.limits, 'how': this.how_txt, 'choices': this.choices, 'next': this.next_id, 'cur': str(this.cur or ''), 'unit': prop(this.raw, 'unit'), 'note': this.note or '', 'note_kind': this.note_kind or '', 'busy': this.busy == True} if this.raw != None else None
+SetRow.view getter: {'id': this.rid, 'group': str(prop(this.raw, 'group')), 'label': str(prop(this.raw, 'label') or this.rid), 'help': str(prop(this.raw, 'help') or ''), 'kind': this.kind, 'live': prop(this.raw, 'live'), 'badge': 'Applies now' if prop(this.raw, 'live') == 'live' else 'Needs a restart', 'edit': this.edit, 'now': this.now, 'shown': this.shown, 'limits': this.limits, 'how': this.how_txt, 'choices': this.choices, 'opts': this.opts, 'next': this.next_id, 'cur': str(this.cur or ''), 'unit': prop(this.raw, 'unit'), 'note': this.note or '', 'note_kind': this.note_kind or '', 'busy': this.busy == True} if this.raw != None else None
 
 -- the row, common part: label, badge, help; the state line
 SetRow.view on-setter set-draw-row:
@@ -278,22 +283,26 @@ SetRow.view on-setter set-draw-field:
     (b + ':unit').class = 'setunit'
     (b + ':unit').text = str(prop(this.view, 'unit') or '')
     (b + ':unit').hidden = not prop(this.view, 'unit')
-    (b + ':unit').before = (b + ':choices') if len(prop(this.view, 'choices')) > 0 else (b + ':save')
--- the seat's model list: a button each, under the box; a click puts that name in the box (nothing is saved by it). The box stays a TEXT input: a model name outside the list can be typed
--- (a select would take that away), and the list is only a help.
-SetRow.view on-setter set-draw-choices:
-  WHEN this.view != None and prop(this.view, 'edit') and len(prop(this.view, 'choices')) > 0:
+    (b + ':unit').before = b + ':save'
+-- the chat's model: a DROPDOWN (a real select) of the models the seat lists (the backend's chat models: no embedding model). The model in force that is not listed is an option too, marked not available, so it can be kept;
+-- picking an option writes nothing (Save does, the same door as every row); the seat's own reason for a refused value is shown in the row's state line.
+SetRow.view on-setter set-draw-model:
+  WHEN this.view != None and prop(this.view, 'edit') and prop(this.view, 'kind') == 'model':
     b = 'DomNode:set:' + prop(this.view, 'id')
-    (b + ':choices').parent = b + ':form'
-    (b + ':choices').tag = 'div'
-    (b + ':choices').class = 'setchoices'
-    (b + ':choices').before = b + ':save'
-    FOR o IN prop(this.view, 'choices'):
-      (b + ':c:' + o).parent = b + ':choices'
-      (b + ':c:' + o).tag = 'button'
-      (b + ':c:' + o).type = 'button'
-      (b + ':c:' + o).class = 'setchoice'
-      (b + ':c:' + o).text = o
+    (b + ':in').parent = b + ':form'
+    (b + ':in').tag = 'select'
+    (b + ':in').class = 'setinput'
+    (b + ':in').aria-label = prop(this.view, 'label')
+    (b + ':in').before = b + ':save'
+    FOR o IN prop(this.view, 'opts'):
+      (b + ':o:' + prop(o, 'v')).parent = b + ':in'
+      (b + ':o:' + prop(o, 'v')).tag = 'option'
+      (b + ':o:' + prop(o, 'v')).value = prop(o, 'v')
+      (b + ':o:' + prop(o, 'v')).text = prop(o, 't')
+      (b + ':o:' + prop(o, 'v')).selected = prop(o, 'v') == prop(this.view, 'cur') or (prop(this.view, 'cur') == '' and prop(o, 'v') == '')
+    keep = [b + ':o:' + prop(o, 'v') for o in prop(this.view, 'opts')]
+    FOR x IN [x for x in instances('DomNode') if startswith(x.eid, b + ':o:') and not (x.eid in keep)]:
+      (x.eid).retire = True
 
 -- a list or an allow-list: the entries (below), an Add button
 SetRow.view on-setter set-draw-lines:
@@ -313,7 +322,7 @@ SetRow.view on-setter set-draw-lines:
 -- ---- the draft: what the person is typing. It follows `current`: a changed value in force replaces it (an applied Save, or a change made elsewhere); an unsaved edit stays otherwise ----
 -- (an entry's key `u` is `i<its text>` for one that was read, `n<counter>` for one that was added; a colon in it is turned into `_`, so a node id parses)
 SetRow.cur on-setter set-sync-text:
-  WHEN this.raw != None and (this.kind == 'text' or this.kind == 'number'):
+  WHEN this.raw != None and (this.kind == 'text' or this.kind == 'number' or this.kind == 'model'):
     this.draft = '' if this.cur == None else str(this.cur)
     ('DomNode:set:' + this.rid + ':in').value = '' if this.cur == None else str(this.cur)
 SetRow.cur on-setter set-sync-list:
@@ -398,10 +407,6 @@ DomNode.clicked on-setter set-clicked:
     n = (prop(r, 'nu') or 0) + 1
     (r).nu = n
     (r).draft = concat(prop(r, 'draft') or [], [{'u': 'n' + str(n), 'a': '', 'b': '', 'c': ''}])
-  ELSE WHEN startswith(this.eid, 'DomNode:set:') and startswith(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'c:'):
-    r = 'SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')
-    (r).draft = after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'c:')
-    ('DomNode:set:' + before(replace(this.eid, 'DomNode:set:', ''), ':') + ':in').value = after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'c:')
   ELSE WHEN startswith(this.eid, 'DomNode:set:') and startswith(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e') and tail(this.eid, 2) == ':x':
     r = 'SetRow:' + before(replace(this.eid, 'DomNode:set:', ''), ':')
     u = head(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e'), len(after(after(replace(this.eid, 'DomNode:set:', ''), ':'), 'e')) - 2)

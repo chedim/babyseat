@@ -33,7 +33,7 @@ fn seat(layer: Option<&str>) -> Host {
     if let Some(src) = layer { h.load_pack("myanswers", src).unwrap_or_else(|e| panic!("the layer is refused: {e}")); }
     h.rebuild();
     // a claude path that does not exist: a model that is started would end the turn in an error (and the test would see it)
-    host::boot_started(&h, &props(json!({"chat_claude_bin": "/nonexistent/claude", "chat_auth": "login"})), true);
+    host::boot_started(&h, &props(json!({"chat_claude_bin": "/nonexistent/claude", "seat_default": "claude", "chat_auth": "login"})), true);
     h.pump();
     h.hold("Http:fake");
     h.born("Http:fake", "Http", props(json!({"listen_result": {"port": 4097}})), "person"); h.pump();

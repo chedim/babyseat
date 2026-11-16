@@ -125,6 +125,10 @@
    "wired": true,
    "why": "the model backend's url (ollama), for the model list"
   },
+  "seat_default": {
+   "wired": true,
+   "why": "developer mode: `--fact seat_default=claude` makes the claude CLI the model of the chat and the minds (and registers its rung); by default no model is chosen and the person picks one the local Ollama lists"
+  },
   "router_on": {
    "wired": true,
    "why": "whether the router exists (the autoselect lanes are offered)"

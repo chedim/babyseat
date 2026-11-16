@@ -220,7 +220,7 @@ fn launch_env(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str], env:
     let fact = format!("chat_claude_bin={}", bin.display());
     let mut cmd = Command::new(BIN);
     cmd.current_dir(dir)
-        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact])
+        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact, "--fact", "seat_default=claude"])
         .args(extra);
     for v in CRED_VARS { cmd.env_remove(v); }
     cmd.envs(env.iter().copied());
@@ -360,7 +360,7 @@ fn a_cli_that_fails_is_an_error_answer_with_its_stderr_and_a_missing_one_says_ho
     assert_eq!(v["response"], "claude failed (rc 3): fake: not logged in");
     assert!(terminate(&mut run));
     // no binary named: nothing runs, the answer says how
-    let (mut run, port) = start("chatnobin", CHAT_PACKS, &[]);
+    let (mut run, port) = start("chatnobin", CHAT_PACKS, &["--fact", "seat_default=claude"]);
     let id = send(port, "hello");
     let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
     assert!(v["response"].as_str().unwrap().contains("chat_claude_bin"), "{v}");

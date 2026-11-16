@@ -13,7 +13,7 @@ const MAKER: &str = "PACK recallmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nBox.go
 
 fn seat(extra: J) -> Host {
     membrane_vm::expr::set_eval_time_ms(Some(10_000));
-    let mut f = props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login"}));
+    let mut f = props(json!({"chat_claude_bin": "/usr/bin/true", "seat_default": "claude", "chat_auth": "login"}));
     for (k, v) in props(extra) { f.insert(k, v); }
     let mut o = Options::new(None);
     o.effects = false;

@@ -33,7 +33,7 @@ const fake = path.join(dir, 'fake-claude');
 writeFileSync(fake, FAKE); chmodSync(fake, 0o755);
 const cloud = JSON.stringify([{ name: 'gpt', backend: 'openai', base_url: 'https://user:hunter2pw@example.test/v1', api_key_env: 'OTHER_PROVIDER_KEY' }]);
 const child = spawn(bin, ['run', ...packs, 'membrane/apps/barest.c1f', '--store', path.join(dir, 'field.sqlite3'), '--port', String(port),
-  '--fact', `chat_claude_bin=${fake}`, '--fact', `cloud_models=${cloud}`],
+  '--fact', `chat_claude_bin=${fake}`, '--fact', 'minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude"}', '--fact', 'seat_name=Rosie', '--fact', `cloud_models=${cloud}`],
   { cwd: repo, stdio: 'ignore', env: { ...process.env, ANTHROPIC_API_KEY: KEY } });
 const url = `http://127.0.0.1:${port}`;
 async function up() { for (let i = 0; i < 150; i++) { try { if ((await fetch(`${url}/`)).ok) return; } catch {} await sleep(200); } throw new Error('the seat did not come up'); }
@@ -127,13 +127,13 @@ try {
   await b.fill(K('chat.max_steps', 'in'), '2.5'); await b.enter();
   await b.until(`/whole number/.test(${textOf(K('chat.max_steps', 'state'))})`, 'a step count is whole');
 
-  // 4. a text row with the Save button: the chat model
-  assert.equal(await b.ev(textOf('.setchoice')), 'gpt', 'the seat\'s model list is buttons under the box (the box stays a text input)');
-  await b.fill(K('model.chat', 'in'), 'claude-agent:sonnet'); await b.press(K('model.chat', 'save'));
-  await b.until(`${textOf(K('model.chat', 'state'))} === 'Applied.' && ${textOf(K('model.chat', 'now'))} === 'In force: claude-agent:sonnet'`, 'the model applied');
-  assert.equal(await rpc('entity_read', { spec: 'Minds:seat', prop: 'loops' }), 'claude-agent:sonnet', 'the chat\'s own reader holds it');
-  await b.fill(K('model.chat', 'in'), 'not a model'); await b.enter();
-  await b.until(`/not a model name/.test(${textOf(K('model.chat', 'state'))})`, 'a bad model name is refused with its reason');
+  // 4. the chat model is a DROPDOWN (a select) of the seat's models, with the Save button (a refused name is tested in settings_view.test.mjs and native/tests/ollama_default_1143.rs)
+  assert.equal(await b.ev(`document.querySelector(${JSON.stringify(K('model.chat', 'in'))}).tagName`), 'SELECT', 'the model row is a select');
+  assert.ok(await b.ev(`!!document.querySelector(${JSON.stringify(K('model.chat', 'o:gpt'))})`), 'the seat\'s model list is its options');
+  await b.ev(`(() => { const e = document.querySelector(${JSON.stringify(K('model.chat', 'in'))}); e.value = 'gpt'; e.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await b.press(K('model.chat', 'save'));
+  await b.until(`${textOf(K('model.chat', 'state'))} === 'Applied.' && ${textOf(K('model.chat', 'now'))} === 'In force: gpt'`, 'the model applied');
+  assert.equal(await rpc('entity_read', { spec: 'Minds:seat', prop: 'loops' }), 'gpt', 'the chat\'s own reader holds it');
 
   // 5. the allow-list editor
   await b.press(K('home.allow', 'add'));

@@ -131,7 +131,9 @@
       "/membrane/chat/message/",
       "/membrane/chat/messages"
     ],
-    "boot_facts": [],
+    "boot_facts": [
+      "seat_default"
+    ],
     "resident": [
       "Doorbell"
     ]
@@ -194,7 +196,7 @@
       "Chunk",
       "Request"
     ],
-    "members": 65,
+    "members": 67,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
@@ -864,7 +866,8 @@
       "embed_model",
       "minds",
       "router_on",
-      "seat_backend"
+      "seat_backend",
+      "seat_default"
     ]
   },
   "legacy_cutover": {
@@ -1313,7 +1316,7 @@
       "Request",
       "Setting"
     ],
-    "members": 12,
+    "members": 13,
     "writes": [
       "*.[]",
       "*.retire",
@@ -1325,7 +1328,9 @@
     "claims": [
       "/ui/settings"
     ],
-    "boot_facts": [],
+    "boot_facts": [
+      "seat_default"
+    ],
     "resident": [
       "Setting"
     ]
