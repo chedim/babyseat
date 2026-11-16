@@ -105,7 +105,7 @@ fn person_token(dir: &Dir, sub: &str) -> String {
 
 /// (id, kind, live): the rows of the design after the operator's answers
 const ROWS: [(&str, &str, &str); 31] = [
-    ("model.chat", "text", "live"), ("model.default", "readonly", "restart"), ("model.list", "readonly", "restart"), ("model.cloud", "readonly", "restart"),
+    ("model.chat", "model", "live"), ("model.default", "readonly", "restart"), ("model.list", "readonly", "restart"), ("model.cloud", "readonly", "restart"),
     ("model.signin", "readonly", "restart"), ("model.cli", "readonly", "restart"),
     ("chat.name", "text", "live"), ("chat.max_steps", "number", "live"), ("chat.timeout", "number", "live"),
     ("map.hidden", "list", "live"), ("map.hidden_prefix", "list", "live"), ("map.window", "number", "live"), ("map.poll_ms", "number", "live"),

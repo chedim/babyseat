@@ -27,7 +27,7 @@ Version **0.7.61**. This is a rebuild: the 0.7 Python seat is retired (see [Upgr
 - **Your history comes along.** A seat started over a 0.7 install imports the old chats by itself, newest first.
 - **Home Assistant.** A HACS integration runs the seat inside Home Assistant (or connects to one you run), makes it an Assist conversation agent and lets the model use the house
   ([docs/home-assistant.md](docs/home-assistant.md)).
-- **Your choice of model, local first.** The chat answers through a local Ollama or any OpenAI-compatible endpoint (the boot facts `seat_backend` and `cloud_models`; [Which model answers](#which-model-answers)). The `claude` CLI is a developer mode, not the way to run it.
+- **Your choice of model.** The default backend is a local Ollama (`seat_backend`, `http://127.0.0.1:11434`): no model is chosen at the start, and the page opens a window while a model or a name is not chosen, with a dropdown of the chat models Ollama lists. Any OpenAI-compatible endpoint works too (the boot fact `cloud_models`); the `claude` CLI is a developer mode ([docs/cliffvm.md](docs/cliffvm.md)). Pull a model first: `ollama pull <name>`.
 - **Local and strict.** The door listens on `127.0.0.1`; every route needs a signed token; the page gets one only from this machine ([docs/auth.md](docs/auth.md)).
 
 Not in this release: the 3D field view (built, switched off: `membrane/apps/field.c1f`), the Home Assistant sidebar panel and relay, Blurp and the
@@ -42,7 +42,7 @@ macOS and Linux (x86_64 and arm64); there is no Windows build. The macOS binarie
 |---|---|---|
 | pip | `pip install babyseat`, then `babyseat` (`--port N`, `--data-dir <dir>`) | at the 0.7.61 release |
 | installer | `curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh \| sh` (installs `~/.local/share/membrane-app/<version>` and a `~/.local/bin/babyseat` link; `--version X.Y.Z` picks one) | at the 0.7.61 release |
-| Docker | `docker run -p 127.0.0.1:4096:4096 -v babyseat-data:/data chedim/babyseat --fact seat_backend=http://host.docker.internal:11434 --fact 'minds=<the minds JSON below>'` (the image has no `claude` CLI; Ollama runs on the host; the admin token: `docker exec <container> cat /data/admin.token`) | at the 0.7.61 release |
+| Docker | `docker run -p 127.0.0.1:4096:4096 -v babyseat-data:/data chedim/babyseat --fact seat_backend=http://host.docker.internal:11434` (the image has no `claude` CLI; Ollama runs on the host; the admin token: `docker exec <container> cat /data/admin.token`) | at the 0.7.61 release |
 | binary | the GitHub release's `babyseat-0.7.61-<target>.tar.gz` and its `.sha256` (targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`): check the sha256, unpack, run `bin/cliffvm serve` | at the 0.7.61 release |
 | Home Assistant | the HACS integration downloads the seat's binary and runs it inside Home Assistant (next section) | at the 0.7.61 release |
 | from source | the next section | works today |
@@ -54,11 +54,11 @@ macOS and Linux (x86_64 and arm64); there is no Windows build. The macOS binarie
 ```
 git clone https://github.com/chedim/membrane && cd membrane
 scripts/dist/build.sh --out ./dist/0.7.61          # builds native/ (about a minute warm) and assembles the dist folder
-ollama pull llama3.2 && ollama pull mxbai-embed-large   # the chat model and the model that makes the memory's vectors
-./dist/0.7.61/bin/cliffvm serve --fact seat_backend=http://127.0.0.1:11434 --fact 'minds=<the minds JSON below>'
+ollama pull <a chat model> && ollama pull mxbai-embed-large   # the model that makes the memory's vectors
+./dist/0.7.61/bin/cliffvm serve                 # then pick the model in the window the page opens
 ```
 
-The model facts are explained under [Which model answers](#which-model-answers). It prints, in this order:
+The model is picked in the page; see [Which model answers](#which-model-answers). It prints, in this order:
 
 ```
 cliffvm serve: claude CLI: /path/to/claude      (only when the claude CLI is on the PATH: the developer mode)
@@ -75,25 +75,17 @@ Open the printed URL: the page loads and you are in the chat. The port is 4096 (
 
 From a checkout you can run the same seat on the repo's own `membrane/` folder: `scripts/seat [--open] [--port <n>]` (data in `./.cliffvm`; the development wrapper).
 
-### Which model answers
+**Which model answers.** The local Ollama, and the model is YOURS to pick: the seat starts with none chosen, and a message sent before you pick one starts nothing and says so. The page opens a first-run window
+(a dropdown of the models Ollama lists, embedding models left out, and the seat's name) at every load until both are chosen; the same choice is the *Model* row of Settings (a dropdown; a name that is set but not listed stays as an option marked not available).
+If the list is empty, Ollama is not running or has nothing pulled: `ollama pull <name>`, then *Refresh*. **Developer mode:** `--fact seat_default=claude` makes the `claude` CLI the model of the chat (a `minds` or `cloud_models` fact works too).
 
-**Ollama (the way to run it).** Pull a chat model and the embedding model, then start the seat with the address of your Ollama and the model's name in `minds`
-(replace `llama3.2` with your model; `--fact` values that parse as JSON are JSON):
-
-```
-ollama pull llama3.2 && ollama pull mxbai-embed-large
-babyseat --fact seat_backend=http://127.0.0.1:11434 \
-  --fact 'minds={"loops":"llama3.2","cortex":"llama3.2","workers":"llama3.2","seat_default":"llama3.2","loops_auth":"chat","cortex_auth":"chat","workers_auth":"chat","think":"auto"}'
-```
-
-No key is needed. These are the facts the Home Assistant component passes for its Ollama provider ([docs/home-assistant.md](docs/home-assistant.md)).
+**Which credential the claude CLI uses** (developer mode only). The claude CLI answers with the Anthropic API key in the seat's environment (`ANTHROPIC_API_KEY`).
+The key is handed to the CLI child and is never written to a property, a row, the journal, a log or a reply. To use the CLI's own login instead, start with
+`--fact chat_auth=login` (the dev wrapper: `CLAUDE_AUTH=login scripts/seat`). With neither, the seat says so at start and a message is answered with how to set it.
 
 **Any OpenAI-compatible endpoint.** `--fact 'cloud_models=[{"name":"<model>","backend":"openai","base_url":"<root URL>","api_key_env":"OPENAI_API_KEY"}]'` plus the same `minds` with that model; the key
 is read from the seat's environment (`OPENAI_API_KEY`) and never stored. Anthropic's API works the same way through its OpenAI-compatible endpoint (`"backend":"anthropic"`, `"api_key_env":"ANTHROPIC_API_KEY"`).
 
-**Developer mode: the `claude` CLI.** With no model facts the seat's launcher still points every mind at the `claude` CLI (`CLAUDE_BIN`, else `claude` on the PATH), which answers with the
-Anthropic API key in the seat's environment (`ANTHROPIC_API_KEY`), or with the CLI's own login under `--fact chat_auth=login` (the dev wrapper: `CLAUDE_AUTH=login scripts/seat`). The key is handed to the CLI child and
-is never written to a property, a row, the journal, a log or a reply. With neither, a message is answered with how to set it. It is meant for developing the seat, not for running one.
 
 **Reaching the seat from another machine.** The door opens on `127.0.0.1` only. `--bind 0.0.0.0` opens it to the network (every route still needs a token), and
 `--fact host_names=seat.local` lets the page hand out its cookie for a name you reach it by; from another machine the page itself needs a token (the Home Assistant component carries one).
