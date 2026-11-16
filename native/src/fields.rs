@@ -1305,19 +1305,47 @@ impl Fields {
     /// An entity leaves (a page element taken out of the DOM): it is gone from the mirror, and what read it or
     /// referenced it recalculates, live, as after a write of each of its fields to nothing.
     pub fn remove(&mut self, core: &mut Core, host: &dyn Host, eid: &str, now: f64, seq: &mut i64) {
-        let Some(old) = core.docs.get(eid).map(|e| e.props.clone()) else { return };
-        if let Some(c) = core.docs.get(eid).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c.clone())); self.mark_key(&(crate::vm::VECTORS_READ.to_string(), c)); }
-        *seq += 1;
-        core.hear(Write { eid: eid.into(), prop: String::new(), new: J::Null, old: J::Null, writer: "remove".into(),
-                          chain: json!({}), seq: *seq }, None, now);
-        self.known.remove(eid);
-        self.dirty.retain(|(_, e, _)| e != eid);
+        self.remove_many(core, host, &[eid.to_string()], now, seq);
+    }
+
+    /// Remove many entities in ONE round with ONE pass over each bookkeeping table (the same forgetting as `remove`, per entity; the way `unload_many` does it). `remove`
+    /// retained over the whole of `dirty`, `reads` and `deps` and ran a round for each entity: a batch of N cost N passes and N rounds (measured 2026-11-15 on a seat whose
+    /// collector took ~670 entities at once: the removes were all of the profile and the seat did not answer). Here the passes are one, whatever N; what read any of them
+    /// recalculates once, after all have left (a getter reads the end state, as it did after the last of the separate rounds).
+    pub fn remove_many(&mut self, core: &mut Core, host: &dyn Host, eids: &[String], now: f64, seq: &mut i64) {
+        crate::span!("remove");
+        crate::gauge!("deps", self.deps.len());
+        crate::gauge!("reads", self.reads.len());
+        crate::gauge!("dirty", self.dirty.len());
+        let mut gone: Vec<(&str, serde_json::Map<String, J>)> = vec![];
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for eid in eids {
+            if !seen.insert(eid.as_str()) { continue; }
+            let Some(old) = core.docs.get(eid.as_str()).map(|e| e.props.clone()) else { continue };
+            if let Some(c) = core.docs.get(eid.as_str()).map(|d| d.cls.clone()) { self.mark_key(&(crate::vm::CLASS_READ.to_string(), c.clone())); self.mark_key(&(crate::vm::VECTORS_READ.to_string(), c)); }
+            *seq += 1;
+            core.hear(Write { eid: eid.as_str().into(), prop: String::new(), new: J::Null, old: J::Null, writer: "remove".into(),
+                              chain: json!({}), seq: *seq }, None, now);
+            self.known.remove(eid.as_str());
+            gone.push((eid.as_str(), old));
+        }
+        if gone.is_empty() { return; }
+        let names: std::collections::HashSet<&str> = gone.iter().map(|(e, _)| *e).collect();
+        self.dirty.retain(|(_, e, _)| !names.contains(e.as_str()));
         // what its getters read is forgotten with it: a reload under another class must not run the old class's getters
-        self.reads.retain(|(e, _), _| e != eid);
-        for set in self.deps.values_mut() { set.retain(|(e, _)| e != eid); }
-        self.link.dirty = true;
-        for (p, v) in &old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); }
-        self.dirty.retain(|(_, e, _)| e != eid);
+        // `deps[k]` holds a reader exactly when `reads[reader]` holds `k`: the reader's own record names the sets to leave, so no pass over all of `deps`
+        for name in &names {
+            for gi in 0..self.getters.len() {
+                let key = (name.to_string(), gi);
+                let Some(ks) = self.reads.remove(&key) else { continue };
+                for k in ks {
+                    if core.own_ns.is_some() && core.is_foreign(&k.0) { self.link.dirty = true; }
+                    if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); }
+                }
+            }
+        }
+        for (eid, old) in &gone { for (p, v) in old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); } }
+        self.dirty.retain(|(_, e, _)| !names.contains(e.as_str()));
         self.new_round();
         self.run(core, host, VecDeque::new(), now, seq);
     }
@@ -1354,8 +1382,10 @@ impl Fields {
     /// The round's end: the foreign keys a getter holds (`deps`) or any evaluation read in this round are the subscriptions; one nobody reads lives the grace out.
     fn link_round(&mut self, core: &Core, now: f64) {
         if core.own_ns.is_none() { return; }
+        crate::span!("link_round");
         let reads = std::mem::take(&mut *core.foreign_reads.borrow_mut());
         if self.link.dirty {
+            crate::span!("link_scan");
             self.link.dirty = false;
             self.link.dep_keys = self.deps.iter().filter(|(k, s)| !s.is_empty() && core.is_foreign(&k.0) && !crate::link::is_special(&k.1)).map(|(k, _)| k.clone()).collect();
         }
@@ -1420,6 +1450,7 @@ impl Fields {
     /// A round: the queued writes run (getters marked, setters fired); when the queue is empty, the dirty getters
     /// recalculate, lowest level first, and a changed value is written (which can queue more). Until both are empty.
     fn run(&mut self, core: &mut Core, host: &dyn Host, mut work: VecDeque<Write>, now: f64, seq: &mut i64) {
+        crate::span!("run");
         core.last_now = now;
         self.in_run = true;
         self.complete_arrivals(core, now);

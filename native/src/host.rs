@@ -24,6 +24,18 @@ pub const WAL_LIMIT_BYTES: u64 = 8 << 20;
 pub const WRITER: &str = "trigger:field:";
 /// the collection (table `c_field`) of the entity rows: k = eid, body = {cls, props, writers}
 pub const ROWS: &str = "c_field";
+
+/// The first key past everything that starts with `prefix` (its last char one up: `A:1:` -> `A:1;`), so `k >= prefix AND k < prefix_end(prefix)` is the prefix as a RANGE of the
+/// primary key (a `substr` test of every row reads the whole table: the seat that froze on a 1.4 GB store, #1143).
+pub fn prefix_end(prefix: &str) -> String {
+    let mut s = prefix.to_string();
+    if let Some(c) = s.pop().and_then(|c| char::from_u32(c as u32 + 1)) { s.push(c); }
+    s
+}
+/// The delete of a retired entity from a table keyed by `k`: the entity's own key and everything under `<eid>:` (?1 = the eid, ?2 = `<eid>:`, ?3 = `prefix_end(?2)`).
+pub fn retire_delete_sql(table: &str) -> String { format!("DELETE FROM {table} WHERE k = ?1 OR (k >= ?2 AND k < ?3)") }
+/// The delete of a retired namespace: every key under the prefix (?1 = the prefix, ?2 = `prefix_end(?1)`).
+pub fn namespace_delete_sql(table: &str) -> String { format!("DELETE FROM {table} WHERE k >= ?1 AND k < ?2") }
 /// the journal's collection (table `c_journal`): k = sequence number, body = a line
 pub const JOURNAL: &str = "c_journal";
 /// the vector store's table (vecstore.rs): eid -> class and the f16 bytes (little endian). Not an entity row; the memory policy never touches it.
@@ -607,6 +619,7 @@ impl Host {
     // ---- the engine's output -----------------------------------------------------------------------------------------
     /// Take what the engine did since the last drain and apply it to the store, stamped. -> whether there was any.
     fn drain_apply(&self) -> bool {
+        crate::span!("drain_apply");
         let _t = self.txn();
         self.fault_wanted();
         let (out, _calls) = { let mut g = self.eng(); let f = &mut g.1; (std::mem::take(&mut f.out), std::mem::take(&mut f.calls)) };
@@ -640,6 +653,7 @@ impl Host {
         // A parent owns its children by the colon path: retiring `A:1` retires `A:1:x` and `A:1:x:y` (not `A:10`).
         let retired = std::mem::take(&mut self.eng().1.retired);
         let mut packs_retired: Vec<String> = vec![];
+        let mut namespaces: Vec<String> = vec![];
         for eid in &retired {
             // a Pack entity retired (`retire = true`, or `Pack:<name> = None`) UNLOADS the pack: its definitions leave and the values its getters left are cleared (the layer below shows again)
             if let Some(name) = eid.strip_prefix(PACK_PREFIX).filter(|n| !n.is_empty()) {
@@ -649,30 +663,42 @@ impl Host {
                 packs_retired.push(name.to_string());
             }
             let below = format!("{eid}:");
+            let above = prefix_end(&below);
             { let mut g = self.eng(); let cls = class_of_eid(eid); if g.0.is_mapped(&cls) { g.0.vectors.remove_tree(&cls, eid); } }   // a retired entity's vector leaves the store, loaded or not
             // a retired `Vm:<ns>` takes the whole namespace `<ns>::` with it (docs/graph-link.md, section 2)
             let ns = Core::namespace_of_vm(eid);
-            let owned: Vec<String> = { let g = self.eng(); g.0.docs.keys().filter(|k| k.starts_with(&below) || ns.as_ref().map_or(false, |n| k.starts_with(n.as_str()))).cloned().collect() };
-            if let Some(n) = &ns { let mut g = self.eng(); let (core, f, _) = &mut *g; f.link_forget(core, n); core.unloaded.retain(|k, _| !k.starts_with(n.as_str())); }
-            self.eng().0.unloaded.retain(|k, _| k != eid && !k.starts_with(&below));   // a stored child that was never loaded is deleted with the rest, and does not wait to load
-            for e in std::iter::once(eid).chain(owned.iter()) {
-                { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, e, ts, seq); }
-            }
+            if let Some(n) = &ns { let mut g = self.eng(); let (core, f, _) = &mut *g; f.link_forget(core, n); namespaces.push(n.clone()); }
             let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.retain(|k, _| k != eid && !k.starts_with(&below) && !ns.as_ref().map_or(false, |n| k.starts_with(n.as_str()))); }   // a retired row is not written back
-            self.exec(&db, &format!("DELETE FROM {ROWS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);
-            self.exec(&db, &format!("DELETE FROM {VECTORS} WHERE k = ?1 OR substr(k, 1, length(?2)) = ?2"), params![eid, below]);   // its vector leaves the table (the engine's store dropped it with the entity)
-            if let Some(n) = &ns { self.exec(&db, &format!("DELETE FROM {ROWS} WHERE substr(k, 1, length(?1)) = ?1"), params![n]); }
+            self.exec(&db, &retire_delete_sql(ROWS), params![eid, below, above]);
+            self.exec(&db, &retire_delete_sql(VECTORS), params![eid, below, above]);   // its vector leaves the table (the engine's store dropped it with the entity)
+            if let Some(n) = &ns { self.exec(&db, &namespace_delete_sql(ROWS), params![n, prefix_end(n)]); }
+        }
+        crate::gauge!("retired_batch", retired.len());
+        if !retired.is_empty() {
+            // what the retired entities own, found and dropped with ONE pass over each table, not one per entity (a seat that retires hundreds at once froze on the passes)
+            let set: std::collections::HashSet<&str> = retired.iter().map(|e| e.as_str()).collect();
+            let gone = |k: &str| -> bool {
+                if set.contains(k) || namespaces.iter().any(|n| k.starts_with(n.as_str())) { return true; }
+                let mut s = k;
+                while let Some(i) = s.rfind(':') { s = &s[..i]; if set.contains(s) { return true; } }
+                false
+            };
+            if let Some(m) = self.pending.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { m.retain(|k, _| !gone(k)); }   // a retired row is not written back
+            let doomed: Vec<String> = { crate::span!("retire_scan"); let mut g = self.eng(); crate::gauge!("docs", g.0.docs.len());
+                g.0.unloaded.retain(|k, _| !gone(k));   // a stored child that was never loaded is deleted with the rest, and does not wait to load
+                g.0.docs.keys().filter(|k| gone(k)).cloned().collect() };
+            let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove_many(core, &NullHost, &doomed, ts, seq);
         }
         let any = any || !retired.is_empty();
         // THE MEMORY POLICY (docs/cliffvm.md, "Unload"): over the memory budget, the coldest loaded entities leave the engine, their rows kept. The VM's own: nothing a pack or
         // the model writes names an entity to evict. Not journalled, changes no value.
-        self.evict_under_pressure();
+        { crate::span!("evict"); self.evict_under_pressure(); }
         // THE COLLECTOR (docs/cliffvm.md, "Garbage collection"): the virtual entities nothing holds any more leave the engine at the end of the round. Removing them
         // is a round of its own (what read them recalculates), which drains again.
-        let dead = { let g = self.eng(); g.0.gc_dead() };
+        let dead = { crate::span!("gc_dead"); let g = self.eng(); g.0.gc_dead() };
+        crate::gauge!("dead_batch", dead.len());
         let any = any || !dead.is_empty();
-        for d in &dead { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove(core, &NullHost, d, ts, seq); core.note_collected(d); }
+        if !dead.is_empty() { let mut g = self.eng(); let (core, f, seq) = &mut *g; f.remove_many(core, &NullHost, &dead, ts, seq); for d in &dead { core.note_collected(d); } }
         if !dead.is_empty() { self.drain_apply(); }
         // THE REACTIONS of a model's write (docs/cliffvm.md, "The return entity"): each door write is a Request `mc_done` by the setter `mcp-write`; the derived
         // writes of the same round are what it caused. The list goes back on that Request as `reactions` (a derived write, never journalled; a replay drains the same way).

@@ -34,6 +34,8 @@ fn main() {
         Ok(Cmd::Run(r)) => {
             #[cfg(feature = "alloc-stats")]
             membrane_vm::alloc_stats::report();
+            #[cfg(feature = "phase-trace")]
+            membrane_vm::trace::report();
             unsafe {
                 libc::signal(libc::SIGTERM, on_term as *const () as usize);
                 libc::signal(libc::SIGINT, on_term as *const () as usize);
