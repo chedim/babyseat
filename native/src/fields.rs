@@ -1333,9 +1333,17 @@ impl Fields {
         let names: std::collections::HashSet<&str> = gone.iter().map(|(e, _)| *e).collect();
         self.dirty.retain(|(_, e, _)| !names.contains(e.as_str()));
         // what its getters read is forgotten with it: a reload under another class must not run the old class's getters
-        self.reads.retain(|(e, _), _| !names.contains(e.as_str()));
-        for set in self.deps.values_mut() { set.retain(|(e, _)| !names.contains(e.as_str())); }
-        self.link.dirty = true;
+        // `deps[k]` holds a reader exactly when `reads[reader]` holds `k`: the reader's own record names the sets to leave, so no pass over all of `deps`
+        for name in &names {
+            for gi in 0..self.getters.len() {
+                let key = (name.to_string(), gi);
+                let Some(ks) = self.reads.remove(&key) else { continue };
+                for k in ks {
+                    if core.own_ns.is_some() && core.is_foreign(&k.0) { self.link.dirty = true; }
+                    if let Some(s) = self.deps.get_mut(&k) { s.remove(&key); }
+                }
+            }
+        }
         for (eid, old) in &gone { for (p, v) in old { self.mark(eid, p); self.mark_refs(p, v, &J::Null); } }
         self.dirty.retain(|(_, e, _)| !names.contains(e.as_str()));
         self.new_round();

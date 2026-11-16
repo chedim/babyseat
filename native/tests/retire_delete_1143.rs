@@ -53,3 +53,43 @@ fn many_retired_at_once_leave_what_read_them_right() {
     for i in 10..60 { h.write(&format!("Box:{i}"), "retire", json!(true), "person"); }
     assert_eq!(h.get("Count:c", "n"), json!(20), "the fifty parents took their fifty children with them");
 }
+
+/// The time to retire 40 entities among `m` that each hold a getter reading `reads` properties (the field remembers `m * reads` things nobody retired).
+fn retire_time(m: usize, reads: usize) -> std::time::Duration {
+    let mut o = Options::new(Some(tmpfile("cost"))); o.effects = false;
+    let h = Host::open(o).unwrap();
+    let expr = (0..reads).map(|j| format!("this.p{j}")).collect::<Vec<_>>().join(" + ");
+    h.load_pack("t", &format!("PACK t 1\nBox.d getter: {expr}\n")).unwrap();
+    h.rebuild();
+    let mut p = Map::new();
+    for j in 0..reads { p.insert(format!("p{j}"), json!(j)); }
+    for i in 0..m + 40 { h.born(&format!("Box:{i}"), "Box", p.clone(), "person"); }
+    let t = std::time::Instant::now();
+    for i in m..m + 40 { h.write(&format!("Box:{i}"), "retire", json!(true), "person"); }
+    t.elapsed()
+}
+
+#[test]
+fn retiring_costs_what_is_retired_not_what_the_field_remembers() {
+    let narrow = retire_time(4000, 1);
+    let wide = retire_time(4000, 40);   // the same entities, forty times what the field remembers of them
+    // the removal finds the readers through what they read, not by a pass over all that is remembered
+    assert!(wide < narrow * 3 + std::time::Duration::from_millis(40), "retiring 40 took {narrow:?} among 4000 readers of 1 property, {wide:?} among 4000 readers of 40");
+}
+
+#[test]
+fn a_reader_of_a_retired_entity_recomputes_and_the_others_keep_their_value() {
+    let mut o = Options::new(Some(tmpfile("readers"))); o.effects = false;
+    let h = Host::open(o).unwrap();
+    h.load_pack("t", "PACK t 1\nRESIDENT Sum\nBox.d getter: this.v * 2\nSum.s getter: Box:1.v + Box:2.v\n").unwrap();
+    h.rebuild();
+    for i in 0..5 { h.born(&format!("Box:{i}"), "Box", props(json!({"v": i + 10})), "person"); }
+    h.born("Sum:x", "Sum", props(json!({})), "person");
+    assert_eq!(h.get("Sum:x", "s"), json!(23));
+    h.write("Box:2", "retire", json!(true), "person");
+    h.write("Box:3", "retire", json!(true), "person");
+    assert_ne!(h.get("Sum:x", "s"), json!(23), "what read a retired entity recomputed");
+    assert_eq!(h.get("Box:4", "d"), json!(28));
+    h.write("Box:1", "v", json!(100), "person");
+    assert_eq!(h.get("Box:1", "d"), json!(200), "a survivor's getter still follows its inputs");
+}
