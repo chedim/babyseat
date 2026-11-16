@@ -65,8 +65,8 @@ def test_an_unknown_host_is_a_clear_error_naming_it(sr, system, machine):
 def test_the_asset_name_and_the_release_base_are_the_ones_the_release_publishes(sr):
     assert sr.asset_name("0.7.61", "x86_64-unknown-linux-musl") == "babyseat-0.7.61-x86_64-unknown-linux-musl.tar.gz"
     assert sr.RELEASE_BASE.format(version="0.7.61") == "https://github.com/chedim/membrane/releases/download/v0.7.61"
-    sh = (Path(__file__).resolve().parents[2] / "addon" / "install-dist.sh").read_text()
-    assert "base=https://github.com/chedim/membrane/releases/download/v$version" in sh and "asset=babyseat-$version-$target.tar.gz" in sh
+    sh = (Path(__file__).resolve().parents[2] / "install.sh").read_text()   # the installer fetches the same release assets
+    assert "base=https://github.com/$REPO/releases/download/v$version" in sh and "asset=babyseat-$version-$target.tar.gz" in sh
 
 
 def test_the_component_version_is_the_manifests(sr):

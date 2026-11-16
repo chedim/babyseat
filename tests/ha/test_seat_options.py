@@ -96,7 +96,10 @@ def test_bad_settings_are_refused_with_the_field_named(so, settings, field):
 
 def test_the_mapping_matches_the_addons_for_every_provider_it_shares(so):
     """The add-on's options.sh is the reference (do not edit addon/): the same fact names and the same model default."""
-    sh = (Path(__file__).resolve().parents[2] / "addon" / "options.sh").read_text()
+    ref = Path(__file__).resolve().parents[2] / "addon" / "options.sh"
+    if not ref.exists():
+        pytest.skip("the add-on is not in this tree (it is on its own branch): nothing to compare with")
+    sh = ref.read_text()
     assert "model=claude-sonnet-5-5" in sh and so.DEFAULT_ANTHROPIC_MODEL == "claude-sonnet-5-5"
     assert 'base_url: "https://api.anthropic.com"' in sh and so.ANTHROPIC_BASE_URL == "https://api.anthropic.com"
     assert 'loops_auth: "chat", cortex_auth: "chat", workers_auth: "chat", think: "auto"' in sh
