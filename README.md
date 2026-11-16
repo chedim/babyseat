@@ -4,7 +4,7 @@
 **Talk to it. It remembers.**
 
 babyseat is an AI seat whose memory is a graph the model itself programs. You talk to one chat; the model answers through the
-Claude CLI, and everything it knows about you, your files and your work lives as **entities in a field** it reads and writes with
+LLM, and everything it knows about you, your files and your work lives as **entities in a field** it reads and writes with
 four tools. A banner the model keeps in its own words carries what matters from one turn to the next, so the chat keeps its thread
 without replaying history.
 
