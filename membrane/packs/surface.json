@@ -644,6 +644,23 @@
     ],
     "boot_facts": []
   },
+  "edit": {
+    "imports": [
+      "fs"
+    ],
+    "classes": [
+      "Edit",
+      "File"
+    ],
+    "members": 12,
+    "writes": [
+      "*.landed",
+      "*.seen",
+      "File:*.write"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
   "embed": {
     "imports": [
       "boot",

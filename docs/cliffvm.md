@@ -79,7 +79,7 @@ docs/graph-link.md); see docs/ui-rebuild-plan.md "The shell and the view-pack co
 (`membrane/apps/field.c1f/field_view.c1f`) is built and DISABLED: that folder is not in the dist, and the default launch does not load it, so the page has no Field tab and makes no field request.
 The chat reads `/membrane/chat/messages` (history) and the message's event stream; the model reads and writes the graph through `POST /mcp`.
 
-**The barest packs** (`membrane/apps/barest.packs`, one shipped pack name per line in load order; `cliffvm serve`, `scripts/seat` and `seat_process.rs` read it): `boot entity environment stats door door_auth fs proc fetch router sql store door_tools semtext mentions chat chat_turn vector embed door_session
+**The barest packs** (`membrane/apps/barest.packs`, one shipped pack name per line in load order; `cliffvm serve`, `scripts/seat` and `seat_process.rs` read it): `boot entity environment stats door door_auth fs edit proc fetch router sql store door_tools semtext mentions chat chat_turn vector embed door_session
 legacy_import legacy_cutover door_fieldvm door_state door_models ha settings link link_route`, each a single-file app (the first, `boot`, is the root of trust), then `launcher` (serve only), then the app folder `barest.c1f`. The other packs in `membrane/packs/`
 (`door_self`, `door_voice`, `door_decisions`, `decisions`, `dev`, `banner`, `attention`, `methods`, `peer`, `turn`, `messages`, `about`, `mcp`, `ported`, `chat_oai`, `legacy_persons`, ...) are not in `barest.packs`, so the release does not load them (their tests do):
 a request carries none of their getters, and the seat seeds no `Command:git` or `File:operator-ledger`.
@@ -88,7 +88,7 @@ a request carries none of their getters, and the seat seeds no `Command:git` or 
 predecessors' whole state and the sizes doubled per request (a 100-row query reached megabytes and the engine stopped answering).
 
 **The help** (`membrane/apps/barest.c1f/help.c1f`, `help/c1f.md`, `help/packs.md`, `help/upgrade.md`): `Help:<topic>` entities whose `text` is the topic's markdown file (a getter reading it; `Boot.started` seeds
-every topic of the app, `Help:start` (the first minutes), `Help:c1f`, `Help:packs`, `Help:upgrade`, `Help:banner`, `Help:cliff`, `Help:semtext`, `Help:sql`, `Help:legacy`, `Help:ha`, `Help:settings`, `Help:environment`, `Help:page`, from the first of `app_dirs`). The model reads them with `entity_read` and lists them with `entity_query` `kind:Help`; the doctrine in `chat_turn.c1f` says "Use Help entities for help" and `Help:c1f` tells where the topics are and how to list them. `help/banner.md` (`Help:banner`) teaches the banner.
+every topic of the app, `Help:start` (the first minutes), `Help:c1f`, `Help:packs`, `Help:upgrade`, `Help:banner`, `Help:cliff`, `Help:semtext`, `Help:sql`, `Help:legacy`, `Help:ha`, `Help:settings`, `Help:environment`, `Help:page`, `Help:edit`, from the first of `app_dirs`). The model reads them with `entity_read` and lists them with `entity_query` `kind:Help`; the doctrine in `chat_turn.c1f` says "Use Help entities for help" and `Help:c1f` tells where the topics are and how to list them. `help/banner.md` (`Help:banner`) teaches the banner.
 `c1f` is the syntax (getters, setters, blocks, entity literals, constructors, nulls with reasons, the operators c1f has: the default is `or`, there is no `??`), `packs` is writing a pack through `Pack:<name>.text`
 The value kind `Error` (a failure, distinct from null) and the `is` operator are built (#1143): `docs/c1f-error.md`, `Help:c1f`.
 (ownership, rule B, layers), `upgrade` is what changed since 0.7.53 plus a SQL / Vue / JavaScript lookup table. **Every code block is a test**: `native/tests/help_1143.rs` loads each ```c1f block through the
@@ -236,6 +236,17 @@ Tests: `native/tests/multi_class_1143.rs`, `seat_process.rs` (`an_entity_carries
 **Retiring an entity** (`native/src/fields.rs` `retired`, `host.rs` `drain_apply`): death by null above is the way to say it, and it comes down to this: a write of `retire = true` (which a pack or a block may still write directly) to ANY entity, by any writer (a pack's setter: the ordinary ownership rules
 apply; the model's `entity_write` as the privileged door), removes it: the engine forgets the entity (what read it recalculates), its stored row is deleted. It is derived when a setter wrote it,
 so never journalled, and a replay re-derives it; an outside write of `retire` is journalled and replayed like any. Test: `native/tests/host_loop.rs` (retire + replay), `seat_process.rs`. In the BROWSER VM the host does the same (`membrane/apps/barest.c1f/ui/fieldvm.js` `retire`, #1143): the entity leaves the page's engine and a DomNode's element leaves the page (`tests/js/fieldvm_retire.test.mjs`); the page has no store, so there is no row.
+
+## The edit pack: a hunk applied by a write (`membrane/packs/edit.c1f`)
+
+A change to a file as data, in plain c1f over the fs stdlib (no builtin, no Rust). `Edit:<name> {path, old, new, base_mtime}` is one hunk: `old` has to occur in the file
+exactly once. Writing `apply = {id}` checks it and writes the file with an ordinary `File.write` (the effect is `File:edit:<name>`, whose receipt wakes the edit, which reads the
+file again); writing `revert = {id}` puts the pre-image back. Reads: `problem` (why the hunk cannot be applied now: no path, empty `old`, no `new`, no such file, not found, matches N
+times, changed since), `diff` (`- old` / `+ new`), `hits`, `status` (`draft ready pending applied reverted refused failed`), `refused` (the last refusal's reason), `text`, `info`, `pre`, `post`.
+A draft changes nothing, so reading `diff` and `problem` is the dry run. The lock is optimistic: `base_mtime` is the `mtime` of `info` as the agent read it, and another mtime at apply
+is a refusal; a revert is refused when the file is no longer `post`. `apply` and `revert` are two steps, because a read lands later: the write sets `want` and a fresh `seen` token, so the file is read again, and the setter on `snap` checks the hunk
+against that fresh text and stat and then writes (status `pending` in between), so the checks and the lock never run on a cached read; use a new `id` for every apply. Tests: `native/tests/edit_pack.rs`
+(real files, mutation-checked); the model reads `Help:edit`.
 
 ## The Sql driver: a second SQLite file as entities (#1143, operator 2026-11-14)
 
