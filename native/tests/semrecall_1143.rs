@@ -17,7 +17,7 @@ Box.ans on-setter answer:\n  WHEN this.ans != None:\n    membrane::Chat:main:mes
 Leaf.go on-setter leaf:\n  WHEN this.go != None:\n    Leaf:x[this.k]:body = SemText(text: this.go)\n    Leaf:x[this.k]:body.mention = True\n";
 
 /// a seat with a store (the window is read from the store's key order) and its drivers on; no model server
-fn seat() -> Host { seat_opts(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login"})), true) }
+fn seat() -> Host { seat_opts(&props(json!({"chat_claude_bin": "/usr/bin/true", "seat_default": "claude", "chat_auth": "login"})), true) }
 /// a seat with no store and no drivers: the receipts are the test's
 fn seat_with(facts: &Map<String, J>) -> Host { seat_opts(facts, false) }
 fn seat_opts(facts: &Map<String, J>, store: bool) -> Host {
@@ -181,7 +181,7 @@ fn note_receipt(h: &Host, note: &str, embeddings: J) {
     h.write(&f, "request_result", json!({"id": job["id"], "status": "ok", "rc": 0, "http_status": 200, "body": json!({"embeddings": embeddings}).to_string()}), "person");
     h.pump();
 }
-fn note_seat() -> Host { seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"}))) }
+fn note_seat() -> Host { seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "seat_default": "claude", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"}))) }
 fn note(h: &Host, eid: &str, text: &str) {
     h.born(eid, "Memory", Map::new(), "person"); h.pump();
     h.write(eid, "text", json!(text), "person"); h.pump();
@@ -263,7 +263,7 @@ fn the_cosine_query_is_the_weighted_sum_of_the_windows_text_vectors() {
 
 #[test]
 fn a_memory_note_reads_the_same_recall_with_its_own_vector_and_the_dials() {
-    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
+    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "seat_default": "claude", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
     turn(&h, "m1", "The marsupial slept all afternoon.", None, 1.0);
     // the sentence vector of the chat message (as the embedding pipeline names it)
     let k = body("m1").replace("::", "/");
@@ -301,7 +301,7 @@ fn the_memory_count_and_clip_are_the_dials() {
 
 #[test]
 fn every_semtext_is_asked_for_its_sentence_vectors_without_a_flag() {
-    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
+    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "seat_default": "claude", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
     leaf(&h, "a", "A text of a pack. It has two sentences.");
     let k = "Leaf:x:a:body";
     assert!(h.snapshot().contains_key(&format!("membrane::Embed:ask:{k}")), "asked with no `embed` write: {:?}", h.snapshot().keys().filter(|x| x.contains("Embed")).collect::<Vec<_>>());
@@ -320,7 +320,7 @@ fn the_recall_pack_names_no_default_of_its_own() {
 /// near duplicates (every hit against every hit placed before it) stay inside the step budget of one evaluation (no `budget exceeded` null).
 #[test]
 fn full_pools_of_long_sentences_stay_inside_the_step_budget() {
-    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
+    let h = seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", "seat_default": "claude", "chat_auth": "login", "seat_backend": "http://127.0.0.1:9", "embed_model": "m"})));
     for i in 0..80 {
         let t = format!("Quokka {} ends here.", (0..10).map(|j| format!("w{i}x{j}")).collect::<Vec<_>>().join(" "));
         leaf(&h, &format!("n{i}"), &t);

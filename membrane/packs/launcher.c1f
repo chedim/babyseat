@@ -4,8 +4,9 @@ IMPORT boot 1
 -- folder, the claude CLI) and tells their paths as facts; what the seat DOES by default is here, as setters on `Boot.started` that fill a fact only when the launcher
 -- or the operator (`--fact name=value`) did not tell it, so a fact always wins. Edit a default here, in the dist's packs/ folder: no binary changes.
 --   default_port     4096 (the door listens there unless `--port` named another; `--port 0` = any free port)
---   minds            the claude CLI is the model of every background mind and of the chat's default pick
---   cloud_models     one rung, `claude` (the claude CLI)
+--   minds            NO model: the chat's model is unset until the person picks one (the page's first-run window or the Settings dropdown) from what the local Ollama (`seat_backend`) lists. DEVELOPER MODE:
+--                    `--fact seat_default=claude` makes the claude CLI the model of every background mind and of the chat's default pick (a `minds` fact, as Home Assistant passes it, wins over both)
+--   cloud_models     none; with `--fact seat_default=claude`, one rung, `claude` (the claude CLI)
 --   seat_backend     the local backend's address: the default Ollama one (nothing needs to run there: a refused connection is an empty list of models)
 --   embed_model      mxbai-embed-large (the model that makes the vector of each sentence, packs/embed.c1f; asked of the model server at seat_backend)
 --   router_on        false (no router between the minds and the models)
@@ -14,9 +15,9 @@ IMPORT boot 1
 Boot.default_port getter: 4096   -- read by door.c1f's door-listen when no `--port` told door_port
 Boot.started on-setter launcher-minds:
   WHEN this.minds == None:
-    this.minds = {'loops': 'claude', 'cortex': 'claude', 'workers': 'claude', 'seat_default': 'claude', 'loops_auth': 'chat', 'cortex_auth': 'chat', 'workers_auth': 'chat', 'think': 'auto'}
+    this.minds = {'loops': str(this.seat_default or ''), 'cortex': str(this.seat_default or ''), 'workers': str(this.seat_default or ''), 'seat_default': str(this.seat_default or ''), 'loops_auth': 'chat', 'cortex_auth': 'chat', 'workers_auth': 'chat', 'think': 'auto'}
 Boot.started on-setter launcher-models:
-  WHEN this.cloud_models == None:
+  WHEN this.cloud_models == None and this.seat_default == 'claude':
     this.cloud_models = [{'name': 'claude', 'backend': 'claude-agent'}]
 Boot.started on-setter launcher-backend:
   WHEN this.seat_backend == None:

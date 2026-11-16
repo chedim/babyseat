@@ -220,7 +220,7 @@ fn launch_env(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str], env:
     let fact = format!("chat_claude_bin={}", bin.display());
     let mut cmd = Command::new(BIN);
     cmd.current_dir(dir)
-        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact])
+        .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact, "--fact", "seat_default=claude"])
         .args(extra);
     for v in CRED_VARS { cmd.env_remove(v); }
     cmd.envs(env.iter().copied());

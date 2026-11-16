@@ -121,11 +121,11 @@ fn it_finds_packs_apps_and_ui_next_to_its_own_binary_and_serves_the_page_and_the
     assert!(get(run.port, "/global/health", "").0.starts_with("HTTP/1.1 401"));
     let (h, b) = get(run.port, "/global/health", &bearer(&data));
     assert!(h.starts_with("HTTP/1.1 200") && b.contains("healthy"), "{h} {b}");
-    // the defaults of the c1f launcher pack: the models route answers (503 without `minds`) and claude is the model, the router is off
+    // the defaults of the c1f launcher pack: the models route answers (503 without `minds`) and NO model is chosen (the local Ollama is the backend; the claude CLI is the developer mode), the router is off
     let (h, b) = get(run.port, "/membrane/models", &bearer(&data));
-    assert!(h.starts_with("HTTP/1.1 200") && b.contains("\"seat_default\":\"claude\""), "the minds are the launcher pack's: {h} {b}");
+    assert!(h.starts_with("HTTP/1.1 200") && b.contains("\"seat_default\":\"\""), "the minds are the launcher pack's: {h} {b}");
     let (_, l) = get(run.port, "/v1/models", &bearer(&data));
-    assert!(l.contains("\"claude\""), "claude is the one model: {l}");
+    assert!(!l.contains("\"claude\""), "no claude rung by default: {l}");
     let (_, o) = get(run.port, "/membrane/options", &bearer(&data));
     assert!(o.contains("\"chat_auth\":\"api_key\""), "the key is the auth by default: {o}");
     let _ = std::fs::remove_dir_all(d.parent().unwrap());

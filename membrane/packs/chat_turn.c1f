@@ -149,8 +149,13 @@ ChatMessage.recall_wait getter:
   asked = prop('membrane::Banner:recall', 'ask_msg')
   ready = prop('membrane::Banner:recall', 'ready')
   False if (held is Error or asked is Error or ready is Error or held == None or ready == None) else (this.eid in held and (asked != this.eid or ready == False))
+-- what the answer says while no model is chosen: how to pick one, and, when the local Ollama has told no chat model (not running, or nothing pulled), how to get one
+ChatMessage.listed_chat getter: [m.name for m in instances('Model') if m.listed == True and m.chat_ok == True and m.rung != True]
+ChatMessage.no_model_text getter: 'No model is chosen, so nothing was started. Open the model picker (the window the page opens while a model is not chosen, or Settings, Model) and choose one of the models the local Ollama lists, then send the message again.' + ('' if len(this.listed_chat) > 0 else ' Ollama lists no chat model right now: start it (' + str(([bk.seat_backend for bk in instances('Boot') if bk.seat_backend != None] or [''])[0]) + ') and pull one with `ollama pull <name>`, then refresh the picker.')
 ChatMessage.plan getter:
   WHEN this.queued != True or this.tstate != 'queued' or this.text == None or this.recall_wait == True: None
+  -- NO MODEL IS CHOSEN (the default: the seat answers through the local Ollama, and the person picks which model): nothing starts, the answer says so and how to pick
+  ELSE WHEN this.model_eff == '': {'refuse': this.no_model_text}
   -- a model that is not a claude rung is answered over an OpenAI-compatible endpoint (packs/chat_oai.c1f): its own plan, none of the claude CLI's checks apply
   ELSE WHEN this.oai_cfg != None: this.oai_plan
   ELSE WHEN this.bin == '': {'refuse': 'The chat answers through the claude CLI, and its path is not named yet (chat_claude_bin). Name it with CLAUDE_BIN=<path to claude> when you start scripts/seat, or start cliffvm with --fact chat_claude_bin=<path>, then send the message again.'}
