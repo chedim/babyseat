@@ -342,10 +342,11 @@ fn the_messages_page_by_rows_limit_and_before() {
     let all = finished(port, &sid, 6);
     assert_eq!(all.len(), 6);
     let (st, last2) = api(port, "GET", &format!("/session/{sid}/message?limit=2"), J::Null);
-    assert_eq!(st, 200);
+    assert_eq!(st, 200, "limit=2 answered {last2}");
     assert_eq!(last2.as_array().unwrap().iter().map(|r| r["info"]["id"].clone()).collect::<Vec<_>>(), all[4..].iter().map(|r| r["info"]["id"].clone()).collect::<Vec<_>>());
     let before = all[4]["info"]["id"].as_str().unwrap();
-    let (_, older) = api(port, "GET", &format!("/session/{sid}/message?limit=2&before={before}"), J::Null);
+    let (st, older) = api(port, "GET", &format!("/session/{sid}/message?limit=2&before={before}"), J::Null);
+    assert_eq!(st, 200, "limit=2&before={before} answered {older}; the six rows were {:?}", all.iter().map(|r| r["info"]["id"].clone()).collect::<Vec<_>>());
     assert_eq!(older.as_array().unwrap().iter().map(|r| r["info"]["id"].clone()).collect::<Vec<_>>(), all[2..4].iter().map(|r| r["info"]["id"].clone()).collect::<Vec<_>>());
 }
 
