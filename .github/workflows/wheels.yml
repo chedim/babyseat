@@ -68,12 +68,19 @@ jobs:
       - name: Rosetta (the x86_64 binary runs on Apple silicon)
         if: matrix.rosetta
         run: sudo softwareupdate --install-rosetta --agree-to-license
+      - name: an x86_64 Python (the x86_64 wheel's smoke test installs it, so it needs an x86_64 pip)
+        id: py_x64
+        if: matrix.rosetta
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: x64
       - name: "smoke test: install into a fresh venv, --version, --help, serve --port 0, /global/health"
         if: ${{ !matrix.musl }}
-        # the x86_64 wheel on an Apple-silicon runner: the whole smoke runs under Rosetta with the system Python (universal), so pip and the venv are x86_64 and accept the wheel
+        # the x86_64 wheel on an Apple-silicon runner: the whole smoke runs under Rosetta with the x64 Python, so pip and the venv are x86_64 and accept the wheel
         run: |
           if [ -n "${{ matrix.rosetta }}" ]; then
-            PYTHON=/usr/bin/python3 arch -x86_64 sh scripts/dist/smoke_wheel.sh dist-wheels/*.whl
+            PYTHON="${{ steps.py_x64.outputs.python-path }}" arch -x86_64 sh scripts/dist/smoke_wheel.sh dist-wheels/*.whl
           else
             sh scripts/dist/smoke_wheel.sh dist-wheels/*.whl
           fi
