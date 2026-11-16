@@ -214,3 +214,34 @@ fn the_launch_fact_seat_default_alone_counts_as_a_chosen_model_on_a_seat_with_no
     assert_eq!(row(&r, "model.chat")["current"], json!("claude"));
     assert_eq!(row(&r, "model.chat")["chosen"], json!(true), "the first-run window stays closed");
 }
+
+// ---- the rung named `claude` is the CLI's own default: it runs with NO --model flag, whatever the seat's default is ----
+fn chat_argv(c: &Core) -> Vec<String> {
+    let cmd = c.docs.iter().find(|(k, _)| k.starts_with("membrane::Command:chat:")).unwrap_or_else(|| panic!("no process was asked for"));
+    cmd.1.props["cmd"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect()
+}
+fn picked_world(pick: &str) -> Vec<String> {
+    // a seat whose store has the `claude` rung and the claude-agent:sonnet rung, with the launcher's empty minds (seat_default NOT set); the pick is the Settings row's own write
+    let (mut c, mut f) = full_world(json!({"seat_backend": "http://127.0.0.1:1", "chat_auth": "login",
+        "cloud_models": [{"name": "claude", "backend": "claude-agent"}, {"name": "claude-agent:sonnet", "backend": "claude-agent"}],
+        "minds": {"loops": "", "cortex": "", "workers": "", "seat_default": "", "loops_auth": "chat", "cortex_auth": "chat", "workers_auth": "chat", "think": "auto"}}));
+    c.load("Http:door".into(), "Http".into(), json!({"listen_result": {"port": 4321, "rc": 0, "host": "127.0.0.1"}}).as_object().unwrap().clone(), None, 3.0);
+    put(&mut c, &mut f, "Setting:model.chat", "set", json!(pick));
+    assert_eq!(get(&c, "Minds:seat", "loops"), json!(pick));
+    ask_chat(&mut c, &mut f);
+    chat_argv(&c)
+}
+
+#[test]
+fn a_pick_of_the_claude_rung_runs_the_cli_with_no_model_flag_even_when_the_seat_default_is_not_set() {
+    let argv = picked_world("claude");
+    assert!(argv.iter().any(|a| a == "-p"), "the CLI was run: {argv:?}");
+    assert!(!argv.iter().any(|a| a == "--model"), "no --model flag for `claude`: {argv:?}");
+}
+
+#[test]
+fn a_claude_agent_alias_still_runs_with_its_model_flag() {
+    let argv = picked_world("claude-agent:sonnet");
+    let i = argv.iter().position(|a| a == "--model").unwrap_or_else(|| panic!("no --model: {argv:?}"));
+    assert_eq!(argv[i + 1], "sonnet");
+}
