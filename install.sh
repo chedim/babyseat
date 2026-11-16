@@ -135,7 +135,7 @@ ln -sfn "$prefix/babyseat" "$bindir/babyseat"
 
 say "installed babyseat $version ($target) in $prefix/$version"
 say "start it:   babyseat            (the seat on http://127.0.0.1:4096; --port N for another port, --data-dir <dir> for its data, babyseat --help for the rest)"
-say "it chats with Claude through the claude CLI or an API key: export ANTHROPIC_API_KEY=... before starting"
+say "it chats through a local Ollama (ollama pull <model>) or an OpenAI-compatible endpoint: see \"Which model answers\" in the README for the facts to start with"
 case ":$PATH:" in *":$bindir:"*) ;; *) say "$bindir is not on your PATH: add it, e.g.  echo 'export PATH=\"$bindir:\$PATH\"' >> ~/.profile" ;; esac
 say "macOS: files installed this way are not quarantined. A tarball downloaded in a browser is: right-click the binary and choose Open once, or run  xattr -dr com.apple.quarantine <folder>"
 say "upgrade: run this installer again. Remove: rm -rf $prefix $bindir/babyseat (the seat's data is in its own folder, not in these)"

@@ -23,7 +23,7 @@ The only way to an open door is to name no secret on purpose (`--fact door_secre
 
 **The sign-in screen** (c1f, not JS). A page opened from another machine (a LAN address, a remote name, a loopback `Host` the door does not allow) gets no cookie, so `GET /ui/fieldvm` answers 401; `boot.js` then fetches `/ui/www/login_view.c1f` and runs ONLY that pack (`apps/barest.c1f/login_view.c1f`, imports `dom` and `fetch`). It is the one pack of the app folder the door serves without a token (door.c1f `Request.login_pack`; every other pack is 404 there) and `/ui/fieldvm` never lists it for a signed-in page. The card takes the token in a password box, `POST /ui/login`s it as JSON, and on a 2xx reloads: the cookie is the seat's (HttpOnly, SameSite=Strict as above). A wrong token shows the seat's own reason beside the form; no answer shows "The seat did not answer". The page keeps nothing: no localStorage, the box and the pack's entity are cleared at submit, the token is in no URL. The shell's bar shows **Sign out** (`POST /ui/logout`, then a reload) only when `/ui/conf` says who the page is.
 
-**The claude turn's credential (the release gate).** The turn's CLI answers with the Anthropic API key of the seat's environment variable `ANTHROPIC_API_KEY` by default; `--fact chat_auth=login` opts into the CLI's own login.
+**The claude turn's credential (developer mode; the release gate).** The turn's CLI answers with the Anthropic API key of the seat's environment variable `ANTHROPIC_API_KEY` by default; `--fact chat_auth=login` opts into the CLI's own login.
 The key travels like the admin token: the run's `env_from` hands the launcher's value to the child's environment, so it is never in `argv`, a property, a row, the journal, a log or a reply, and the Command driver masks it
 (`***`) in anything the child prints (only values of 16+ characters: a shorter one is no credential; 16 is the operator-approved minimum). With no key and no opt-in the turn is refused with the way to set it (docs/cliffvm.md, "The claude turn's auth").
 
@@ -56,7 +56,7 @@ The door refuses `crit`, an `aud` and a non-numeric `nbf`/`iat`; the leeway is e
 (an open connection's entity never hands its credentials to a reader); a HEAD to a family route is a 405 with `allow`; an `/ui/serve/` prefix, `..`, `//`, upper case, `%2f` and the like never reach a route without the gate.
 The evidence for each is in docs/release-verification.md.
 
-## The claude turn's credential
+## The claude turn's credential (developer mode)
 
 The turn's CLI answers with the Anthropic API key of the seat's environment variable `ANTHROPIC_API_KEY` by default; `--fact chat_auth=login` opts into the CLI's own login (the dev wrapper maps `CLAUDE_AUTH=login`).
 The key travels like the admin token: the run's `env_from` hands the seat's value to the child's environment, so it is never in `argv`, a property, a row, the journal, a log or a reply, and the Command driver masks it (`***`)
