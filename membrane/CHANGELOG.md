@@ -13,6 +13,8 @@
 
 ### Fixes
 - **The chat page asks again.** A read of the turns that timed out left "The seat did not answer the last read of the turns; the view asks again." on the page until a reload, because with the link up the page re-read only when the seat rang its doorbell. A failed read now leaves the page owing it, and the next tick asks again.
+- **A chat message with no text body no longer holds the whole queue.** A message posted by a watcher pack with a `:body` entity that has no text left the recall step waiting for ever for the oldest queued message, so every message behind it queued with no error and `/session/status` said idle. Such an ask now counts as ready. (0.7.61 has the same flaw, only for messages posted that way: the page, the door and sessions always create the body.)
+- **Picking the `claude` rung runs the CLI with no `--model` flag** whatever `seat_default` says; before, a seat with the `claude` rung but no `seat_default` ran `claude --model claude` and the CLI refused it.
 - **Float timestamps read back exactly** (`serde_json` `float_roundtrip`): a stored f64 could come back one bit off, which made a journal test fail on some runs. No stored format changes.
 
 ### Known gaps (not in 0.7.62)
