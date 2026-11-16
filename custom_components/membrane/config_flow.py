@@ -1,4 +1,7 @@
-"""The setup form (connect-only, #1143): the address of a seat the user runs, and a token for it. The token is minted on the seat
+"""The setup (#1143). The first step is a menu (operator 2026-11-15): "Run a seat inside Home Assistant" (the default: the component downloads the
+seat of its own release and runs it, seat_runner.py; the person picks the provider, Anthropic, an OpenAI-compatible endpoint or Ollama, and its key, model
+or URL; Home Assistant's own Ollama integration prefills the Ollama form; an options flow changes them later) or "Connect to a seat I run": the address
+of a seat the user runs, and a token for it. The token is minted on the seat
 (`cliffvm token mint`, docs/home-assistant.md) and kept in the entry's `serve_pass`. A token has a life: when the seat refuses it
 (a 401) Home Assistant starts the reauth flow and the user pastes a new one. The babyseat add-on announces its seat through the Supervisor
 (`async_step_hassio`): the address and the token come from it, and a later announcement keeps the entry's token current."""
@@ -11,9 +14,15 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (SelectSelector, SelectSelectorConfig, SelectSelectorMode, TextSelector, TextSelectorConfig,
+                                            TextSelectorType)
 
-from .const import CONF_SERVE_PASS, CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_PORT, DEFAULT_SERVE_USER, DOCS_URL, DOMAIN
+from .const import (CONF_ANTHROPIC_KEY, CONF_API_KEY, CONF_BASE_URL, CONF_MODE, CONF_MODEL, CONF_OLLAMA_URL, CONF_PROVIDER, CONF_SEAT_NAME,
+                    CONF_SERVE_PASS, CONF_SERVE_PORT, CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_PORT, DEFAULT_SERVE_USER, DOCS_URL, DOMAIN, MODE_INSIDE,
+                    SEAT_KEYS)
 from .seat_client import SeatAuthError, SeatClient, SeatError
+from .seat_options import DEFAULT_ANTHROPIC_MODEL, PROVIDERS, SeatOptionsError, seat_facts
+from .seat_runner import UnsupportedPlatform, free_port, release_target
 
 if TYPE_CHECKING:                                 # only a type: the step reads .config and .name
     from homeassistant.helpers.service_info.hassio import HassioServiceInfo
@@ -50,9 +59,91 @@ def ollama_hint(hass, step_id: str, placeholders: dict) -> tuple[str, dict]:
     return f"{step_id}_ollama", {**placeholders, "ollama_url": found[0], "ollama_model": found[1] or "(none set)"}
 
 
-class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+def seat_settings(entry) -> dict:
+    """The seat settings of an inside entry: the options flow's (they replace the setup's whole) or the setup's; only the keys that hold a value."""
+    src = entry.options if (entry.options or {}).get(CONF_PROVIDER) else entry.data
+    return {k: src[k] for k in SEAT_KEYS if src.get(k)}
+
+
+PASSWORD = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+URL = TextSelector(TextSelectorConfig(type=TextSelectorType.URL))
+SECRET_KEYS = {"anthropic": CONF_ANTHROPIC_KEY, "openai": CONF_API_KEY}
+
+
+def _req(key, default):
+    return vol.Required(key, default=default) if default else vol.Required(key)
+
+
+def _opt(key, default):
+    return vol.Optional(key, default=default) if default else vol.Optional(key)
+
+
+def provider_schema(hass, provider: str, cur: dict, key_required: bool) -> vol.Schema:
+    """The provider's fields. `cur`: the values to show (a key is never shown back: its field stays empty). Ollama: Home Assistant's own Ollama server and model."""
+    if provider == "ollama":
+        found = ha_ollama(hass) or ("", "")
+        fields = {_req(CONF_OLLAMA_URL, cur.get(CONF_OLLAMA_URL) or found[0]): URL, _req(CONF_MODEL, cur.get(CONF_MODEL) or found[1]): str}
+    elif provider == "openai":
+        fields = {_req(CONF_BASE_URL, cur.get(CONF_BASE_URL)): URL, _req(CONF_MODEL, cur.get(CONF_MODEL)): str, vol.Optional(CONF_API_KEY): PASSWORD}
+    else:
+        fields = {(vol.Required if key_required else vol.Optional)(CONF_ANTHROPIC_KEY): PASSWORD,
+                  _req(CONF_MODEL, cur.get(CONF_MODEL) or DEFAULT_ANTHROPIC_MODEL): str}
+    fields[_opt(CONF_SEAT_NAME, cur.get(CONF_SEAT_NAME))] = str
+    return vol.Schema(fields)
+
+
+def provider_settings(provider: str, user_input: dict, keep: dict) -> tuple[dict, dict]:
+    """-> (the settings to store, the form's errors). An empty key keeps the one in `keep` (the options flow). Checked without the network:
+    seat_options' own rules (a key, an http(s) URL, a model)."""
+    out = {CONF_PROVIDER: provider}
+    for k, v in (user_input or {}).items():
+        v = str(v or "").strip()
+        if k in (CONF_OLLAMA_URL, CONF_BASE_URL):
+            v = v.rstrip("/")
+        if v:
+            out[k] = v
+    secret = SECRET_KEYS.get(provider)
+    if secret and not out.get(secret) and keep.get(CONF_PROVIDER) == provider and keep.get(secret):
+        out[secret] = keep[secret]
+    try:
+        seat_facts(out)
+    except SeatOptionsError as e:
+        return out, {e.field: "invalid_url" if e.field in (CONF_OLLAMA_URL, CONF_BASE_URL) else "required"}
+    return {k: out[k] for k in SEAT_KEYS if out.get(k)}, {}
+
+
+def provider_picker(default: str) -> vol.Schema:
+    return vol.Schema({vol.Required(CONF_PROVIDER, default=default): SelectSelector(SelectSelectorConfig(
+        options=list(PROVIDERS), translation_key="provider", mode=SelectSelectorMode.LIST))})
+
+
+class _ProviderSteps:
+    """The provider's form, shared by the setup and the options flow: `_seat_done(settings)` ends it; `_keep` is what an empty key keeps."""
+    _keep: dict = {}
+    _key_required = True
+
+    async def _provider_step(self, provider: str, user_input):
+        errors = {}
+        if user_input is not None:
+            settings, errors = provider_settings(provider, user_input, self._keep)
+            if not errors:
+                return await self._seat_done(settings)
+        src = user_input if user_input is not None else (self._keep if self._keep.get(CONF_PROVIDER) == provider else {})
+        return self.async_show_form(step_id=provider, errors=errors, data_schema=provider_schema(self.hass, provider, src, self._key_required))
+
+    async def async_step_anthropic(self, user_input=None):
+        return await self._provider_step("anthropic", user_input)
+
+    async def async_step_openai(self, user_input=None):
+        return await self._provider_step("openai", user_input)
+
+    async def async_step_ollama(self, user_input=None):
+        return await self._provider_step("ollama", user_input)
+
+
+class MembraneConfigFlow(_ProviderSteps, config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
-    MINOR_VERSION = 4               # connect-only: the entry is {serve_url, serve_user, serve_pass}; 1.4: the old sensors and select are gone (async_migrate_entry)
+    MINOR_VERSION = 5               # 1.4: the old sensors and select are gone; 1.5: an entry runs its own seat again (mode inside), a 0.7.53 inside entry comes back as one
 
     async def _check(self, url: str, token: str, user: str = DEFAULT_SERVE_USER) -> str:
         """"" when the seat answers its health with this token, else the error key."""
@@ -78,6 +169,8 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not url or not token:
             return self.async_abort(reason="invalid_discovery")
         for entry in self._async_current_entries(include_ignore=False):
+            if entry.data.get(CONF_MODE) == MODE_INSIDE:
+                return self.async_abort(reason="already_configured")     # it runs its own seat: an add-on's seat does not take it over
             old = str(entry.data.get(CONF_SERVE_URL) or "")
             if entry.unique_id == uid or old in (url, ""):
                 if old == url and entry.data.get(CONF_SERVE_PASS) == token and entry.unique_id == uid:
@@ -110,6 +203,35 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
         if self._async_current_entries(include_ignore=False):
             return self.async_abort(reason="already_configured")
+        return self.async_show_menu(step_id="user", menu_options=["inside", "connect"])
+
+    async def async_step_inside(self, user_input=None):
+        """Run a seat inside Home Assistant: the provider first (Ollama when Home Assistant has its own Ollama server, else Anthropic)."""
+        try:
+            release_target()
+        except UnsupportedPlatform as e:
+            return self.async_abort(reason="unsupported_platform", description_placeholders={"reason": str(e)})
+        if user_input is not None and user_input.get(CONF_PROVIDER) in PROVIDERS:
+            return await getattr(self, f"async_step_{user_input[CONF_PROVIDER]}")()
+        return self.async_show_form(step_id="inside", data_schema=provider_picker("ollama" if ha_ollama(self.hass) else "anthropic"))
+
+    async def _seat_done(self, settings: dict):
+        if self._async_current_entries(include_ignore=False):
+            return self.async_abort(reason="already_configured")
+        return self.async_create_entry(title="Membrane", data={CONF_MODE: MODE_INSIDE, **settings, CONF_SERVE_PORT: free_port(DEFAULT_PORT)})
+
+    @staticmethod
+    def async_get_options_flow(entry):
+        return MembraneOptionsFlow()
+
+    @classmethod
+    def async_supports_options_flow(cls, entry) -> bool:
+        return entry.data.get(CONF_MODE) == MODE_INSIDE
+
+    async def async_step_connect(self, user_input=None):
+        """Connect to a seat the person runs: its address and a token."""
+        if self._async_current_entries(include_ignore=False):
+            return self.async_abort(reason="already_configured")
         errors = {}
         if user_input is not None:
             url = clean_url(user_input[CONF_SERVE_URL])
@@ -121,19 +243,27 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return self.async_create_entry(title="Membrane", data={
                         CONF_SERVE_URL: url, CONF_SERVE_USER: DEFAULT_SERVE_USER, CONF_SERVE_PASS: user_input[CONF_SERVE_PASS]})
                 errors["base"] = err
-        step_id, placeholders = ollama_hint(self.hass, "user", {})
+        step_id, placeholders = ollama_hint(self.hass, "connect", {})
         return self.async_show_form(step_id=step_id, errors=errors, description_placeholders=placeholders, data_schema=vol.Schema({
             vol.Required(CONF_SERVE_URL, default=(user_input or {}).get(CONF_SERVE_URL, "")): str,
             vol.Required(CONF_SERVE_PASS): str}))
 
-    async_step_user_ollama = async_step_user                         # the same form, shown with the Ollama hint
+    async_step_connect_ollama = async_step_connect                   # the same form, shown with the Ollama hint
 
     async def async_step_reauth(self, entry_data):
         """An entry with a seat address whose token was refused: a new token. An entry with none (it ran the seat inside Home Assistant,
         which this release no longer does): the address and the token of a seat that runs elsewhere."""
+        if self._get_reauth_entry().data.get(CONF_MODE) == MODE_INSIDE:
+            return await self.async_step_reauth_inside()
         if not str(self._get_reauth_entry().data.get(CONF_SERVE_URL) or ""):
             return await self.async_step_reauth_no_seat()
         return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_inside(self, user_input=None):
+        """The seat this entry runs refused its token (its key was changed or removed): a restart reads the token the seat writes at its start."""
+        if user_input is None:
+            return self.async_show_form(step_id="reauth_inside")
+        return self.async_update_reload_and_abort(self._get_reauth_entry(), data_updates={}, reason="reauth_successful")
 
     async def async_step_reauth_confirm(self, user_input=None):
         """The seat refused the token: it ran out, the seat's key changed, or it is a token of the old seat (0.7.53), which the new seat
@@ -165,3 +295,17 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if old_url:
             placeholders["url"] = old_url
         return self.async_show_form(step_id=step_id, errors=errors, data_schema=vol.Schema(fields), description_placeholders=placeholders)
+
+
+class MembraneOptionsFlow(_ProviderSteps, config_entries.OptionsFlow):
+    """The seat's settings of an inside entry: the provider, then its fields; an empty key keeps the stored one. The entry is reloaded (the seat restarts)."""
+    _key_required = False
+
+    async def async_step_init(self, user_input=None):
+        self._keep = seat_settings(self.config_entry)
+        if user_input is not None and user_input.get(CONF_PROVIDER) in PROVIDERS:
+            return await getattr(self, f"async_step_{user_input[CONF_PROVIDER]}")()
+        return self.async_show_form(step_id="init", data_schema=provider_picker(self._keep.get(CONF_PROVIDER) or "anthropic"))
+
+    async def _seat_done(self, settings: dict):
+        return self.async_create_entry(data=settings)

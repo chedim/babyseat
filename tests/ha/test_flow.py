@@ -33,11 +33,11 @@ def test_the_manifest_needs_no_pip_requirement_and_is_the_release_version():
     assert "http" not in man["dependencies"] and "frontend" not in man["dependencies"]   # no panels in slice 1
 
 
-def test_the_first_step_is_a_form_for_the_url_and_the_token_no_menu(ha, run):
+def test_connect_is_a_form_for_the_url_and_the_token(ha, run):
     pkg, hass = ha
     _, f = _flow(pkg, hass)
-    form = run(f.async_step_user())
-    assert form["type"] == "form" and form["step_id"] == "user"
+    form = run(f.async_step_connect())
+    assert form["type"] == "form" and form["step_id"] == "connect"
     assert _fields(form) == {"serve_url", "serve_pass"}
 
 
@@ -48,7 +48,7 @@ def test_a_good_url_and_token_make_the_entry_with_the_token_in_serve_pass(ha, ru
         async with FakeSeat("tok-1") as seat, aiohttp.ClientSession() as s:
             hass.session = s
             _, f = _flow(pkg, hass)
-            return seat, await f.async_step_user({"serve_url": seat.url + "/", "serve_pass": "tok-1"})
+            return seat, await f.async_step_connect({"serve_url": seat.url + "/", "serve_pass": "tok-1"})
     seat, res = run(go())
     assert res["type"] == "create_entry"
     assert res["data"] == {"serve_url": seat.url, "serve_user": "opencode", "serve_pass": "tok-1"}
@@ -61,9 +61,9 @@ def test_a_wrong_token_is_invalid_auth_and_a_dead_address_cannot_connect(ha, run
         async with FakeSeat("tok-1") as seat, aiohttp.ClientSession() as s:
             hass.session = s
             _, f = _flow(pkg, hass)
-            bad = await f.async_step_user({"serve_url": seat.url, "serve_pass": "nope"})
-            dead = await f.async_step_user({"serve_url": "http://127.0.0.1:1", "serve_pass": "x"})
-            notaurl = await f.async_step_user({"serve_url": "seat.local", "serve_pass": "x"})
+            bad = await f.async_step_connect({"serve_url": seat.url, "serve_pass": "nope"})
+            dead = await f.async_step_connect({"serve_url": "http://127.0.0.1:1", "serve_pass": "x"})
+            notaurl = await f.async_step_connect({"serve_url": "seat.local", "serve_pass": "x"})
             return bad, dead, notaurl
     bad, dead, notaurl = run(go())
     assert bad["type"] == "form" and bad["errors"] == {"base": "invalid_auth"}
@@ -82,10 +82,10 @@ def test_one_entry_per_home_assistant(ha, run):
         assert e.reason == "already_configured"
 
 
-def test_the_flow_is_version_1_minor_4(ha):
+def test_the_flow_is_version_1_minor_5(ha):
     pkg, hass = ha
     mod, _ = _flow(pkg, hass)
-    assert (mod.MembraneConfigFlow.VERSION, mod.MembraneConfigFlow.MINOR_VERSION) == (1, 4)
+    assert (mod.MembraneConfigFlow.VERSION, mod.MembraneConfigFlow.MINOR_VERSION) == (1, 5)
 
 
 # ---- async_migrate_entry: the entries the old component made ----------------------------------------------------------------
@@ -104,7 +104,7 @@ def test_a_connect_entry_keeps_its_url_and_password_and_loses_what_has_no_place_
                                         "seats": [{"id": "seat-4096", "host": "seat", "serve_port": 4096, "token": "old-seat-token", "url": "http://seat:4096"}],
                                         "active": "seat-4096"})
     _migrate(pkg, hass, e)
-    assert (e.version, e.minor_version) == (1, 4)
+    assert (e.version, e.minor_version) == (1, 5)
     assert e.data == {"serve_url": "http://seat:4096", "serve_user": "opencode", "serve_pass": "old-seat-token"}
     assert e.options == {}
 
@@ -120,18 +120,19 @@ def test_the_active_seat_of_the_zoo_is_the_one_kept(ha):
     assert e.data == {"serve_url": "http://b.lan:4097", "serve_user": "u2", "serve_pass": "tb"}
 
 
-def test_an_inside_entry_has_no_seat_to_connect_to_and_is_left_for_reauth(ha):
+def test_an_inside_entry_runs_its_seat_again_on_its_ollama(ha):
+    # 2026-11-15: the inside mode is back; an inside entry with nothing to run is in test_inside.py (reauth_no_seat)
     pkg, hass = ha
     e = fakeha.FakeConfigEntry(minor_version=2, data={"mode": "inside", "backend": "http://ollama:11434", "model": "m", "embed_model": "e"},
                                options={"seats": [{"id": "inside", "inside": True}], "active": "inside"})
     _migrate(pkg, hass, e)
-    assert e.data == {"serve_url": "", "serve_user": "opencode", "serve_pass": ""}
-    assert e.minor_version == 4
+    assert e.data == {"mode": "inside", "provider": "ollama", "ollama_url": "http://ollama:11434", "model": "m"}
+    assert e.minor_version == 5
 
 
 def test_a_migrated_entry_is_not_migrated_twice(ha):
     pkg, hass = ha
-    e = fakeha.FakeConfigEntry(minor_version=4, data={"serve_url": "http://x", "serve_user": "opencode", "serve_pass": "t"})
+    e = fakeha.FakeConfigEntry(minor_version=5, data={"serve_url": "http://x", "serve_user": "opencode", "serve_pass": "t"})
     _migrate(pkg, hass, e)
     assert hass.config_entries.updated == []
 
@@ -139,7 +140,7 @@ def test_a_migrated_entry_is_not_migrated_twice(ha):
 def test_the_strings_cover_every_step_and_error_the_flow_can_show_and_the_translation_is_the_same_file():
     s = json.loads((CC / "strings.json").read_text())
     assert s == json.loads((CC / "translations" / "en.json").read_text())
-    assert set(s["config"]["step"]) == {"user", "user_ollama", "reauth_confirm", "reauth_no_seat", "hassio_confirm",
+    assert set(s["config"]["step"]) == {"user", "inside", "anthropic", "openai", "ollama", "connect", "connect_ollama", "reauth_inside", "reauth_confirm", "reauth_no_seat", "hassio_confirm",
                                          "hassio_confirm_ollama"}
     assert {"cannot_connect", "invalid_auth", "invalid_url"} <= set(s["config"]["error"])
     assert {"already_configured", "reauth_successful"} <= set(s["config"]["abort"])

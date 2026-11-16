@@ -54,7 +54,12 @@ class SeatClient:
     def __init__(self, session: aiohttp.ClientSession, url: str, token: str, user: str = DEFAULT_SERVE_USER) -> None:
         self._s = session
         self.url = str(url or "").strip().rstrip("/")
-        self._headers = {"Authorization": "Basic " + base64.b64encode(f"{user or DEFAULT_SERVE_USER}:{token or ''}".encode()).decode()}
+        self._user = user or DEFAULT_SERVE_USER
+        self.set_token(token)
+
+    def set_token(self, token: str) -> None:
+        """The token every call sends from now on (a seat run inside Home Assistant hands its client a fresh one now and then)."""
+        self._headers = {"Authorization": "Basic " + base64.b64encode(f"{self._user}:{token or ''}".encode()).decode()}
 
     async def _call(self, method: str, path: str, timeout: float, json=None):
         """-> (status, parsed body or None). 401 raises SeatAuthError; a failure to talk raises SeatUnreachable."""
@@ -142,6 +147,16 @@ class SeatClient:
         if status != 200:
             cause = (body or {}).get("error") if isinstance(body, dict) else None
             raise SeatError(f"the seat refused the model {model}: {cause if isinstance(cause, str) else status}")
+
+    async def write_entity(self, spec: str, prop: str, value) -> str:
+        """One `entity_write` on the seat's tool route (`POST /mcp`, what the model's own tools call; any verified token is the admin) -> the reply text."""
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_write", "arguments": {"spec": spec, "prop": prop, "value": value}}}
+        status, got = await self._call("POST", "/mcp", HEALTH_TIMEOUT_S, body)
+        res = (got or {}).get("result") if isinstance(got, dict) else None
+        text = str((((res or {}).get("content") or [{}])[0] or {}).get("text") or "")
+        if status != 200 or not isinstance(res, dict) or res.get("isError"):
+            raise SeatError(f"writing {spec}.{prop} answered {status}: {text or got}")
+        return text
 
     async def prompt(self, sid: str, text: str, speaker: str = "") -> None:
         """A message the seat answers in its own time (nothing waits for the turn): the same parts as `message`."""

@@ -25,7 +25,7 @@ Version **0.7.61**. This is a rebuild: the 0.7 Python seat is retired (see [Upgr
   (a small block of c1f run in one call). Files, commands, HTTP, SQL and Home Assistant are entities the model writes to; the answer is a receipt it reads.
   The model can load its own packs and replace its own banner ([docs/cliffvm.md](docs/cliffvm.md)).
 - **Your history comes along.** A seat started over a 0.7 install imports the old chats by itself, newest first.
-- **Home Assistant.** A HACS integration makes the seat an Assist conversation agent and lets the model use the house
+- **Home Assistant.** A HACS integration runs the seat inside Home Assistant (or connects to one you run), makes it an Assist conversation agent and lets the model use the house
   ([docs/home-assistant.md](docs/home-assistant.md)).
 - **Your choice of model.** The chat answers through the `claude` CLI or any OpenAI-compatible endpoint, a local Ollama included (the boot fact `cloud_models`, or `seat_backend` for a local backend; [docs/cliffvm.md](docs/cliffvm.md)).
 - **Local and strict.** The door listens on `127.0.0.1`; every route needs a signed token; the page gets one only from this machine ([docs/auth.md](docs/auth.md)).
@@ -44,6 +44,7 @@ macOS and Linux (x86_64 and arm64); there is no Windows build. The macOS binarie
 | installer | `curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh \| sh` (installs `~/.local/share/membrane-app/<version>` and a `~/.local/bin/babyseat` link; `--version X.Y.Z` picks one) | at the 0.7.61 release |
 | Docker | `docker run -p 127.0.0.1:4096:4096 -v babyseat-data:/data -e ANTHROPIC_API_KEY -v /path/to/linux/claude:/opt/claude:ro -e CLAUDE_BIN=/opt/claude chedim/babyseat` (the image has no `claude`; the admin token: `docker exec <container> cat /data/admin.token`) | at the 0.7.61 release |
 | binary | the GitHub release's `babyseat-0.7.61-<target>.tar.gz` and its `.sha256` (targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`): check the sha256, unpack, run `bin/cliffvm serve` | at the 0.7.61 release |
+| Home Assistant | the HACS integration downloads the seat's binary and runs it inside Home Assistant (next section) | at the 0.7.61 release |
 | from source | the next section | works today |
 
 `babyseat` and `membrane` are one command: it starts `cliffvm serve` and nothing else. The old subcommands (`opencode`, `store`, `ingest`, ...) are gone.
@@ -81,15 +82,19 @@ The key is handed to the CLI child and is never written to a property, a row, th
 **Reaching the seat from another machine.** The door opens on `127.0.0.1` only. `--bind 0.0.0.0` opens it to the network (every route still needs a token), and
 `--fact host_names=seat.local` lets the page hand out its cookie for a name you reach it by; from another machine the page itself needs a token (the Home Assistant component carries one).
 
-## Connect Home Assistant
+## Home Assistant
 
 1. HACS, three dots, *Custom repositories*, `https://github.com/chedim/membrane`, category *Integration*; install **babyseat (membrane)** and restart Home Assistant.
-2. Run the seat (`cliffvm serve`, or `pip install babyseat` and `babyseat`) and add it by hand:
-   *Settings, Devices & services, Add integration, babyseat (membrane)*: the seat's address (`http://<seat-machine>:4096`; the seat needs `--bind` for that) and the token in `<data>/admin.token`.
+2. *Settings, Devices & services, Add integration, babyseat (membrane)*, then one of:
+   - **Run a seat inside Home Assistant** (the default): pick the provider (Anthropic with an API key, an OpenAI-compatible endpoint, or Ollama: Home Assistant's own Ollama server and model are filled in) and submit.
+     The integration downloads the seat of its own release for this machine (Linux x86_64/aarch64: the static musl build; macOS), checks its sha256 and every file, keeps its data in `<config>/membrane/` and runs it on 127.0.0.1;
+     *Configure* changes the provider, model or key later.
+   - **Connect to a seat I run**: the seat's address (`http://<seat-machine>:4096`; the seat needs `--bind` for that) and the token in `<data>/admin.token`.
 3. *Settings, Voice assistants*: pick the **Membrane seat** conversation agent.
 
-The integration is a thin client: it starts no seat and installs no package. It makes a hidden Home Assistant user, *Membrane*, and runs every call the model writes as that
-user, so Home Assistant's own permissions decide what the model may touch. Details, the allow-list and the entities: [docs/home-assistant.md](docs/home-assistant.md).
+An entry of 0.7.53 that ran the seat inside Home Assistant comes back by itself on its Ollama server, and the new seat imports its chat history. The integration installs no pip package. It makes a hidden Home Assistant user, *Membrane*, and runs every call the model writes as that
+user, so Home Assistant's own permissions decide what the model may touch. Details, what is not verified yet, the allow-list and the entities: [docs/home-assistant.md](docs/home-assistant.md).
+A Supervisor add-on (`addon/`) is in the repository; it is not supported.
 
 ## Upgrading from the Python seat (0.7.x)
 

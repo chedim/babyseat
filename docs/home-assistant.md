@@ -1,21 +1,19 @@
 # babyseat in Home Assistant
 
-Status: describes the component in `custom_components/membrane/` as it ships in this release (its version in `manifest.json` is the package's; the domain stays `membrane`). Tests: `pytest tests/ha` (a fake Home Assistant and a real private seat with a fake `claude`),
-`native/tests/ha_1143.rs` and `native/tests/session_1143.rs` (the routes the component calls).
+Status: describes the component in `custom_components/membrane/` as it ships in this release (its version in `manifest.json` is the package's; the domain stays `membrane`). Tests: `pytest tests/ha` (a fake Home Assistant, a fake seat binary, and a real private seat with a fake `claude`),
+`native/tests/ha_1143.rs` and `native/tests/session_1143.rs` (the routes the component calls), and `scripts/ha_core_smoke.py` (a real Home Assistant Core, by hand).
 
-The **babyseat (membrane)** integration (HACS) is a **thin client of a seat that runs outside Home Assistant**. It gives Home Assistant three things: the seat as an **Assist conversation agent**, a few **entities and services** for the seat, and the seat's
-**use of the house** (the model reads states and calls services through Home Assistant, with no Home Assistant secret on the seat). It connects to the seat's address with a token. It does **not** start a seat inside Home Assistant and it installs
-no package (`requirements: []`). Where the seat runs:
-
-- **Home Assistant OS or Supervised**: the **babyseat add-on** runs the seat under the Supervisor and announces it to Home Assistant (discovery, below): no address or token to type.
-- **Home Assistant Container or Core**: there is no add-on; run `cliffvm serve` on a machine Home Assistant can reach (the same machine, or one on your network) and give the integration its address and token.
+The **babyseat (membrane)** integration (HACS) gives Home Assistant a seat. By default it **runs the seat itself, inside Home Assistant** (operator 2026-11-15): it downloads the seat of its own release, checks it, starts it on
+this machine and keeps it running. Or it **connects to a seat you run** elsewhere, with its address and a token. Either way Home Assistant gets three things: the seat as an **Assist conversation agent**, a few **entities and services** for the seat,
+and the seat's **use of the house** (the model reads states and calls services through Home Assistant, with no Home Assistant secret on the seat). It installs no pip package (`requirements: []`).
 
 ## What it does
 
 | | |
 |---|---|
+| Setup, the default: *Run a seat inside Home Assistant*: the provider (Anthropic, an OpenAI-compatible endpoint, Ollama) and its key, model or URL; the seat is downloaded, checked, started and supervised by the component | works (checked on a real Home Assistant Core on macOS; see *What is not verified*) |
+| Setup, the other way: *Connect to a seat I run*: the seat URL + token, or the add-on's discovery; a health check at setup; a token that ran out asks for a new one (reauth) | works |
 | Assist: the seat answers Home Assistant's conversations (one seat session per HA conversation; the speaker's name goes as a first line `[HA user: <name>]`) | works |
-| Setup: found by the add-on's discovery, or a form with the seat URL + token; a health check at setup; a token that ran out asks for a new one (reauth) | works |
 | The seat uses the house: the model reads an entity's state and calls services through Home Assistant (`HaCall`), under an allow-list (default deny) and what the person exposed to Assist | works |
 | Entities: the seat reachable, a turn running, the model, turns today, last answer, last error; a select of the seat's model | works |
 | Services: `membrane.send_message`, `membrane.ask` | works |
@@ -25,18 +23,59 @@ One entry per Home Assistant: one seat.
 ## Install
 
 1. HACS -> the three dots -> *Custom repositories* -> `https://github.com/chedim/membrane`, category *Integration*. Install **babyseat (membrane)** and restart Home Assistant.
-2. Run a seat:
-   - **OS / Supervised**: install the babyseat add-on (its own page says how) and start it. *Settings -> Devices & services* shows **babyseat (membrane)** as *Discovered*: *Add*, then *Submit*. Done: skip step 3.
-   - **Container / Core**: run `cliffvm serve` where Home Assistant can reach it (next section) and read its admin token (*The token*, below).
-3. *Settings -> Devices & services -> Add integration -> babyseat (membrane)*: the seat's URL (for example `http://192.168.1.20:4096`) and the token.
-4. *Settings -> Voice assistants*: pick the **Membrane seat** conversation agent for an assistant.
+2. *Settings -> Devices & services -> Add integration -> babyseat (membrane)*. The first step asks where the seat runs:
+   - **Run a seat inside Home Assistant** (the default, next section): pick the provider, give its key, model or URL, *Submit*. Done.
+   - **Connect to a seat I run** (*Connect to a seat I run*, below): the seat's URL and its token.
+3. *Settings -> Voice assistants*: pick the **Membrane seat** conversation agent for an assistant.
 
-## Run a seat (Container / Core)
+## Run a seat inside Home Assistant
 
-The seat is `cliffvm serve` (docs/cliffvm.md; the README has the install and the quick start). The turn is answered through the `claude` CLI with an Anthropic API key in the seat's environment (`ANTHROPIC_API_KEY`; docs/auth.md).
+The component runs the native seat (`cliffvm serve`) as a child process of Home Assistant, on every Home Assistant flavour (OS, Supervised, Container, Core) whose machine is one of the release's targets (`seat_runner.py`).
+
+**The provider** (the form, then *Configure* to change it later; `seat_options.py`, the same mapping as the add-on's `addon/options.sh`):
+
+| Provider | Fields | What the seat is started with |
+|---|---|---|
+| **Anthropic** (the default) | Anthropic API key (required; from the Claude Console, scoped to a workspace), model (default `claude-sonnet-5-5`) | `--fact cloud_models=[{name: <model>, backend: anthropic, base_url: https://api.anthropic.com, api_key_env: ANTHROPIC_API_KEY}]` (Anthropic's OpenAI-compatible endpoint) and `--fact minds=...` (every mind on the model); the key in the seat's environment as `ANTHROPIC_API_KEY` |
+| **OpenAI-compatible** | endpoint address (its root: the seat adds `/v1/chat/completions`), model (required), API key (optional) | `--fact cloud_models=[{name, backend: openai, base_url, api_key_env: OPENAI_API_KEY}]` + `minds`; the key as `OPENAI_API_KEY` |
+| **Ollama** | Ollama URL, model (both prefilled from Home Assistant's own Ollama integration when it has one: its server and its conversation agent's model) | `--fact seat_backend=<url>` + `minds`; no key |
+
+Every form also takes an optional seat name (`--fact seat_name`; without one the seat asks for its name, or takes the 0.7 seat's). The form checks what it can without the network: a key that is not empty, an `http://` or `https://` URL, a model.
+A key is never on the seat's command line (any process of the host can read that), never in a log, and never shown back in a form: it is kept in the config entry (Home Assistant's `.storage`, as every integration's key is) and handed to
+the seat in its environment. The seat's environment is its own: `PATH`, `LANG`, `LC_ALL`, `TZ`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `HOME=<config>/membrane/home` and the key; never Home Assistant's (Home Assistant OS gives Home Assistant a `SUPERVISOR_TOKEN`; the seat runs model-written commands and must not hold it).
+The add-on's `claude_cli` provider is not offered: there is no `claude` CLI inside Home Assistant.
+
+**What it downloads, from where, what it checks.** The tarball of the component's OWN version (`manifest.json`) for this machine: `babyseat-<version>-<target>.tar.gz` and its `.sha256` from `https://github.com/chedim/membrane/releases/download/v<version>/`, the files `scripts/dist/build.sh --archive` makes and the release workflow publishes. The target:
+
+| Host | Target |
+|---|---|
+| Linux x86_64 | `x86_64-unknown-linux-musl` (static: runs on glibc and musl alike, Home Assistant OS and Container included) |
+| Linux aarch64 (a Raspberry Pi 4/5 on a 64-bit OS, ...) | `aarch64-unknown-linux-musl` (static) |
+| macOS arm64 / x86_64 (developers) | `aarch64-apple-darwin` / `x86_64-apple-darwin` |
+| anything else (32-bit ARM, i686, Windows, ...) | none: the menu's *Run a seat inside Home Assistant* aborts with the reason; connect to a seat on another machine |
+
+As `install.sh` does: the tarball's sha256 is checked against the `.sha256` file BEFORE it is unpacked; it is unpacked (no absolute path, no `..`, no link out of the folder) into a staging folder; its one folder must say the version in `VERSION` and match its own `MANIFEST.sha256` file by file;
+only then it is moved to `<config>/membrane/app/<version>/`. A failure leaves nothing (the setup is retried by Home Assistant, the reason shown on the entry). At every start the installed folder is checked against its manifest again (no download); a folder that no longer matches is downloaded again.
+A new release of the component downloads its own version's folder; old version folders are left on disk. All of it is off Home Assistant's event loop (aiohttp for the download, the executor for the hashing and the unpacking).
+
+**The process.** `<config>/membrane/app/<version>/bin/cliffvm serve --port <port> --bind 127.0.0.1 --data-dir <config>/membrane --fact ...`, its working folder `<config>/membrane`. The port is kept in the entry (`serve_port`): 4096 when it was free at the setup, else a free one; a port taken at a later start is replaced by a free one (and kept).
+The seat is ready when `GET /global/health` answers with the admin token it writes at its start (`<config>/membrane/admin.token`), within 180 seconds; the component then talks to `http://127.0.0.1:<port>` with that token, and mints a fresh one (`cliffvm token mint`, 30 days) every day so a seat that runs for months never holds an expired one.
+The seat's output goes to Home Assistant's log as `membrane seat: <line>` (stdout at debug, stderr at warning; anything that looks like a key or a token is masked). When the seat exits it is started again after 5 s, doubling up to 300 s for each exit that came within 300 s of its start;
+after 5 such exits in a row it is not restarted, and a **repair** (*Settings -> Repairs*) shows its last words: fix the key, model or URL (*Configure*), then reload the integration. Unloading or reloading the entry, and Home Assistant's stop, send the seat SIGTERM (and SIGKILL after 30 s) and wait for it. A seat left running by a Home Assistant that died
+(its pid in `<config>/membrane/seat.pid`, its command line naming this data folder) is stopped before a new one starts, so two seats never share the store.
+
+**Where its data is.** `<config>/membrane/`: `seat.sqlite` (the store), `door.secret`, `admin.token`, `home/` (its HOME), `app/<version>/` (the seat itself), `seat.pid`. The 0.7.53 component's seat kept its store in `<config>/membrane/.membrane/`: the new seat finds it there by itself (*Upgrading from 0.7.53*).
+
+**Change the model.** *Settings -> Devices & services -> babyseat (membrane) -> Configure*: the provider, then its fields (an empty key keeps the stored one). The seat restarts with them. The seat itself keeps its pick in its store and takes the `minds` fact only at its first start, and its options route (what the model select posts) takes only an Ollama model or a claude rung; so at every start, when the seat runs on another model than the entry's, the component writes the entry's model to every mind (`Minds:seat` `loops`, `cortex`, `workers`, `seat_default`, with `entity_write` on the seat's `/mcp`, as the `minds` fact would). The seat's own model select (*Entities*) picks among the models the seat lists without a restart, until the next start (it does not list an Anthropic or OpenAI-compatible model).
+
+## Connect to a seat I run
+
+The seat is `cliffvm serve` (docs/cliffvm.md; the README has the install and the quick start) on a machine Home Assistant can reach (the same machine, or one on your network). Give the form its URL (for example `http://192.168.1.20:4096`) and its admin token (*The token*, below).
 
 **The seat listens on 127.0.0.1 by default.** Home Assistant on the same machine reaches it as it is. A seat on another machine must be started with `--bind <address>` (for example `cliffvm serve --bind 0.0.0.0` on a network you trust:
 every route still needs a token, but the port is open to the network). `scripts/seat` (the dev wrapper) passes every `cliffvm serve` option through, `--bind` included.
+
+A Supervisor add-on that runs the seat (`addon/`) exists in the repository; it is not supported, and its discovery (below) is the only part of it the component knows.
 
 ## The add-on's discovery
 
@@ -45,16 +84,16 @@ Home Assistant hands it to the component's `async_step_hassio` (`config_flow.py`
 
 - builds `http://<host>:<port>` and keys the entry by `<host>:<port>` (the unique id);
 - **when no entry exists**: checks the seat's health with the token (as the form does; a refused token aborts with *invalid_auth*, a seat that does not answer with *cannot_connect*) and asks you to confirm (Home Assistant's rule: a discovery never makes an entry by itself); the entry is `{serve_url, serve_user, serve_pass}` like the form's;
-- **when the entry of this seat exists** (the same unique id, an entry typed by hand with the same address, or an entry that ran the seat inside Home Assistant and has no address yet): stores the announced address and token and sets the entry up again, with no step of yours. The add-on announces at every start, so a token the seat refused is repaired the next time the add-on starts; an announcement that changes nothing does nothing;
-- **when the entry names another seat**: leaves it alone (one entry per Home Assistant).
+- **when the entry of this seat exists** (the same unique id, an entry typed by hand with the same address, or an old entry with no address yet): stores the announced address and token and sets the entry up again, with no step of yours. An announcement that changes nothing does nothing;
+- **when the entry runs its own seat inside Home Assistant, or names another seat**: leaves it alone (one entry per Home Assistant).
 
-**The Ollama hint.** When Home Assistant has its own Ollama integration, the discovery's confirmation and the manual form say which server and model it uses (`ha_ollama` in `config_flow.py`: the first `ollama` entry with a `url`; the model of its conversation subentry, else the entry's `model`). This tells you how to make the seat use the same server: set the add-on's Ollama URL and model options to them, or start `cliffvm serve` with `--fact seat_backend=<url>` and pick the model in the seat's model select. It is only a hint: the component reads Home Assistant's entries, makes no network call, configures nothing and writes nothing to the seat. Without an Ollama entry the forms are the plain ones (the hint has its own step ids, `hassio_confirm_ollama` and `user_ollama`).
+**The Ollama hint.** When Home Assistant has its own Ollama integration, the discovery's confirmation and the connect form say which server and model it uses (`ha_ollama` in `config_flow.py`: the first `ollama` entry with a `url`; the model of its conversation subentry, else the entry's `model`). The inside path's Ollama form is prefilled with the same two. Reading them makes no network call.
 
-An announcement without a host or a token aborts (*invalid_discovery*). How the add-on runs the seat is the add-on's own page; this is its whole contract with the component.
+An announcement without a host or a token aborts (*invalid_discovery*).
 
 ## The token
 
-Every route of the seat needs a token, Home Assistant's calls too (docs/auth.md). The simplest token is the one the seat writes at every start, `<data dir>/admin.token` (the path is printed at start). Or mint one on the seat's machine:
+Every route of the seat needs a token, Home Assistant's calls too (docs/auth.md). A seat run inside Home Assistant needs nothing from you: the component reads the token the seat writes. For a seat you run, the simplest token is the one the seat writes at every start, `<data dir>/admin.token` (the path is printed at start). Or mint one on the seat's machine:
 
 ```
 cliffvm token mint --sub ha --name "Home Assistant" --ttl 30d --secret-file <data dir>/door.secret
@@ -68,17 +107,20 @@ There are no users: every valid token is the admin, so any token of the seat giv
 Home Assistant polls the seat's `GET /global/health` every 60 seconds with the token. When the seat answers `401` (the token ran out, or the seat's secret changed), Home Assistant shows the integration as needing attention
 (*Settings -> Devices & services -> Membrane -> Reconfigure*): paste a new token. A turn that meets the `401` first tells the person in Assist, in words, to do the same. A seat that is down is a retry, not a reauth.
 
-The reauth form says where the new token is: `<data dir>/admin.token` (new at every start of the seat), a minted one, or, for the add-on, the add-on's log (and the add-on's discovery stores it by itself at its next start). An entry that ran the seat inside Home Assistant gets its own reauth form, with the address too (*Upgrading from 0.7.53*, below).
+The reauth form says where the new token is: `<data dir>/admin.token` (new at every start of the seat), a minted one, or, for the add-on, the add-on's log (and the add-on's discovery stores it by itself at its next start). For a seat run inside Home Assistant (its `door.secret` was changed or removed) the reauth is one *Submit* that restarts the seat: the component reads the token the restarted seat writes.
+An old entry with no seat and nothing to run gets its own form (*Upgrading from 0.7.53*).
 
 ## Upgrading from 0.7.53
 
-**The seat no longer runs inside Home Assistant.** 0.7.53's "Inside Home Assistant" mode ran the Python seat as Home Assistant's child process; that seat is gone, and the component only connects. HACS updates the component; at the first start the entry is migrated (`async_migrate_entry`):
+0.7.53's "Inside Home Assistant" mode ran the Python seat as Home Assistant's child process, thinking with an Ollama server. HACS updates the component; at the first start the entry is migrated (`async_migrate_entry`, entry version 1.5):
 
-- **An entry that ran the seat inside Home Assistant** has no seat to connect to: it is kept with an empty address and token, and Home Assistant shows it as needing attention. The form says what happened and what to do: on **Home Assistant OS or Supervised**, install the **babyseat add-on** and start it (its discovery fills the entry in by itself, no form to fill); on **Container or Core**, run `cliffvm serve` on a machine Home Assistant can reach and enter its address and token in the form.
-- **An entry that connected to a seat** keeps its address, but **the old seat's tokens are not valid on the new seat** (the new seat has its own key): the reauth asks for the new seat's admin token (`<data dir>/admin.token`, the add-on's log, or the add-on's discovery at its next start when the address is the add-on's).
+- **An entry that ran the seat inside Home Assistant comes back by itself.** It becomes an inside entry with provider **Ollama**, its old Ollama URL (`backend`) and its model (the options' pick, else the setup's; the embedding model is dropped: the new seat has none of its own). The setup downloads the new seat and starts it: nothing for the person to do.
+  The old entry of the "zoo" (several seats) whose active seat was the inside one is handled the same way. An inside entry whose stored settings hold no Ollama URL or model (none was ever written by 0.7.53's form, but a hand-edited entry may) has nothing to run: it is kept with an empty address and Home Assistant asks for attention with the form *This entry has no seat*: remove the integration and add it again with *Run a seat inside Home Assistant*, or give the address and token of a seat that runs elsewhere.
+- **An entry that connected to a seat** keeps its address, but **the old seat's tokens are not valid on the new seat** (the new seat has its own key): the reauth asks for the new seat's admin token.
 
-**What carries over**: the **chat history**. A new seat that can read the old seat's folder (`<config>/membrane/`, which the old component leaves alone) imports the old chats by itself, newest first, and offers the model the old seat's name (docs/cliffvm.md, "The history cutover"); `cliffvm serve --legacy <path>` names another folder.
-**What does not**: the old field's **entities and goals**, the **settings**, the **model setup** (backend, model, embed model: the new seat answers through the `claude` CLI, docs/auth.md), the **tokens**, and the **`HaAllow` allow-lists** (*The seat uses the house*, below): recreate the allow-list entries on the new seat, since with none every call of the model into the house is denied. The old component's sidebar panel, landing page, relay, speech input, several seats (the zoo) and its 17 metric entities are not in the component (the metric entities are removed from the entity registry at the migration, *Entities* below).
+**The history.** The new seat's data folder is `<config>/membrane/`, the folder the 0.7.53 component's seat used; its old store is `<config>/membrane/.membrane/field.sqlite/field.sqlite3`. The history cutover (docs/cliffvm.md, "The history cutover") looks in `<data>/.membrane` among its places, so the new seat finds the old store by itself, opens it read-only and imports the chat history in the background, newest first, and offers the model the old seat's name.
+The new seat's own files (`seat.sqlite`, `door.secret`, `admin.token`, `app/`, `home/`, `seat.pid`) sit beside `.membrane/`, which is never written. The 0.7.53 seat's `home/` folder is the new seat's HOME as well; its `seat.log` is left as it was.
+**What does not carry over**: the old field's **entities and goals**, the **settings**, the **embedding model**, the **tokens**, and the **`HaAllow` allow-lists** (*The seat uses the house*, below): recreate the allow-list entries on the new seat, since with none every call of the model into the house is denied. The old component's sidebar panel, landing page, relay, speech input, several seats (the zoo) and its 17 metric entities are not in the component (the metric entities are removed from the entity registry at the migration, *Entities* below).
 
 ## The seat uses the house
 
@@ -114,13 +156,26 @@ A failed turn is spoken as an error with the seat's own cause, for example `The 
 
 ## Where things are
 
-The entry is `{serve_url, serve_user, serve_pass}`; `serve_pass` holds the token; its unique id is `membrane` (made by the form) or `<host>:<port>` (made or repaired by the add-on's discovery). The component has no files of its own on disk and starts no process (one background task per entry pulls the seat's calls). The old component's seat directory `<config>/membrane/` (data of a seat it started) is left alone; a new seat finds its chat history by itself (`<data>/.membrane`, `/config/membrane/.membrane`, or `cliffvm serve --legacy <path>`; docs/cliffvm.md, "The history cutover").
+A seat run inside Home Assistant: the entry is `{mode: inside, provider, model, <the provider's key or URL>, seat_name?, serve_port}` (the options flow's settings, when there are some, replace the provider's fields); its unique id is `membrane`. Its files are `<config>/membrane/` (*Run a seat inside Home Assistant*, "Where its data is"); its process is the one child of Home Assistant the component starts.
+A seat you run: the entry is `{serve_url, serve_user, serve_pass}`; `serve_pass` holds the token; its unique id is `membrane` (made by the form) or `<host>:<port>` (made or repaired by the add-on's discovery); the component has no files of its own on disk and starts no process.
+Either way one background task per entry pulls the seat's calls.
+
+## What is not verified
+
+- **The Linux builds inside a real Home Assistant.** The inside path ran on a real Home Assistant Core on macOS (the apple-darwin build, `scripts/ha_core_smoke.py`). The static musl builds are what Linux hosts download; they have not been run by this component on Home Assistant OS, Supervised, Container or Core on Linux, nor on a Raspberry Pi, nor under an Android proot.
+- **A real GitHub download.** The download, its sha256 and manifest checks ran against a local release folder (the entry's `release_base`, which only the tests set). The GitHub release of a version must carry the tarballs and their `.sha256` files for the inside path to start; before a release is published, an inside entry stays *not ready* (Home Assistant retries) with the download's error.
+- **The Anthropic provider end to end.** The tests use a fake OpenAI-compatible endpoint; Anthropic's OpenAI-compatible endpoint with a real key was not called.
+- **Home Assistant OS's own limits** (the size of `/config`, the memory of a small board while the seat runs next to Home Assistant).
 
 ## Tests
 
 `pytest tests/ha` runs the component against a fake Home Assistant (tests/ha/fakeha.py; the discovery: `test_discovery.py`, the two reauth forms: `test_auth.py`) and, where a `cliffvm` binary is built (`cd native && cargo build --release --no-default-features --features bin`; or `CLIFFVM_BIN=`), against a real seat with a fake `claude`. `native/tests/session_1143.rs` and `native/tests/ha_1143.rs` pin the routes the component calls (the calls, the allow-list, the journal replay).
 
+`test_seat_options.py` (the provider -> facts mapping, no secret in argv), `test_seat_runner.py` (the platform map; the download's checks: a wrong sha256, a file changed after the manifest, no sidecar, another version, a member outside the folder; the process with a fake `cliffvm`: the environment, the start error, the boot timeout, SIGTERM then kill, the restart backoff and the give-up, the token refresh, the orphan) and `test_inside.py` (the menu, the provider forms, the setup that downloads and starts the seat, the stop, the repair, the options flow, the migration of a 0.7.53 inside entry).
+
 `scripts/ha_core_smoke.py` (by hand, not in CI) runs the same component in a REAL, throwaway Home Assistant Core: a venv with `pip install homeassistant`, run with that venv's
-python and `--cliffvm <binary>`. It starts a private seat (the launcher, a fake `claude`, no model server), a `hass` on 127.0.0.1 (onboarded over REST), and drives the manual form,
+python and `--cliffvm <binary>`. It starts a private seat (the launcher, a fake `claude`, no model server), a `hass` on 127.0.0.1 (onboarded over REST), and drives the connect form,
 Assist, the services, a refused token and its repair, a restart and the removal over REST, then the add-on's discovery, the migration of an old entry and the Ollama hint in-process
-through Home Assistant's own flow manager; it removes everything it started (`--keep` keeps the logs). Last run: Home Assistant 2026.11.1 on Python 3.14, every check passed.
+through Home Assistant's own flow manager, then the inside path in another `hass`: a release tarball built from `--cliffvm`, a fake OpenAI-compatible endpoint, a fake 0.7 store, the menu -> inside -> openai flow over REST,
+Assist through the seat the component started, the history cutover, the options flow, a reload, Home Assistant's stop, a start that downloads the tarball from a local release folder, and the removal (the seat process gone after each);
+it removes everything it started (`--keep` keeps the logs). Last run (2026-11-15): Home Assistant 2026.11.1 on Python 3.14, macOS arm64, 76 of 76 checks passed.

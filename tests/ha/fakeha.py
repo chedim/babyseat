@@ -30,6 +30,10 @@ class ConfigEntryNotReady(Exception):
     pass
 
 
+class ConfigEntryError(Exception):
+    """HA's: the setup failed for good (no retry); the entry shows the message."""
+
+
 class UpdateFailed(Exception):
     pass
 
@@ -171,6 +175,7 @@ class FakeConfigEntry:
         self.reauth_started = 0
         self.unloaders = []
         self.tasks = []
+        self.update_listeners = []
 
     def async_create_background_task(self, hass, coro, name=None):
         import asyncio
@@ -185,7 +190,15 @@ class FakeConfigEntry:
         self.unloaders.append(fn)
 
     def add_update_listener(self, fn):
-        return lambda: None
+        self.update_listeners.append(fn)
+        return lambda: self.update_listeners.remove(fn) if fn in self.update_listeners else None
+
+    async def run_unloaders(self):
+        """HA's _async_process_on_unload: every async_on_unload callback, newest first (a coroutine is awaited)."""
+        while self.unloaders:
+            r = self.unloaders.pop()()
+            if hasattr(r, "__await__"):
+                await r
 
 
 class FakeConfigEntries:
@@ -243,6 +256,26 @@ class FakeHass:
         self.auth = types.SimpleNamespace(async_get_user=self._get_user, async_get_users=self._get_users,
                                           async_create_system_user=self._create_system_user, async_remove_user=self._remove_user)
         self.tasks = []
+        self.config = types.SimpleNamespace(config_dir="/config", path=lambda *p: str(Path(self.config.config_dir, *p)))
+        self.issues = {}                          # (domain, issue_id) -> what async_create_issue was given
+        self.bus = types.SimpleNamespace(async_listen_once=self._listen_once, listeners=[])
+
+    def _listen_once(self, event, fn):
+        item = (event, fn)
+        self.bus.listeners.append(item)
+        return lambda: self.bus.listeners.remove(item) if item in self.bus.listeners else None
+
+    async def fire(self, event):
+        """The bus fires `event`: each once-listener runs (awaited) and is removed."""
+        for item in [x for x in self.bus.listeners if x[0] == event]:
+            self.bus.listeners.remove(item)
+            r = item[1](types.SimpleNamespace(event_type=event))
+            if hasattr(r, "__await__"):
+                await r
+
+    async def async_add_executor_job(self, fn, *args):
+        import asyncio
+        return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
 
     async def _get_user(self, uid):
         return self.users.get(uid)
@@ -313,6 +346,9 @@ class ConfigFlow:
         return {"type": "form", "step_id": step_id, "data_schema": data_schema, "errors": errors or {},
                 "description_placeholders": description_placeholders or {}}
 
+    def async_show_menu(self, *, step_id, menu_options, description_placeholders=None):
+        return {"type": "menu", "step_id": step_id, "menu_options": list(menu_options), "description_placeholders": description_placeholders or {}}
+
     def async_create_entry(self, *, title, data, options=None, description=None):
         self._done = True
         return {"type": "create_entry", "title": title, "data": dict(data), "options": options}
@@ -334,6 +370,46 @@ class ConfigFlow:
         self.hass.config_entries.async_schedule_reload(entry.entry_id)
         self._done = True
         return {"type": "abort", "reason": reason}
+
+
+class OptionsFlow:
+    """HA's options flow: `config_entry` is the entry it changes (HA sets it); create_entry's data becomes the entry's options."""
+    hass = None
+    config_entry = None
+
+    def async_show_form(self, *, step_id, data_schema=None, errors=None, description_placeholders=None, last_step=None):
+        return ConfigFlow.async_show_form(self, step_id=step_id, data_schema=data_schema, errors=errors, description_placeholders=description_placeholders)
+
+    def async_show_menu(self, *, step_id, menu_options, description_placeholders=None):
+        return ConfigFlow.async_show_menu(self, step_id=step_id, menu_options=menu_options)
+
+    def async_create_entry(self, *, data, title=""):
+        self.hass.config_entries.async_update_entry(self.config_entry, options=data)
+        return {"type": "create_entry", "data": dict(data)}
+
+    def async_abort(self, *, reason, description_placeholders=None):
+        return {"type": "abort", "reason": reason}
+
+
+class _Selector:
+    def __init__(self, config=None):
+        self.config = config
+
+    def __call__(self, value):
+        return value
+
+
+class _SelectorConfig(dict):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+
+
+def _create_issue(hass, domain, issue_id, **kw):
+    hass.issues[(domain, issue_id)] = kw
+
+
+def _delete_issue(hass, domain, issue_id):
+    hass.issues.pop((domain, issue_id), None)
 
 
 class DataUpdateCoordinator:
@@ -420,13 +496,13 @@ def load(monkeypatch, session=None):
     mods = {
         "homeassistant": ha,
         "homeassistant.config_entries": _mod("homeassistant.config_entries", ConfigFlow=ConfigFlow, ConfigEntry=FakeConfigEntry,
-                                             ConfigFlowResult=dict),
+                                             ConfigFlowResult=dict, OptionsFlow=OptionsFlow),
         "homeassistant.core": _mod("homeassistant.core", HomeAssistant=FakeHass, callback=lambda f: f, ServiceCall=ServiceCall, Context=Context,
                                    SupportsResponse=SupportsResponse, ServiceResponse=dict),
-        "homeassistant.const": _mod("homeassistant.const", Platform=types.SimpleNamespace(
+        "homeassistant.const": _mod("homeassistant.const", EVENT_HOMEASSISTANT_STOP="homeassistant_stop", Platform=types.SimpleNamespace(
             CONVERSATION="conversation", SENSOR="sensor", BINARY_SENSOR="binary_sensor", SELECT="select")),
         "homeassistant.exceptions": _mod("homeassistant.exceptions", ConfigEntryAuthFailed=ConfigEntryAuthFailed,
-                                         ConfigEntryNotReady=ConfigEntryNotReady, HomeAssistantError=HomeAssistantError,
+                                         ConfigEntryNotReady=ConfigEntryNotReady, ConfigEntryError=ConfigEntryError, HomeAssistantError=HomeAssistantError,
                                          ServiceNotFound=ServiceNotFound, Unauthorized=Unauthorized),
         "homeassistant.auth": _mod("homeassistant.auth"),
         "homeassistant.auth.const": _mod("homeassistant.auth.const", GROUP_ID_USER="system-users", GROUP_ID_ADMIN="system-admin"),
@@ -453,10 +529,19 @@ def load(monkeypatch, session=None):
                                                      async_get_clientsession=lambda h: h.session),
         "homeassistant.helpers.update_coordinator": _mod("homeassistant.helpers.update_coordinator", DataUpdateCoordinator=DataUpdateCoordinator,
                                                          UpdateFailed=UpdateFailed, CoordinatorEntity=_CoordinatorEntity),
+        "homeassistant.helpers.selector": _mod(
+            "homeassistant.helpers.selector", SelectSelector=_Selector, SelectSelectorConfig=_SelectorConfig, TextSelector=_Selector,
+            TextSelectorConfig=_SelectorConfig, SelectSelectorMode=types.SimpleNamespace(LIST="list", DROPDOWN="dropdown"),
+            TextSelectorType=types.SimpleNamespace(PASSWORD="password", URL="url", TEXT="text")),
+        "homeassistant.helpers.issue_registry": _mod("homeassistant.helpers.issue_registry", async_create_issue=_create_issue,
+                                                     async_delete_issue=_delete_issue,
+                                                     IssueSeverity=types.SimpleNamespace(ERROR="error", WARNING="warning")),
         "homeassistant.helpers.entity_platform": _mod("homeassistant.helpers.entity_platform", AddConfigEntryEntitiesCallback=object),
     }
     comps.conversation = mods["homeassistant.components.conversation"]
     helpers.entity_registry = mods["homeassistant.helpers.entity_registry"]
+    helpers.selector = mods["homeassistant.helpers.selector"]
+    helpers.issue_registry = mods["homeassistant.helpers.issue_registry"]
     try:
         import voluptuous  # noqa: F401
     except ImportError:
