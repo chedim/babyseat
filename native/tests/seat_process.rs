@@ -318,6 +318,23 @@ fn an_entity_query_without_full_returns_a_small_reply_for_an_entity_with_large_s
 }
 
 #[test]
+fn an_entity_query_with_props_returns_only_those_properties_of_each_row() {
+    let (mut run, port) = seat("props", true);
+    let big = "x".repeat(200_000);
+    call(port, "entity_write", json!({"spec": "Heavy:one", "prop": "blob", "value": big}));
+    call(port, "entity_write", json!({"spec": "Heavy:one", "prop": "state", "value": "done"}));
+    call(port, "entity_write", json!({"spec": "Heavy:two", "prop": "blob", "value": "small"}));
+    wait("the entities stored", || { let (r, _) = call(port, "entity_query", json!({"q": "kind:Heavy"})); (r.contains("Heavy:one") && r.contains("Heavy:two")).then_some(()) });
+    let (r, e) = call(port, "entity_query", json!({"q": "kind:Heavy", "props": ["state", "nope"]}));
+    assert!(!e, "{r}");
+    assert!(r.len() < 400, "props keeps the reply small: {} bytes", r.len());
+    assert!(r.contains("Heavy:one (Heavy)") && r.contains("Heavy:two (Heavy)"), "every row still lists eid and class: {r}");
+    assert!(r.contains("state") && r.contains("done"), "the asked property is there: {r}");
+    assert!(!r.contains("blob") && !r.contains("nope"), "a property not asked, or a name the row lacks, is absent: {r}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
 fn request_rows_of_an_earlier_run_are_retired_when_the_seat_starts() {
     let dir = tmp("sweep");
     {

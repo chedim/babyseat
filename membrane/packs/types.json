@@ -1103,6 +1103,7 @@
       "Request.mc_q_off": "Num",
       "Request.mc_q_on": "Bool",
       "Request.mc_q_other": "List(Text)",
+      "Request.mc_q_props": "Text",
       "Request.mc_q_rows": "Any",
       "Request.mc_q_terms": "List(Text)",
       "Request.mc_q_text": "Text?",

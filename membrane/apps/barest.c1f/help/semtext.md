@@ -115,7 +115,7 @@ There are two ways to look back, and they answer different questions:
 - RECALL (`Banner:recall` for the message you answer, the reply of a `Memory` write and its `associations`, `recall` of any SemText) is RANKED: the sentences closest to the ask, best first, found
   by shared words and things, by meaning and by the texts that moved the same things in the field, each line with the id of the text it came from and when that text last changed. Use it to find
   what you did not know to look for.
-- A DIRECT SEARCH reads the entities themselves: `entity_query {q: "kind:ChatMessage", full: true}` lists the messages with their stored properties (`Help:c1f`, "Finding entities"), `entity_read`
+- A DIRECT SEARCH reads the entities themselves: `entity_query {q: "kind:ChatMessage", props: ["text"]}` lists the messages with their `text` (`Help:c1f`, "Finding entities"), `entity_read`
   reads one, and a clifflet filters what is loaded. It is EXACT: it gives what is stored, in id order, and a word is found where it is written.
 
 Recall lines are context, not facts: a line may be old, cut short or from someone else's text. Before you rely on one, read the text it names (its id is on the line) and check it.
