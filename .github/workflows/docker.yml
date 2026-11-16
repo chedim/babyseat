@@ -96,9 +96,9 @@ jobs:
       - name: the image runs as a non-root user, exposes 4096, has a /data volume and no claude CLI
         run: |
           set -eu
-          [ "$(docker run --rm babyseat:ci id -u)" = 10001 ]
+          [ "$(docker run --rm --entrypoint id babyseat:ci -u)" = 10001 ]
           docker inspect babyseat:ci --format '{{.Config.ExposedPorts}} {{.Config.Volumes}}' | grep -q '4096/tcp.*/data'
-          docker run --rm babyseat:ci sh -c '! command -v claude'
+          docker run --rm --entrypoint sh babyseat:ci -c '! command -v claude'
           docker run --rm babyseat:ci --version | grep -q "${{ steps.ver.outputs.version }}"
       - name: the seat answers (health 401 without the token, 200 with the admin token)
         run: |
