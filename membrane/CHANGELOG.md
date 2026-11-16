@@ -1,3 +1,33 @@
+## v0.7.62 (2026-11-16) — A local model by default, a first-run window, Cron and the edit pack
+
+### Upgrading from 0.7.61 (read this first)
+- **The seat no longer defaults to the `claude` CLI.** With no model facts, no model is chosen: a message starts nothing and says how to pick one. The page opens a window with a model dropdown (the chat models the local Ollama lists, embedding models left out) and a name field, at every load until both are set. The *Model* row of Settings is the same dropdown. A seat whose store already has a model (the 0.7.61 default `claude` was stored) keeps it. To keep the `claude` CLI as the model, start with `--fact seat_default=claude` (developer mode).
+- **Home Assistant** is unchanged: the component still passes its own model facts.
+- **Docker.** 0.7.61's image was never pushed; 0.7.62 is the first image of the Rust seat and is pushed as stable (`latest`). It has no `claude` CLI; point it at an Ollama (`--fact seat_backend=http://host.docker.internal:11434`) and pick the model in the page.
+
+### The seat
+- **Ollama is the default backend** (`seat_backend`, `http://127.0.0.1:11434`); the model is the person's to pick, there is no default model name. Docs: README "Which model answers".
+- **`entity_query` takes `props`:** `entity_query {q, k, props: ["text", "state"]}` returns each row's `eid (Class)` and only those stored properties. `full: true` stays as an explicit opt-in; the help no longer teaches it, because on a class like ChatMessage it returned about 190,000 characters and the model could not use the reply.
+- **The edit pack** (`Edit:<name> {path, old, new, base_mtime}`, from Memo): a hunk applied to a file by a write; `old` must match exactly once, the file is read again at apply time, an optional `mtime` lock refuses a changed file, and `revert` puts the pre-image back (refused if the file changed since). A draft changes nothing: reading `diff` and `problem` is the dry run.
+- **The Cron entity** (`Cron:<name> {schedule, enabled}`): a 5-field cron schedule or `@every <n><unit>` (s, m, h, d) in the seat's local time zone. When it matches, the entity's `fired = {id, at}` is written and any pack reacts with a setter on it. A bad schedule is refused with a reason (`problem`); `next`, `last` and `dropped` are readable. After a restart missed runs are skipped. The timer is a native effect journalled once (a replay never re-fires). Not supported: month and day names, `@daily`. Daylight-saving transitions are untested (a fire inside the transition hour may be an hour off).
+
+### Fixes
+- **The chat page asks again.** A read of the turns that timed out left "The seat did not answer the last read of the turns; the view asks again." on the page until a reload, because with the link up the page re-read only when the seat rang its doorbell. A failed read now leaves the page owing it, and the next tick asks again.
+- **Float timestamps read back exactly** (`serde_json` `float_roundtrip`): a stored f64 could come back one bit off, which made a journal test fail on some runs. No stored format changes.
+- **Two CI-only flakes** (the float one above and a race in `field_active_1143`) no longer fail releases.
+
+### Known gaps (not in 0.7.62)
+- **Goals and decision cards are not in the standalone seat** (the old goal graph was Python-era); the old `tool:clock` was not ported either (Cron is the new tool for time).
+- The history import counts per conversation, not per message, and shows "0 of N" until a conversation finishes.
+- No slow-request log: a stall of more than a few seconds leaves no trace in the seat's log.
+- A way to hold a secret in the seat (today a key is an environment variable); `born_by`/`births_to` are not taught where the model reads about the chat.
+
+### For later
+- Goals and decision cards on the Rust seat; #1101 (unknown tool names call cliffhanger methods through a context stack) redone on c1f.
+- The 0.7.64 UI: entity panels with a chat per entity (top third details, bottom two thirds a separate chat about it; separate history, shared memory).
+- A git-backed multi-hunk layer for the edit pack; a content hash instead of `mtime` (needs a builtin the operator approves).
+- Sensors and watchers, with a heartbeat design; a secrets design; the cliff debugger (the `phase-trace` seed is in the tree).
+
 ## v0.7.61 (2026-11-15) — The standalone seat, a memory that finds by meaning, and Home Assistant
 
 
