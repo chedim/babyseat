@@ -233,6 +233,25 @@ scenario('with the link up the history is read only when the doorbell rings: no 
   w.tick(0.8); assert.equal(reads(), 6, 'no link: the poll timers are the fallback');
 });
 
+// 5b2. a read that does not succeed leaves the page owing it: with the link up the next tick asks again, without a new ring (it used to wait for the next ring, so the note "the view asks again" was a lie)
+scenario('with the link up a read that failed or timed out is asked again without a new ring; a good answer hides the note and the page is quiet', () => {
+  const w = world(); w.open();
+  w.feed('Link:page', 'Link', { up: true });
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  const reads = () => w.reqs('history').length;
+  w.feed('membrane::Doorbell:chat', 'Doorbell', { at: 100 });
+  w.tick(0.1); assert.equal(reads(), 2);
+  w.fail('history', 'timeout after 10 s');
+  assert.equal(w.get('DomNode:chat:pollnote').hidden, false, 'the failure is said');
+  w.tick(0.1); assert.equal(reads(), 3, 'asked again without a new ring');
+  w.fail('history', 'timeout after 10 s');
+  w.tick(0.1); assert.equal(reads(), 4, 'and again while it fails');
+  w.reply('history', 200, page([MSGS[0], MSGS[1]]));
+  assert.equal(w.get('DomNode:chat:pollnote').hidden, true, 'a good answer hides the note');
+  for (let i = 0; i < 100; i++) w.tick(0.1);
+  assert.equal(reads(), 4, 'no extra read after a good answer');
+});
+
 // 5c. THE REAL ENGINE PATH: the engine names ONE subscription, the doorbell's `at`, and a value the link feeds rings it (the same counts as 5b, with the hooks instead of a local entity)
 scenario('the engine subscribes only the doorbell, and a value fed by the link is one read of the history', () => {
   const w = world(); w.f.set_ns('pAAAAAAAA'); w.open();
