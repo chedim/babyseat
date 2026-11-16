@@ -77,6 +77,31 @@ fn store() -> std::path::PathBuf {
     dir
 }
 
+/// `?m=4` and the later `?m=100` are two answers at two instants, and the seat's own background entities (Embed:queue, Legacy:seat, Stats:eval ...) are written between them, so the first four of
+/// the second need not be the first answer's four. What holds at any instant: the four are newest first, and every row of the later answer that is left out of the four is either not newer than the
+/// oldest of the four or has been written since (it is not one of this test's own, untouched `Zed:` rows).
+fn newest_four_hold(a: &J, all: &J) {
+    let rows = |x: &J| x["nodes"].as_array().unwrap().iter().map(|n| (n["id"].as_str().unwrap().to_string(), n["updated"].as_f64().unwrap())).collect::<Vec<_>>();
+    let (four, later) = (rows(a), rows(all));
+    assert_eq!(four.len(), 4, "{a}");
+    assert!(four.windows(2).all(|w| w[0].1 >= w[1].1), "newest first: {a}");
+    let oldest = four.iter().map(|r| r.1).fold(f64::MAX, f64::min);
+    for (id, u) in &later {
+        if !four.iter().any(|r| &r.0 == id) { assert!(*u <= oldest || !id.starts_with("Zed:"), "{id} ({u}) is newer than the four and was not written since: {a} / {all}"); }
+    }
+}
+
+#[test]
+fn a_write_between_the_two_reads_does_not_break_the_newest_four_check() {
+    let dir = store();
+    let run = start(&dir, &["warm_rows=0"]);
+    let (_, a) = active(run.port, "?m=4");
+    put(run.port, "Env:bg"); // what the seat's background entities do between the two requests
+    let (_, all) = active(run.port, "?m=100");
+    assert_eq!(ids(&all)[0], "Env:bg", "{all}");
+    newest_four_hold(&a, &all);
+}
+
 #[test]
 fn the_active_route_answers_the_newest_entities_with_the_hidden_classes_left_out() {
     let dir = store();
@@ -91,7 +116,7 @@ fn the_active_route_answers_the_newest_entities_with_the_hidden_classes_left_out
     // the four newest of the classes that are not hidden by default (Message, SemText, Span, Request, DomNode, View, Fetch, Setting), newest first (the boot's own entities are among them)
     let (_, all) = active(run.port, "?m=100");
     let all_ids = ids(&all);
-    assert_eq!(ids(&a), all_ids[..4].to_vec(), "{a}");
+    newest_four_hold(&a, &all);
     let upd: Vec<f64> = a["nodes"].as_array().unwrap().iter().map(|n| n["updated"].as_f64().unwrap()).collect();
     assert!(upd.windows(2).all(|w| w[0] >= w[1]), "newest first: {upd:?}");
     let zed: Vec<&String> = all_ids.iter().filter(|i| i.starts_with("Zed:")).collect();
