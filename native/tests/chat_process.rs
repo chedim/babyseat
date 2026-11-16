@@ -360,7 +360,7 @@ fn a_cli_that_fails_is_an_error_answer_with_its_stderr_and_a_missing_one_says_ho
     assert_eq!(v["response"], "claude failed (rc 3): fake: not logged in");
     assert!(terminate(&mut run));
     // no binary named: nothing runs, the answer says how
-    let (mut run, port) = start("chatnobin", CHAT_PACKS, &[]);
+    let (mut run, port) = start("chatnobin", CHAT_PACKS, &["--fact", "seat_default=claude"]);
     let id = send(port, "hello");
     let v = wait("the refusal", || { let v = view(port, &id); if v["state"] == "error" { Some(v) } else { None } });
     assert!(v["response"].as_str().unwrap().contains("chat_claude_bin"), "{v}");

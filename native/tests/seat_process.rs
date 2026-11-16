@@ -64,7 +64,8 @@ fn seat_at(dir: std::path::PathBuf, with_fake: bool, facts: &[&str]) -> (Run, u1
     cmd.current_dir(&dir).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000").arg("run").args(barest_packs()).arg(r.join("membrane/apps/barest.c1f"))
         .args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"]);
     for f in facts { cmd.arg("--fact").arg(f); }
-    if with_fake { cmd.arg("--fact").arg(format!("chat_claude_bin={}", bin.display())).arg("--fact").arg("seat_default=claude"); }
+    cmd.arg("--fact").arg("seat_default=claude");
+    if with_fake { cmd.arg("--fact").arg(format!("chat_claude_bin={}", bin.display())); }
     let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();

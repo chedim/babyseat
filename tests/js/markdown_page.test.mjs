@@ -48,7 +48,7 @@ function startSeat({ claude = true, facts = [], apps = [] } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'shell-page-'));
   const fake = path.join(dir, 'fake-claude');
   writeFileSync(fake, FAKE); chmodSync(fake, 0o755);
-  const args = ['run', ...packs, 'membrane/apps/barest.c1f', ...apps, '--store', path.join(dir, 'field.sqlite3'), '--port', String(port),
+  const args = ['run', ...packs, 'membrane/apps/barest.c1f', ...apps, '--store', path.join(dir, 'field.sqlite3'), '--port', String(port), '--fact', 'minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude"}', '--fact', 'seat_name=Rosie',
     ...(claude ? ['--fact', `chat_claude_bin=${fake}`] : []), ...facts.flatMap((f) => ['--fact', f])];
   const env = { ...process.env, ANTHROPIC_API_KEY: 'sk-ant-harness-default-0000' };
   const child = spawn(bin, args, { cwd: repo, stdio: 'ignore', env });

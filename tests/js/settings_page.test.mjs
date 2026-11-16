@@ -33,7 +33,7 @@ const fake = path.join(dir, 'fake-claude');
 writeFileSync(fake, FAKE); chmodSync(fake, 0o755);
 const cloud = JSON.stringify([{ name: 'gpt', backend: 'openai', base_url: 'https://user:hunter2pw@example.test/v1', api_key_env: 'OTHER_PROVIDER_KEY' }]);
 const child = spawn(bin, ['run', ...packs, 'membrane/apps/barest.c1f', '--store', path.join(dir, 'field.sqlite3'), '--port', String(port),
-  '--fact', `chat_claude_bin=${fake}`, '--fact', `cloud_models=${cloud}`],
+  '--fact', `chat_claude_bin=${fake}`, '--fact', 'minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude"}', '--fact', 'seat_name=Rosie', '--fact', `cloud_models=${cloud}`],
   { cwd: repo, stdio: 'ignore', env: { ...process.env, ANTHROPIC_API_KEY: KEY } });
 const url = `http://127.0.0.1:${port}`;
 async function up() { for (let i = 0; i < 150; i++) { try { if ((await fetch(`${url}/`)).ok) return; } catch {} await sleep(200); } throw new Error('the seat did not come up'); }

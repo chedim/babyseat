@@ -41,7 +41,7 @@ fn launch(dir: std::path::PathBuf, facts: &[&str], full: bool) -> Run {
                 "--fact", "seat_backend=http://127.0.0.1:11434", "--fact", "router_on=false", "--fact", r#"cloud_models=[{"name":"claude","backend":"claude-agent"}]"#, "--fact", "chat_claude_bin=/usr/bin/true"])
             .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap()
     } else {
-        Command::new("sh").arg(format!("{root}/scripts/seat")).args(["--data-dir", dir.join("d").to_str().unwrap(), "--port", "0"])
+        Command::new("sh").arg(format!("{root}/scripts/seat")).args(["--data-dir", dir.join("d").to_str().unwrap(), "--port", "0", "--fact", "seat_default=claude"])
             .args(facts.iter().flat_map(|f| ["--fact", *f]))
             .env("CLIFFVM", BIN).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap()
     };

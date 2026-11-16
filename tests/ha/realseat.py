@@ -140,7 +140,7 @@ class ReleaseSeat(RealSeat):
         claude.write_text(FAKE_CLAUDE)
         claude.chmod(0o755)
         env = dict(os.environ, ANTHROPIC_API_KEY="sk-ant-harness-default-0000", CLIFFVM=str(self.bin), CLAUDE_BIN=str(claude))
-        self.child = subprocess.Popen(["sh", str(ROOT / "scripts" / "seat"), "--data-dir", str(d), "--port", "0"], cwd=ROOT, env=env, stdout=subprocess.PIPE,
+        self.child = subprocess.Popen(["sh", str(ROOT / "scripts" / "seat"), "--data-dir", str(d), "--port", "0", "--fact", "seat_default=claude"], cwd=ROOT, env=env, stdout=subprocess.PIPE,
                                       stderr=subprocess.DEVNULL, text=True)
         for line in self.child.stdout:                  # the launcher's own lines first, then the door's
             if "door listening on" in line:
