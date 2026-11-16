@@ -9,6 +9,7 @@ door_auth
 fs
 edit
 proc
+cron
 fetch
 router
 sql

@@ -393,6 +393,52 @@
       "Chunk"
     ]
   },
+  "cron": {
+    "getters": {
+      "Cron.bad": "Any",
+      "Cron.days_all": "List(Dict)",
+      "Cron.days_near": "List(Dict)",
+      "Cron.dom_star": "Bool",
+      "Cron.dow_star": "Bool",
+      "Cron.every_n": "Num?",
+      "Cron.every_s": "Num?",
+      "Cron.every_unit": "Text?",
+      "Cron.far": "Any",
+      "Cron.hundred": "Any",
+      "Cron.is_every": "Bool",
+      "Cron.l0": "Dict?",
+      "Cron.last": "Any",
+      "Cron.limits": "List(List(Int))",
+      "Cron.m0": "Num?",
+      "Cron.names": "List(Text)",
+      "Cron.next": "Any",
+      "Cron.nums": "List(Int)",
+      "Cron.nx": "Dict?",
+      "Cron.off0": "Num?",
+      "Cron.pbase": "Any",
+      "Cron.problem": "Text?",
+      "Cron.rest": "Text",
+      "Cron.s0": "Num?",
+      "Cron.sets": "List(List(Int))",
+      "Cron.text": "Text",
+      "Cron.tod": "Any",
+      "Cron.today": "Bool",
+      "Cron.toks": "List(List(Dict))",
+      "Cron.w5": "List(Text)"
+    },
+    "writes": {
+      "Cron.arm": "Dict",
+      "Cron.base": "Any",
+      "Cron.dropped": "Num?",
+      "Cron.due": "Any",
+      "Cron.fired": "Dict",
+      "Cron.late": "Dict"
+    },
+    "findings": [],
+    "resident": [
+      "Cron"
+    ]
+  },
   "decisions": {
     "getters": {
       "Decision.ans_error": "Text?",

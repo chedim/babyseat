@@ -78,6 +78,8 @@ pub struct Shared {
     secrets: HashMap<String, Vec<u8>>,
     /// a running command's child process, by its entity (Command.stop kills it)
     children: HashMap<String, Arc<Mutex<Option<std::process::Child>>>>,
+    /// the armed timers of the Cron driver (drivers.rs `arm`), by their entity: (the run's id, the epoch second to wake at); one per entity
+    timers: HashMap<String, (J, f64)>,
     /// the open connections of the Sql driver (sqldrv.rs), by their SqlSource entity
     sources: HashMap<String, crate::sqldrv::SourceSlot>,
     done: u64,
@@ -291,6 +293,38 @@ impl Store {
             g.done += 1;
             sh.1.notify_all();
         }).expect("a thread for an effect");
+    }
+
+    /// The Cron driver's timer: wake `eid` at epoch second `at`, once. A second `arm` for the same entity REPLACES the first (a write of a schedule re-arms);
+    /// a null `at` disarms. The entity is "in flight" (the collector and the memory policy leave it) while a timer is armed. No thread: the host's loop asks
+    /// `fire_due` with ITS clock (`Host::pump`), so a test with a fake clock needs no sleep and a replay never re-arms (it has no store).
+    pub fn arm_timer(&self, eid: &str, id: &J, at: Option<f64>) {
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        let had = match at {
+            Some(at) => g.timers.insert(eid.to_string(), (id.clone(), at)).is_some(),
+            None => g.timers.remove(eid).is_some(),
+        };
+        match (had, at.is_some()) {
+            (false, true) => { *g.in_flight.entry(eid.to_string()).or_insert(0) += 1; }
+            (true, false) => { if let Some(n) = g.in_flight.get_mut(eid) { *n -= 1; if *n == 0 { g.in_flight.remove(eid); } } }
+            _ => {}
+        }
+    }
+
+    /// Every timer whose time has come at `now` (epoch seconds) is taken out and answers with its receipt `{id, status, rc, at, fired}` (`at`: the time it was
+    /// armed for, `fired`: `now`); the engine takes it at its next round like any effect's. -> how many fired.
+    pub fn fire_due(&self, now: f64) -> usize {
+        let mut g = self.sh.0.lock().unwrap_or_else(|e| e.into_inner());
+        if g.timers.is_empty() { return 0; }
+        let due: Vec<String> = g.timers.iter().filter(|(_, (_, at))| *at <= now).map(|(e, _)| e.clone()).collect();
+        for e in &due {
+            if let Some((id, at)) = g.timers.remove(e) {
+                let rec = serde_json::json!({"id": id, "status": "ok", "rc": 0, "at": crate::drivers::num_json(at), "fired": crate::drivers::num_json(now)});
+                g.receipts.push((e.clone(), "arm".to_string(), rec));
+            }
+        }
+        if !due.is_empty() { g.done += 1; self.sh.1.notify_all(); }
+        due.len()
     }
 
     /// The connection slot of a SqlSource entity (sqldrv.rs): made empty at first use, kept for the life of the process.

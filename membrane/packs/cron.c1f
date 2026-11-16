@@ -1,0 +1,123 @@
+PACK cron 1
+IMPORT boot 1
+RESIDENT Cron
+-- THE cron PACK (#1143): a schedule as an entity. `Cron:<name> {schedule, enabled}`.
+--   schedule  standard 5-field cron `minute hour day-of-month month day-of-week` (lists `1,2`, ranges `1-5`, steps `*/5` and `10-40/10`, `*`; day-of-week 0-7, 0 and 7 are
+--             Sunday; when BOTH day fields are restricted a day matches if EITHER does, as cron always did), or `@every <n><unit>` with the unit s, m, h or d.
+--             The wall time is the seat's local time zone. Cron fields are minute-granular; `@every 1s` is the smallest tick.
+--   enabled   false disarms; true or absent arms. Writing `schedule` (or `enabled`) arms again from now.
+-- When the time comes the DRIVER answers (the receipt `arm_result`, journalled like any outside write) and this pack turns it into the event:
+--   fired = {id, at}      `at` is the epoch second the schedule named; react with an ordinary setter: `Cron.fired on-setter ...`
+-- Getters: `next` (the epoch second of the next fire, null while disarmed), `last` (the `at` of the last fire), `problem` (why a schedule is refused: a text, else null; a
+-- refused schedule never fires and is never guessed), `dropped` (how many fires were skipped because the engine was still busy past their time: they are not queued).
+-- After a restart the missed runs are SKIPPED (no catch-up): the timer is armed again for the next matching time.
+-- The only Rust is the timer (`Cron.arm = {id, at}`: wake once at the epoch second `at`; a null `at` disarms; drivers.rs, store.rs `fire_due`). Everything else is here.
+
+-- ---- the schedule, read ----------------------------------------------------------------------------------------------------------------
+Cron.text getter: strip(str(this.schedule or ''))
+Cron.w5 getter: words(this.text)
+Cron.is_every getter: startswith(this.text, '@every ')
+Cron.names getter: ['minute', 'hour', 'day-of-month', 'month', 'day-of-week']
+Cron.limits getter: [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]]
+Cron.nums getter: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59]
+
+-- `@every <n><unit>`: the interval in seconds (n a whole number above 0), else null
+Cron.rest getter: strip(after(this.text, '@every'))
+Cron.every_n getter: num(head(this.rest, len(this.rest) - 1)) if this.is_every else None
+Cron.every_unit getter: tail(this.rest, 1) if this.is_every else None
+Cron.every_s getter:
+  WHEN this.is_every and this.every_n is Int and this.every_n >= 1 and this.every_unit in ['s', 'm', 'h', 'd']: this.every_n * (1 if this.every_unit == 's' else (60 if this.every_unit == 'm' else (3600 if this.every_unit == 'h' else 86400)))
+  ELSE: None
+
+-- the five fields, each a list of the tokens its comma list holds: {p: the token, a: first, b: last, s: step}; a part that is no number is null (judged by `bad`)
+Cron.toks getter:
+  WHEN this.is_every or len(this.w5) != 5: []
+  ELSE: [[{'p': p, 'a': (this.limits[i][0] if before(p, '/') == '*' else num(before(before(p, '/'), '-'))), 'b': (this.limits[i][1] if before(p, '/') == '*' else (num(after(before(p, '/'), '-')) if '-' in before(p, '/') else (this.limits[i][1] if '/' in p else num(before(p, '/'))))), 's': (num(after(p, '/')) if '/' in p else 1)} for p in words(replace(this.w5[i], ',', ' '))] for i in [0, 1, 2, 3, 4]]
+Cron.bad getter:
+  WHEN len(this.toks) == 0: []
+  ELSE: fold([], [concat(acc, concat([this.names[i] + ': ' + t['p'] for t in this.toks[i] if not (t['a'] is Int and t['b'] is Int and t['s'] is Int and t['a'] >= this.limits[i][0] and t['b'] <= this.limits[i][1] and t['a'] <= t['b'] and t['s'] >= 1)], ([this.names[i] + ': ' + this.w5[i]] if (',,' in this.w5[i] or startswith(this.w5[i], ',') or tail(this.w5[i], 1) == ',') else []))) for i in [0, 1, 2, 3, 4]])
+
+-- the values each field allows (day-of-week 7 is 0)
+Cron.sets getter:
+  WHEN len(this.toks) == 0 or len(this.bad) > 0: []
+  ELSE: [distinct([(0 if (i == 4 and v == 7) else v) for v in this.nums if v <= this.limits[i][1] and v >= this.limits[i][0] and len([t for t in this.toks[i] if v >= t['a'] and v <= t['b'] and num(before(str((v - t['a']) / t['s']), '.')) * t['s'] == v - t['a']]) > 0]) for i in [0, 1, 2, 3, 4]]
+Cron.dom_star getter: startswith(str(this.w5[2]), '*') if len(this.w5) == 5 else False
+Cron.dow_star getter: startswith(str(this.w5[4]), '*') if len(this.w5) == 5 else False
+-- every minute of the day a time of day matches (minutes since midnight)
+Cron.tod getter: fold([], [concat(acc, [h * 60 + m for m in this.sets[0]]) for h in this.sets[1]]) if len(this.sets) == 5 else []
+
+-- why a schedule is refused (null when it is fine)
+Cron.problem getter:
+  WHEN this.text == '': 'a Cron needs a schedule: 5 cron fields (minute hour day-of-month month day-of-week) or @every <n><unit>, e.g. */5 * * * * or @every 30s'
+  ELSE WHEN startswith(this.text, '@') and not this.is_every: 'unknown schedule ' + this.text + ': the only @-form is @every <n><unit> (unit s, m, h or d), e.g. @every 30s'
+  ELSE WHEN this.is_every and this.every_s == None: 'bad @every ' + this.rest + ': write a whole number above 0 and a unit s, m, h or d, e.g. @every 30s'
+  ELSE WHEN this.is_every: None
+  ELSE WHEN len(this.w5) != 5: 'a cron schedule has 5 fields (minute hour day-of-month month day-of-week), this one has ' + str(len(this.w5)) + ': ' + this.text
+  ELSE WHEN len(this.bad) > 0: 'bad cron field ' + this.bad[0] + ' (lists 1,2 ranges 1-5 steps */5 or *; minute 0-59, hour 0-23, day-of-month 1-31, month 1-12, day-of-week 0-7)'
+  ELSE WHEN this.base != None and not this.today and len(this.days_all) == 0 and len(this.days_near) == 0: 'this schedule matches no day within about 4 years (a date like 31 Feb never comes): ' + this.text
+  ELSE: None
+
+-- ---- the next time ---------------------------------------------------------------------------------------------------------------------
+-- `base` is the time to plan from (the clock at a (re)arm, the slot that just fired after a fire); the next fire is the first matching minute STRICTLY after it.
+-- `late` = {for, at} is the replan of a late wake (below): while it names the current `base`, the plan starts from `late.at` (the clock) instead.
+Cron.pbase getter: this.late['at'] if (this.late != None and this.late['for'] == this.base) else this.base
+-- the first minute boundary after `base`, as local fields
+Cron.s0 getter: (num(before(str(this.pbase / 60), '.')) + 1) * 60 if this.pbase != None else None
+Cron.l0 getter: localtime(this.s0) if this.s0 != None else None
+Cron.m0 getter: this.l0['hour'] * 60 + this.l0['minute'] if this.l0 != None else None
+Cron.off0 getter: this.s0 - (this.l0['day_number'] * 86400 + this.m0 * 60) if this.l0 != None else None
+-- today (the day of that minute) matches, and a time of day at or after it does
+Cron.today getter: this.pbase != None and len(this.sets) == 5 and len([v for v in this.tod if v >= this.m0]) > 0 and (this.l0['month'] in this.sets[3] and ((this.l0['day'] in this.sets[2] or (this.l0['day_number'] + 4 - 7 * num(before(str((this.l0['day_number'] + 4) / 7), '.'))) in this.sets[4]) if (not this.dom_star and not this.dow_star) else (this.l0['day'] in this.sets[2] and (this.l0['day_number'] + 4 - 7 * num(before(str((this.l0['day_number'] + 4) / 7), '.'))) in this.sets[4])))
+-- the local noons of the days after that minute's day (a noon is clear of the day's own zone change); a day matches by its month, day, and weekday (day_number 0 was a Thursday)
+Cron.days_near getter:
+  WHEN len(this.sets) != 5 or this.pbase == None: []
+  ELSE: [d for d in [{'l': localtime(x), 'x': x} for x in [this.s0 - this.m0 * 60 + 43200 + k * 86400 for k in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62]]] if d['l']['month'] in this.sets[3] and ((d['l']['day'] in this.sets[2] or (d['l']['day_number'] + 4 - 7 * num(before(str((d['l']['day_number'] + 4) / 7), '.'))) in this.sets[4]) if (not this.dom_star and not this.dow_star) else (d['l']['day'] in this.sets[2] and (d['l']['day_number'] + 4 - 7 * num(before(str((d['l']['day_number'] + 4) / 7), '.'))) in this.sets[4]))]
+-- only when no day within 62 matched: the rare schedules (29 Feb, a Friday the 13th) look as far as the next leap cycle (about 4 years)
+Cron.days_all getter:
+  WHEN len(this.days_near) > 0 or len(this.sets) != 5 or this.pbase == None: []
+  ELSE: [d for d in [{'l': localtime(x), 'x': x} for x in [this.s0 - this.m0 * 60 + 43200 + k * 86400 for k in this.far]] if d['l']['month'] in this.sets[3] and ((d['l']['day'] in this.sets[2] or (d['l']['day_number'] + 4 - 7 * num(before(str((d['l']['day_number'] + 4) / 7), '.'))) in this.sets[4]) if (not this.dom_star and not this.dow_star) else (d['l']['day'] in this.sets[2] and (d['l']['day_number'] + 4 - 7 * num(before(str((d['l']['day_number'] + 4) / 7), '.'))) in this.sets[4]))]
+Cron.hundred getter: fold([], [concat(acc, [b * 10 + c for c in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]]) for b in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]])
+Cron.far getter: fold([], [concat(acc, [a * 100 + x + 63 for x in this.hundred]) for a in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]])
+
+-- the plan: {at: the next fire (epoch seconds) or null, base}; the `base` rides along so a plan from a new base is always a new value (a restart re-arms)
+Cron.nx getter:
+  WHEN this.pbase == None: None
+  ELSE WHEN this.enabled == False or this.problem != None: {'at': None, 'base': this.pbase}
+  ELSE WHEN this.every_s != None: {'at': this.pbase + this.every_s, 'base': this.pbase}
+  ELSE WHEN this.today: {'at': this.l0['day_number'] * 86400 + min([v for v in this.tod if v >= this.m0]) * 60 + this.off0, 'base': this.pbase}
+  ELSE WHEN len(this.days_near) > 0: {'at': this.days_near[0]['l']['day_number'] * 86400 + min(this.tod) * 60 + (this.days_near[0]['x'] - (this.days_near[0]['l']['day_number'] * 86400 + this.days_near[0]['l']['hour'] * 3600 + this.days_near[0]['l']['minute'] * 60)), 'base': this.pbase}
+  ELSE: {'at': this.days_all[0]['l']['day_number'] * 86400 + min(this.tod) * 60 + (this.days_all[0]['x'] - (this.days_all[0]['l']['day_number'] * 86400 + this.days_all[0]['l']['hour'] * 3600 + this.days_all[0]['l']['minute'] * 60)), 'base': this.pbase}
+
+Cron.next getter: this.due if this.enabled != False and this.problem == None else None
+Cron.last getter: prop(this.fired, 'at') if this.fired != None else None
+
+-- ---- arming ----------------------------------------------------------------------------------------------------------------------------
+-- a schedule or `enabled` written, or the seat started: plan from now. (A restore runs no setter: the boot's does it for every Cron.)
+Cron.schedule on-setter cron-schedule:
+  ALWAYS:
+    this.base = clock
+Cron.enabled on-setter cron-enabled:
+  ALWAYS:
+    this.base = clock
+Boot.started on-setter cron-boot:
+  ALWAYS:
+    FOR c IN instances('Cron'):
+      c.base = clock
+-- a plan: arm the one timer for it. A plan whose time is already past (the engine was busy longer than a slot) is NOT queued: it is counted in `dropped` (for
+-- `@every` the number of intervals skipped; for cron fields 1 for the late wake) and planned again from now (`late`).
+Cron.nx on-setter cron-arm:
+  WHEN prop(this.nx, 'at') == None:
+    this.due = None
+    this.arm = {'id': str(this.eid) + ':off:' + str(prop(this.nx, 'base')), 'at': None}
+  ELSE WHEN prop(this.nx, 'at') <= clock:
+    skipped = (num(before(str((clock - prop(this.nx, 'at') + this.every_s) / this.every_s), '.')) if this.every_s != None else 1)
+    this.dropped = (this.dropped or 0) + skipped
+    this.late = {'for': this.base, 'at': (prop(this.nx, 'at') + (skipped - 1) * this.every_s if this.every_s != None else clock)}
+  ELSE:
+    this.due = prop(this.nx, 'at')
+    this.arm = {'id': str(this.eid) + '@' + str(prop(this.nx, 'at')), 'at': prop(this.nx, 'at')}
+-- the timer answered: the event, then plan from the slot that fired
+Cron.arm_result on-setter cron-fire:
+  WHEN this.enabled != False and this.problem == None and prop(this.arm_result, 'at') != None:
+    this.fired = {'id': prop(this.arm_result, 'id'), 'at': prop(this.arm_result, 'at')}
+    this.base = prop(this.arm_result, 'at')

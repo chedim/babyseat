@@ -317,6 +317,18 @@ The receipt is `Fetch:<name>.request_result`: `{id, status, rc, head, http_statu
 -- receipt Fetch:probe.request_result.rc = 2
 ```
 
+## Cron: do something on a schedule
+
+`Cron:<name>` is a schedule. Write `schedule` as five cron fields (`minute hour day-of-month month day-of-week`; lists `1,2`, ranges `1-5`, steps `*/5`, `*`; numbers only) or as `@every <n><unit>` with the unit `s`, `m`, `h` or `d` (`@every 30s`). The time is the seat's local time zone; cron fields are minute-granular, `@every 1s` is the smallest tick. When the time comes the entity's `fired` becomes `{id, at}` (`at` is the epoch second the schedule named): react with an ordinary setter on `Cron.fired`. `enabled = false` stops it, writing `schedule` or `enabled = true` starts it again from now. A schedule that does not parse is refused: `Cron:<name>.problem` says why and nothing fires. Read `next` (when it fires next, null while stopped), `last` and `dropped`. A fire the seat was too busy to handle on time is skipped and counted in `dropped`, never queued; after a restart the runs that were missed are skipped and the next one is armed.
+
+```c1f
+PACK nightly 1
+IMPORT cron 1
+Cron.fired on-setter nightly-note:
+  ALWAYS:
+    this.runs = (this.runs or 0) + 1
+```
+
 `SqlSource:<name>` and `SqlQuery:<name>.run` follow the same shape for a second SQLite file (`Help:sql`): write the source's `path`, the query's `source` and `sql`, then `run = {id, args}` and read `rows`.
 The previous seat's store is kept as the read-only source `legacy`; `Help:legacy` says what it holds and how to look things up in it and bring a piece into the field.
 
