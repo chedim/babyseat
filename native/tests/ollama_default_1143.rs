@@ -196,3 +196,21 @@ fn a_message_with_no_model_chosen_starts_no_process_and_says_how_to_pick_one() {
     assert_eq!(r["error"], json!(true));
     assert!(!c.docs.keys().any(|k| k.starts_with("Command:chat") || k.contains(":Command:chat")), "no process was asked for");
 }
+
+#[test]
+fn the_launch_fact_seat_default_alone_counts_as_a_chosen_model_on_a_seat_with_no_launcher_pack() {
+    let mut f = Fields::goalgraph();
+    for p in ["boot", "door", "fetch", "router", "settings"] {
+        f.set_pack(p, &std::fs::read_to_string(root().join("membrane/packs").join(format!("{p}.c1f"))).unwrap()).unwrap();
+    }
+    let mut c = Core::new();
+    c.store = Some(Store::io_only(std::env::temp_dir().to_str().unwrap()));
+    c.load("Boot:seat".into(), "Boot".into(), json!({"ui_dir": "/x", "seat_backend": "http://127.0.0.1:1", "seat_default": "claude", "seat_name": "Rosie"}).as_object().unwrap().clone(), None, 0.0);
+    let mut s = 0; f.rebuild(&mut c, 1.0, &mut s);
+    let boot = Write { eid: "Boot:seat".into(), prop: "started".into(), new: json!(5), old: J::Null, writer: "person".into(), chain: json!({}), seq: 4 };
+    c.hear(boot.clone(), None, 2.0);
+    f.react(&mut c, &H, boot, 2.0, &mut s);
+    let r = feed(&mut c, &mut f, 1);
+    assert_eq!(row(&r, "model.chat")["current"], json!("claude"));
+    assert_eq!(row(&r, "model.chat")["chosen"], json!(true), "the first-run window stays closed");
+}

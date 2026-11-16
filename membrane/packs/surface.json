@@ -1328,7 +1328,9 @@
     "claims": [
       "/ui/settings"
     ],
-    "boot_facts": [],
+    "boot_facts": [
+      "seat_default"
+    ],
     "resident": [
       "Setting"
     ]

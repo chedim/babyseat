@@ -25,7 +25,7 @@ Setting.fact_val getter:
   ELSE: this.boot_val
 -- the rows whose value is computed from other entities (they are read-only, except the chat's model and the allow-list, whose write goes to their source)
 Setting.current getter:
-  WHEN this.eid == 'Setting:model.chat': prop('Minds:seat', 'loops') or prop('Minds:seat', 'seat_default') or ''
+  WHEN this.eid == 'Setting:model.chat': prop('Minds:seat', 'loops') or prop('Minds:seat', 'seat_default') or ([b.seat_default for b in instances('Boot') if b.seat_default != None] or [''])[0]
   ELSE WHEN this.eid == 'Setting:model.default': prop('Minds:seat', 'seat_default') or ''
   ELSE WHEN this.eid == 'Setting:model.list': [m.name for m in instances('Model') if (m.listed == True and m.chat_ok == True) or m.rung == True]
   ELSE WHEN this.eid == 'Setting:model.cloud': [{'name': prop(c, 'name'), 'backend': prop(c, 'backend'), 'api_key_env': prop(c, 'api_key_env')} for c in (([prop(b, 'cloud_models') for b in instances('Boot') if prop(b, 'cloud_models') != None] or [[]])[0])]

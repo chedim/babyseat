@@ -38,7 +38,7 @@ function folder() { const d = mkdtempSync(path.join(tmpdir(), 'release-verify-')
 // the release launcher: strict door, loopback only
 function launcher() {
   const [dir, fake] = folder(); const port = 25000 + Math.floor(Math.random() * 900) + 11 * nseat++;
-  const child = spawn('sh', [path.join(repo, 'scripts/seat'), '--data-dir', dir, '--port', String(port), '--fact', 'seat_backend=http://127.0.0.1:9'], { cwd: repo, stdio: 'ignore', env: { ...process.env, CLIFFVM: bin, CLAUDE_BIN: fake, ANTHROPIC_API_KEY: 'sk-ant-harness-default-0000' } });
+  const child = spawn('sh', [path.join(repo, 'scripts/seat'), '--data-dir', dir, '--port', String(port), '--fact', 'seat_backend=http://127.0.0.1:9', '--fact', 'seat_default=claude', '--fact', 'seat_name=Rosie'], { cwd: repo, stdio: 'ignore', env: { ...process.env, CLIFFVM: bin, CLAUDE_BIN: fake, ANTHROPIC_API_KEY: 'sk-ant-harness-default-0000' } });
   children.push(child);
   return { dir, port, child };
 }
