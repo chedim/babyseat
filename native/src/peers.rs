@@ -2,14 +2,15 @@
 //! seat makes the control rings and its own cell table, runs a `graphlink_core::Link` over the rings, and shows the peer as `Vm:<its namespace>` (a `link` of `up` or `gone`). It is
 //! driven from the loop's per-turn callback on the engine's thread (`Peers::pump`): it never waits, starts no thread, and every decision is the engine's.
 #![cfg(unix)]
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use graphlink_core::frame::{Op, Target, VERSION};
 use graphlink_core::link::{Event, Link, Me};
 use graphlink_core::transport::Transport;
-use graphlink_shm::{cells::{CellState, Cells}, Shm};
+use graphlink_shm::{cells::{CellState, Cells, CellsReader}, Shm};
 use serde_json::{json, Map, Value as J};
 
+use crate::fields::LinkVal;
 use crate::host::Host;
 
 /// who the writes of the peer driver are, in the journal
@@ -24,20 +25,36 @@ struct Peer {
     subs: Vec<(Target, Option<Vec<String>>)>,
     /// what is in the cells now: key -> (revision, value, state); a cell is rewritten only when its value or state changes
     published: HashMap<String, (f64, J, CellState)>,
+    /// the peer's own cell table (it makes `/gl-<name>-pc`; mapped read-only once it exists), and the owner's numbers for reading it
+    reader: Option<CellsReader>,
+    spins: u64,
+    depth: usize,
+    /// what the seat has asked this peer for: node -> the props named in the `sub` sent
+    asked: HashMap<String, Vec<String>>,
+    /// the revision of each peer cell already given to the engine (key -> revision)
+    seen: HashMap<String, f64>,
+    /// the nodes the engine was told are gone or refused (so it is told once)
+    told_down: HashSet<String>,
+    /// cells that could not be read (reported once each)
+    reported: HashSet<String>,
     link: Link,
     /// the peer's namespace, from its hello
     ns: Option<String>,
     gone: bool,
 }
 
-pub struct Peers { list: Vec<Peer> }
+pub struct Peers {
+    list: Vec<Peer>,
+    /// the foreign keys the engine reads (from `link_notices`): node -> props; each goes to the peer that owns the namespace
+    wanted: BTreeMap<String, Vec<String>>,
+}
 
 fn field(o: &Map<String, J>, name: &str, k: &str) -> Result<u64, String> {
     o.get(k).and_then(J::as_u64).filter(|n| *n > 0).ok_or_else(|| format!("peers: `{k}` of {name:?} must be a number above zero (the owner's number: there is no default)"))
 }
 
 impl Peers {
-    /// The fact `peers`: a list of `{name, ring_bytes, slots, key_cap, val_cap}`; the seat makes the regions `/gl-<name>-ctl` (the control rings) and `/gl-<name>-sc` (its cell table).
+    /// The fact `peers`: a list of `{name, ring_bytes, slots, key_cap, val_cap, spins, depth}` (all the owner's numbers: the first four size the seat's side, `spins` and `depth` say how the seat reads the peer's cell table); the seat makes the regions `/gl-<name>-ctl` (the control rings) and `/gl-<name>-sc` (its cell table).
     pub fn from_fact(seat_ns: &str, v: &J) -> Result<Peers, String> {
         let items = v.as_array().ok_or("peers: the fact must be a list of {name, ring_bytes, slots, key_cap, val_cap}")?;
         let mut list = vec![];
@@ -47,6 +64,7 @@ impl Peers {
             if format!("/gl-{name}-ctl").len() > 31 { return Err(format!("peers: the name {name:?} is too long (a region name is at most 31 bytes: /gl-<name>-ctl)")); }
             let ring = field(o, name, "ring_bytes")? as usize;
             let (slots, key_cap, val_cap) = (field(o, name, "slots")?, field(o, name, "key_cap")?, field(o, name, "val_cap")?);
+            let (spins, depth) = (field(o, name, "spins")?, field(o, name, "depth")? as usize);
             let (key_cap, val_cap) = (u32::try_from(key_cap).map_err(|_| "peers: `key_cap` is too big")?, u32::try_from(val_cap).map_err(|_| "peers: `val_cap` is too big")?);
             let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             // the names are THIS seat's (the owner declared them for it): what a dead seat left behind under them is removed first
@@ -55,13 +73,20 @@ impl Peers {
             let cells = Cells::create(format!("/gl-{name}-sc"), slots, key_cap, val_cap, epoch).map_err(|e| format!("peers: {name}: {e}"))?;
             let mut link = Link::new(Me { ns: seat_ns.into(), build: format!("cliffvm {}", env!("CARGO_PKG_VERSION")), epoch: epoch as f64, support: vec![VERSION], initiator: true });
             ctl.send(&link.open()).map_err(|e| format!("peers: {name}: {e}"))?;
-            list.push(Peer { name: name.to_string(), ctl, cells, subs: vec![], published: HashMap::new(), link, ns: None, gone: false });
+            list.push(Peer { name: name.to_string(), ctl, cells, subs: vec![], published: HashMap::new(), reader: None, spins, depth, asked: HashMap::new(), seen: HashMap::new(), told_down: HashSet::new(), reported: HashSet::new(), link, ns: None, gone: false });
         }
-        Ok(Peers { list })
+        Ok(Peers { list, wanted: BTreeMap::new() })
     }
 
     /// One turn of every peer: take the frames that arrived, tell the engine what they mean, answer. Never waits.
     pub fn pump(&mut self, h: &Host) {
+        // what the engine reads from other namespaces, since the last turn
+        let (subs, unsubs, _due) = h.link_notices();
+        for n in subs { if let Some(eid) = n["eid"].as_str() { let e = self.wanted.entry(eid.to_string()).or_default(); for p in n["props"].as_array().into_iter().flatten().filter_map(J::as_str) { if !e.iter().any(|x| x == p) { e.push(p.to_string()); } } } }
+        for n in unsubs {
+            let Some(eid) = n["eid"].as_str() else { continue };
+            if let Some(e) = self.wanted.get_mut(eid) { let drop: Vec<&str> = n["props"].as_array().into_iter().flatten().filter_map(J::as_str).collect(); e.retain(|p| !drop.contains(&p.as_str())); if e.is_empty() { self.wanted.remove(eid); } }
+        }
         for p in self.list.iter_mut() {
             loop {
                 match p.ctl.recv() {
@@ -76,6 +101,7 @@ impl Peers {
             }
             if !p.gone && p.ctl.is_closed() { p.go(h); }
             if !p.gone && !p.subs.is_empty() { p.publish(h); }
+            if !p.gone && p.link.is_open() { p.ask(&self.wanted); p.follow(h); }
         }
     }
 }
@@ -104,6 +130,54 @@ impl Peer {
             Event::Op(Op::Unsub { target }) => self.subs.retain(|(t, _)| *t != target),
             _ => {}
         }
+    }
+
+    /// Tell the peer what the engine reads of its namespace: a `sub` for each node (again when the props change), an `unsub` for a node nothing reads any more.
+    fn ask(&mut self, wanted: &BTreeMap<String, Vec<String>>) {
+        let Some(ns) = self.ns.clone() else { return };
+        let mine = |eid: &str| eid.split_once("::").map_or(false, |(n, _)| n == ns);
+        let mut ops = vec![];
+        for (eid, props) in wanted.iter().filter(|(e, _)| mine(e)) {
+            if self.asked.get(eid) != Some(props) { ops.push(Op::Sub { target: Target::Id(eid.clone()), props: Some(props.clone()), limit: None }); self.asked.insert(eid.clone(), props.clone()); }
+        }
+        let dropped: Vec<String> = self.asked.keys().filter(|e| !wanted.contains_key(*e)).cloned().collect();
+        for eid in dropped { ops.push(Op::Unsub { target: Target::Id(eid.clone()) }); self.asked.remove(&eid); self.seen.retain(|k, _| !k.starts_with(&format!("{eid}\u{1}"))); self.told_down.remove(&eid); }
+        if !ops.is_empty() { if let Ok(f) = self.link.send(ops) { let _ = self.ctl.send(&f); } }
+    }
+
+    /// Read the peer's cells for what was asked and give the engine every value whose revision is newer than the last one it was given (`feed_val`: a replica, never stored).
+    fn follow(&mut self, h: &Host) {
+        if self.reader.is_none() { self.reader = CellsReader::attach(format!("/gl-{}-pc", self.name)).ok(); }
+        let Some(reader) = self.reader.as_ref() else { return };
+        let (spins, depth) = (self.spins, self.depth);
+        let mut feed: Vec<(String, LinkVal, f64)> = vec![];
+        for (eid, props) in self.asked.iter() {
+            let ekey = format!("{eid}\u{1}");
+            match reader.get(&ekey, spins, depth) {
+                Ok(Some(c)) if c.state != CellState::Live => {
+                    if self.told_down.insert(eid.clone()) { feed.push((eid.clone(), if c.state == CellState::Gone { LinkVal::Gone } else { LinkVal::Refused(c.value.as_str().unwrap_or("refused").to_string()) }, c.rev)); }
+                    continue;
+                }
+                Ok(Some(_)) => { if self.told_down.remove(eid) { self.seen.retain(|k, _| !k.starts_with(&ekey)); } }   // back after being gone: everything is given again
+                Ok(None) => {}
+                Err(e) => { if self.reported.insert(ekey.clone()) { eprintln!("cliffvm: peer {}: cell {ekey:?}: {e}", self.name); } continue; }
+            }
+            let mut map = Map::new();
+            let mut rev = 0f64;
+            for prop in props {
+                let key = format!("{eid}\u{1}{prop}");
+                match reader.get(&key, spins, depth) {
+                    Ok(Some(c)) if c.state == CellState::Live => {
+                        if self.seen.get(&key).map_or(true, |r| c.rev > *r) { self.seen.insert(key, c.rev); rev = rev.max(c.rev); map.insert(prop.clone(), c.value); }
+                    }
+                    Ok(Some(c)) => { if self.reported.insert(key.clone()) { eprintln!("cliffvm: peer {}: cell {key:?} is {:?}: {}", self.name, c.state, c.value); } }
+                    Ok(None) => {}
+                    Err(e) => { if self.reported.insert(key.clone()) { eprintln!("cliffvm: peer {}: cell {key:?}: {e}", self.name); } }
+                }
+            }
+            if !map.is_empty() { feed.push((eid.clone(), LinkVal::Props(map), rev)); }
+        }
+        for (eid, val, rev) in feed { h.feed_val(&eid, val, rev); }
     }
 
     /// Write what the peer subscribed to into the seat's cell table: each node's cells, for the props it named (all when none), whose value changed since the last turn.

@@ -32,17 +32,20 @@ fn peer_name() -> String { format!("t{}x{}", std::process::id() % 100000, common
 struct Names(String);
 impl Drop for Names { fn drop(&mut self) { for part in ["ctl", "sc", "pc"] { let _ = graphlink_shm::remove_region(&format!("/gl-{}-{part}", self.0)); } } }
 
-fn command(dir: &std::path::Path, facts: &[String]) -> Command {
+fn command(dir: &std::path::Path, facts: &[String]) -> Command { command_with(dir, facts, &[]) }
+fn command_with(dir: &std::path::Path, facts: &[String], extra: &[std::path::PathBuf]) -> Command {
     let r = repo();
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
-    let packs: Vec<String> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect();
+    let mut packs: Vec<String> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect();
+    packs.extend(extra.iter().map(|p| p.to_string_lossy().to_string()));
     let mut cmd = Command::new(BIN);
     cmd.current_dir(dir).arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f")).args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"]);
     for f in facts { cmd.arg("--fact").arg(f); }
     cmd
 }
-fn start(dir: &std::path::Path, facts: &[String]) -> Run {
-    let mut child = command(dir, facts).stdout(Stdio::piped()).stderr(std::fs::File::create(dir.join("err.log")).unwrap()).spawn().unwrap();
+fn start(dir: &std::path::Path, facts: &[String]) -> Run { start_with(dir, facts, &[]) }
+fn start_with(dir: &std::path::Path, facts: &[String], extra: &[std::path::PathBuf]) -> Run {
+    let mut child = command_with(dir, facts, extra).stdout(Stdio::piped()).stderr(std::fs::File::create(dir.join("err.log")).unwrap()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
@@ -67,7 +70,7 @@ fn call(port: u16, tool: &str, args: J) -> String {
 }
 fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})) }
 
-fn decl(name: &str) -> String { json!([{"name": name, "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 1024}]).to_string() }
+fn decl(name: &str) -> String { decl_caps(name, 1024) }
 
 /// the peer's end of the control rings: attach (the seat makes them at start), and run a Link over them
 struct PeerEnd { ctl: Shm, link: Link, events: Vec<Event> }
@@ -95,6 +98,9 @@ impl PeerEnd {
         false
     }
 }
+
+/// the owner's numbers for one peer: the seat's own table (slots, key_cap, val_cap), the rings, and how it reads the peer's table (`spins`: tries of a slot being written, `depth`: how deep a value nests)
+fn decl_caps(name: &str, val_cap: u32) -> String { json!([{"name": name, "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": val_cap, "spins": 1_000_000, "depth": 32}]).to_string() }
 
 fn wait_for(port: u16, spec: &str, prop: &str, want: &str, secs: u64) -> String {
     let end = Instant::now() + Duration::from_secs(secs);
@@ -144,9 +150,11 @@ fn a_page_is_still_a_page_a_vm_without_a_link_keeps_kind_page() {
 #[test]
 fn a_declaration_the_seat_cannot_use_stops_the_start_and_names_the_fact() {
     for (bad, why) in [
-        (json!([{"name": "x".repeat(40), "ring_bytes": 4096, "slots": 8, "key_cap": 16, "val_cap": 16}]).to_string(), "name"),
-        (json!([{"name": "ok", "slots": 8, "key_cap": 16, "val_cap": 16}]).to_string(), "ring_bytes"),
-        (json!([{"name": "ok", "ring_bytes": 4096, "slots": 0, "key_cap": 16, "val_cap": 16}]).to_string(), "slots"),
+        (json!([{"name": "x".repeat(40), "ring_bytes": 4096, "slots": 8, "key_cap": 16, "val_cap": 16, "spins": 10, "depth": 4}]).to_string(), "name"),
+        (json!([{"name": "ok", "slots": 8, "key_cap": 16, "val_cap": 16, "spins": 10, "depth": 4}]).to_string(), "ring_bytes"),
+        (json!([{"name": "ok", "ring_bytes": 4096, "slots": 0, "key_cap": 16, "val_cap": 16, "spins": 10, "depth": 4}]).to_string(), "slots"),
+        (json!([{"name": "ok", "ring_bytes": 4096, "slots": 8, "key_cap": 16, "val_cap": 16, "depth": 4}]).to_string(), "spins"),
+        (json!([{"name": "ok", "ring_bytes": 4096, "slots": 8, "key_cap": 16, "val_cap": 16, "spins": 10}]).to_string(), "depth"),
         (json!({"name": "not a list"}).to_string(), "list"),
     ] {
         let dir = tmp("bad");
@@ -172,7 +180,6 @@ fn a_seat_that_died_leaves_stale_region_names_and_the_next_start_clears_its_own(
 
 // ---- subscriptions and cells: a peer asks for seat nodes, the seat publishes them in its cell table (the peer maps it read-only) -----------------------------------------------------
 
-fn decl_caps(name: &str, val_cap: u32) -> String { json!([{"name": name, "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": val_cap}]).to_string() }
 fn key(eid: &str, prop: &str) -> String { format!("{eid}\u{1}{prop}") }
 fn put(port: u16, eid: &str, prop: &str, v: J) { call(port, "entity_write", json!({"spec": eid, "prop": prop, "value": v})); }
 
@@ -285,4 +292,72 @@ fn a_node_that_does_not_exist_is_a_gone_cell_and_a_value_that_does_not_fit_is_a_
     let big = cell_when(&cells, &key("Lamp:desk", "note"), 30, |c| c.is_some()).expect("a cell for the big value");
     assert_eq!(big.state, CellState::Refused);
     assert!(big.value.as_str().unwrap().contains("value"), "the reason says which limit: {:?}", big.value);
+}
+
+// ---- the inbound side: a seat rule reads a node a peer owns; the seat asks for it (`sub`) and follows the peer's cells ---------------------------------------------------------------
+
+/// a pack with a rule that reads a foreign node the peer owns, and one that reads a node nobody owns
+fn probe_pack(dir: &std::path::Path) -> std::path::PathBuf {
+    let p = dir.join("probe.c1f");
+    std::fs::write(&p, "PACK probe 1\nIMPORT boot 1\nRESIDENT Probe\nProbe.seen getter: kitchen::Lamp:desk.power\nProbe.lost getter: nobody::Thing:1.state\n").unwrap();
+    p
+}
+fn peer_cells(name: &str) -> graphlink_shm::cells::Cells { graphlink_shm::cells::Cells::create(format!("/gl-{name}-pc"), 64, 128, 1024, 1).unwrap() }
+fn asked(ev: &[Event], eid: &str) -> Option<Option<Vec<String>>> {
+    ev.iter().find_map(|e| if let Event::Op(Op::Sub { target: Target::Id(i), props, .. }) = e { if i == eid { Some(props.clone()) } else { None } } else { None })
+}
+
+#[test]
+fn a_seat_rule_that_reads_a_peers_node_asks_for_it_and_follows_the_peers_cells() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let dir = tmp("inbound");
+    let run = start_with(&dir, &[format!("peers={}", decl(&name))], &[probe_pack(&dir)]);
+    let mut mine = peer_cells(&name);
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    put(run.port, "Probe:1", "x", json!(1));
+    // the rule reads kitchen::Lamp:desk.power: the seat asks the peer for exactly that prop
+    assert!(peer.until(30_000, |ev| asked(ev, "kitchen::Lamp:desk").is_some()), "the peer was never asked: {:?}", peer.events);
+    assert_eq!(asked(&peer.events, "kitchen::Lamp:desk").unwrap(), Some(vec!["power".to_string()]));
+    let before = read(run.port, "Probe:1", "seen");
+    assert!(!before.contains("off"), "nothing has arrived yet: {before}");
+    // the peer publishes its node: the rule follows
+    mine.put("kitchen::Lamp:desk\u{1}", 1.0, &json!(true)).unwrap();
+    mine.put("kitchen::Lamp:desk\u{1}power", 1.0, &json!("off")).unwrap();
+    assert!(wait_for(run.port, "Probe:1", "seen", "off", 30).contains("off"), "the rule never saw the peer's value: {}", read(run.port, "Probe:1", "seen"));
+    mine.put("kitchen::Lamp:desk\u{1}power", 2.0, &json!("on")).unwrap();
+    let now_on = wait_for(run.port, "Probe:1", "seen", "\"on\"", 30);
+    assert!(now_on.contains("on") && !now_on.contains("off"), "the change did not arrive: {now_on}");
+    // the peer says the node is gone: the rule no longer sees the old value
+    mine.mark("kitchen::Lamp:desk\u{1}", 3.0, CellState::Gone, "").unwrap();
+    let end = Instant::now() + Duration::from_secs(30);
+    loop { let v = read(run.port, "Probe:1", "seen"); if !v.contains("on") || Instant::now() > end { assert!(!v.contains("\"on\""), "still shows the gone node's value: {v}"); break; } std::thread::sleep(Duration::from_millis(100)); }
+}
+
+#[test]
+fn a_node_no_peer_owns_is_not_asked_of_anyone() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let dir = tmp("nobody");
+    let run = start_with(&dir, &[format!("peers={}", decl(&name))], &[probe_pack(&dir)]);
+    let _mine = peer_cells(&name);
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    put(run.port, "Probe:1", "x", json!(1));
+    assert!(peer.until(30_000, |ev| asked(ev, "kitchen::Lamp:desk").is_some()));
+    peer.until(600, |_| false);
+    assert!(asked(&peer.events, "nobody::Thing:1").is_none(), "kitchen was asked for a node of the namespace `nobody`");
+}
+
+#[test]
+fn when_no_rule_reads_the_node_any_more_the_peer_is_told_to_stop() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let dir = tmp("drop");
+    let run = start_with(&dir, &[format!("peers={}", decl(&name))], &[probe_pack(&dir)]);
+    let _mine = peer_cells(&name);
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    put(run.port, "Probe:1", "x", json!(1));
+    assert!(peer.until(30_000, |ev| asked(ev, "kitchen::Lamp:desk").is_some()));
+    put(run.port, "Probe:1", "retire", json!(true));   // the rule goes with its entity
+    assert!(peer.until(30_000, |ev| ev.iter().any(|e| matches!(e, Event::Op(Op::Unsub { target: Target::Id(i) }) if i == "kitchen::Lamp:desk"))), "no unsub came: {:?}", peer.events);
 }
