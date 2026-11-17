@@ -50,6 +50,21 @@ pub fn replace_private(path: &Path, text: &str) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| { let _ = std::fs::remove_file(&tmp); format!("{}: {e}", path.display()) })
 }
 
+/// What the seat's peers need when the seat has a door secret: the secret (to mint each declared peer's token and to check every hello), the folder the tokens go in (`<data dir>/peers`) and their life
+/// (the admin token's: the fact `admin_token_ttl_s`, 30 days when unset). A seat with no secret has none: its peers are not asked for a token.
+pub struct PeerAuth { pub secret: Vec<u8>, pub dir: PathBuf, pub ttl: f64 }
+
+pub fn peer_auth(facts: &[(String, J)]) -> Result<Option<PeerAuth>, String> {
+    let fact = |k: &str| facts.iter().rev().find(|(n, _)| n == k).map(|(_, v)| v);
+    let Some(secret_path) = fact("door_secret_file").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) else { return Ok(None) };
+    let secret_path = PathBuf::from(secret_path);
+    let secret = ensure_secret(&secret_path)?;
+    let dir = fact("seat_data_dir").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(PathBuf::from)
+        .or_else(|| secret_path.parent().map(|p| p.to_path_buf())).unwrap_or_else(|| PathBuf::from("."));
+    let ttl = fact("admin_token_ttl_s").and_then(|v| v.as_f64()).unwrap_or(DEFAULT_TTL_S);
+    Ok(Some(PeerAuth { secret, dir: dir.join("peers"), ttl }))
+}
+
 /// At boot: the facts say whether there is a door secret; -> the facts to add (`admin_token_file`), or none for a seat with no secret.
 pub fn boot(facts: &[(String, J)], now: f64) -> Result<Map<String, J>, String> {
     let fact = |k: &str| facts.iter().rev().find(|(n, _)| n == k).map(|(_, v)| v);
