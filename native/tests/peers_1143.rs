@@ -361,3 +361,69 @@ fn when_no_rule_reads_the_node_any_more_the_peer_is_told_to_stop() {
     put(run.port, "Probe:1", "retire", json!(true));   // the rule goes with its entity
     assert!(peer.until(30_000, |ev| ev.iter().any(|e| matches!(e, Event::Op(Op::Unsub { target: Target::Id(i) }) if i == "kitchen::Lamp:desk"))), "no unsub came: {:?}", peer.events);
 }
+
+// ---- forwarded writes: a peer asks the seat to write one of ITS nodes; a c1f policy (the fact `peer_writes`) decides, and the default is no ------------------------------------------------
+
+fn wr(wid: &str, id: &str, prop: &str, value: J) -> Op { Op::Wr { wid: wid.into(), id: id.into(), prop: prop.into(), value } }
+/// the receipt the peer gets for a write: None until it comes
+fn receipt(ev: &[Event], wid: &str) -> Option<Option<String>> {
+    ev.iter().find_map(|e| if let Event::Op(Op::Res { wid: w, refused }) = e { if w == wid { Some(refused.clone()) } else { None } } else { None })
+}
+fn rule_fact() -> String { format!("peer_writes={}", json!([{"peer": "kitchen", "prefix": "Lamp:"}])) }
+
+#[test]
+fn a_write_a_peer_asks_for_is_refused_by_default_with_the_reason_and_changes_nothing() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("wr-no"), &[format!("peers={}", decl(&name))]);
+    put(run.port, "Lamp:desk", "power", json!("off"));
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    peer.say(vec![wr("w1", "Lamp:desk", "power", json!("on"))]);
+    assert!(peer.until(30_000, |ev| receipt(ev, "w1").is_some()), "no receipt came: {:?}", peer.events);
+    let why = receipt(&peer.events, "w1").unwrap().expect("refused");
+    assert!(why.contains("peer_writes"), "the reason names the fact that decides: {why}");
+    assert!(read(run.port, "Lamp:desk", "power").contains("off"), "nothing was written");
+}
+
+#[test]
+fn a_rule_in_the_fact_lets_a_peer_write_the_nodes_it_names_and_only_those() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("wr-yes"), &[format!("peers={}", decl(&name)), rule_fact()]);
+    put(run.port, "Lamp:desk", "power", json!("off"));
+    put(run.port, "Door:front", "locked", json!(true));
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    peer.say(vec![wr("w1", "Lamp:desk", "power", json!("on")), wr("w2", "Door:front", "locked", json!(false))]);
+    assert!(peer.until(30_000, |ev| receipt(ev, "w1").is_some() && receipt(ev, "w2").is_some()), "{:?}", peer.events);
+    assert_eq!(receipt(&peer.events, "w1").unwrap(), None, "accepted: ok");
+    assert!(receipt(&peer.events, "w2").unwrap().is_some(), "outside the prefix: refused");
+    assert!(wait_for(run.port, "Lamp:desk", "power", "on", 30).contains("on"));
+    let door = read(run.port, "Door:front", "locked");
+    assert!(door.to_lowercase().contains("true") && !door.to_lowercase().contains("false"), "the door was not touched: {door}");
+}
+
+#[test]
+fn a_rule_is_for_one_peer_another_peer_is_refused_by_it() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("wr-other"), &[format!("peers={}", decl(&name)), rule_fact()]);
+    put(run.port, "Lamp:desk", "power", json!("off"));
+    let mut peer = PeerEnd::open(&name, "garage");   // the rule names `kitchen`
+    peer.say(vec![wr("w1", "Lamp:desk", "power", json!("on"))]);
+    assert!(peer.until(30_000, |ev| receipt(ev, "w1").is_some()));
+    assert!(receipt(&peer.events, "w1").unwrap().is_some());
+    assert!(read(run.port, "Lamp:desk", "power").contains("off"));
+}
+
+#[test]
+fn a_peer_cannot_ask_the_seat_to_write_a_node_of_another_namespace() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("wr-ns"), &[format!("peers={}", decl(&name)), format!("peer_writes={}", json!([{"peer": "kitchen", "prefix": ""}]))]);   // a rule that allows everything it can
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    peer.say(vec![wr("w1", "garage::Lamp:1", "power", json!("on"))]);
+    assert!(peer.until(30_000, |ev| receipt(ev, "w1").is_some()));
+    let why = receipt(&peer.events, "w1").unwrap().expect("refused");
+    assert!(why.contains("not a node of this seat"), "{why}");
+    drop(run);
+}

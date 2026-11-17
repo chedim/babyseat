@@ -2,6 +2,7 @@ PACK link 1
 IMPORT boot 1
 RESIDENT Vm
 VIRTUAL Page
+RESIDENT LinkWrite
 -- THE GRAPH LINK, SLICE 1: WHAT THE PAGE TELLS THE SEAT (#1143, docs/graph-link.md sections 2 and 8, "Slice 1: built"). The page is a second field engine; it cannot be asked, so it tells.
 -- Its own pack (apps/barest.c1f/link_view.c1f, run in the browser) writes through the ordinary door (`POST /mcp`, `entity_write`; whoever reaches the page may write, there are no per-person rights):
 --   Vm:<ns>.caps              what this page can do, ONE write at start: protocol, encodings, frames, the DOM allow-list, the packs it runs (`provides`, each with its `requires`), the classes it can evaluate, limits, device class
@@ -60,3 +61,11 @@ Boot.old_vms on-setter link-sweep:
   WHEN this.old_vms != None:
     FOR r IN this.old_vms:
       (prop(r, 'k')).retire = True
+
+-- A WRITE A PEER ASKED FOR (docs/graph-link.md, sections 7 and 18): a peer's `wr` over shared memory becomes `LinkWrite:<peer name>:<wid>` {peer, id, prop, value} (the seat's peer driver, native/src/peers.rs; the driver reads the verdict and retires it at once: a question is not memory),
+-- and the verdict below decides. THE POLICY IS DATA, A FACT THE OWNER SETS: `peer_writes`, a list of rules `{peer, prefix}`: the peer whose namespace is `peer` may write the nodes whose id starts with `prefix`. No rule, no write: the default is
+-- refusal, and the peer's receipt says which fact decides. The driver applies an accepted write as an ordinary outside write (writer `link:<peer>`); it never writes a node of another namespace, whatever the rules say.
+Boot.pw_rules getter: this.peer_writes if this.peer_writes is List else []
+LinkWrite.rules getter: ([b.pw_rules for b in instances('Boot')] or [[]])[0]
+LinkWrite.allowed getter: len([r for r in this.rules if r['peer'] == this.peer and startswith(str(this.id), str(r['prefix']))]) > 0
+LinkWrite.verdict getter: 'accept' if this.allowed else 'refused: no rule of the fact peer_writes lets ' + str(this.peer) + ' write ' + str(this.id)
