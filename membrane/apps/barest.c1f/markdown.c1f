@@ -19,10 +19,10 @@ IMPORT dom 1
 -- that has children would wipe them); a value that did not change is no write.
 MdPaint.nodes on-setter md-paint:
   WHEN this.nodes != None:
-    keys = [prop(nd, 'k') for nd in this.nodes]
-    FOR e IN [x for x in (this.drawn or []) if x not in keys]:
+    ks = [prop(nd, 'k') for nd in this.nodes]
+    FOR e IN [x for x in (this.drawn or []) if x not in ks]:
       (e).retire = True
-    this.drawn = keys
+    this.drawn = ks
     FOR nd IN this.nodes:
       (prop(nd, 'k')).tag = prop(nd, 'tag')
       (prop(nd, 'k')).class = prop(nd, 'class')

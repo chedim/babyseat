@@ -477,6 +477,7 @@ fn call_ty_in(f: &str, args: &[Node], tys: &[Ty], env: &Env) -> Ty {
         "lower" | "strip" | "plain" | "unspeak" => { if ar(1, 1) { chk(0, Acc::Text); } Ty::text() }
         "replace" => { if ar(3, 3) { for i in 0..3 { chk(i, Acc::Text); } } Ty::text() }
         "startswith" => { if ar(2, 2) { chk(0, Acc::Text); chk(1, Acc::Text); } Ty::bool() }
+        "keys" => { ar(1, 1); Ty::list(Ty::text()) }
         "lines" | "words" => { if ar(1, 1) { chk(0, Acc::Text); } Ty::list(Ty::text()) }
         "spans" => { if ar(2, 2) { chk(0, Acc::Text); chk(1, Acc::Text); } Ty::list(Ty::dict()) }   // [{start, end, text}] (#1143)
         "join" => { if ar(2, 2) { chk(0, Acc::List); chk(1, Acc::Text); } Ty::text() }
