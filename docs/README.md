@@ -33,7 +33,7 @@ Anything in progress says so on its page and names its branch. The README at the
 | [chat-keys.md](chat-keys.md) | the session id in the message's key: why and how |
 | [doctrine-barest.md](doctrine-barest.md) | the doctrine (the system prompt), the banner and the message: what the model gets, and what it promises |
 | [ui-rebuild-plan.md](ui-rebuild-plan.md) | the page as c1f view packs: status per slice, the shell and view-pack contract, markdown and Stop |
-| [graph-link.md](graph-link.md) | joining the page's graph and the seat's: slices 1 and 2 built (the page reports, the engine hooks), the rest design |
+| [graph-link.md](graph-link.md) | joining graphs: the page's and the seat's (slices 1 and 2 built: the page reports, the engine hooks), the seat's local peers over shared memory and the bridge to other machines (section 18, built in 0.7.63: `peers`, `peer_writes`, tokens, supervision, TLS, two seats), the rest design |
 | [waves.md](waves.md) | wavelink: getters as a wave, setters as transactions, the algorithm threads of one VM would use (a design, not built), and what it means for the graph link |
 
 ## Measurements and design notes (dated; not part of the release surface)

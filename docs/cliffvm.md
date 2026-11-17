@@ -69,7 +69,7 @@ fallback), declares it as the read-only `SqlSource:legacy` and imports the chat 
 `./.membrane`, `~/membrane/.membrane` and Home Assistant's `/config/membrane/.membrane`. It ends for good when the ledger says `done`; an interrupted import resumes. Only the chat history is converted; the model reads the rest of the old field on demand (`Help:legacy`).
 
 **The dist folder** (`scripts/dist/build.sh [--bin <cliffvm>] [--out <dir>] [--target <triple>] [--archive <tar.gz>]`; default `dist/<version>`):
-`bin/cliffvm  packs/  apps/{barest.packs, barest.c1f/}  help/  LICENSE  VERSION  MANIFEST.sha256` (a sha256 per file but itself, sorted; `scripts/dist/verify.sh <dir>` checks it; `scripts/dist/smoke.sh <dir>` starts `serve --port 0` from the folder
+`bin/cliffvm  bin/graphlink-bridge (when the build made one)  packs/  apps/{barest.packs, barest.c1f/}  help/  LICENSE  VERSION  MANIFEST.sha256` (a sha256 per file but itself, sorted; `scripts/dist/verify.sh <dir>` checks it; `scripts/dist/smoke.sh <dir>` starts `serve --port 0` from the folder
 and reads `/global/health`; `scripts/dist/assemble_wheel_payload.sh <dist> <payload>` makes the folder the wheel wrapper packages as `membrane/dist/`). `.github/workflows/release-binaries.yml` builds it per platform on a tag `v*` or by hand and publishes nothing.
 The wheels, the installer and the image are in progress (branch `w118-wheels`; docs/packaging-plan.md). Tests: `native/tests/serve_1143.rs`, `native/tests/dist_1143.rs`.
 
@@ -288,6 +288,18 @@ The previous seat's chat history (sessions and messages) is imported from the re
 - **Late wakes are dropped, not queued.** When the plan from the slot that fired is already in the past (the engine was busy longer than a slot) the slots are SKIPPED and counted in `dropped` (for `@every` the number of intervals skipped; for cron fields 1 per late wake), and the plan restarts from now (`late = {for, at}`: the engine refuses a second write of `base` in one cascade, so the re-plan has its own property). The `@every` grid is kept (`at` + k * n).
 - **Restart.** The timers are RAM; a restore runs no setter, so `cron-boot` plans every Cron from the clock of the start: the missed runs are SKIPPED (not caught up, not counted), the next one is armed. **Replay** runs no driver (no store, no timer): the journalled `arm_result` lines re-derive `fired`, `due`, `dropped` and what a setter on `fired` did, and nothing fires again.
 - **Not covered / open.** Daylight-saving transitions are not tested (the zone offset is read at the local noon of the target day, so a fire inside the hour of a transition may be an hour off); the real clock is exercised by the host loop only, never by the tests; `dropped` for cron fields is 1 per late wake, not the number of matching minutes skipped; no month or day names (`jan`, `mon`), no `@daily`.
+
+## Local peers and the bridge (#1143, 0.7.63; the design and the decisions are docs/graph-link.md, section 18)
+
+Programs that share the seat's graph with no socket are declared in the boot fact `peers` (a list; `native/src/peers.rs`, driven from the host loop's per-turn callback in `cli.rs`). Each entry: `name` (letters, digits, `-`, `_`; the longest region name is 31 bytes), `ring_bytes`, `slots`, `key_cap`, `val_cap`, `spins`, `depth` (every number the owner's: no defaults, a bad entry stops the start and names the fact), and with a door secret `ns` (the peer's namespace). The seat makes `/gl-<name>-ctl` (control rings) and `/gl-<name>-sc` (its cell table); the peer makes `/gl-<name>-pc`.
+
+- **What the seat shows.** `Vm:<peer namespace>` with `link` `up` or `gone` (`kind` `peer`, `state` `connected` or `gone`); a rule that reads a node the peer owns makes the seat ask for it (`sub`) and follow the peer's cells (replicas, never stored).
+- **Writes.** A peer's `wr` is refused unless the fact `peer_writes` (a list of `{peer, prefix}`) allows it (`LinkWrite`, `membrane/packs/link.c1f`); a node of another namespace is never written.
+- **Tokens.** With a door secret the seat writes `<data dir>/peers/<name>.token` (mode 0600, the life of `admin_token_ttl_s`) and refuses a hello without a valid token for the declared namespace (`docs/auth.md`).
+- **Supervision.** An entry with `run` `{argv, restart_wait_s, max_restarts, reset_after_s}` (all the owner's) has its process started by the seat with `GRAPHLINK_PARENT` set to the seat's pid, started again after the wait with new rings, and given up on after `max_restarts`.
+- **The bridge.** `bin/graphlink-bridge` (in the dist folder, built by the same `cargo build`) joins a seat to a remote over TCP: `connect` or `listen`, tokens, TLS, `--seat-name` for two seats, `--die-with-parent`. Its program and crates are github.com/chedim/graphlink.
+
+Tests: `native/tests/peers_1143.rs`, `peers_auth_1143.rs`, `peers_super_1143.rs`, `bridge_e2e_1143.rs` (real processes: a seat, the bridge, a remote over TCP, and two seats).
 
 ## The host loop (`native/src/host.rs`)
 
