@@ -36,9 +36,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
-      - run: cargo test --release --no-default-features --features bin --no-fail-fast
+      # nextest runs every test as its own process and all of them at once across the test binaries (cargo test runs the binaries one after another: 163 of them, 14 minutes of the 16 were waiting on seats
+      # one at a time); the tests name their temp folders, ports and shared-memory regions uniquely, so they may overlap. nextest does not run doc tests: they run on their own.
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --release --no-default-features --features bin --no-fail-fast
+        working-directory: native
+      - run: cargo test --release --no-default-features --features bin --doc
         working-directory: native
   js:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]   # the page tests split over three runners: each file runs in one of them
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,7 +67,11 @@ jobs:
       - run: |
           set -e
           export CLIFFVM="$PWD/native/target/release/cliffvm" CHROME="$(command -v google-chrome)"
-          for t in tests/js/*.test.mjs; do echo "== $t"; node "$t"; done
+          i=0
+          for t in tests/js/*.test.mjs; do
+            if [ $((i % 3)) -eq ${{ matrix.shard }} ]; then echo "== $t"; node "$t"; fi
+            i=$((i + 1))
+          done
   ha:
     runs-on: ubuntu-latest
     steps:
