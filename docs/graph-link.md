@@ -329,21 +329,32 @@ The VM could split a pack by RULE (getter/setter) instead of by pack: rules that
 5. **The cost.** Extra round trips: fine for coarse events, bad for fine-grained ones; the traffic budget of section 11 applies to each cut.
 6. **Why placement stays at PACK granularity (section 16) for slices 1-3:** a file is a reviewable unit, a refusal names it, the operator splits it with an editor; a rule-level cut needs the dataflow analysis, the equivalence test and measured traffic to choose cuts. It is decided later from measured traffic, not now.
 
-## 18. Local peers: the seat's peer driver and the bridges (design, not built; operator 2026-11-16)
+## 18. Local peers: the seat's peer driver, shared memory, and the bridges (design, not built; operator 2026-11-16)
 
-Decided: the engine is a small kernel (rounds, ownership, the store, the journal). Code that is first-party, on the hot path and handles trusted data stays in the engine (`sql`, files, command, the HTTP client). Code that is third-party, network-facing (hostile input, TLS), able to crash, or needing other privileges runs OUTSIDE as a GraphLink peer. Network transports are therefore NOT built into cliffvm: a TCP, WebSocket or MQTT **bridge** is a separate program that speaks the network outward and a local transport inward.
+This section is how the seat talks to code that runs OUTSIDE the engine process: out-of-process modules (drivers, devices, tools). It is not how packs load: a pack is c1f source the engine loads from `membrane/apps/barest.packs` (and later from packages, #1089).
 
-**The one new native piece: a peer driver on the engine thread.**
-- It starts a child process the seat was told to run (a command and its arguments, declared by a package once packages exist, #1089, and approved by the owner; until then by a fact the owner sets) and talks to it over the child's standard input and output: one JSON frame per line (the framing of `graphlink-net`), later a shared-memory region (github.com/chedim/graphlink `docs/shared-memory.md`). The library's `Transport` trait is the same for both.
-- A reader thread per child pushes lines into a channel and wakes the loop, as every driver thread does; the engine thread owns the `graphlink_core::Link` and every decision. Frames are handled at the end of a round and answered in a later one (section 4).
-- Events become the entities the design already has: `Opened` is the child's `Vm:<ns>` (kind `peer`, `link: up`), `Op(Val)` goes through `apply_val` into replicas (built, slice 2), `Op(Wr)` is a forwarded write to a node the seat owns (slice 3), `Closed` and `Failed` set `link: gone` and the subtree follows the policy of section 14 (a peer is durable: stale, not deleted).
-- Supervision: start at boot, restart when the child dies (the wait between restarts is a number for the operator), stop at shutdown. A restart is never started in the middle of a round.
+Decided: the engine is a small kernel (rounds, ownership, the store, the journal). Code that is first-party, on the hot path and handles trusted data stays in the engine (`sql`, files, command, the HTTP client). Code that is third-party, network-facing (hostile input, TLS), able to crash, or needing other privileges runs OUTSIDE as a GraphLink peer.
 
-**The bridge (a separate binary in the graphlink repo, `graphlink-bridge`):** TCP (then WebSocket, MQTT) outward, the child's standard input and output inward. It owns the network credentials and the TLS; the seat never sees a socket. It holds its own token and the namespace claim of section 13 and MUST NOT widen what the peer behind it may own (the gateway rule of section 14). The first user is `graphlink watch` and `graphlink write` from the CLI, against a real seat.
+**The local transport is shared memory** (github.com/chedim/graphlink: `graphlink-shm`, `docs/shared-memory.md`). Per peer there are three regions, each with ONE writer so a reader can map it read-only:
+- `ctl`: the control rings (one ring per direction): `hello`, `sub`, `unsub`, `read`, `wr` and its `res`, `q` and `page`, `resync`, `pause`, `upgrade`, `bye`;
+- the seat's cell table: the latest value of each seat node and prop the peer subscribed to, written by the seat, mapped read-only by the peer;
+- the peer's cell table: the same the other way.
+A region is identified by a NAME, not a path (`shm_open` on Unix, a named mapping on Windows later). The owner declares each peer, with ALL its capacities (ring bytes, slots, key and value bytes: no defaults), in a fact `peers`.
+
+**The one new native piece: a peer driver on the engine thread** (`native/src/peers.rs`, Unix only, not compiled into the wasm build), driven from the loop's per-turn callback:
+- It holds, per peer, a `graphlink_core::Link` (hello, version negotiation, counters, upgrade), the control rings and the two cell tables. The engine thread owns every decision; the library starts no thread.
+- Events become the entities the design already has: `Opened` is the peer's `Vm:<ns>` (kind `peer`, `link: up`); a foreign key the engine reads that a peer owns is announced as `sub` (from `link_notices`); a peer's cell with a newer revision than the replica goes through `feed_val` (built, slice 2); a peer's `sub` makes the seat publish that node's cells (revision up on each change); `Closed` and `Failed` set `link: gone`, and the subtree follows section 14 (a peer is durable: stale, not deleted).
+- `wr` from a peer (a forwarded write) is REFUSED until the policy of section 7 exists (a security decision for the operator).
+- A peer's change is noticed on the loop's next turn: shared memory has no wake-up signal, so the latency is the loop's own wait (50 ms at most today); a faster wake is a separate number for the operator.
+- Supervision (when the seat starts the peer itself): start, restart when it dies, stop at shutdown; never in the middle of a round.
+
+**Upgrade.** A peer may first connect over TCP (through a bridge) and then `upgrade` to shared memory when it is on the same machine (docs/frames.md, "Upgrade"): the proposer names the regions, the other side attaches, both switch, the counters go on; a refusal leaves the link on TCP.
+
+**The bridges** (separate binaries in the graphlink repo; the seat never holds a socket): `TCP to shared memory` first, `shared memory to stdio` later. A bridge owns the network credentials and the TLS, holds its own token and the namespace claim of section 13, and MUST NOT widen what the peer behind it may own (the gateway rule of section 14).
 
 **What stays as it is:** the HTTP long poll of slice 2 for pages, until a page can speak a bridge.
 
-**Threads:** nothing changes: the engine is one thread, the child is a process, and the reader thread only moves bytes (the rule of `graphlink-core`: sans-I/O, state on the engine thread).
+**Threads:** nothing changes: the engine is one thread, a peer is a process, and the driver only reads and writes mapped memory on the engine thread.
 
 ## DECISIONS for the operator (nothing is chosen silently; my pick in brackets)
 
@@ -393,7 +404,8 @@ Decided: the engine is a small kernel (rounds, ownership, the store, the journal
 43. (slice 1) A tab that never reports leaves no `Vm`; make `Vm` at the snapshot instead? [no]
 44. (slice 1) Where a refused report is shown to the person (today: `LinkView:main.note`, not drawn). [draw it in the shell error line]
 45. Placement: a file with mixed imports is a loud placement error (section 16), the rule-level split later. [yes]
-46. (section 18) The wait between restarts of a peer child, and the number of restarts before the seat stops trying. [none set: a number for the operator]
-47. (section 18) The largest frame a peer may send, and the most peers a seat holds. [none set: numbers for the operator]
-48. (section 18) Until packages exist, how the owner declares a peer child: a fact `peers` holding `[{name, command, args}]`. [yes]
-49. (section 18) The bridge is a separate binary in the graphlink repo and ships as a release asset, not inside cliffvm. [yes]
+46. (section 18) The wait between restarts of a peer the seat starts itself, and the number of restarts before it stops trying. [none set: a number for the operator]
+47. (section 18) The most peers a seat holds, and the largest frame a peer may send. [none set: numbers for the operator]
+48. (section 18) How the owner declares a peer: a fact `peers` holding `[{name, ring_bytes, slots, key_cap, val_cap}]` (the capacities are the owner's numbers). [yes]
+49. (section 18) The bridges are separate binaries in the graphlink repo and ship as release assets, not inside cliffvm. [yes]
+50. (section 18) A wake-up for shared memory faster than the loop's own wait. [none: a number for the operator, only if measured too slow]
