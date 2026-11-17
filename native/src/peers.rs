@@ -3,6 +3,7 @@
 //! driven from the loop's per-turn callback on the engine's thread (`Peers::pump`): it never waits, starts no thread, and every decision is the engine's.
 #![cfg(unix)]
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use graphlink_core::frame::{Op, Target, VERSION};
 use graphlink_core::link::{Event, Link, Me};
@@ -18,7 +19,12 @@ const WRITER: &str = "link:peer";
 
 struct Peer {
     name: String,
-    ctl: Shm,
+    /// the control rings; `None` only for the moment between a process ending and the rings being made again
+    ctl: Option<Shm>,
+    ring: usize,
+    seat_ns: String,
+    /// the process the owner declared for this peer, and the numbers for starting it again
+    sup: Option<Supervisor>,
     /// the seat's own cell table for this peer (the peer maps it read-only): one cell per `(eid, prop)` the peer subscribed to, and one per entity (`eid` and an empty prop)
     cells: Cells,
     /// what the peer asked for: a node or a prefix, and the props it named (all when none)
@@ -48,6 +54,55 @@ struct Peer {
     refused: bool,
 }
 
+/// The process of a declared peer (`run` in the fact `peers`): started by the seat, started again after the owner's wait when it exits, given up on after the owner's number of restarts. The
+/// count starts again from zero when a process had stayed up the owner's time. Every number is the owner's; there are no defaults.
+struct Supervisor { argv: Vec<String>, wait: Duration, max: u64, reset: Duration, child: Option<std::process::Child>, started: Instant, restarts: u64, restart_at: Option<Instant>, gave_up: bool }
+
+impl Supervisor {
+    fn from_decl(name: &str, o: &Map<String, J>) -> Result<Option<Supervisor>, String> {
+        let Some(r) = o.get("run") else { return Ok(None) };
+        let r = r.as_object().ok_or_else(|| format!("peers: `run` of {name:?} must be {{argv, restart_wait_s, max_restarts, reset_after_s}}"))?;
+        let argv: Vec<String> = r.get("argv").and_then(J::as_array).filter(|a| !a.is_empty()).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect::<Vec<_>>()).filter(|a| !a.is_empty())
+            .ok_or_else(|| format!("peers: `run.argv` of {name:?} must be a non-empty list of strings (the program and its arguments)"))?;
+        let secs = |k: &str| r.get(k).and_then(J::as_f64).filter(|n| *n > 0.0 && n.is_finite());
+        let (wait, reset, max) = (secs("restart_wait_s"), secs("reset_after_s"), r.get("max_restarts").and_then(J::as_u64));
+        let mut missing = vec![];
+        if wait.is_none() { missing.push("restart_wait_s (seconds above zero)"); }
+        if max.is_none() { missing.push("max_restarts (a whole number; 0 means never start it again)"); }
+        if reset.is_none() { missing.push("reset_after_s (seconds above zero)"); }
+        let (Some(wait), Some(reset), Some(max)) = (wait, reset, max) else { return Err(format!("peers: `run` of {name:?} needs {}: the owner's numbers, there are no defaults", missing.join(", "))) };
+        Ok(Some(Supervisor { argv, wait: Duration::from_secs_f64(wait), max, reset: Duration::from_secs_f64(reset), child: None, started: Instant::now(), restarts: 0, restart_at: None, gave_up: false }))
+    }
+
+    /// Start the process; it learns who started it (`GRAPHLINK_PARENT`), so a program such as the bridge can end with the seat. A start that fails counts like a process that exits.
+    fn start(&mut self, name: &str) {
+        let mut cmd = std::process::Command::new(&self.argv[0]);
+        cmd.args(&self.argv[1..]).env("GRAPHLINK_PARENT", std::process::id().to_string()).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null());
+        match cmd.spawn() {
+            Ok(c) => { self.child = Some(c); self.started = Instant::now(); }
+            Err(e) => { eprintln!("cliffvm: peer {name}: cannot start {:?}: {e}", self.argv[0]); self.ended(name, "did not start"); }
+        }
+    }
+
+    /// The process is over (it exited, or could not start): when to try again, or that the seat gives up.
+    fn ended(&mut self, name: &str, how: &str) {
+        self.child = None;
+        if self.started.elapsed() >= self.reset { self.restarts = 0; }
+        if self.restarts >= self.max {
+            self.gave_up = true;
+            eprintln!("cliffvm: peer {name}: its process {how} and the {} restarts the owner allowed are used: giving up", self.max);
+        } else {
+            self.restarts += 1;
+            self.restart_at = Some(Instant::now() + self.wait);
+            eprintln!("cliffvm: peer {name}: its process {how}; starting it again in {:?} (restart {} of {})", self.wait, self.restarts, self.max);
+        }
+    }
+}
+
+impl Drop for Supervisor {
+    fn drop(&mut self) { if let Some(c) = self.child.as_mut() { let _ = c.kill(); let _ = c.wait(); } }
+}
+
 pub struct Peers {
     list: Vec<Peer>,
     /// the foreign keys the engine reads (from `link_notices`): node -> props; each goes to the peer that owns the namespace
@@ -70,6 +125,7 @@ impl Peers {
             let ring = field(o, name, "ring_bytes")? as usize;
             let (slots, key_cap, val_cap) = (field(o, name, "slots")?, field(o, name, "key_cap")?, field(o, name, "val_cap")?);
             let (spins, depth) = (field(o, name, "spins")?, field(o, name, "depth")? as usize);
+            let sup = Supervisor::from_decl(name, o)?;
             // with a door secret a peer's namespace is declared: the seat mints the peer's token with it (`ns` claim), and a hello must carry that token
             let declared = match &auth {
                 None => None,
@@ -89,7 +145,10 @@ impl Peers {
             let cells = Cells::create(format!("/gl-{name}-sc"), slots, key_cap, val_cap, epoch).map_err(|e| format!("peers: {name}: {e}"))?;
             let mut link = Link::new(Me { ns: seat_ns.into(), build: format!("cliffvm {}", env!("CARGO_PKG_VERSION")), epoch: epoch as f64, support: vec![VERSION], initiator: true });
             ctl.send(&link.open()).map_err(|e| format!("peers: {name}: {e}"))?;
-            list.push(Peer { name: name.to_string(), ctl, cells, subs: vec![], published: HashMap::new(), reader: None, spins, depth, asked: HashMap::new(), seen: HashMap::new(), told_down: HashSet::new(), reported: HashSet::new(), link, ns: None, gone: false, declared, secret: auth.as_ref().map(|a| a.secret.clone()), refused: false });
+            list.push(Peer { name: name.to_string(), ctl: Some(ctl), ring, seat_ns: seat_ns.to_string(), sup, cells, subs: vec![], published: HashMap::new(), reader: None, spins, depth, asked: HashMap::new(), seen: HashMap::new(), told_down: HashSet::new(), reported: HashSet::new(), link, ns: None, gone: false, declared, secret: auth.as_ref().map(|a| a.secret.clone()), refused: false });
+            // the rings and the table exist now: the process the owner declared can attach
+            let nm = name.to_string();
+            if let Some(sup) = list.last_mut().and_then(|p| p.sup.as_mut()) { sup.start(&nm); }
         }
         Ok(Peers { list, wanted: BTreeMap::new() })
     }
@@ -104,18 +163,19 @@ impl Peers {
             if let Some(e) = self.wanted.get_mut(eid) { let drop: Vec<&str> = n["props"].as_array().into_iter().flatten().filter_map(J::as_str).collect(); e.retain(|p| !drop.contains(&p.as_str())); if e.is_empty() { self.wanted.remove(eid); } }
         }
         for p in self.list.iter_mut() {
+            p.supervise(h);
             loop {
-                match p.ctl.recv() {
+                match p.ctl.as_mut().map_or(Ok(None), |c| c.recv()) {
                     Ok(None) => break,
                     Ok(Some(frame)) => {
                         let (events, reply) = p.link.receive(frame);
-                        if let Some(r) = reply { let _ = p.ctl.send(&r); }
+                        if let Some(r) = reply { p.say(&r); }
                         for ev in events { p.event(h, ev); }
                     }
                     Err(e) => { eprintln!("cliffvm: peer {}: {e}", p.name); p.go(h); break; }
                 }
             }
-            if !p.gone && p.ctl.is_closed() { p.go(h); }
+            if !p.gone && p.ctl.as_ref().map_or(true, |c| c.is_closed()) { p.go(h); }
             if !p.gone && !p.subs.is_empty() { p.publish(h); }
             if !p.gone && p.link.is_open() { p.ask(&self.wanted); p.follow(h); }
         }
@@ -123,6 +183,52 @@ impl Peers {
 }
 
 impl Peer {
+    fn say(&mut self, f: &graphlink_core::frame::Frame) { if let Some(c) = self.ctl.as_mut() { let _ = c.send(f); } }
+
+    /// Watch the peer's process: when it ends the peer is gone (its `Vm` says so), and after the owner's wait the rings and the link are made again, new, for the process that starts.
+    fn supervise(&mut self, h: &Host) {
+        let Some(sup) = self.sup.as_mut() else { return };
+        if let Some(child) = sup.child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let how = format!("exited ({status})");
+                    sup.ended(&self.name, &how);
+                    if !self.gone { self.go(h); }
+                }
+                Ok(None) => return,
+                Err(e) => { eprintln!("cliffvm: peer {}: cannot watch its process: {e}", self.name); return; }
+            }
+        }
+        let Some(sup) = self.sup.as_mut() else { return };
+        if sup.child.is_none() && !sup.gave_up && sup.restart_at.map_or(false, |t| Instant::now() >= t) {
+            sup.restart_at = None;
+            match self.fresh_rings() {
+                Ok(()) => { let name = self.name.clone(); if let Some(sup) = self.sup.as_mut() { sup.start(&name); } }
+                Err(e) => { eprintln!("cliffvm: peer {}: cannot make the control rings again: {e}", self.name); if let Some(sup) = self.sup.as_mut() { let n = self.name.clone(); sup.ended(&n, "could not be given new rings"); } }
+            }
+        }
+    }
+
+    /// New control rings and a new link for a process that starts again: the old rings belonged to the old process (the old end is dropped first: dropping it removes its name). What the old link had
+    /// asked, and what the engine was told, is forgotten; the seat's own cell table stays (it is the seat's).
+    fn fresh_rings(&mut self) -> Result<(), String> {
+        self.ctl = None;
+        graphlink_shm::remove_region(&format!("/gl-{}-ctl", self.name))?;
+        let mut ctl = Shm::create(format!("/gl-{}-ctl", self.name), self.ring)?;
+        let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let mut link = Link::new(Me { ns: self.seat_ns.clone(), build: format!("cliffvm {}", env!("CARGO_PKG_VERSION")), epoch: epoch as f64, support: vec![VERSION], initiator: true });
+        ctl.send(&link.open())?;
+        self.ctl = Some(ctl);
+        self.link = link;
+        self.subs.clear();
+        self.asked.clear();
+        self.seen.clear();
+        self.told_down.clear();
+        self.reader = None;
+        self.refused = false;
+        Ok(())
+    }
+
     fn eid(&self) -> Option<String> { self.ns.as_ref().map(|n| format!("Vm:{n}")) }
 
     fn event(&mut self, h: &Host, ev: Event) {
@@ -137,7 +243,7 @@ impl Peer {
                     if let Err(why) = verdict {
                         eprintln!("cliffvm: peer {}: hello refused: {why}", self.name);
                         self.refused = true;
-                        if let Ok(f) = self.link.send(vec![Op::Bye { why: "refused: auth".into() }]) { let _ = self.ctl.send(&f); self.ctl.flush(); }
+                        if let Ok(f) = self.link.send(vec![Op::Bye { why: "refused: auth".into() }]) { self.say(&f); if let Some(c) = self.ctl.as_mut() { c.flush(); } }
                         return;
                     }
                 }
@@ -172,7 +278,7 @@ impl Peer {
         }
         let dropped: Vec<String> = self.asked.keys().filter(|e| !wanted.contains_key(*e)).cloned().collect();
         for eid in dropped { ops.push(Op::Unsub { target: Target::Id(eid.clone()) }); self.asked.remove(&eid); self.seen.retain(|k, _| !k.starts_with(&format!("{eid}\u{1}"))); self.told_down.remove(&eid); }
-        if !ops.is_empty() { if let Ok(f) = self.link.send(ops) { let _ = self.ctl.send(&f); } }
+        if !ops.is_empty() { if let Ok(f) = self.link.send(ops) { self.say(&f); } }
     }
 
     /// Read the peer's cells for what was asked and give the engine every value whose revision is newer than the last one it was given (`feed_val`: a replica, never stored).
@@ -225,7 +331,7 @@ impl Peer {
             if verdict.as_str() == Some("accept") { h.write(&id, &prop, value, &format!("link:{ns}")); None }
             else { Some(verdict.as_str().map(str::to_string).unwrap_or_else(|| "refused: the policy gave no verdict".into())) }
         })();
-        if let Ok(f) = self.link.send(vec![Op::Res { wid, refused }]) { let _ = self.ctl.send(&f); }
+        if let Ok(f) = self.link.send(vec![Op::Res { wid, refused }]) { self.say(&f); }
     }
 
     /// Write what the peer subscribed to into the seat's cell table: each node's cells, for the props it named (all when none), whose value changed since the last turn.

@@ -26,11 +26,11 @@ bytemuck = { version = "1.25.2", optional = true }
 pollster = { version = "1.0.1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 # the graph link's subscription table and replica notes (#1143): their own repo, pinned to a commit
-graphlink-core = { git = "https://github.com/chedim/graphlink", rev = "070501a763b223f65822887aaf1b4b238fa14435" }
-graphlink-auth = { git = "https://github.com/chedim/graphlink", rev = "070501a763b223f65822887aaf1b4b238fa14435" }
+graphlink-core = { git = "https://github.com/chedim/graphlink", rev = "3ca54bde3a7d5778fdc90f63676003ebfdb941bb" }
+graphlink-auth = { git = "https://github.com/chedim/graphlink", rev = "3ca54bde3a7d5778fdc90f63676003ebfdb941bb" }
 # shared memory for the seat's local peers (Unix; an empty crate elsewhere): control rings and cell tables (docs/graph-link.md, section 18)
-graphlink-bridge = { git = "https://github.com/chedim/graphlink", rev = "070501a763b223f65822887aaf1b4b238fa14435", optional = true }
-graphlink-shm = { git = "https://github.com/chedim/graphlink", rev = "070501a763b223f65822887aaf1b4b238fa14435", optional = true }
+graphlink-bridge = { git = "https://github.com/chedim/graphlink", rev = "3ca54bde3a7d5778fdc90f63676003ebfdb941bb", optional = true }
+graphlink-shm = { git = "https://github.com/chedim/graphlink", rev = "3ca54bde3a7d5778fdc90f63676003ebfdb941bb", optional = true }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }   # a stored f64 (a stamp, a number in a journal line) must parse back to the same bits (#1143)
 # the tokenizer (#1143): UAX #29 sentence and word boundaries, compiled in; no_std-capable, so wasm32 builds
 unicode-segmentation = { version = "=1.13.3", default-features = false }
@@ -61,7 +61,7 @@ alloc-stats = []   # a diagnostic, OFF by default: the counting global allocator
 tls = ["dep:rustls", "dep:webpki-roots"]   # https for the Fetch driver (rustls + webpki roots); off for wasm
 
 [dev-dependencies]
-graphlink-net = { git = "https://github.com/chedim/graphlink", rev = "070501a763b223f65822887aaf1b4b238fa14435" }
+graphlink-net = { git = "https://github.com/chedim/graphlink", rev = "3ca54bde3a7d5778fdc90f63676003ebfdb941bb" }
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 # the Rust tests' own executor (a test binary is its own process: it never shares a WAL file with the seat)
 rusqlite = { version = "0.32", features = ["bundled"] }

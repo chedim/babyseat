@@ -372,7 +372,7 @@ dependencies = [
 [[package]]
 name = "graphlink-auth"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
+source = "git+https://github.com/chedim/graphlink?rev=3ca54bde3a7d5778fdc90f63676003ebfdb941bb#3ca54bde3a7d5778fdc90f63676003ebfdb941bb"
 dependencies = [
  "serde_json",
 ]
@@ -380,7 +380,7 @@ dependencies = [
 [[package]]
 name = "graphlink-bridge"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
+source = "git+https://github.com/chedim/graphlink?rev=3ca54bde3a7d5778fdc90f63676003ebfdb941bb#3ca54bde3a7d5778fdc90f63676003ebfdb941bb"
 dependencies = [
  "graphlink-auth",
  "graphlink-core",
@@ -392,7 +392,7 @@ dependencies = [
 [[package]]
 name = "graphlink-core"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
+source = "git+https://github.com/chedim/graphlink?rev=3ca54bde3a7d5778fdc90f63676003ebfdb941bb#3ca54bde3a7d5778fdc90f63676003ebfdb941bb"
 dependencies = [
  "serde_json",
 ]
@@ -400,7 +400,7 @@ dependencies = [
 [[package]]
 name = "graphlink-net"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
+source = "git+https://github.com/chedim/graphlink?rev=3ca54bde3a7d5778fdc90f63676003ebfdb941bb#3ca54bde3a7d5778fdc90f63676003ebfdb941bb"
 dependencies = [
  "graphlink-core",
  "rcgen",
@@ -411,7 +411,7 @@ dependencies = [
 [[package]]
 name = "graphlink-shm"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
+source = "git+https://github.com/chedim/graphlink?rev=3ca54bde3a7d5778fdc90f63676003ebfdb941bb#3ca54bde3a7d5778fdc90f63676003ebfdb941bb"
 dependencies = [
  "graphlink-core",
  "serde_json",

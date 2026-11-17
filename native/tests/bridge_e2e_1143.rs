@@ -108,6 +108,12 @@ impl Remote {
         Remote { link, tcp: Some(tcp), listener: None, subs: vec![], events: vec![] }
     }
     fn pump(&mut self) {
+        // a connection that closed is forgotten: a listening remote takes the next one (a restarted bridge dials again), with a new link
+        if self.listener.is_some() && self.tcp.as_ref().map_or(false, |t| t.is_closed()) {
+            self.tcp = None;
+            self.link = Link::new(Me { ns: "kitchen".into(), build: "t".into(), epoch: 1.0, support: vec![VERSION], initiator: false });
+            self.subs.clear();
+        }
         if self.tcp.is_none() {
             if let Some(Some(mut t)) = self.listener.as_ref().map(|l| l.accept().unwrap()) { t.send(&self.link.open()).unwrap(); self.tcp = Some(t); }
         }
@@ -182,4 +188,34 @@ fn a_remote_that_reaches_the_seat_through_a_listening_bridge_writes_a_node_only_
     assert!(remote.receipt("w2").unwrap().is_some(), "Door: is outside the rule: refused");
     assert!(wait_for(&run, "Lamp:desk", "power", "on", 30).contains("on"));
     assert!(read(&run, "Door:front", "locked").to_lowercase().contains("true"), "the door was not touched");
+}
+
+#[test]
+fn a_bridge_the_seat_supervises_is_started_again_when_it_dies_and_the_remotes_values_flow_again() {
+    let name = peer_name();
+    let _n = Names(name.clone());
+    let dir = tmp("super");
+    let marker = dir.join("pids");
+    let (mut remote, addr) = Remote::listening();
+    // the seat starts the bridge itself: the program is `sh`, which notes its pid and becomes the bridge
+    let token = dir.join("peers").join(format!("{name}.token"));
+    let line = format!("echo $$ >> {}; exec {BRIDGE} connect {addr} --peer {name} --slots 64 --key-cap 128 --val-cap 1024 --epoch 1 --spins 1000000 --depth 32 --token-file {} --die-with-parent", marker.display(), token.display());
+    let mut decl = json!([{"name": name, "ns": "kitchen", "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 1024, "spins": 1_000_000, "depth": 32,
+                           "run": {"argv": ["sh", "-c", line], "restart_wait_s": 0.5, "max_restarts": 3, "reset_after_s": 600}}]);
+    decl[0]["ns"] = json!("kitchen");
+    let run = start_with(&dir, &[format!("peers={decl}")], &[probe_pack(&dir)]);
+    put(&run, "Probe:1", "x", json!(1));
+    assert!(remote.until(60_000, |r| r.subs.iter().any(|t| matches!(t, Target::Id(i) if i == "kitchen::Lamp:desk"))), "the remote was never asked: {}", std::fs::read_to_string(dir.join("err.log")).unwrap_or_default());
+    remote.set("kitchen::Lamp:desk", 1.0, json!({"power": "off"}));
+    assert!(wait_for(&run, "Probe:1", "seen", "off", 30).contains("off"));
+    // the bridge dies hard
+    let pid = std::fs::read_to_string(&marker).unwrap().lines().next().unwrap().trim().to_string();
+    let _ = Command::new("kill").args(["-9", &pid]).status();
+    assert!(wait_for(&run, "Vm:kitchen", "link", "gone", 30).contains("gone"), "the Vm is gone while the bridge is");
+    // the seat starts it again; the remote is asked again; its new value reaches the rule
+    remote.subs.clear();
+    assert!(remote.until(60_000, |r| r.subs.iter().any(|t| matches!(t, Target::Id(i) if i == "kitchen::Lamp:desk"))), "the restarted bridge never asked the remote: {}", std::fs::read_to_string(dir.join("err.log")).unwrap_or_default());
+    remote.set("kitchen::Lamp:desk", 5.0, json!({"power": "second"}));
+    assert!(wait_for(&run, "Probe:1", "seen", "second", 30).contains("second"), "the value did not flow again: {}", read(&run, "Probe:1", "seen"));
+    assert!(wait_for(&run, "Vm:kitchen", "link", "up", 30).contains("up"));
 }
