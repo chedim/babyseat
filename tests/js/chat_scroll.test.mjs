@@ -143,4 +143,4 @@ try {
   assert.deepEqual(errors, [], 'no script error');
   if (process.env.SHOTS) { mkdirSync(process.env.SHOTS, { recursive: true }); writeFileSync(path.join(process.env.SHOTS, 'chat-scroll.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64')); }
   console.log('chat scroll: ok');
-} finally { try { ws.close(); } catch {} br.kill(); seat.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); rmSync(dir, { recursive: true, force: true }); }
+} finally { try { ws.close(); } catch {} br.kill(); seat.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 }); rmSync(dir, { recursive: true, force: true }); }

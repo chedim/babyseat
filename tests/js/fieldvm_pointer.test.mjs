@@ -41,4 +41,4 @@ try {
   assert.equal(r.wheel.dy, 120); assert.equal(Math.round(r.wheel.x), 7); assert.equal(Math.round(r.wheel.y), 8); assert.equal(typeof r.wheel.time, 'number');
   assert.equal(r.wheelPrevented, true, 'a wheel over the element does not scroll the page');
   console.log('fieldvm pointer: ok');
-} finally { br.kill(); srv.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+} finally { br.kill(); srv.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 }); }

@@ -81,4 +81,4 @@ try {
   assert.equal(r.pagePack, 'from pack'); assert.equal(r.pageDisabled, true);
   assert.equal(r.pageKey, 'Enter'); assert.equal(r.pageSubmit, 'number');
   console.log('fieldvm dom2: ok');
-} finally { br.kill(); srv.kill(); await sleep(300); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+} finally { br.kill(); srv.kill(); await sleep(300); rmSync(prof, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 }); }

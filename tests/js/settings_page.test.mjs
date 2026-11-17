@@ -73,7 +73,7 @@ async function browser() {
     for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1, buttons: type === 'mousePressed' ? 1 : 0 });
   };
   b.shot = async (name) => { if (!process.env.SHOTS) return; mkdirSync(process.env.SHOTS, { recursive: true }); await sleep(450); const f = path.join(process.env.SHOTS, name + '.png'); writeFileSync(f, Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64')); console.log('  screenshot', f); };
-  b.close = async () => { ws.close(); br.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); };
+  b.close = async () => { ws.close(); br.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 }); };
   return b;
 }
 const Q = (sel) => `document.querySelector(${JSON.stringify(sel)})`;

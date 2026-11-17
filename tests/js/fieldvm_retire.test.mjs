@@ -43,4 +43,4 @@ try {
   assert.equal(r.after.bElement, true, 'a sibling stays');
   assert.deepEqual(r.after.nodes, ['DomNode:t:b'], 'the host forgets the removed nodes');
   console.log('fieldvm retire: ok');
-} finally { br.kill(); srv.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+} finally { br.kill(); srv.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 }); }
