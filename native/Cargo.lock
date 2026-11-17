@@ -372,23 +372,46 @@ dependencies = [
 [[package]]
 name = "graphlink-auth"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=482c16b4d50029f29c387e81f634ffdbc330fe5d#482c16b4d50029f29c387e81f634ffdbc330fe5d"
+source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
 dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "graphlink-bridge"
+version = "0.0.1"
+source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
+dependencies = [
+ "graphlink-auth",
+ "graphlink-core",
+ "graphlink-net",
+ "graphlink-shm",
  "serde_json",
 ]
 
 [[package]]
 name = "graphlink-core"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=482c16b4d50029f29c387e81f634ffdbc330fe5d#482c16b4d50029f29c387e81f634ffdbc330fe5d"
+source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
 dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "graphlink-net"
+version = "0.0.1"
+source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
+dependencies = [
+ "graphlink-core",
+ "rcgen",
+ "rustls",
  "serde_json",
 ]
 
 [[package]]
 name = "graphlink-shm"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=482c16b4d50029f29c387e81f634ffdbc330fe5d#482c16b4d50029f29c387e81f634ffdbc330fe5d"
+source = "git+https://github.com/chedim/graphlink?rev=070501a763b223f65822887aaf1b4b238fa14435#070501a763b223f65822887aaf1b4b238fa14435"
 dependencies = [
  "graphlink-core",
  "serde_json",
@@ -582,7 +605,9 @@ version = "0.7.62"
 dependencies = [
  "bytemuck",
  "graphlink-auth",
+ "graphlink-bridge",
  "graphlink-core",
+ "graphlink-net",
  "graphlink-shm",
  "libc",
  "objc2",
