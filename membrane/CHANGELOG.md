@@ -1,3 +1,22 @@
+## v0.7.63 (2026-11-17) — Local peers over shared memory, and the bridge to other machines
+
+### Upgrading from 0.7.62
+- **Nothing changes for a seat that declares no `peers`.** The new fact `peers` is off by default.
+- **`keys` is a builtin now** (`keys(d)`: the keys of a dict, in the order it holds them). A pack that used `keys` as a local name must rename it; the packs of this release already do.
+- **With a door secret, a declared peer needs its namespace** (`ns` in its `peers` entry) and its hello must carry the token the seat wrote for it. A seat without a secret asks for no token.
+
+### GraphLink: the seat's local peers (docs/graph-link.md, section 18)
+- **Peers over shared memory.** The fact `peers` declares programs that share the seat's graph with no socket: each gets control rings and a cell table (named regions `/gl-<name>-ctl`, `-sc`, `-pc`); it shows as `Vm:<its namespace>` with `link` `up` or `gone`; a rule that reads a node the peer owns makes the seat ask for it, and the peer's changes arrive as replicas. Every number (ring and table sizes, spins, depth) is the owner's: there are no defaults, and a bad declaration stops the start and names the fact.
+- **A peer's write is refused unless a rule allows it.** A forwarded write becomes a short-lived `LinkWrite`, and a c1f verdict decides from the fact `peer_writes` (`[{peer, prefix}]`); no rule means no write, and a node of another namespace is never written.
+- **Tokens for peers.** With a door secret the seat writes `<data dir>/peers/<name>.token` (mode 0600, the admin token's life) for each declared peer, and refuses a hello that carries no valid token for the declared namespace (`refused: auth`, the reason only in the seat's log). The token code is the `graphlink-auth` crate, shared with the peers.
+- **Supervision.** A peer declared with `run` (`argv`, `restart_wait_s`, `max_restarts`, `reset_after_s`, all the owner's) has its process started by the seat, started again after the wait with new rings and a new link, and given up on after the allowed restarts.
+- **The bridge to other machines.** `graphlink-bridge` ships beside `cliffvm` (the dist folder's `bin/`): `connect` dials a remote, `listen` waits for one, over TCP with tokens and TLS, and the seat sees the remote's nodes as replicas. Two seats are told apart on the wire by `--seat-name` (every seat is `membrane` inside), so a seat can read another seat's nodes as `<name>::<id>`. The programs and the protocol live in github.com/chedim/graphlink (the library crates `graphlink-core`, `-auth`, `-shm`, `-net`).
+
+### Known gaps (not in 0.7.63)
+- A seat cannot write a node of another seat yet (only a remote's write into the seat is built), and `peer_writes` has no per-property rules.
+- The upgrade of a link from TCP to shared memory, and a heartbeat for a peer that hangs without ending, are not built.
+- Windows has no backend for the named regions.
+
 ## v0.7.62 (2026-11-16) — A local model by default, a first-run window, Cron and the edit pack
 
 ### Upgrading from 0.7.61 (read this first)

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Assemble the dist folder from a release build (docs/packaging-plan.md, decided 2026-11-14: packs and apps as FILES in a version-stamped folder next to the binary).
 #   scripts/dist/build.sh [--bin <cliffvm>] [--out <dir>] [--target <rust triple>] [--archive <file.tar.gz>]
-# --bin      the binary to put in bin/ (default: build it: `cargo build --release --no-default-features --features bin` in native/, with --target when given)
+# --bin      the binary to put in bin/ (default: build it: `cargo build --release --no-default-features --features bin` in native/, with --target when given); a graphlink-bridge beside it goes into bin/ too
 # --out      the folder to make (default: <repo>/dist/<version>; <version> is native/Cargo.toml's package version). An existing folder is replaced only if it is empty or a dist (it has a VERSION file).
 # --archive  also pack the folder as <file.tar.gz> (the one top folder is the out folder's name) and write <file.tar.gz>.sha256 next to it
 # The tree (what `cliffvm serve` finds by itself, relative to bin/cliffvm; the repo's membrane/ folder has the same shape, so `cliffvm serve --root membrane` is the dev run):
@@ -50,6 +50,9 @@ rm -rf "$tmp"
 mkdir -p "$tmp/bin" "$tmp/packs" "$tmp/apps"
 cp "$bin" "$tmp/bin/cliffvm"
 chmod 755 "$tmp/bin/cliffvm"
+# the bridge program the seat's peers run (graphlink-bridge, built by the same cargo build) goes beside it when there is one
+bridge=$(dirname "$bin")/graphlink-bridge
+if [ -f "$bridge" ]; then cp "$bridge" "$tmp/bin/graphlink-bridge"; chmod 755 "$tmp/bin/graphlink-bridge"; fi
 # ONLY what the barest seat loads: the packs apps/barest.packs lists, the launcher pack (`cliffvm serve` reads its defaults), and boot.json (the one data file read at run time).
 # The Python-era packs of membrane/packs/ and membrane/help/*.md (nothing loads them) stay out.
 grep -v '^[[:space:]]*#' "$mem/apps/barest.packs" | grep -v '^[[:space:]]*$' | while IFS= read -r n; do

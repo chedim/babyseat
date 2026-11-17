@@ -1,6 +1,6 @@
 # Documentation index
 
-Every page here describes what the code does at 0.7.62 (`cliffvm`, the Rust seat). Pages for things that are gone (the 0.7 Python seat, the old page, Blurp, the quota and self features) were removed; they are in git and the 0.7.53 tag.
+Every page here describes what the code does at 0.7.63 (`cliffvm`, the Rust seat). Pages for things that are gone (the 0.7 Python seat, the old page, Blurp, the quota and self features) were removed; they are in git and the 0.7.53 tag.
 Anything in progress says so on its page and names its branch. The README at the root has the install and the quick start.
 
 ## If you use babyseat (user)

@@ -2,7 +2,7 @@
 #
 # The build context holds the release tarballs release-binaries.yml makes (the glibc ones: the dist folder inside is babyseat-<version>-<triple>/<version>/):
 #   docker-dist/babyseat-<version>-x86_64-unknown-linux-gnu.tar.gz   docker-dist/babyseat-<version>-aarch64-unknown-linux-gnu.tar.gz
-#   docker buildx build --build-arg VERSION=0.7.62 -t chedim/babyseat:0.7.62 .
+#   docker buildx build --build-arg VERSION=0.7.63 -t chedim/babyseat:0.7.63 .
 # (docker.yml downloads them from the workflow's artifacts; scripts/dist/build.sh --archive makes one by hand, from a linux binary.)
 #
 # RUN:    docker run -p 4096:4096 -v babyseat:/data -e ANTHROPIC_API_KEY chedim/babyseat
