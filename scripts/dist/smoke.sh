@@ -1,5 +1,5 @@
 #!/bin/sh
-# The smoke test of a built dist folder (CI runs it on every platform; run it by hand the same way): the folder is intact, `cliffvm --version` names the stamped version,
+# The smoke test of a built dist folder (CI runs it on every platform; run it by hand the same way): the folder is intact, `cliffvm --version` names the engine's stamped version (ENGINE, else VERSION),
 # `cliffvm serve --port 0` comes up from the folder alone (cwd elsewhere), /global/health answers 200 with the admin token and 401 without, and the seat is stopped.
 #   scripts/dist/smoke.sh <dist folder>
 # Needs curl. No claude CLI and no API key are used: no chat turn runs.
@@ -8,7 +8,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 d=$(cd "${1:?usage: scripts/dist/smoke.sh <dist folder>}" && pwd)
 sh "$here/verify.sh" "$d"
 ver=$(cat "$d/VERSION")
-"$d/bin/cliffvm" --version | grep -q " $ver\$" || { echo "smoke: cliffvm --version does not say $ver" >&2; exit 1; }
+# the binary says the ENGINE's version when the folder stamps one (the engine is its own release: ENGINE), else the folder's
+want=$ver; [ ! -f "$d/ENGINE" ] || want=$(cat "$d/ENGINE")
+"$d/bin/cliffvm" --version | grep -q " $want\$" || { echo "smoke: cliffvm --version does not say $want" >&2; exit 1; }
 work=$(mktemp -d)
 log=$work/serve.log
 pid=''
