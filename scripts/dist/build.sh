@@ -1,8 +1,9 @@
 #!/bin/sh
 # Assemble the dist folder from a release build (docs/packaging-plan.md, decided 2026-11-14: packs and apps as FILES in a version-stamped folder next to the binary).
-#   scripts/dist/build.sh [--bin <cliffvm>] [--out <dir>] [--target <rust triple>] [--archive <file.tar.gz>]
+#   scripts/dist/build.sh [--bin <cliffvm>] [--engine-version <x.y.z>] [--out <dir>] [--target <rust triple>] [--archive <file.tar.gz>]
 # --bin      the binary to put in bin/ (default: build it: `cargo build --release --no-default-features --features bin` in native/, with --target when given); a graphlink-bridge beside it goes into bin/ too
-# --out      the folder to make (default: <repo>/dist/<version>; <version> is native/Cargo.toml's package version). An existing folder is replaced only if it is empty or a dist (it has a VERSION file).
+# --engine-version  the version of the engine binary (the cliffvm release it came from, scripts/dist/fetch_cliffvm.sh): stamped as the file ENGINE, and the smoke test checks `cliffvm --version` against it
+# --out      the folder to make (default: <repo>/dist/<version>; <version> is the PRODUCT's version, pyproject.toml's, which is VERSION in the folder). An existing folder is replaced only if it is empty or a dist (it has a VERSION file).
 # --archive  also pack the folder as <file.tar.gz> (the one top folder is the out folder's name) and write <file.tar.gz>.sha256 next to it
 # The tree (what `cliffvm serve` finds by itself, relative to bin/cliffvm; the repo's membrane/ folder has the same shape, so `cliffvm serve --root membrane` is the dev run):
 #   bin/cliffvm  packs/*.c1f + boot.json ...  apps/barest.packs apps/barest.c1f/  LICENSE  VERSION  MANIFEST.sha256
@@ -10,15 +11,16 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/native/Cargo.toml" | head -1)
-[ -n "$version" ] || { echo "dist/build.sh: no version in native/Cargo.toml" >&2; exit 1; }
-bin=''; out=''; target=''; archive=''
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/pyproject.toml" | head -1)
+[ -n "$version" ] || { echo "dist/build.sh: no version in pyproject.toml" >&2; exit 1; }
+bin=''; out=''; target=''; archive=''; engine=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --bin) bin=${2:?--bin needs a path}; shift 2 ;;
     --out) out=${2:?--out needs a folder}; shift 2 ;;
     --target) target=${2:?--target needs a rust triple}; shift 2 ;;
     --archive) archive=${2:?--archive needs a file name}; shift 2 ;;
+    --engine-version) engine=${2:?--engine-version needs a version}; shift 2 ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "dist/build.sh: unknown option $1 (--bin --out --target --archive)" >&2; exit 2 ;;
   esac
@@ -66,6 +68,7 @@ cp -R "$mem/apps/barest.c1f" "$tmp/apps/barest.c1f"
 
 cp "$root/LICENSE" "$tmp/LICENSE"
 printf '%s\n' "$version" > "$tmp/VERSION"
+[ -z "$engine" ] || printf '%s\n' "$engine" > "$tmp/ENGINE"
 find "$tmp" -name .DS_Store -delete
 (cd "$tmp" && find . -type f ! -name MANIFEST.sha256 | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do printf '%s  %s\n' "$(sha "$f")" "$f"; done > "$tmp.manifest") && mv "$tmp.manifest" "$tmp/MANIFEST.sha256"
 rm -rf "$out"
