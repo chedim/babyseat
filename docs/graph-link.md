@@ -89,6 +89,8 @@ Answers come in a later round, as outside writes by the driver. Evaluation never
   (otherwise the replica and the owner diverge on a refusal).
 - **Hidden tabs.** `Conn:page.hidden` already exists; a hidden page sends `pause` (a `hello` with `have`) and the owner stops `val`s and keeps only revisions; `resync` on visible. Lease: no frame for `lease_s` (D16) and the owner treats the page as gone (`bye`).
 
+How frames meet a parallel engine (rounds, setters as transactions, what `res` should mean) is written in [waves.md](waves.md), a design that is not built.
+
 ## 5. Determinism and the journal (point 5)
 
 - A `val` is an outside write by the link driver: stamped like a driver receipt (`host.rs:92` `is_outside`; `fields.rs:1319` stamps `driver:<verb>` / `record:<verb>`). A read-once and a query answer are receipts of the effect (like `Fetch`/`SqlQuery`, journalled, `docs/cliffvm.md:280`): a replay applies them and never asks.
