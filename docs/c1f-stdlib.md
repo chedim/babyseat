@@ -1,6 +1,6 @@
 # The c1f standard library: the contracts and the builtins
 
-Status: the contracts below are built and pinned by `native/tests/contracts.rs`; the builtin list is the one in `native/src/expr.rs` (`RESERVED`, kept in step with `call` by a test). Spec files: `tests/specs/*.json`.
+Status: the contracts below are built and pinned by `seat-tests/tests/contracts.rs`; the builtin list is the one in `native/src/expr.rs` (`RESERVED`, kept in step with `call` by a test). Spec files: `tests/specs/*.json`.
 
 c1f has no functions and no macros. A pack is getters and setters over entities, so a "library" can only be **data contracts and
 shared getters on a class** that every pack imports. The standard library is therefore the contract of the classes the OS is
@@ -14,7 +14,7 @@ built on, plus a small set of builtins. Principles:
 
 ## The Request contract (`membrane/packs/door.c1f` is the library for the class `Request`)
 A request is an entity `Request:<n>`. A family pack `IMPORT door 1` and defines, for its family `<f>` (the reserved names in `FAMILIES`,
-`native/tests/contracts.rs`):
+`seat-tests/tests/contracts.rs`):
 
 | getter | meaning | required |
 |---|---|---|
@@ -73,7 +73,7 @@ called with arguments), and an explicit accumulator name (`fold(init, 'acc', [..
 rounded to f32, so two devices whose math libraries differ in the last bits of an f64 give the same answer (`log(1)` is 0.0). An Error with its reason on 0, a negative number, or anything that is
 not an Int or a Float (`log('e')`, `log(True)`, `log([1])`); a null gives a null (as every call). One step. Typed `Float`. Tests: `native/tests/log_1143.rs`.
 **Builtins over long lists** (#1143, operator 2026-11-15: the field's recall must scale; a comprehension pays steps per item, a builtin one step). Tests: `native/tests/props_vmean_1143.rs`;
-what they bought: `native/tests/recall_scale_1143.rs` and docs/semtext-and-legs.md ("Cost of the whole recall").
+what they bought: `seat-tests/tests/recall_scale_1143.rs` and docs/semtext-and-legs.md ("Cost of the whole recall").
 - `props(ids, 'name')` is `[prop(e, 'name') for e in ids]` in one step: one property of every entity of a list (an entity or its id; a dict item reads its key, as `prop`; a null item
   stays a null; a property an entity does not hold is its reasoned null `absent: ...`). `props(ids, at, 'name')` takes element `at[i]` of the i-th value, as `x[k]` does (a list by its
   whole-number index, negative from the end; a dict by its key; a miss, a null value or a null index is a null): the GATHER a comprehension would write as `[prop(e, 'name')[k] ...]`.
@@ -214,7 +214,7 @@ for the reader that changes nothing. The threshold is `DEFAULT_EVAL_TIME_MS` (10
 is injectable (`expr::set_clock`) for tests.
 
 ## The contracts are executable
-`native/tests/contracts.rs` fails when a contract is broken: every shipped pack loads together (view packs that import `dom` are
+`seat-tests/tests/contracts.rs` fails when a contract is broken: every shipped pack loads together (view packs that import `dom` are
 the browser's); a route family pack imports door, defines both `o_<f>` and `r_<f>`, is a reserved family, and does not redefine the
 door's getters; every Boot fact a pack reads is in `membrane/packs/facts.json` (with a `why`), and a fact marked `wired` is written
 by the launcher. A new fact = a registry entry; a new family =
@@ -223,7 +223,7 @@ a reserved name in `FAMILIES` and in the door's chain.
 ## The surface snapshot: a pack as a black box
 `membrane/packs/surface.json` records, per pack, everything it touches from outside: its imports, its declared classes (and a count
 of members), the Boot facts it reads, the paths it claims, and the properties it WRITES on other entities (`Goal:*.status`, `*.answer` for
-a dynamic target, `ref(goal).replan` through a reference). `native/tests/contracts.rs` recomputes it from the pack text and fails on any
+a dynamic target, `ref(goal).replan` through a reference). `seat-tests/tests/contracts.rs` recomputes it from the pack text and fails on any
 difference (unquoted entity targets count like quoted ones: a keyed `membrane::Config:voice:in[slug].on = ..` is `membrane:*.on`, and a constructor is listed as `membrane:*=Voice()`). Reviewing a pack, an agent's branch or Memo's edit means reading the surface diff, not the code: a pack that starts
 writing a new property, claiming a new path or importing a new pack fails the test until the change is reviewed and recorded
 (`SURFACE_UPDATE=1 cargo test --test contracts surface`). There is no `private` keyword: the contract is the surface.
@@ -250,6 +250,6 @@ null alone, `Never` for the element of `[]`. Rules (they MODEL the null semantic
 Findings are what is certainly wrong: text added to a number, an index or attribute on something that cannot take it, a builtin
 given an argument of the wrong kind (`len(3)`), a wrong argument count, `<` between text and a number, a loop over a non-list, a
 getter cycle. Nothing fails on them yet. `membrane/packs/types.json` is the snapshot of every shipped pack (`pack -> getters,
-writes, findings`); `native/tests/contracts.rs` compares it and `TYPES_UPDATE=1 cargo test --test contracts types` regenerates it.
+writes, findings`); `seat-tests/tests/contracts.rs` compares it and `TYPES_UPDATE=1 cargo test --test contracts types` regenerates it.
 
 An append write for lists (several producers adding to one list in a round) is a design note, not built: `docs/append-write.md`.

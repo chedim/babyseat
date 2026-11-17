@@ -9,6 +9,7 @@ babyseat is an AI seat whose memory is a graph the model programs. The seat is `
 ## Ground rules
 1. Test first, then the fix; every change ships its test. Run the suites that your change touches before committing, and the whole set before a PR:
    - Rust (the seat, real processes, no model): `cd native && cargo test --release --no-default-features --features bin` (the app is built without the `python` feature).
+   - The pack-tied tests (the seat started on this repo's packs and apps; `seat-tests/`) run on the pinned cliffvm release: `scripts/dist/fetch_cliffvm.sh "$(cat CLIFFVM_VERSION)" <target> <folder>`, then `cd seat-tests && CLIFFVM_DIST=<folder> cargo nextest run --release` (`cargo test` works too, one binary at a time).
    - The page (c1f view packs on the wasm engine, some in headless Chrome): `node tests/js/<name>.test.mjs` (`CHROME=<path>` names the browser; a test that needs a seat builds nothing: build `cliffvm` first).
    - Home Assistant component and the launcher: `pytest tests/ha tests/wrapper`.
 2. Keep docs honest in the same change: README.md maps the entry points, docs/ holds the references (docs/README.md lists them), the model-facing help is `membrane/apps/barest.c1f/help/*.md` (every code block is a test: `help_1143`).

@@ -7,7 +7,7 @@ no model, no seat, no network. One file per route answer, `{status, body}`. The 
 handler line it stands for. `map_field` and `map_search` are the literals the released handler writes when the field is not loaded / there is
 no entity store (the handler computes nothing else in that case).
 
-The consumer compares SHAPE, never values (the comparer is `shape_misses` in `native/tests/boot_routes_1143.rs`, the same as the session API's):
+The consumer compares SHAPE, never values (the comparer is `shape_misses` in `seat-tests/tests/boot_routes_1143.rs`, the same as the session API's):
 every key of the fixture must be in the answer with the same JSON type (a `null` in a fixture accepts any type); extra keys are fine;
 an element of an answer's list must match some element of the fixture's list; an empty fixture list accepts anything.
 

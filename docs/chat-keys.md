@@ -39,7 +39,7 @@ new mechanism (one extra tiny entity per message); it is the cheapest one that k
 - Help text updated: help/semtext.md, help/legacy.md. Not changed: hidden prefixes (`Chat:session:`, `Chat:main` cover every new key; the default entry `Chat:message:` matches nothing on a new store and is kept for old ones), `Chat:main.last_turn`, the banner, the page's JS (ids are opaque `<ms>-<n8>` strings, `before` is whatever the route sent).
 - The page's `GET /membrane/chat/messages`: with `sid` = one session, `sid=` = the main chat, no `sid` = every turn (time rows). Unchanged for the page.
 
-## The two routes' queries (tests: native/tests/chat_keys_1143.rs)
+## The two routes' queries (tests: seat-tests/tests/chat_keys_1143.rs)
 
 ```
 SELECT k FROM c_field WHERE cls = 'Chat' AND k >= ?1 AND k < ?2

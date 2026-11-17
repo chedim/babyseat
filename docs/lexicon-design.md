@@ -57,7 +57,7 @@ Today `sql(query, args)` reads only the seat's own store (`native/src/sqlexec.rs
    No new builtin and no change to `sql()`. The notation below: a sketch's `lexrows(Q, args)` is SHORTHAND, not a builtin: a setter writes the entity
    `SqlQuery:lex:<hash of Q and args>` (`source`, `sql = Q`) and `.run = {id: <that hash>, args}` once (the same id never runs twice), and a getter reads its `rows`
    (`None` until the receipt lands). One entity per distinct question, because only the latest receipt stays on an entity.
-   Tests of the driver: `native/tests/sql_driver_1143.rs`.
+   Tests of the driver: `seat-tests/tests/sql_driver_1143.rs`.
 3. **Convert on touch:** a miss on `Word:lemma:x` copies that word's rows into `c_field`. It only pays when a
    consumer wants a stored fact; the lexicon is read-only and large, so reading in place is smaller. Not recommended.
 

@@ -2,7 +2,7 @@
 
 Status: SHIPPED. This is the whole system text of the chat turn (`ChatMessage.note` in `membrane/packs/chat_turn.c1f`; the OpenAI-style turn of `chat_oai.c1f`, not in the release list, sends the doctrine and then the banner in its system message), in the operator's own words
 (2026-11-13). The system prompt is the doctrine only: the banner is not part of it. The banner block (`<banner>` tags: `Banner:admin:main`'s text, then every other non-empty `Banner:<name>` part, oldest update first, `Banner:recall` among them) and the user's words are two text blocks of ONE stdin user message (`ChatMessage.stdin`). The static instructions are the help entities: `Help:start` (the first minutes: what to read on arrival, when to act and when to ask), `Help:c1f` (where the help is and the language), `Help:packs`, `Help:banner`, `Help:upgrade` and the rest
-(`entity_query` `kind:Help` lists them; the files are `membrane/apps/barest.c1f/help/*.md`). `native/tests/help_1143.rs` pins the text and loads every code block of the help; `neutral_text_1143.rs` keeps all of it
+(`entity_query` `kind:Help` lists them; the files are `membrane/apps/barest.c1f/help/*.md`). `seat-tests/tests/help_1143.rs` pins the text and loads every code block of the help; `neutral_text_1143.rs` keeps all of it
 domain-neutral (no product names, no software-only examples in the model-facing text).
 
 ```

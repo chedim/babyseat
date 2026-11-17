@@ -1,5 +1,5 @@
 // The FIRST-RUN WINDOW as a c1f view pack (membrane/apps/barest.c1f/firstrun_view.c1f, #1143), on the wasm engine in Node, like settings_view.test.mjs: the page's VM with the packs `dom`, `fetch`, `shell_view`, `settings_view`,
-// `firstrun_view`. The test plays the HOST and the SEAT (the rows of GET /ui/settings: native/tests/ollama_default_1143.rs proves the seat side: `chosen`, `choices`, `refused`).
+// `firstrun_view`. The test plays the HOST and the SEAT (the rows of GET /ui/settings: seat-tests/tests/ollama_default_1143.rs proves the seat side: `chosen`, `choices`, `refused`).
 // Asserted: the window is a function of the two values only (the model chosen, the name chosen), opens at every page load while one is not, a real select of the listed models, the name field (prefilled when it is
 // chosen already: a launch fact or an imported name), one submit writes both through the Settings rows' door and the window closes when the seat says both are chosen, an empty name keeps it open, the empty-list
 // state says how to pull a model and has Refresh, the seat's refusal is shown.

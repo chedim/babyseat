@@ -1,7 +1,7 @@
 # babyseat in Home Assistant
 
 Status: describes the component in `custom_components/membrane/` as it ships in this release (its version in `manifest.json` is the package's; the domain stays `membrane`). Tests: `pytest tests/ha` (a fake Home Assistant, a fake seat binary, and a real private seat with a fake `claude`),
-`native/tests/ha_1143.rs` and `native/tests/session_1143.rs` (the routes the component calls), and `scripts/ha_core_smoke.py` (a real Home Assistant Core, by hand).
+`seat-tests/tests/ha_1143.rs` and `seat-tests/tests/session_1143.rs` (the routes the component calls), and `scripts/ha_core_smoke.py` (a real Home Assistant Core, by hand).
 
 The **babyseat (membrane)** integration (HACS) gives Home Assistant a seat. By default it **runs the seat itself, inside Home Assistant** (operator 2026-11-15): it downloads the seat of its own release, checks it, starts it on
 this machine and keeps it running. Or it **connects to a seat you run** elsewhere, with its address and a token. Either way Home Assistant gets three things: the seat as an **Assist conversation agent**, a few **entities and services** for the seat,
@@ -169,7 +169,7 @@ Either way one background task per entry pulls the seat's calls.
 
 ## Tests
 
-`pytest tests/ha` runs the component against a fake Home Assistant (tests/ha/fakeha.py; the discovery: `test_discovery.py`, the two reauth forms: `test_auth.py`) and, where a `cliffvm` binary is built (`cd native && cargo build --release --no-default-features --features bin`; or `CLIFFVM_BIN=`), against a real seat with a fake `claude`. `native/tests/session_1143.rs` and `native/tests/ha_1143.rs` pin the routes the component calls (the calls, the allow-list, the journal replay).
+`pytest tests/ha` runs the component against a fake Home Assistant (tests/ha/fakeha.py; the discovery: `test_discovery.py`, the two reauth forms: `test_auth.py`) and, where a `cliffvm` binary is built (`cd native && cargo build --release --no-default-features --features bin`; or `CLIFFVM_BIN=`), against a real seat with a fake `claude`. `seat-tests/tests/session_1143.rs` and `seat-tests/tests/ha_1143.rs` pin the routes the component calls (the calls, the allow-list, the journal replay).
 
 `test_seat_options.py` (the provider -> facts mapping, no secret in argv), `test_seat_runner.py` (the platform map; the download's checks: a wrong sha256, a file changed after the manifest, no sidecar, another version, a member outside the folder; the process with a fake `cliffvm`: the environment, the start error, the boot timeout, SIGTERM then kill, the restart backoff and the give-up, the token refresh, the orphan) and `test_inside.py` (the menu, the provider forms, the setup that downloads and starts the seat, the stop, the repair, the options flow, the migration of a 0.7.53 inside entry).
 

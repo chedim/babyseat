@@ -3,7 +3,7 @@
 What was verified, by which test, and what it found. Seats under test are REAL private seats started by the release launcher (`scripts/seat`: the shipped barest packs and app, the strict door,
 its own data folder, a free port, a fake `claude`; never a live seat, never a model). `PASS` = proved by a test that passes on this tree; `GAP` = a fact the operator must decide, nothing built.
 
-Tests: `native/tests/release_verify_1143.rs` (Rust, real processes), `tests/js/release_verify.test.mjs` (headless Chrome), `tests/ha/test_release_launcher.py` (the Home Assistant component).
+Tests: `seat-tests/tests/release_verify_1143.rs` (Rust, real processes), `tests/js/release_verify.test.mjs` (headless Chrome), `tests/ha/test_release_launcher.py` (the Home Assistant component).
 
 **Changed 2026-11-14 (operator: no users in this release).** Every request with a VALID token (or the page cookie) is THE ADMIN whatever its `sub` says; there is no second person, no non-admin tier and no 403
 `for the owner`. Rows 3a-3c and B7 changed status (below); the bypass matrix (tokenless 401, bad signature, alg none, expired, crit, aud, ...) is unchanged. The page cookie is given only for a loopback Host name of this machine (row B7).

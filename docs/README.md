@@ -51,4 +51,4 @@ Anything in progress says so on its page and names its branch. The README at the
 ## The model's own pages
 
 The topics the model reads with `entity_read Help:<topic>` are files in `membrane/apps/barest.c1f/help/` (`c1f`, `packs`, `upgrade`, `banner`, `cliff`, `semtext`, `sql`, `legacy`, `ha`, `settings`, `page`);
-every code block in them is a test (`native/tests/help_1143.rs`).
+every code block in them is a test (`seat-tests/tests/help_1143.rs`).
