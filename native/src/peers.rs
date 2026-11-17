@@ -128,6 +128,7 @@ impl Peer {
                 self.subs.push((target, props));
             }
             Event::Op(Op::Unsub { target }) => self.subs.retain(|(t, _)| *t != target),
+            Event::Op(Op::Wr { wid, id, prop, value }) => self.forwarded(h, wid, id, prop, value),
             _ => {}
         }
     }
@@ -178,6 +179,24 @@ impl Peer {
             if !map.is_empty() { feed.push((eid.clone(), LinkVal::Props(map), rev)); }
         }
         for (eid, val, rev) in feed { h.feed_val(&eid, val, rev); }
+    }
+
+    /// A write the peer asks for: it becomes a `LinkWrite` (a question), the c1f verdict decides (packs/link.c1f, the fact `peer_writes`), and the seat applies an accepted one as an ordinary outside
+    /// write with the writer `link:<peer>`. A node of another namespace is never written. The peer gets a receipt either way.
+    fn forwarded(&mut self, h: &Host, wid: String, id: String, prop: String, value: J) {
+        let refused = (|| -> Option<String> {
+            let Some(ns) = self.ns.clone() else { return Some("refused: the peer has not said who it is (no hello yet)".into()) };
+            if id.split_once("::").map_or(false, |(n, _)| n != "membrane") { return Some(format!("not a node of this seat: {id}")); }
+            let q = format!("LinkWrite:{}:{}", self.name, wid);
+            let mut props = Map::new();
+            for (k, v) in [("peer", json!(ns)), ("id", json!(id)), ("prop", json!(prop)), ("value", value.clone())] { props.insert(k.into(), v); }
+            h.born(&q, "LinkWrite", props, WRITER);
+            let verdict = h.get(&q, "verdict");
+            h.write(&q, "retire", json!(true), WRITER);   // the question has its answer: it goes
+            if verdict.as_str() == Some("accept") { h.write(&id, &prop, value, &format!("link:{ns}")); None }
+            else { Some(verdict.as_str().map(str::to_string).unwrap_or_else(|| "refused: the policy gave no verdict".into())) }
+        })();
+        if let Ok(f) = self.link.send(vec![Op::Res { wid, refused }]) { let _ = self.ctl.send(&f); }
     }
 
     /// Write what the peer subscribed to into the seat's cell table: each node's cells, for the props it named (all when none), whose value changed since the last turn.

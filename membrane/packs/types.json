@@ -1783,6 +1783,10 @@
       "Boot.lk_max_value": "Num?",
       "Boot.lk_window": "Num?",
       "Boot.old_vms": "Any",
+      "Boot.pw_rules": "Any",
+      "LinkWrite.allowed": "Bool",
+      "LinkWrite.rules": "Any",
+      "LinkWrite.verdict": "Text",
       "Page.ns": "Text",
       "Vm.hidden": "Any",
       "Vm.kind": "Text",
@@ -1804,7 +1808,8 @@
       "Page"
     ],
     "resident": [
-      "Vm"
+      "Vm",
+      "LinkWrite"
     ]
   },
   "link_route": {

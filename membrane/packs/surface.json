@@ -1019,10 +1019,11 @@
     ],
     "classes": [
       "Boot",
+      "LinkWrite",
       "Page",
       "Vm"
     ],
-    "members": 21,
+    "members": 25,
     "writes": [
       "*.retire",
       "Vm:*.connected_at",
@@ -1040,13 +1041,15 @@
       "link_max_value",
       "link_window",
       "lk_since",
+      "peer_writes",
       "started"
     ],
     "virtual": [
       "Page"
     ],
     "resident": [
-      "Vm"
+      "Vm",
+      "LinkWrite"
     ]
   },
   "link_route": {

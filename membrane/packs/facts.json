@@ -1,6 +1,10 @@
 {
  "_doc": "The Boot facts packs read (docs/c1f-stdlib.md). wired=true: `cliffvm` (cli.rs, host.rs, launcher.c1f or scripts/seat) writes it; wired=false: a pack reads it and it is told only when a launch line names it (`--fact name=value`), else the pack's own default stands.",
  "facts": {
+  "peer_writes": {
+   "wired": false,
+   "why": "the policy of the writes a local peer (over shared memory) asks the seat to make: a list of rules {peer, prefix}; the peer whose namespace is `peer` may write the nodes whose id starts with `prefix`; none by default, so every forwarded write is refused (packs/link.c1f `LinkWrite.verdict`; docs/graph-link.md section 18)"
+  },
   "link_hold_s": {
    "wired": false,
    "why": "seconds the seat holds an empty poll of POST /ui/link before it answers it empty (the keepalive); default 25 (graph link decision 18; a value tried, not decided)"
