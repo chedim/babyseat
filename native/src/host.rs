@@ -1196,6 +1196,17 @@ impl Host {
         if self.eng().0.unloaded.contains_key(eid) { self.ensure_loaded(eid, self.now()); self.settle_loaded(); }
         self.eng().0.docs.get(eid).and_then(|e| e.props.get(prop).cloned()).unwrap_or(J::Null)
     }
+    /// The props of one entity (a lazy one is loaded first), or None when there is no such entity: what the seat's peer driver publishes for a subscribed node.
+    pub fn entity_props(&self, eid: &str) -> Option<Map<String, J>> {
+        if self.eng().0.unloaded.contains_key(eid) { self.ensure_loaded(eid, self.now()); self.settle_loaded(); }
+        self.eng().0.docs.get(eid).map(|e| e.props.clone())
+    }
+    /// The ids of the LOADED entities that start with `prefix`, sorted (a lazy class that was never referenced may list none: the rule of `instances`).
+    pub fn eids_with_prefix(&self, prefix: &str) -> Vec<String> {
+        let mut v: Vec<String> = self.eng().0.docs.keys().filter(|k| k.starts_with(prefix)).cloned().collect();
+        v.sort();
+        v
+    }
     /// The engine's mirror: eid -> {cls, props}.
     pub fn snapshot(&self) -> std::collections::BTreeMap<String, J> {
         self.eng().0.docs.iter().map(|(k, e)| (k.clone(), json!({"cls": e.cls, "props": e.props}))).collect()
