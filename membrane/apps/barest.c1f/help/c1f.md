@@ -157,6 +157,8 @@ V.sum getter: fold(0, [acc + x for x in this.xs])
 V.spread getter: fold([], [concat(acc, [x]) for x in this.xs if len([k for k in acc if abs(k - x) <= 1]) == 0])
 ```
 
+`keys(d)` is the keys of a dict as a list of text, in the order the dict holds them (`keys({'b': 1, 'a': 2})` is `['b', 'a']`).
+
 A long list is cheaper in one builtin than in a comprehension (a builtin is one step, a comprehension pays per item): `props(ids, 'name')` reads one property of every
 entity of a list (`props(ids, at, 'name')` takes element `at[i]` of each value), `vmean(ids)` is the mean of the unit vectors `v` of a list of entities (an id with no
 vector is skipped), and `group_by(rows, key, ['col'])` also totals each named column per group:

@@ -89,7 +89,8 @@ what they bought: `native/tests/recall_scale_1143.rs` and docs/semtext-and-legs.
   in row order from 0 (whole numbers stay whole until a float joins, as Python's `sum`; floats add in f64, the same value `dot(pluck(rows, c), ones)` gives). An Error with its reason: a
   value that is not a number (or is missing), a column named `key` or `rows`, `sums` not a list of names. With no sums (or `[]`) the groups are as before.
 All three are one step however long the list (the reads and the arithmetic are the builtin's own cost, not counted: see Limits).
-There is NO `int()`, `dict()`, `merge`, `keys` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
+There is NO `int()`, `dict()`, `merge` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
+`keys(d)` is the one that was added (#1143, operator 2026-11-16): the keys of a dict as a list of text, in the order the dict holds them (so `{'b': 1, 'a': 2}` gives `['b', 'a']`); a read still pending is `[]`, anything that is not a dict is an error. It costs one step whatever the size (`native/tests/keys_1143.rs`). `keys` is a reserved name, like the other builtins.
 A new builtin needs the operator's approval; it is an arm of `call` and a name in `RESERVED`, with a Rust test.
 
 ## Conventions (the traps that bit)

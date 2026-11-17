@@ -253,7 +253,7 @@ against that fresh text and stat and then writes (status `pending` in between), 
 `native/src/sqldrv.rs`, `membrane/packs/sql.c1f`, `Help:sql`, tests `native/tests/sql_driver_1143.rs` and `sql_door_1143.rs`. No builtin and no change to `sql()` (which reads the seat's own store): a second
 SQLite file (the old store of the migration, the lexicon, a scratch database) is two kinds of entity and one driver verb.
 - `SqlSource:<name>` {`path`, `mode`}: `mode` is `ro` (the default) or `rw`. Written by the model with `entity_write` (the admin's tool; the tools pack imports `sql` as it imports `proc` and `fetch`, so the pack
-  needs no grant beyond theirs) or pre-declared at launch by the fact `sql_sources`, a LIST `[{name, path, mode}]` (c1f cannot list a dict's keys; `keys()` is only a proposed builtin) that the `sql` pack turns
+  needs no grant beyond theirs) or pre-declared at launch by the fact `sql_sources`, a LIST `[{name, path, mode}]` (`keys(d)` lists a dict's keys, in order) that the `sql` pack turns
   into the same entities (the fact SEEDS: a source that already has a path, written by the model or kept from an earlier run, is left alone, so a restart never undoes the model's choice; 2026-11-14, #1143). A `ro` source is opened with SQLite's **immutable** URI (`file:<path>?immutable=1`, read-only, `query_only`): no lock, nothing written beside the file, and **the file must not change while the
   seat runs** (a changed file is read as it was when the source opened, WAL files are ignored: a live database being written is read from a snapshot copy). `rw` opens an existing file read-write. The connection is
   opened lazily by the first run and opened again by the next run after `path` or `mode` was rewritten.
