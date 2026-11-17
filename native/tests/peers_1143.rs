@@ -3,9 +3,10 @@
 #![cfg(all(feature = "bin", unix))]
 mod common;
 
-use graphlink_core::frame::{Frame, VERSION};
+use graphlink_core::frame::{Frame, Op, Target, VERSION};
 use graphlink_core::link::{Event, Link, Me};
 use graphlink_core::transport::Transport;
+use graphlink_shm::cells::{Cell, CellState, CellsReader};
 use graphlink_shm::Shm;
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -167,4 +168,121 @@ fn a_seat_that_died_leaves_stale_region_names_and_the_next_start_clears_its_own(
     let mut peer = PeerEnd::attach(&name, "kitchen");
     assert!(peer.until(30_000, |ev| ev.iter().any(|e| matches!(e, Event::Opened { .. }))), "the seat could not use its own names: {}", std::fs::read_to_string(std::env::temp_dir()).unwrap_or_default());
     drop(run);
+}
+
+// ---- subscriptions and cells: a peer asks for seat nodes, the seat publishes them in its cell table (the peer maps it read-only) -----------------------------------------------------
+
+fn decl_caps(name: &str, val_cap: u32) -> String { json!([{"name": name, "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": val_cap}]).to_string() }
+fn key(eid: &str, prop: &str) -> String { format!("{eid}\u{1}{prop}") }
+fn put(port: u16, eid: &str, prop: &str, v: J) { call(port, "entity_write", json!({"spec": eid, "prop": prop, "value": v})); }
+
+impl PeerEnd {
+    fn say(&mut self, ops: Vec<Op>) { let f = self.link.send(ops).expect("the link is open"); self.ctl.send(&f).unwrap(); }
+    fn open(name: &str, ns: &str) -> PeerEnd {
+        let mut p = PeerEnd::attach(name, ns);
+        assert!(p.until(30_000, |ev| ev.iter().any(|e| matches!(e, Event::Opened { .. }))), "the link never opened");
+        p
+    }
+}
+fn seat_cells(name: &str) -> CellsReader {
+    let end = Instant::now() + Duration::from_secs(60);
+    loop { match CellsReader::attach(format!("/gl-{name}-sc")) { Ok(r) => return r, Err(e) => { assert!(Instant::now() < end, "no cell table: {e}"); std::thread::sleep(Duration::from_millis(50)); } } }
+}
+/// poll a cell until `ok` holds (or the time is up) and return what it was last
+fn cell_when(r: &CellsReader, k: &str, secs: u64, ok: impl Fn(&Option<Cell>) -> bool) -> Option<Cell> {
+    let end = Instant::now() + Duration::from_secs(secs);
+    loop {
+        let c = r.get(k, 1_000_000, 32).unwrap();
+        if ok(&c) || Instant::now() > end { return c; }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_peer_that_subscribes_to_a_seat_node_reads_its_cells_and_sees_them_change() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("sub"), &[format!("peers={}", decl(&name))]);
+    put(run.port, "Lamp:desk", "power", json!("off"));
+    put(run.port, "Lamp:desk", "level", json!(3));
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    let cells = seat_cells(&name);
+    peer.say(vec![Op::Sub { target: Target::Id("Lamp:desk".into()), props: None, limit: None }]);
+    let power = cell_when(&cells, &key("Lamp:desk", "power"), 30, |c| c.is_some()).expect("the power cell");
+    assert_eq!((power.state, power.value.clone(), power.rev), (CellState::Live, json!("off"), 1.0));
+    assert_eq!(cell_when(&cells, &key("Lamp:desk", "level"), 30, |c| c.is_some()).unwrap().value, json!(3));
+    assert_eq!(cells.get(&key("Lamp:desk", ""), 1_000_000, 32).unwrap().unwrap().state, CellState::Live, "the entity itself is a cell too");
+    // the seat's node changes: the cell follows, with a higher revision
+    put(run.port, "Lamp:desk", "power", json!("on"));
+    let after = cell_when(&cells, &key("Lamp:desk", "power"), 30, |c| matches!(c, Some(c) if c.value == json!("on"))).unwrap();
+    assert_eq!((after.value, after.rev), (json!("on"), 2.0));
+    // a value that did not change does not move the revision
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(cells.get(&key("Lamp:desk", "level"), 1_000_000, 32).unwrap().unwrap().rev, 1.0);
+}
+
+#[test]
+fn a_subscription_that_names_props_publishes_only_those() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("props"), &[format!("peers={}", decl(&name))]);
+    put(run.port, "Lamp:desk", "power", json!("off"));
+    put(run.port, "Lamp:desk", "level", json!(3));
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    let cells = seat_cells(&name);
+    peer.say(vec![Op::Sub { target: Target::Id("Lamp:desk".into()), props: Some(vec!["power".into()]), limit: None }]);
+    assert!(cell_when(&cells, &key("Lamp:desk", "power"), 30, |c| c.is_some()).is_some());
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(cells.get(&key("Lamp:desk", "level"), 1_000_000, 32).unwrap().is_none(), "level was not asked for");
+}
+
+#[test]
+fn a_prefix_subscription_publishes_every_node_under_it_and_the_ones_born_later() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("prefix"), &[format!("peers={}", decl(&name))]);
+    put(run.port, "Lamp:desk", "power", json!("off"));
+    put(run.port, "Lamp:bed", "power", json!("on"));
+    put(run.port, "Door:front", "locked", json!(true));
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    let cells = seat_cells(&name);
+    peer.say(vec![Op::Sub { target: Target::Prefix("Lamp:".into()), props: None, limit: None }]);
+    assert!(cell_when(&cells, &key("Lamp:desk", "power"), 30, |c| c.is_some()).is_some());
+    assert_eq!(cell_when(&cells, &key("Lamp:bed", "power"), 30, |c| c.is_some()).unwrap().value, json!("on"));
+    put(run.port, "Lamp:hall", "power", json!("off"));
+    assert!(cell_when(&cells, &key("Lamp:hall", "power"), 30, |c| c.is_some()).is_some(), "a node born after the subscription is published too");
+    assert!(cells.get(&key("Door:front", "locked"), 1_000_000, 32).unwrap().is_none(), "outside the prefix");
+}
+
+#[test]
+fn after_an_unsubscribe_the_cells_stop_following() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("unsub"), &[format!("peers={}", decl(&name))]);
+    put(run.port, "Lamp:desk", "power", json!("off"));
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    let cells = seat_cells(&name);
+    peer.say(vec![Op::Sub { target: Target::Id("Lamp:desk".into()), props: None, limit: None }]);
+    assert!(cell_when(&cells, &key("Lamp:desk", "power"), 30, |c| c.is_some()).is_some());
+    peer.say(vec![Op::Unsub { target: Target::Id("Lamp:desk".into()) }]);
+    std::thread::sleep(Duration::from_millis(400));
+    put(run.port, "Lamp:desk", "power", json!("on"));
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(cells.get(&key("Lamp:desk", "power"), 1_000_000, 32).unwrap().unwrap().value, json!("off"), "nobody is subscribed: the cell keeps its last value");
+}
+
+#[test]
+fn a_node_that_does_not_exist_is_a_gone_cell_and_a_value_that_does_not_fit_is_a_refused_one() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("edge"), &[format!("peers={}", decl_caps(&name, 64))]);
+    put(run.port, "Lamp:desk", "note", json!("x".repeat(500)));
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    let cells = seat_cells(&name);
+    peer.say(vec![Op::Sub { target: Target::Id("Nope:1".into()), props: None, limit: None }, Op::Sub { target: Target::Id("Lamp:desk".into()), props: None, limit: None }]);
+    let gone = cell_when(&cells, &key("Nope:1", ""), 30, |c| c.is_some()).expect("a cell for a node that is not there");
+    assert_eq!(gone.state, CellState::Gone);
+    let big = cell_when(&cells, &key("Lamp:desk", "note"), 30, |c| c.is_some()).expect("a cell for the big value");
+    assert_eq!(big.state, CellState::Refused);
+    assert!(big.value.as_str().unwrap().contains("value"), "the reason says which limit: {:?}", big.value);
 }

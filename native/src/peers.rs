@@ -2,10 +2,12 @@
 //! seat makes the control rings and its own cell table, runs a `graphlink_core::Link` over the rings, and shows the peer as `Vm:<its namespace>` (a `link` of `up` or `gone`). It is
 //! driven from the loop's per-turn callback on the engine's thread (`Peers::pump`): it never waits, starts no thread, and every decision is the engine's.
 #![cfg(unix)]
-use graphlink_core::frame::VERSION;
+use std::collections::HashMap;
+
+use graphlink_core::frame::{Op, Target, VERSION};
 use graphlink_core::link::{Event, Link, Me};
 use graphlink_core::transport::Transport;
-use graphlink_shm::{cells::Cells, Shm};
+use graphlink_shm::{cells::{CellState, Cells}, Shm};
 use serde_json::{json, Map, Value as J};
 
 use crate::host::Host;
@@ -16,8 +18,12 @@ const WRITER: &str = "link:peer";
 struct Peer {
     name: String,
     ctl: Shm,
-    /// the seat's own cell table for this peer (written when the peer subscribes; the peer maps it read-only)
-    _cells: Cells,
+    /// the seat's own cell table for this peer (the peer maps it read-only): one cell per `(eid, prop)` the peer subscribed to, and one per entity (`eid` and an empty prop)
+    cells: Cells,
+    /// what the peer asked for: a node or a prefix, and the props it named (all when none)
+    subs: Vec<(Target, Option<Vec<String>>)>,
+    /// what is in the cells now: key -> (revision, value, state); a cell is rewritten only when its value or state changes
+    published: HashMap<String, (f64, J, CellState)>,
     link: Link,
     /// the peer's namespace, from its hello
     ns: Option<String>,
@@ -49,7 +55,7 @@ impl Peers {
             let cells = Cells::create(format!("/gl-{name}-sc"), slots, key_cap, val_cap, epoch).map_err(|e| format!("peers: {name}: {e}"))?;
             let mut link = Link::new(Me { ns: seat_ns.into(), build: format!("cliffvm {}", env!("CARGO_PKG_VERSION")), epoch: epoch as f64, support: vec![VERSION], initiator: true });
             ctl.send(&link.open()).map_err(|e| format!("peers: {name}: {e}"))?;
-            list.push(Peer { name: name.to_string(), ctl, _cells: cells, link, ns: None, gone: false });
+            list.push(Peer { name: name.to_string(), ctl, cells, subs: vec![], published: HashMap::new(), link, ns: None, gone: false });
         }
         Ok(Peers { list })
     }
@@ -69,6 +75,7 @@ impl Peers {
                 }
             }
             if !p.gone && p.ctl.is_closed() { p.go(h); }
+            if !p.gone && !p.subs.is_empty() { p.publish(h); }
         }
     }
 }
@@ -90,7 +97,60 @@ impl Peer {
                 self.gone = false;
             }
             Event::Closed { .. } | Event::Failed { .. } => self.go(h),
+            Event::Op(Op::Sub { target, props, .. }) => {
+                self.subs.retain(|(t, _)| *t != target);   // the same target again replaces the props it named
+                self.subs.push((target, props));
+            }
+            Event::Op(Op::Unsub { target }) => self.subs.retain(|(t, _)| *t != target),
             _ => {}
+        }
+    }
+
+    /// Write what the peer subscribed to into the seat's cell table: each node's cells, for the props it named (all when none), whose value changed since the last turn.
+    fn publish(&mut self, h: &Host) {
+        let mut eids: Vec<String> = vec![];
+        for (t, _) in &self.subs {
+            match t { Target::Id(e) => eids.push(e.clone()), Target::Prefix(p) => eids.extend(h.eids_with_prefix(p)) }
+        }
+        eids.sort();
+        eids.dedup();
+        for eid in eids {
+            // a node another namespace owns is not the seat's to publish (a replica of the peer's own node would go straight back to it)
+            if eid.split_once("::").map_or(false, |(ns, _)| ns != "membrane") { continue; }
+            let wanted: Option<Vec<String>> = {
+                let named: Vec<&Option<Vec<String>>> = self.subs.iter().filter(|(t, _)| match t { Target::Id(e) => *e == eid, Target::Prefix(p) => eid.starts_with(p.as_str()) }).map(|(_, p)| p).collect();
+                if named.iter().any(|p| p.is_none()) { None } else { Some(named.iter().filter_map(|p| p.as_ref()).flatten().cloned().collect()) }
+            };
+            match h.entity_props(&eid) {
+                None => self.cell(&format!("{eid}\u{1}"), CellState::Gone, json!(null)),
+                Some(props) => {
+                    self.cell(&format!("{eid}\u{1}"), CellState::Live, json!(true));
+                    for (k, v) in props.iter().filter(|(k, _)| wanted.as_ref().map_or(true, |w| w.contains(k))) { self.cell(&format!("{eid}\u{1}{k}"), CellState::Live, v.clone()); }
+                }
+            }
+        }
+    }
+
+    /// One cell: written when its value or state differs from what is there, at the next revision; a value that does not fit becomes a `Refused` cell that says why.
+    fn cell(&mut self, key: &str, state: CellState, value: J) {
+        let (rev, same) = match self.published.get(key) { Some((r, v, st)) => (*r, *st == state && *v == value), None => (0.0, false) };
+        if same { return; }
+        let rev = rev + 1.0;
+        let wrote = match state {
+            CellState::Live => self.cells.put(key, rev, &value),
+            CellState::Gone => self.cells.mark(key, rev, CellState::Gone, ""),
+            CellState::Refused => self.cells.mark(key, rev, CellState::Refused, value.as_str().unwrap_or("")),
+        };
+        match wrote {
+            Ok(()) => { self.published.insert(key.to_string(), (rev, value, state)); }
+            Err(why) if state == CellState::Live => {
+                // the value does not fit its slot (or the key its capacity, or the table is full): the cell says so, instead of keeping an old value
+                let reason = json!(why);
+                // what is remembered is what was ASKED (a live value), so an unchanged value that does not fit is not written again every turn
+                if self.cells.mark(key, rev, CellState::Refused, &why).is_ok() { self.published.insert(key.to_string(), (rev, value, state)); }
+                else { eprintln!("cliffvm: peer {}: cannot publish {key:?}: {reason}", self.name); self.published.insert(key.to_string(), (rev, value, state)); }
+            }
+            Err(why) => { eprintln!("cliffvm: peer {}: cannot publish {key:?}: {why}", self.name); self.published.insert(key.to_string(), (rev, value, state)); }
         }
     }
 
