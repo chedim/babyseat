@@ -329,6 +329,22 @@ The VM could split a pack by RULE (getter/setter) instead of by pack: rules that
 5. **The cost.** Extra round trips: fine for coarse events, bad for fine-grained ones; the traffic budget of section 11 applies to each cut.
 6. **Why placement stays at PACK granularity (section 16) for slices 1-3:** a file is a reviewable unit, a refusal names it, the operator splits it with an editor; a rule-level cut needs the dataflow analysis, the equivalence test and measured traffic to choose cuts. It is decided later from measured traffic, not now.
 
+## 18. Local peers: the seat's peer driver and the bridges (design, not built; operator 2026-11-16)
+
+Decided: the engine is a small kernel (rounds, ownership, the store, the journal). Code that is first-party, on the hot path and handles trusted data stays in the engine (`sql`, files, command, the HTTP client). Code that is third-party, network-facing (hostile input, TLS), able to crash, or needing other privileges runs OUTSIDE as a GraphLink peer. Network transports are therefore NOT built into cliffvm: a TCP, WebSocket or MQTT **bridge** is a separate program that speaks the network outward and a local transport inward.
+
+**The one new native piece: a peer driver on the engine thread.**
+- It starts a child process the seat was told to run (a command and its arguments, declared by a package once packages exist, #1089, and approved by the owner; until then by a fact the owner sets) and talks to it over the child's standard input and output: one JSON frame per line (the framing of `graphlink-net`), later a shared-memory region (github.com/chedim/graphlink `docs/shared-memory.md`). The library's `Transport` trait is the same for both.
+- A reader thread per child pushes lines into a channel and wakes the loop, as every driver thread does; the engine thread owns the `graphlink_core::Link` and every decision. Frames are handled at the end of a round and answered in a later one (section 4).
+- Events become the entities the design already has: `Opened` is the child's `Vm:<ns>` (kind `peer`, `link: up`), `Op(Val)` goes through `apply_val` into replicas (built, slice 2), `Op(Wr)` is a forwarded write to a node the seat owns (slice 3), `Closed` and `Failed` set `link: gone` and the subtree follows the policy of section 14 (a peer is durable: stale, not deleted).
+- Supervision: start at boot, restart when the child dies (the wait between restarts is a number for the operator), stop at shutdown. A restart is never started in the middle of a round.
+
+**The bridge (a separate binary in the graphlink repo, `graphlink-bridge`):** TCP (then WebSocket, MQTT) outward, the child's standard input and output inward. It owns the network credentials and the TLS; the seat never sees a socket. It holds its own token and the namespace claim of section 13 and MUST NOT widen what the peer behind it may own (the gateway rule of section 14). The first user is `graphlink watch` and `graphlink write` from the CLI, against a real seat.
+
+**What stays as it is:** the HTTP long poll of slice 2 for pages, until a page can speak a bridge.
+
+**Threads:** nothing changes: the engine is one thread, the child is a process, and the reader thread only moves bytes (the rule of `graphlink-core`: sans-I/O, state on the engine thread).
+
 ## DECISIONS for the operator (nothing is chosen silently; my pick in brackets)
 
 1. Page namespace text: no hyphens (`name_char`, `expr.rs:218`); `p<hex>` or `page_<n>`? [`p` + 4 hex, so `p7a`]
@@ -377,3 +393,7 @@ The VM could split a pack by RULE (getter/setter) instead of by pack: rules that
 43. (slice 1) A tab that never reports leaves no `Vm`; make `Vm` at the snapshot instead? [no]
 44. (slice 1) Where a refused report is shown to the person (today: `LinkView:main.note`, not drawn). [draw it in the shell error line]
 45. Placement: a file with mixed imports is a loud placement error (section 16), the rule-level split later. [yes]
+46. (section 18) The wait between restarts of a peer child, and the number of restarts before the seat stops trying. [none set: a number for the operator]
+47. (section 18) The largest frame a peer may send, and the most peers a seat holds. [none set: numbers for the operator]
+48. (section 18) Until packages exist, how the owner declares a peer child: a fact `peers` holding `[{name, command, args}]`. [yes]
+49. (section 18) The bridge is a separate binary in the graphlink repo and ships as a release asset, not inside cliffvm. [yes]
