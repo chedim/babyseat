@@ -28,6 +28,7 @@ Version **0.7.62**. This is a rebuild: the 0.7 Python seat is retired (see [Upgr
 - **Home Assistant.** A HACS integration runs the seat inside Home Assistant (or connects to one you run), makes it an Assist conversation agent and lets the model use the house
   ([docs/home-assistant.md](docs/home-assistant.md)).
 - **Your choice of model.** The default backend is a local Ollama (`seat_backend`, `http://127.0.0.1:11434`): no model is chosen at the start, and the page opens a window while a model or a name is not chosen, with a dropdown of the chat models Ollama lists. Any OpenAI-compatible endpoint works too (the boot fact `cloud_models`); the `claude` CLI is a developer mode ([docs/cliffvm.md](docs/cliffvm.md)). Pull a model first: `ollama pull <name>`.
+- **Seats and programs can share a graph (0.7.63).** Local programs over shared memory (the fact `peers`), other machines through `graphlink-bridge` (TCP with tokens and TLS), and two seats reading each other's nodes: [docs/graph-link.md](docs/graph-link.md), section 18. The protocol and its crates: [chedim/graphlink](https://github.com/chedim/graphlink).
 - **Local and strict.** The door listens on `127.0.0.1`; every route needs a signed token; the page gets one only from this machine ([docs/auth.md](docs/auth.md)).
 
 Not in this release: the 3D field view (built, switched off: `membrane/apps/field.c1f`), the Home Assistant sidebar panel and relay, Blurp and the
