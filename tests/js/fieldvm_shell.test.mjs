@@ -57,4 +57,4 @@ try {
   // 10. hidden
   assert.deepEqual(r.hidden, [false, true, false], 'Conn:page.hidden follows the page');
   console.log('fieldvm_shell ok');
-} finally { br.kill(); srv.kill(); await sleep(300); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+} finally { br.kill(); srv.kill(); await sleep(300); rmSync(prof, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 }); }

@@ -100,7 +100,7 @@ async function browser() {
   b.release = async () => { for (const rid of b.paused.splice(0)) await send('Fetch.continueRequest', { requestId: rid }); };
   b.size = (w, h, mobile = false) => send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile });
   b.shot = async (name) => { if (!process.env.SHOTS) return; mkdirSync(process.env.SHOTS, { recursive: true }); await sleep(450); writeFileSync(path.join(process.env.SHOTS, name + '.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64')); };
-  b.close = async () => { ws.close(); br.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); };
+  b.close = async () => { ws.close(); br.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 }); };
   return b;
 }
 const K = (k) => `[data-key="${k}"]`;

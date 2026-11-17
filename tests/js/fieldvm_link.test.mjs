@@ -45,4 +45,4 @@ try {
   assert.equal(r.born.tag, 'li'); assert.equal(r.born.class, 'new'); assert.equal(r.born.parent, 'DomNode:page:#list');
   assert.equal(r.gone, null);
   console.log('fieldvm link: ok');
-} finally { br.kill(); srv.kill(); await sleep(300); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+} finally { br.kill(); srv.kill(); await sleep(300); rmSync(prof, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 }); }
