@@ -14,6 +14,7 @@ babyseat is an AI seat whose memory is a graph the model programs. The seat is `
 2. Keep docs honest in the same change: README.md maps the entry points, docs/ holds the references (docs/README.md lists them), the model-facing help is `membrane/apps/barest.c1f/help/*.md` (every code block is a test: `help_1143`).
    A doc says what the code does NOW; something in progress says so and names its branch; something gone is removed (it is in git and the tags), not marked.
 3. CHANGELOG.md, CITATION.cff and the version bump are written at the release commit only, never in a feature or fix PR.
+   The engine ships from its own repository (github.com/chedim/cliffvm; its README has the plan of the move): the release binaries are the cliffvm release named by `CLIFFVM_VERSION`. Until `native/` is removed from this repo, a change to the engine is made in BOTH (`native/` here, where its tests run, and chedim/cliffvm, what ships), and `CLIFFVM_VERSION` moves to the cliffvm release that has it.
 4. Sync with origin via fetch + ff-only; never rewrite shared history. Base every PR on main (no stacked PRs).
 5. No secrets in code, docs or comments: tokens come from the environment. No personal names or home paths in anything published (`~` or a placeholder).
 6. Keep new commands small and named; prefer composing existing ones over one-off scripts. Behaviour is c1f; Rust is only the host (docs/porting-brief.md): no new Python logic.
