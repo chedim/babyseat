@@ -62,7 +62,7 @@ async function browser() {
   const dbg = dbgPort++;
   const br = spawn(chrome, ['--headless=new', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${prof}`, `--remote-debugging-port=${dbg}`, 'about:blank'], { stdio: 'ignore' });
   let tabs;
-  for (let i = 0; i < 50 && !tabs; i++) { await sleep(200); try { tabs = await (await fetch(`http://127.0.0.1:${dbg}/json`)).json(); } catch {} }
+  for (let i = 0; i < 50 && !tabs; i++) { await sleep(200); try { const got = await (await fetch(`http://127.0.0.1:${dbg}/json`)).json(); if (Array.isArray(got) && got.some(t => t.type === "page")) tabs = got; } catch {} }
   const ws = new WebSocket(tabs.find((t) => t.type === 'page').webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener('open', r, { once: true }));
   let id = 0; const waiting = new Map(); const b = { errors: [], posts: [], paused: [], calls: [], hook: null };
@@ -95,7 +95,7 @@ async function browser() {
   b.release = async () => { for (const rid of b.paused.splice(0)) await send('Fetch.continueRequest', { requestId: rid }); };
   b.size = (w, h, mobile = false) => send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile });
   b.shot = async (name) => { if (!process.env.SHOTS) return; mkdirSync(process.env.SHOTS, { recursive: true }); await sleep(450); writeFileSync(path.join(process.env.SHOTS, name + '.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64')); };
-  b.close = async () => { ws.close(); br.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true }); };
+  b.close = async () => { ws.close(); br.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); };
   return b;
 }
 const K = (k) => `[data-key="${k}"]`;
