@@ -1,0 +1,63 @@
+PACK watchdog 1
+IMPORT boot 1
+IMPORT cron 1
+RESIDENT Pin
+RESIDENT Alert
+RESIDENT Snap
+RESIDENT Watchdog
+-- THE CONTINUITY WATCHDOG (operator 2026-11-17): it keeps what must survive a turn where the next turn reads it, and says so when something is lost.
+-- An OPTIONAL pack: the seat does not load it (it is not in apps/barest.packs). The model loads it by writing this text to `Pack:watchdog`, then puts `Watchdog:main.banner` in its own
+-- `Banner.text` (Help:banner; a pack that imports `default_banner` and `watchdog`). Deterministic, no prose matching: it reads structured entities only.
+--   Pin:<slug> {kind, text, done}   something that must survive turns. kind = goal | loop | focus | fact; done = true when it is finished. Write one for each goal or open loop.
+--   Snap:s<n> {at, pins, words, prev}   a checkpoint of the open pins and of the notes (`Banner:work.words`), taken by Cron:watchdog every 10 minutes (seeded at start) or by
+--                                      `Watchdog:main.checkpoint = <any new number>`. The last three are kept.
+--   Alert:<slug> {text, ack}        a sticky warning, raised at a checkpoint when a pin has lost its text without being marked done, or when the notes shrank to under half.
+--                                      It stays in the banner section until `Alert:<slug>.ack = true`. To restore lost notes write `Snap:s<n>.words` back to `Banner:work.words`.
+--   Watchdog:main.banner            the section for the banner: the alerts, the open pins and the previous exchange (what the user said, what the seat answered), so a turn
+--                                      starts knowing what `it` meant. `Watchdog:main.chat` names the chat (default main).
+
+Pin.live getter: this.done != True
+Alert.live getter: this.ack != True and (this.text or '') != ''
+Watchdog.pin_line getter:
+  ps = [p.kind + ': ' + p.text for p in instances('Pin') if p.done != True and p.text != None]
+  'PINS (open, ' + str(len(ps)) + '): ' + join(ps, ' | ') if len(ps) > 0 else 'PINS: none open (write Pin:<slug> kind/text for each goal or open loop)'
+Watchdog.alert_line getter:
+  al = [a.text for a in instances('Alert') if a.ack != True and (a.text or '') != '']
+  'CONTINUITY ALERT (Alert:x.ack = true when handled): ' + join(al, ' | ') if len(al) > 0 else ''
+-- the previous turn is the one the chat names (`last_turn`, written by chat_turn.c1f when a turn ends); its message and its response are read by reference
+Watchdog.last_turn getter: prop('membrane::Chat:' + str(this.chat or 'main'), 'last_turn')
+Watchdog.last_exchange getter:
+  t = this.last_turn
+  m = replace(t, ':turn', '')
+  u = prop(m, 'text')
+  a = prop(t + ':response', 'text')
+  'LAST EXCHANGE: user said "' + head(u or '?', 300) + '" / I answered "' + head(a or '(no answer: that turn ended without one)', 300) + '"' if t != None else ''
+Watchdog.banner getter: join([l for l in [this.alert_line, this.pin_line, this.last_exchange] if (l or '') != ''], '\n')
+
+-- the checkpoint: compare with the last one, raise what was lost, then take the new one
+Watchdog.checkpoint on-setter snap:
+  ALWAYS:
+    prev = this.last_snap
+    old_pins = prop(prev, 'pins') or []
+    old_words = prop(prev, 'words') or ''
+    new_words = prop(Banner:work, 'words') or ''
+    gone = [p for p in old_pins if prop(p, 'text') == None]
+    FOR p IN gone:
+      ('Alert:vanished-' + replace(replace(p, ':', '_'), '/', '_')).text = 'pin vanished without done: ' + p
+    Alert:wipe.text = ('banner notes shrank from ' + str(len(old_words)) + ' to ' + str(len(new_words)) + ' chars; the old notes are ' + str(prev) + '.words') if (len(old_words) > 80 and len(new_words) * 2 < len(old_words)) else (prop(Alert:wipe, 'text') or '')
+    ('Snap:s' + str(this.checkpoint)) = Snap(at: this.checkpoint, pins: [p.eid for p in instances('Pin') if p.done != True and p.text != None], words: new_words, prev: prev)
+    this.last_snap = 'Snap:s' + str(this.checkpoint)
+    this.beat = this.checkpoint
+    -- the snapshot three back goes (the new one, the last one and the one before it stay)
+    stale = [s for s in [prop(prop(prev, 'prev'), 'prev')] if s != None]
+    FOR s IN stale:
+      ('' + s) = None
+      this.pruned = s
+
+-- the beat: one schedule of its own, seeded once at start (a schedule that was set is kept)
+Boot.started on-setter seed-watchdog:
+  WHEN prop('Cron:watchdog', 'schedule') == None:
+    Cron:watchdog = Cron(schedule: '@every 10m', job: 'watchdog')
+Cron.fired on-setter watchdog-beat:
+  WHEN this.job == 'watchdog':
+    Watchdog:main.checkpoint = this.fired['at']

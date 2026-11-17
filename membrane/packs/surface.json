@@ -1442,5 +1442,33 @@
     "writes": [],
     "claims": [],
     "boot_facts": []
+  },
+  "watchdog": {
+    "imports": [
+      "boot",
+      "cron"
+    ],
+    "classes": [
+      "Alert",
+      "Boot",
+      "Cron",
+      "Pin",
+      "Watchdog"
+    ],
+    "members": 10,
+    "writes": [
+      "Alert:*.text",
+      "Alert:wipe.text",
+      "Cron:watchdog=Cron()",
+      "Watchdog:main.checkpoint"
+    ],
+    "claims": [],
+    "boot_facts": [],
+    "resident": [
+      "Pin",
+      "Alert",
+      "Snap",
+      "Watchdog"
+    ]
   }
 }
