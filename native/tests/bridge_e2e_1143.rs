@@ -219,3 +219,44 @@ fn a_bridge_the_seat_supervises_is_started_again_when_it_dies_and_the_remotes_va
     assert!(wait_for(&run, "Probe:1", "seen", "second", 30).contains("second"), "the value did not flow again: {}", read(&run, "Probe:1", "seen"));
     assert!(wait_for(&run, "Vm:kitchen", "link", "up", 30).contains("up"));
 }
+
+/// a TCP port nobody listens on right now (the listening bridge of a seat is started by that seat, so its address is chosen first)
+fn free_port() -> u16 { std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port() }
+
+fn probe_of(dir: &std::path::Path, reads: &str) -> std::path::PathBuf {
+    let p = dir.join("probe.c1f");
+    std::fs::write(&p, format!("PACK probe 1\nIMPORT boot 1\nRESIDENT Probe\nProbe.seen getter: {reads}\n")).unwrap();
+    p
+}
+
+/// the supervised program of a seat: `sh` notes nothing, it becomes the bridge
+fn bridge_run(mode: &str, addr: &str, name: &str, dir: &std::path::Path, seat_name: &str) -> J {
+    let token = dir.join("peers").join(format!("{name}.token"));
+    let line = format!("exec {BRIDGE} {mode} {addr} --peer {name} --seat-name {seat_name} --slots 64 --key-cap 128 --val-cap 1024 --epoch 1 --spins 1000000 --depth 32 --token-file {} --die-with-parent", token.display());
+    json!({"argv": ["sh", "-c", line], "restart_wait_s": 0.5, "max_restarts": 20, "reset_after_s": 600})
+}
+
+#[test]
+fn two_seats_that_are_both_membrane_read_each_others_nodes_through_two_bridges() {
+    // seat `a` listens (its bridge says `a` across the link), seat `b` dials (`b`); each declares the other under that name; each rule reads a node of the other
+    let (pa, pb) = (peer_name(), peer_name());
+    let (_na, _nb) = (Names(pa.clone()), Names(pb.clone()));
+    let (da, db) = (tmp("two-a"), tmp("two-b"));
+    let addr = format!("127.0.0.1:{}", free_port());
+    let decl = |peer: &str, ns: &str, run: J| json!([{"name": peer, "ns": ns, "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 1024, "spins": 1_000_000, "depth": 32, "run": run}]);
+    let run_a = start_with(&da, &[format!("peers={}", decl(&pa, "b", bridge_run("listen", &addr, &pa, &da, "a")))], &[probe_of(&da, "b::Lamp:kitchen.power")]);
+    let run_b = start_with(&db, &[format!("peers={}", decl(&pb, "a", bridge_run("connect", &addr, &pb, &db, "b")))], &[probe_of(&db, "a::Lamp:desk.power")]);
+    // each seat owns a bare node; the other reads it under the name of its owner
+    put(&run_a, "Lamp:desk", "power", json!("off"));
+    put(&run_b, "Lamp:kitchen", "power", json!("dim"));
+    put(&run_a, "Probe:1", "x", json!(1));
+    put(&run_b, "Probe:1", "x", json!(1));
+    assert!(wait_for(&run_b, "Probe:1", "seen", "off", 90).contains("off"), "b never saw a's Lamp:desk: {}", read(&run_b, "Probe:1", "seen"));
+    assert!(wait_for(&run_a, "Probe:1", "seen", "dim", 90).contains("dim"), "a never saw b's Lamp:kitchen: {}", read(&run_a, "Probe:1", "seen"));
+    assert!(wait_for(&run_b, "Vm:a", "link", "up", 30).contains("up"), "a is a Vm of b");
+    assert!(wait_for(&run_a, "Vm:b", "link", "up", 30).contains("up"), "b is a Vm of a");
+    // a change on a reaches b
+    put(&run_a, "Lamp:desk", "power", json!("on"));
+    let now = wait_for(&run_b, "Probe:1", "seen", "\"on\"", 60);
+    assert!(now.contains("on") && !now.contains("off"), "{now}");
+}
