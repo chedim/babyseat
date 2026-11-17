@@ -3,6 +3,8 @@
 //! 1-3 letters never live; seeds are the term's own embedding (through the embed queue, kept out of `Vector`); one background is the mean of every sentence vector;
 //! mature identifiers keep episodes. The states are stored rows, restored at a restart, never journalled.
 //! There is NEVER a real model server here: the receipts are written by the test (the Fetch driver's own writes).
+mod common;
+
 use membrane_vm::host::{boot_started, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
@@ -269,7 +271,7 @@ fn the_background_is_the_running_mean_of_every_sentence_vector() {
 }
 
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("field-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 

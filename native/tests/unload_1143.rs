@@ -1,13 +1,15 @@
 //! EAGER UNLOAD UNDER MEMORY PRESSURE (#1143, operator 2026-11-13; docs/cliffvm.md, "Unload"): the opposite of lazy load. An entity not touched for a while leaves the
 //! engine (its store row stays) and loads again on the next reference. The VM does it ITSELF, the host's policy (no pack, no write: operator 2026-11-14, "the model does
 //! not maintain what is in memory, the VM does"): the memory-budget facts say when, the engine's touch clock (`.touched`, not persisted) says which.
+mod common;
+
 use membrane_vm::host::{Host, MemoryConfig, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("unload-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 fn open(file: &str) -> Host { let mut o = Options::new(Some(file.to_string())); o.effects = false; Host::open(o).unwrap() }

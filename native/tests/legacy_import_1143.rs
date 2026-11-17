@@ -2,6 +2,8 @@
 //! `ChatSession` / `ChatMessage` / `ChatTurn` / `ChatResponse` / `ChatTool` entities, written by `membrane/packs/legacy_import.c1f` through the read-only
 //! `SqlSource:legacy` (the Sql driver). The fixtures are SMALL SQLite files with the previous store's real schema (`c_sessions`, `c_messages`: `k TEXT PRIMARY KEY, body TEXT`)
 //! and synthetic text; the real copy is used only by the `#[ignore]`d measuring test at the end (read-only). No model runs and no `claude` exists here.
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,7 +16,7 @@ fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR"
 fn pack(n: &str) -> String { std::fs::read_to_string(repo().join(format!("membrane/packs/{n}.c1f"))).unwrap_or_else(|e| panic!("{n}.c1f: {e}")) }
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("legacy-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(d.join(".membrane")).unwrap();
     d.canonicalize().unwrap()

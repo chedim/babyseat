@@ -2,6 +2,8 @@
 //! getter fails the VM writes (derived, not journalled) the class `Error` on top of the entity's class list (`parents`) and the reason into `failed[prop]`; when
 //! every failure clears, `Error` leaves `parents` and `failed` empties. The stored value of the failed property stays null; a read of it gives the Error (the overlay),
 //! the getter keeps recomputing. Both rows persist, so a restart brings the Errors back.
+mod common;
+
 use membrane_vm::host::{self, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 use std::time::{Duration, Instant};
@@ -162,7 +164,7 @@ fn the_vm_writes_are_derived_not_journalled_and_stamped_like_the_other_derived_w
 
 #[test]
 fn failures_persist_across_a_restart_and_come_back_through_the_overlay() {
-    let file = std::env::temp_dir().join(format!("errclass-{}-{}.sqlite3", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())).to_string_lossy().to_string();
+    let file = std::env::temp_dir().join(format!("errclass-{}-{}.sqlite3", std::process::id(), common::unique())).to_string_lossy().to_string();
     {
         let h = open(Options::new(Some(file.clone())));
         h.load_pack("entity", &entity_text()).unwrap(); h.load_pack("er", Q).unwrap(); h.rebuild();
@@ -260,7 +262,7 @@ fn a_whole_entity_read_shows_failed_properties_as_error_and_the_rest_normally() 
     let tools = std::fs::read_to_string(repo().join("membrane/packs/door_tools.c1f")).unwrap();
     let line = tools.lines().find(|l| l.starts_with("Request.mc_r_rows getter: sql(")).expect("the whole-read query");
     let lit = &line["Request.mc_r_rows getter: sql(".len()..line.find(", this.mc_r_id)").unwrap()];
-    let file = std::env::temp_dir().join(format!("errclass-read-{}-{}.sqlite3", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())).to_string_lossy().to_string();
+    let file = std::env::temp_dir().join(format!("errclass-read-{}-{}.sqlite3", std::process::id(), common::unique())).to_string_lossy().to_string();
     let h = Host::open(Options::new(Some(file.clone()))).unwrap();
     h.load_pack("entity", &entity_text()).unwrap();
     h.load_pack("er", &format!("{Q}Dash.rows getter: sql({lit}, 'Box:a')\nDash.plain getter: sql({lit}, 'Box:b')\n")).unwrap();

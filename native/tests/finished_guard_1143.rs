@@ -1,6 +1,8 @@
 //! A finished message stops depending on the banner (#1143): the per-message prompt getters (`banner_text`, `banner_slot`, `sys`, `argv`, `mcp_json`, `bin`, `port`,
 //! `max_turns`, `note`) apply only while the turn is unfinished; once it is `done` or `error` they are none (derived), so a banner change recomputes no finished message,
 //! the store rows stay slim and a restart derives nothing for them. Also the store's durability: WAL with `synchronous=NORMAL`.
+mod common;
+
 use membrane_vm::host::{self, Host, Options};
 use rusqlite::Connection;
 use serde_json::{json, Map, Value as J};
@@ -8,7 +10,7 @@ use std::path::PathBuf;
 
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("guard-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 fn seat(store: Option<&str>, before: impl Fn(&Host)) -> Host {

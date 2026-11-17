@@ -2,6 +2,8 @@
 //! `membrane/packs/legacy_cutover.c1f` finds the old store (the search order below), declares it as the read-only `SqlSource:legacy`, and imports every session in the BACKGROUND, newest
 //! first, in small batches that leave the imported entities out of memory; a ledger (`Legacy:cutover` and the per-session `Legacy:session:<sid>`) makes it done once and resumable.
 //! Host-level tests on small synthetic stores (native/tests/legacy_fixture); the real-store numbers are measured on a private seat (see the report), never here. No clock: counts and contents only.
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,7 +15,7 @@ use legacy_fixture::*;
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn pack(n: &str) -> String { std::fs::read_to_string(repo().join(format!("membrane/packs/{n}.c1f"))).unwrap_or_else(|e| panic!("{n}.c1f: {e}")) }
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cutover-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(d.join(".membrane")).unwrap();
     std::fs::create_dir_all(d.join("cwd")).unwrap();

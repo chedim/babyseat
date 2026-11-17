@@ -2,6 +2,8 @@
 //! value could go: every route's reply, the store, its WAL, the journal, stdout, stderr, the process listing. A restart with another environment shows the new boot value, the journal holds both writes.
 //! Private seat: a data folder of its own, an ephemeral port, no chat turn, no `claude`.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -55,7 +57,7 @@ fn start(dir: &std::path::Path, env: &[(&str, &str)], facts: &[&str]) -> Seat {
     Seat { child, port, stdout: vec![line], stderr }
 }
 fn dir(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-environment-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d.canonicalize().unwrap()

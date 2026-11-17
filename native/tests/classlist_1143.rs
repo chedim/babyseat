@@ -2,6 +2,8 @@
 //! (`cls:<name>` entries); the nearest class is the first entry, the root `Entity` is implicitly last. The eid prefix is only the BIRTH
 //! DEFAULT (no `parents` = the list [prefix]; a born entity with extra `parents` gets the prefix class put first); after birth it has no
 //! standing: a write of `parents` reorders, adds or replaces classes, and getters, setters, kind matching and rule B follow the list.
+mod common;
+
 use membrane_vm::host::{self, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
@@ -121,7 +123,7 @@ fn the_list_survives_a_journal_replay_and_a_restart() {
     assert_eq!(r.get("Own:y", "text"), json!("own"));
     assert!(h.journal().iter().any(|l| matches!(l, Line::Born { eid, props, .. } if eid == "Own:x" && props["parents"] == json!(["cls:alpha"]))), "the journal keeps what was said");
 
-    let file = std::env::temp_dir().join(format!("classlist-{}-{}.sqlite3", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())).to_string_lossy().to_string();
+    let file = std::env::temp_dir().join(format!("classlist-{}-{}.sqlite3", std::process::id(), common::unique())).to_string_lossy().to_string();
     let open = || { let mut o = Options::new(Some(file.clone())); o.effects = false; Host::open(o).unwrap() };
     {
         let h = open(); h.load_pack("abc", PACK).unwrap(); h.rebuild();

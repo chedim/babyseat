@@ -1,5 +1,7 @@
 //! The store's churn (#1143, the seat that burned CPU idle): what the engine writes is stored ONCE per round, in ONE transaction, and a write
 //! that changes nothing never touches the store. `Host::store_commits` counts the commits of the host's connection.
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use rusqlite::Connection;
 use serde_json::{json, Map, Value as J};
@@ -7,7 +9,7 @@ use serde_json::{json, Map, Value as J};
 const PACK: &str = "PACK churn 1\nRESIDENT Box\nBox.double getter: this.n * 2\nBox.label getter: 'box ' + str(this.n)\n";
 
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("churn-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 fn open(file: &str) -> Host { let mut o = Options::new(Some(file.to_string())); o.effects = false; Host::open(o).unwrap() }

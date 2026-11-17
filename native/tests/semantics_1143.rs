@@ -1,5 +1,7 @@
 //! Null reasons and the mention cascade (#1143, the model's live findings): a missing property is a null that says `absent`
 //! (naming the entity and the property); a reasoned null inside a list or a dict keeps its reason.
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use serde_json::{json, Value as J};
 
@@ -80,7 +82,7 @@ Watch.snap on-setter snapshot:\n  ALWAYS:\n    this.last_keeps = this.keeps_now\
 Watch.alert getter: 'ALERT' if this.last_keeps != None and this.keeps_now < this.last_keeps else ''\n";
 
 fn store_file(tag: &str) -> String {
-    std::env::temp_dir().join(format!("sem-{tag}-{}-{}.sqlite3", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())).to_string_lossy().to_string()
+    std::env::temp_dir().join(format!("sem-{tag}-{}-{}.sqlite3", std::process::id(), common::unique())).to_string_lossy().to_string()
 }
 fn open(file: &str) -> Host { let mut o = Options::new(Some(file.to_string())); o.effects = false; Host::open(o).unwrap() }
 

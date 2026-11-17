@@ -2,6 +2,8 @@
 //! reads the rows back; the pack needs no grant beyond what Command and Fetch need (the tools pack imports `sql`, as it imports `proc` and `fetch`); a
 //! caller with no token is refused (401) and nothing is made; the seat's own store path is refused with a visible reason whoever writes it.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -15,7 +17,7 @@ struct Run { child: Child, _lines: Receiver<String> }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(d.join("packs")).unwrap();
     for n in ["boot.c1f", "door.c1f", "door_auth.c1f", "door_tools.c1f", "entity.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f"] {

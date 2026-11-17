@@ -1,5 +1,7 @@
 //! scripts/seat: the dev wrapper of `cliffvm serve`, the strict door on the barest pack set, claude the only model (a fake `claude`: nothing runs a model here).
 #![cfg(feature = "bin")]
+mod common;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
@@ -13,7 +15,7 @@ struct Run { child: Child, _lines: Receiver<String>, port: u16, said: Vec<String
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("seat-launcher-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

@@ -1,6 +1,8 @@
 //! The dist folder (#1143, docs/packaging-plan.md): `scripts/dist/build.sh` assembles `dist/<version>/{bin/cliffvm, packs/, apps/, VERSION, MANIFEST.sha256}` from a release
 //! build, and `cliffvm serve` run from THAT folder (the repo is not named to it) comes up. Built here from the test binary (a release build is CI's step).
 #![cfg(feature = "bin")]
+mod common;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
@@ -12,7 +14,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn repo() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn tmp(tag: &str) -> PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("dist-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

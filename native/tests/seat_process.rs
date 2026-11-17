@@ -22,7 +22,7 @@ fn app_ui() -> std::path::PathBuf { repo().join("membrane/apps/barest.c1f/ui") }
 fn app_file(rel: &str) -> std::path::PathBuf { app_ui().join(rel) }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

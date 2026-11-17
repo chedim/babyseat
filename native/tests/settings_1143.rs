@@ -3,6 +3,8 @@
 //! writes `refused = <reason>` and nothing else). The seat is the shipped one (barest.packs + the app) with a fake `claude`; the writes go through `POST /mcp entity_write`, the
 //! door the window uses (one door for every valid token). Every wait has a timeout and the child is always reaped.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -31,7 +33,7 @@ const KEY: &str = "sk-ant-settings-sentinel-7731";
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn setup(tag: &str) -> Dir {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-settings-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     let bin = d.join("fake-claude");

@@ -1,4 +1,6 @@
 //! The host loop in Rust (src/host.rs): stamps, the journal of OUTSIDE writes, and replay = the same state.
+mod common;
+
 use membrane_vm::expr;
 use membrane_vm::host::{self, is_outside, stamp_born_writer, stamp_writer, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
@@ -29,7 +31,7 @@ fn slow() -> String {
 }
 
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("hostloop-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 
@@ -316,7 +318,7 @@ Command.seen getter: join([x['d'] for x in sort_by([{'n': c.n, 'd': c.data} for 
 #[test]
 fn a_command_run_with_partial_delivers_its_lines_as_journalled_chunks_before_the_receipt_and_replays() {
     use_clock(0);
-    let dir = std::env::temp_dir().join(format!("hostloop-partial-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let dir = std::env::temp_dir().join(format!("hostloop-partial-{}-{}", std::process::id(), common::unique()));
     std::fs::create_dir_all(&dir).unwrap();
     let h = Host::open({ let mut o = Options::new(Some(dir.join("f.sqlite3").to_string_lossy().to_string())); o.clock = ticking(); o }).unwrap();
     h.load_pack("pc", PARTIAL).unwrap();

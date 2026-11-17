@@ -2,6 +2,8 @@
 //! each with the owner it sits under (the eid's colon prefix) when that owner is in the window too. It reads COLUMNS of `c_field` (`k`, `cls`, `updated`) and never a body,
 //! so an entity nobody loaded stays unloaded (the route is described in the header of membrane/packs/door_fieldvm.c1f). The seat is the shipped one (barest.packs + the app), no real `claude`, an ephemeral port.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -23,7 +25,7 @@ impl Drop for Run {
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-active-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

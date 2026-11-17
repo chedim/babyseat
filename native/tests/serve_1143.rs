@@ -2,6 +2,8 @@
 //! starts the barest seat there, and holds NO app default of its own: the minds, the models, the local backend and the default port live in the pack `launcher.c1f`.
 //! A fake `claude` stands in for the CLI: no chat turn runs here.
 #![cfg(feature = "bin")]
+mod common;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
@@ -16,7 +18,7 @@ struct Run { child: Child, lines: Receiver<String>, port: u16, said: Vec<String>
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
 
 fn tmp(tag: &str) -> PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("serve-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

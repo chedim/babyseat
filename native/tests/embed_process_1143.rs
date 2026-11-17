@@ -2,6 +2,8 @@
 //! and with a model server that is not there (a closed port) the queue is a visible, reasoned state on the entity and in the Settings row, never a silent stall, and the turn is answered all the same.
 //! No Ollama, no real `claude`: the CLI is a script in the test folder and the model server's address is a port nothing listens on.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -30,7 +32,7 @@ const KEY: &str = "sk-ant-settings-sentinel-7731";
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn setup(tag: &str) -> Dir {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-settings-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     let bin = d.join("fake-claude");

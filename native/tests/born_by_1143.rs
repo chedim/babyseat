@@ -1,13 +1,15 @@
 //! Every entity remembers what birthed it (#1143, operator 2026-11-14): the reserved read-only property `born_by` is the eid of the CAUSE of the birth, the entity whose
 //! setter was running (for a door `entity_write`, the Request of the call). A birth with no cause reads as the engine's plain "absent" null. It is a constant per entity,
 //! stored with the row (survives eviction and restart) and, for a birth a replay does not recompute (a virtual trigger's), carried by the journal line's optional `by`.
+mod common;
+
 use membrane_vm::host::{Host, Line, MemoryConfig, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("bornby-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 fn open(file: Option<&str>) -> Host { let mut o = Options::new(file.map(String::from)); o.effects = false; Host::open(o).unwrap() }

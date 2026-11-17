@@ -1,5 +1,7 @@
 //! THE VECTOR (#1143, operator 2026-11-14): the native half of the semantic field. A class a pack declares `MAPPED Vector f16` keeps the list of numbers `v` of its entities in a
 //! compact native store (not in the entity's row), and the builtin `near(list, 'Vector', k)` finds the k nearest by cosine. docs/cliffvm.md ("Storage modes"), docs/c1f-stdlib.md.
+mod common;
+
 use membrane_vm::host::{Host, Line, MemoryConfig, Options};
 use membrane_vm::syntax::parse_full;
 use serde_json::{json, Map, Value as J};
@@ -10,7 +12,7 @@ use std::sync::Arc;
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn vector_pack() -> String { std::fs::read_to_string(repo().join("membrane/packs/vector.c1f")).unwrap() }
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("vector-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 fn open(file: Option<&str>) -> Host { let mut o = Options::new(file.map(String::from)); o.effects = false; Host::open(o).unwrap() }

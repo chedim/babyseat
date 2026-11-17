@@ -2,6 +2,8 @@
 //! (`Environment:host.HOME`, `.MEMBRANE_DATA_DIR`; a variable that is not set is absent). Only an ALLOW-LISTED set carries its value; a secret-bearing name (KEY, TOKEN, SECRET, PASSWORD) reads the text `set`
 //! and never the value; `env_allow` extends the list and a secret-looking name is refused with the reason. A STORED entity (class `Environment`, RESIDENT) written by a JOURNALLED outside write.
 //! Tests assert content, never the clock.
+mod common;
+
 use membrane_vm::host::{boot_environment, boot_started, environment_props, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 
@@ -10,7 +12,7 @@ fn pack(n: &str) -> String { std::fs::read_to_string(repo().join(format!("membra
 fn env(v: &[(&str, &str)]) -> Vec<(String, String)> { v.iter().map(|(k, x)| (k.to_string(), x.to_string())).collect() }
 fn facts(v: &[(&str, J)]) -> Map<String, J> { v.iter().map(|(k, x)| (k.to_string(), x.clone())).collect() }
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("environment-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

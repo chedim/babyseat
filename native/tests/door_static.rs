@@ -1,5 +1,7 @@
 //! The UI shell and its files through the door, DECIDED IN c1f (packs/door.c1f: the route table, the content types, the path
 //! rules); rust only sends the file the pack names (`Request:<n>.respond = {status, headers, file}`).
+mod common;
+
 use membrane_vm::fields::Fields;
 use membrane_vm::store::Store;
 use membrane_vm::vm::{Core, Host, Write};
@@ -106,7 +108,7 @@ fn a_missing_file_a_traversal_and_a_post_are_refused() {
 }
 
 fn layer(tag: &str, files: &[(&str, &str)]) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("door-layers-{tag}-{}-{n}", std::process::id()));
     for (f, t) in files { let p = d.join("ui").join(f); std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, t).unwrap(); }
     d.to_string_lossy().to_string()

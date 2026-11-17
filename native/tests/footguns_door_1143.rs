@@ -1,6 +1,8 @@
 //! Silent foot-guns made loud at the model's door (#1143, operator 2026-11-14): `entity_write` answers a refusal with its reason, in the reply, for a bare id, for a name the VM provides, for the
 //! host's own status props of a Pack, for the seat's start and for a request's identity; and a Pack whose text was emptied reads `state: removed`. The seat is the shipped barest one.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -29,7 +31,7 @@ const KEY: &str = "sk-ant-settings-sentinel-7731";
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn setup(tag: &str) -> Dir {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-settings-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     let bin = d.join("fake-claude");

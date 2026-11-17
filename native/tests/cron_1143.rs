@@ -2,6 +2,8 @@
 //! next time and arms ONE timer with the driver verb `Cron.arm = {id, at}`; the driver (store.rs `arm_timer` / `fire_due`) only waits and answers with the receipt
 //! `arm_result`, which the pack turns into `fired = {id, at}`. Every test runs on a FAKE CLOCK (a settable time handed to the host: nothing sleeps) in a fixed
 //! zone with no daylight saving (`TZ=Etc/GMT-2`, UTC+2), so the expected epochs are plain arithmetic.
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,7 +28,7 @@ impl Clock {
     fn add(&self, s: f64) { self.set(self.get() + s); }
 }
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cron-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(d.join(".membrane")).unwrap();
     d.canonicalize().unwrap()

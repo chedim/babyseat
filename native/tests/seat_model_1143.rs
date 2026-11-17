@@ -4,6 +4,8 @@
 //! no pick of its own is that setting; a session's own pick wins; any valid token (the admin) writes it; a model the seat cannot run is refused and the old one
 //! stays; it survives a restart on the same store. There is NEVER a real `claude` here. Every wait has a timeout and the child is always reaped.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -38,7 +40,7 @@ out({"type": "result", "subtype": "success", "is_error": False, "result": "Done:
 "#;
 
 fn setup(tag: &str) -> Dir {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-{tag}-{}-{n}", std::process::id()));
     let pd = d.join("packs");
     std::fs::create_dir_all(&pd).unwrap();

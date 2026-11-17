@@ -4,6 +4,8 @@
 //! the classes `Vm` (stored, one row per page, swept when the seat starts) and `Page` (virtual, held by its `Vm`) take the page's writes through the ordinary door (`POST /mcp`
 //! `entity_write`), the SEAT stamps `Vm.seen`, `Vm.state` is `connected` or `stale` by the fact `link_stale_s`, and `Help:page` tells a model how to read it all.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -17,7 +19,7 @@ impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-active-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d
