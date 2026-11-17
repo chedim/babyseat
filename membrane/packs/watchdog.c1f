@@ -41,10 +41,15 @@ Watchdog.checkpoint on-setter snap:
     old_pins = prop(prev, 'pins') or []
     old_words = prop(prev, 'words') or ''
     new_words = prop(Banner:work, 'words') or ''
-    gone = [p for p in old_pins if prop(p, 'text') == None]
+    gone = [p for p in old_pins if prop(p, 'text') == None and prop(p, 'done') != True]
     FOR p IN gone:
+      ('Alert:vanished-' + replace(replace(p, ':', '_'), '/', '_')).ack = False
       ('Alert:vanished-' + replace(replace(p, ':', '_'), '/', '_')).text = 'pin vanished without done: ' + p
-    Alert:wipe.text = ('banner notes shrank from ' + str(len(old_words)) + ' to ' + str(len(new_words)) + ' chars; the old notes are ' + str(prev) + '.words') if (len(old_words) > 80 and len(new_words) * 2 < len(old_words)) else (prop(Alert:wipe, 'text') or '')
+    wipe_old = prop(Alert:wipe, 'text') or ''
+    wipe_text = ('banner notes shrank from ' + str(len(old_words)) + ' to ' + str(len(new_words)) + ' chars; the old notes are ' + str(prev) + '.words') if (len(old_words) > 80 and len(new_words) * 2 < len(old_words)) else wipe_old
+    -- a new text is a new loss: it is raised again even if the last one was acked
+    Alert:wipe.ack = False if wipe_text != wipe_old else (prop(Alert:wipe, 'ack') or False)
+    Alert:wipe.text = wipe_text
     ('Snap:s' + str(this.checkpoint)) = Snap(at: this.checkpoint, pins: [p.eid for p in instances('Pin') if p.done != True and p.text != None], words: new_words, prev: prev)
     this.last_snap = 'Snap:s' + str(this.checkpoint)
     this.beat = this.checkpoint

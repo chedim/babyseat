@@ -1,165 +1,870 @@
 [
  {
   "name": "watchdog: a checkpoint keeps the open pins and the notes, a done pin is left out",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
-  "given": [
-   {"eid": "Watchdog:main", "class": "Watchdog", "props": {}},
-   {"eid": "Pin:a", "class": "Pin", "props": {"kind": "goal", "text": "ship it"}},
-   {"eid": "Pin:b", "class": "Pin", "props": {"kind": "loop", "text": "old loop", "done": true}},
-   {"eid": "Banner:work", "class": "Banner", "props": {"words": "my notes"}}
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
   ],
-  "writes": [{"eid": "Watchdog:main", "prop": "checkpoint", "value": 1}],
+  "given": [
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "Pin:a",
+    "class": "Pin",
+    "props": {
+     "kind": "goal",
+     "text": "ship it"
+    }
+   },
+   {
+    "eid": "Pin:b",
+    "class": "Pin",
+    "props": {
+     "kind": "loop",
+     "text": "old loop",
+     "done": true
+    }
+   },
+   {
+    "eid": "Banner:work",
+    "class": "Banner",
+    "props": {
+     "words": "my notes"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   }
+  ],
   "expect": [
-   {"eid": "Snap:s1", "prop": "pins", "equals": ["Pin:a"]},
-   {"eid": "Snap:s1", "prop": "words", "equals": "my notes"},
-   {"eid": "Watchdog:main", "prop": "last_snap", "equals": "Snap:s1"}
+   {
+    "eid": "Snap:s1",
+    "prop": "pins",
+    "equals": [
+     "Pin:a"
+    ]
+   },
+   {
+    "eid": "Snap:s1",
+    "prop": "words",
+    "equals": "my notes"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "last_snap",
+    "equals": "Snap:s1"
+   }
   ]
  },
  {
   "name": "watchdog: a pin that vanished without done leaves a sticky alert, a pin marked done does not",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
   "given": [
-   {"eid": "Watchdog:main", "class": "Watchdog", "props": {}},
-   {"eid": "Pin:a", "class": "Pin", "props": {"kind": "goal", "text": "ship it"}},
-   {"eid": "Pin:b", "class": "Pin", "props": {"kind": "loop", "text": "finish me"}}
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "Pin:a",
+    "class": "Pin",
+    "props": {
+     "kind": "goal",
+     "text": "ship it"
+    }
+   },
+   {
+    "eid": "Pin:b",
+    "class": "Pin",
+    "props": {
+     "kind": "loop",
+     "text": "finish me"
+    }
+   }
   ],
   "writes": [
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 1},
-   {"eid": "Pin:b", "prop": "done", "value": true},
-   {"eid": "Pin:a", "prop": "text", "value": null},
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 2}
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   },
+   {
+    "eid": "Pin:b",
+    "prop": "done",
+    "value": true
+   },
+   {
+    "eid": "Pin:a",
+    "prop": "text",
+    "value": null
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 2
+   }
   ],
   "expect": [
-   {"eid": "Alert:vanished-Pin_a", "prop": "text", "contains": "pin vanished without done: Pin:a"},
-   {"eid": "Alert:vanished-Pin_a", "prop": "live", "equals": true},
-   {"eid": "Pin:b", "prop": "live", "equals": false},
-   {"eid": "Watchdog:main", "prop": "alert_line", "equals": "CONTINUITY ALERT (Alert:x.ack = true when handled): pin vanished without done: Pin:a"}
+   {
+    "eid": "Alert:vanished-Pin_a",
+    "prop": "text",
+    "contains": "pin vanished without done: Pin:a"
+   },
+   {
+    "eid": "Alert:vanished-Pin_a",
+    "prop": "live",
+    "equals": true
+   },
+   {
+    "eid": "Pin:b",
+    "prop": "live",
+    "equals": false
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "alert_line",
+    "equals": "CONTINUITY ALERT (Alert:x.ack = true when handled): pin vanished without done: Pin:a"
+   }
   ]
  },
  {
   "name": "watchdog: notes that shrank to under half raise an alert that says where the old notes are",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
   "given": [
-   {"eid": "Watchdog:main", "class": "Watchdog", "props": {}},
-   {"eid": "Banner:work", "class": "Banner", "props": {"words": "the notes of this chat are long enough to matter: the goal, the decision, the open loop and the rule that bit us"}}
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "Banner:work",
+    "class": "Banner",
+    "props": {
+     "words": "the notes of this chat are long enough to matter: the goal, the decision, the open loop and the rule that bit us"
+    }
+   }
   ],
   "writes": [
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 1},
-   {"eid": "Banner:work", "prop": "words", "value": "x"},
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 2}
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   },
+   {
+    "eid": "Banner:work",
+    "prop": "words",
+    "value": "x"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 2
+   }
   ],
   "expect": [
-   {"eid": "Alert:wipe", "prop": "text", "contains": "the old notes are Snap:s1.words"},
-   {"eid": "Watchdog:main", "prop": "alert_line", "contains": "CONTINUITY ALERT"},
-   {"eid": "Snap:s1", "prop": "words", "contains": "the rule that bit us"}
+   {
+    "eid": "Alert:wipe",
+    "prop": "text",
+    "contains": "the old notes are Snap:s1.words"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "alert_line",
+    "contains": "CONTINUITY ALERT"
+   },
+   {
+    "eid": "Snap:s1",
+    "prop": "words",
+    "contains": "the rule that bit us"
+   }
   ]
  },
  {
   "name": "watchdog: notes that shrank a little do not raise an alert, and an ack clears an alert from the banner",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
   "given": [
-   {"eid": "Watchdog:main", "class": "Watchdog", "props": {}},
-   {"eid": "Banner:work", "class": "Banner", "props": {"words": "the notes of this chat are long enough to matter: the goal, the decision, the open loop and the rule that bit us"}},
-   {"eid": "Alert:old", "class": "Alert", "props": {"text": "something was lost"}}
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "Banner:work",
+    "class": "Banner",
+    "props": {
+     "words": "the notes of this chat are long enough to matter: the goal, the decision, the open loop and the rule that bit us"
+    }
+   },
+   {
+    "eid": "Alert:old",
+    "class": "Alert",
+    "props": {
+     "text": "something was lost"
+    }
+   }
   ],
   "writes": [
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 1},
-   {"eid": "Banner:work", "prop": "words", "value": "the notes of this chat are long enough to matter: the goal, the decision, the open loop"},
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 2},
-   {"eid": "Alert:old", "prop": "ack", "value": true}
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   },
+   {
+    "eid": "Banner:work",
+    "prop": "words",
+    "value": "the notes of this chat are long enough to matter: the goal, the decision, the open loop"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 2
+   },
+   {
+    "eid": "Alert:old",
+    "prop": "ack",
+    "value": true
+   }
   ],
   "expect": [
-   {"eid": "Alert:wipe", "prop": "text", "equals": ""},
-   {"eid": "Watchdog:main", "prop": "alert_line", "equals": ""},
-   {"eid": "Alert:old", "prop": "live", "equals": false}
+   {
+    "eid": "Alert:wipe",
+    "prop": "text",
+    "equals": ""
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "alert_line",
+    "equals": ""
+   },
+   {
+    "eid": "Alert:old",
+    "prop": "live",
+    "equals": false
+   }
   ]
  },
  {
   "name": "watchdog: the banner section shows the open pins and, with no pin, how to write one",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
   "given": [
-   {"eid": "Watchdog:main", "class": "Watchdog", "props": {}},
-   {"eid": "Pin:a", "class": "Pin", "props": {"kind": "goal", "text": "ship it"}},
-   {"eid": "Pin:b", "class": "Pin", "props": {"kind": "loop", "text": "follow up"}},
-   {"eid": "Pin:c", "class": "Pin", "props": {"kind": "fact", "text": "gone", "done": true}}
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "Pin:a",
+    "class": "Pin",
+    "props": {
+     "kind": "goal",
+     "text": "ship it"
+    }
+   },
+   {
+    "eid": "Pin:b",
+    "class": "Pin",
+    "props": {
+     "kind": "loop",
+     "text": "follow up"
+    }
+   },
+   {
+    "eid": "Pin:c",
+    "class": "Pin",
+    "props": {
+     "kind": "fact",
+     "text": "gone",
+     "done": true
+    }
+   }
   ],
   "writes": [],
   "expect": [
-   {"eid": "Watchdog:main", "prop": "pin_line", "equals": "PINS (open, 2): goal: ship it | loop: follow up"},
-   {"eid": "Watchdog:main", "prop": "banner", "equals": "PINS (open, 2): goal: ship it | loop: follow up"}
+   {
+    "eid": "Watchdog:main",
+    "prop": "pin_line",
+    "equals": "PINS (open, 2): goal: ship it | loop: follow up"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "banner",
+    "equals": "PINS (open, 2): goal: ship it | loop: follow up"
+   }
   ]
  },
  {
   "name": "watchdog: the banner section with nothing open says how to write a pin",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
-  "given": [{"eid": "Watchdog:main", "class": "Watchdog", "props": {}}],
-  "writes": [],
-  "expect": [{"eid": "Watchdog:main", "prop": "banner", "equals": "PINS: none open (write Pin:<slug> kind/text for each goal or open loop)"}]
- },
- {
-  "name": "watchdog: the banner section carries the previous exchange, so a turn starts knowing what `it` meant",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
   "given": [
-   {"eid": "Watchdog:main", "class": "Watchdog", "props": {}},
-   {"eid": "membrane::Chat:main", "class": "Chat", "props": {"last_turn": "membrane::Chat:main:message:1:turn"}},
-   {"eid": "membrane::Chat:main:message:1", "class": "ChatMessage", "props": {"text": "merge it"}},
-   {"eid": "membrane::Chat:main:message:1:turn:response", "class": "ChatResponse", "props": {"text": "merged"}}
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   }
   ],
   "writes": [],
   "expect": [
-   {"eid": "Watchdog:main", "prop": "last_exchange", "equals": "LAST EXCHANGE: user said \"merge it\" / I answered \"merged\""},
-   {"eid": "Watchdog:main", "prop": "banner", "contains": "LAST EXCHANGE: user said \"merge it\""}
+   {
+    "eid": "Watchdog:main",
+    "prop": "banner",
+    "equals": "PINS: none open (write Pin:<slug> kind/text for each goal or open loop)"
+   }
+  ]
+ },
+ {
+  "name": "watchdog: the banner section carries the previous exchange, so a turn starts knowing what `it` meant",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "membrane::Chat:main",
+    "class": "Chat",
+    "props": {
+     "last_turn": "membrane::Chat:main:message:1:turn"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1",
+    "class": "ChatMessage",
+    "props": {
+     "text": "merge it"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1:turn:response",
+    "class": "ChatResponse",
+    "props": {
+     "text": "merged"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "last_exchange",
+    "equals": "LAST EXCHANGE: user said \"merge it\" / I answered \"merged\""
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "banner",
+    "contains": "LAST EXCHANGE: user said \"merge it\""
+   }
   ]
  },
  {
   "name": "watchdog: a cron fire of the job watchdog takes a checkpoint at the epoch second it names",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
-  "given": [{"eid": "Cron:watchdog", "class": "Cron", "props": {"job": "watchdog"}}, {"eid": "Cron:other", "class": "Cron", "props": {"job": "other"}}],
-  "writes": [{"eid": "Cron:watchdog", "prop": "fired", "value": {"id": "c1", "at": 7}}, {"eid": "Cron:other", "prop": "fired", "value": {"id": "c0", "at": 3}}],
-  "expect": [{"eid": "Watchdog:main", "prop": "last_snap", "equals": "Snap:s7"}, {"eid": "Watchdog:main", "prop": "beat", "equals": 7}]
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Cron:watchdog",
+    "class": "Cron",
+    "props": {
+     "job": "watchdog"
+    }
+   },
+   {
+    "eid": "Cron:other",
+    "class": "Cron",
+    "props": {
+     "job": "other"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Cron:watchdog",
+    "prop": "fired",
+    "value": {
+     "id": "c1",
+     "at": 7
+    }
+   },
+   {
+    "eid": "Cron:other",
+    "prop": "fired",
+    "value": {
+     "id": "c0",
+     "at": 3
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "last_snap",
+    "equals": "Snap:s7"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "beat",
+    "equals": 7
+   }
+  ]
  },
  {
   "name": "watchdog: the seat starts with its own 10 minute schedule",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
-  "given": [{"eid": "Boot:seat", "class": "Boot", "props": {}}],
-  "writes": [{"eid": "Boot:seat", "prop": "started", "value": 5}],
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 5
+   }
+  ],
   "expect": [
-   {"eid": "Cron:watchdog", "prop": "schedule", "equals": "@every 10m"},
-   {"eid": "Cron:watchdog", "prop": "job", "equals": "watchdog"}
+   {
+    "eid": "Cron:watchdog",
+    "prop": "schedule",
+    "equals": "@every 10m"
+   },
+   {
+    "eid": "Cron:watchdog",
+    "prop": "job",
+    "equals": "watchdog"
+   }
   ]
  },
  {
   "name": "watchdog: a schedule that was set before the start is kept",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
-  "given": [{"eid": "Boot:seat", "class": "Boot", "props": {}}, {"eid": "Cron:watchdog", "class": "Cron", "props": {"schedule": "@every 1h", "job": "watchdog"}}],
-  "writes": [{"eid": "Boot:seat", "prop": "started", "value": 5}],
-  "expect": [{"eid": "Cron:watchdog", "prop": "schedule", "equals": "@every 1h"}]
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {}
+   },
+   {
+    "eid": "Cron:watchdog",
+    "class": "Cron",
+    "props": {
+     "schedule": "@every 1h",
+     "job": "watchdog"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Boot:seat",
+    "prop": "started",
+    "value": 5
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Cron:watchdog",
+    "prop": "schedule",
+    "equals": "@every 1h"
+   }
+  ]
  },
  {
   "name": "watchdog: only the last snapshots are kept",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
-  "given": [{"eid": "Watchdog:main", "class": "Watchdog", "props": {}}],
-  "writes": [
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 1},
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 2},
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 3}
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
   ],
-  "expect": [{"eid": "Watchdog:main", "prop": "pruned", "none": true}]
+  "given": [
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 2
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 3
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "pruned",
+    "none": true
+   }
+  ]
  },
  {
   "name": "watchdog: the snapshot three back is pruned at the fourth checkpoint",
-  "packs": ["membrane/packs/boot.c1f", "membrane/packs/cron.c1f", "membrane/packs/watchdog.c1f"],
-  "given": [{"eid": "Watchdog:main", "class": "Watchdog", "props": {}}],
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   }
+  ],
   "writes": [
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 1},
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 2},
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 3},
-   {"eid": "Watchdog:main", "prop": "checkpoint", "value": 4}
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 2
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 3
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 4
+   }
   ],
   "expect": [
-   {"eid": "Watchdog:main", "prop": "last_snap", "equals": "Snap:s4"},
-   {"eid": "Snap:s4", "prop": "prev", "equals": "Snap:s3"},
-   {"eid": "Watchdog:main", "prop": "pruned", "equals": "Snap:s1"}
+   {
+    "eid": "Watchdog:main",
+    "prop": "last_snap",
+    "equals": "Snap:s4"
+   },
+   {
+    "eid": "Snap:s4",
+    "prop": "prev",
+    "equals": "Snap:s3"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "pruned",
+    "equals": "Snap:s1"
+   }
+  ]
+ },
+ {
+  "name": "watchdog: an alert that was acked is raised again when the notes are wiped again",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "Banner:work",
+    "class": "Banner",
+    "props": {
+     "words": "the notes of this chat are long enough to matter: the goal, the decision, the open loop and the rule that bit us"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   },
+   {
+    "eid": "Banner:work",
+    "prop": "words",
+    "value": "x"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 2
+   },
+   {
+    "eid": "Alert:wipe",
+    "prop": "ack",
+    "value": true
+   },
+   {
+    "eid": "Banner:work",
+    "prop": "words",
+    "value": "the notes of this chat are long enough to matter: the goal, the decision, the open loop and the rule that bit us"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 3
+   },
+   {
+    "eid": "Banner:work",
+    "prop": "words",
+    "value": "y"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 4
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Alert:wipe",
+    "prop": "live",
+    "equals": true
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "alert_line",
+    "contains": "CONTINUITY ALERT"
+   }
+  ]
+ },
+ {
+  "name": "watchdog: an acked wipe alert stays quiet while the notes stay small",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "Banner:work",
+    "class": "Banner",
+    "props": {
+     "words": "the notes of this chat are long enough to matter: the goal, the decision, the open loop and the rule that bit us"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   },
+   {
+    "eid": "Banner:work",
+    "prop": "words",
+    "value": "x"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 2
+   },
+   {
+    "eid": "Alert:wipe",
+    "prop": "ack",
+    "value": true
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 3
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Alert:wipe",
+    "prop": "live",
+    "equals": false
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "alert_line",
+    "equals": ""
+   }
+  ]
+ },
+ {
+  "name": "watchdog: a pin marked done and then cleared (retired) raises no alert",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "Pin:a",
+    "class": "Pin",
+    "props": {
+     "kind": "goal",
+     "text": "ship it"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   },
+   {
+    "eid": "Pin:a",
+    "prop": "done",
+    "value": true
+   },
+   {
+    "eid": "Pin:a",
+    "prop": "text",
+    "value": null
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 2
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "alert_line",
+    "equals": ""
+   }
+  ]
+ },
+ {
+  "name": "watchdog: a pin alert that was acked is raised again when the pin is lost a second time",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/cron.c1f",
+   "membrane/packs/watchdog.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Watchdog:main",
+    "class": "Watchdog",
+    "props": {}
+   },
+   {
+    "eid": "Pin:a",
+    "class": "Pin",
+    "props": {
+     "kind": "goal",
+     "text": "ship it"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 1
+   },
+   {
+    "eid": "Pin:a",
+    "prop": "text",
+    "value": null
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 2
+   },
+   {
+    "eid": "Alert:vanished-Pin_a",
+    "prop": "ack",
+    "value": true
+   },
+   {
+    "eid": "Pin:a",
+    "prop": "text",
+    "value": "ship it again"
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 3
+   },
+   {
+    "eid": "Pin:a",
+    "prop": "text",
+    "value": null
+   },
+   {
+    "eid": "Watchdog:main",
+    "prop": "checkpoint",
+    "value": 4
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Alert:vanished-Pin_a",
+    "prop": "live",
+    "equals": true
+   }
   ]
  }
 ]
