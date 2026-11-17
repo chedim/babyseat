@@ -67,6 +67,8 @@ jobs:
       - run: |
           set -e
           export CLIFFVM="$PWD/native/target/release/cliffvm" CHROME="$(command -v google-chrome)"
+          # the first start of Chrome on a fresh runner is slow (more than the 10 s some page tests wait for its debugging port): start it once here, before any test
+          "$CHROME" --headless=new --no-first-run --no-default-browser-check --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null 2>&1 || true
           i=0
           for t in tests/js/*.test.mjs; do
             if [ $((i % 3)) -eq ${{ matrix.shard }} ]; then echo "== $t"; node "$t"; fi
