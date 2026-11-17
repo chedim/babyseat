@@ -34,7 +34,7 @@ Anything in progress says so on its page and names its branch. The README at the
 | [doctrine-barest.md](doctrine-barest.md) | the doctrine (the system prompt), the banner and the message: what the model gets, and what it promises |
 | [ui-rebuild-plan.md](ui-rebuild-plan.md) | the page as c1f view packs: status per slice, the shell and view-pack contract, markdown and Stop |
 | [graph-link.md](graph-link.md) | joining the page's graph and the seat's: slices 1 and 2 built (the page reports, the engine hooks), the rest design |
-| [waves.md](waves.md) | getters as a wave, setters as transactions (a parallel-engine design, not built), and what it means for the graph link |
+| [waves.md](waves.md) | wavelink: getters as a wave, setters as transactions, the algorithm threads of one VM would use (a design, not built), and what it means for the graph link |
 
 ## Measurements and design notes (dated; not part of the release surface)
 

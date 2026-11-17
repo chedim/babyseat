@@ -1,8 +1,17 @@
-# Waves: getters as a wave, setters as transactions (DESIGN, not built; #1143)
+# Wavelink: getters as a wave, setters as transactions (DESIGN, not built; #1143)
 
 Status: **design from the operator's 2026-11-15 conversation. Nothing here is built and no branch exists.** Every number, new builtin and new native piece below is a DECISION for the operator.
 What the engine does today is in [cliffhanger-fields.md](cliffhanger-fields.md) (rules 2 to 9 of section 2); this page says what could change and why it is written down: so that a later parallel engine
 and [graph-link.md](graph-link.md) are built to fit each other.
+
+**Wavelink** (the operator's name, 2026-11-16) is the algorithm the threads of ONE VM would use: level-by-level getter waves, setter frontiers merged in the serial order, a conflict check, losers bumped to the next frontier (sections 2 to 4). It runs on shared memory and gives exactly the serial engine's result. Between VMs the protocol is GraphLink ([graph-link.md](graph-link.md)):
+
+| Scale | Mechanism | Consistency | State |
+|---|---|---|---|
+| inside one VM (threads) | wavelink | exact: equal to the serial engine | shared memory, no copies |
+| between VMs (processes, devices, machines, or threads kept isolated on purpose) | GraphLink | eventual: a foreign read is `pending` first | replicas copied over frames |
+
+There is no third layer: threads of one process need no messages. A thread that must stay isolated is a GraphLink peer over the in-memory pipe.
 
 ## 1. What is true today (from cliffhanger-fields.md)
 
@@ -46,6 +55,10 @@ The result must equal the serial engine's, and that is a test: run both engines 
 - **Hot cells:** setters writing one cell (a counter, the banner) always conflict.
 - **Not checked:** how today's serial engine treats a getter that sits between two setters of the same step; the frontier must reproduce exactly that. This has to be read in the code before any build.
 - **Pipelining** (the next wave trailing the first by a level, with a few versions per cell) is a later optimisation. The first version is one wave at a time, parallel inside a level.
+
+## 5b. Wavelink across processes: a leader and workers (a later shape, not built)
+
+Two owners of one namespace are not possible (ownership is one VM per namespace). What is possible is one OWNER and workers: the leader owns the namespace, applies every write and keeps the serial order and the journal; a worker holds replicas of what it reads (its demand-driven subscriptions) and evaluates a frontier's rules against the settled state, returning each rule's read set and proposed writes; the leader merges them in the fixed order, runs the conflict check, drops and bumps the losers and applies the winners. The result still equals the serial engine's. A worker never starts an effect: only the leader commits. It costs a round trip per frontier and replicas to keep current, so it pays across processes or machines, not between threads of one process, where shared memory is cheaper. It needs a task op and a result op in the frame spec (the `wr` and `res` of docs/frames.md are forwarded writes, a different thing): a protocol decision for the operator.
 
 ## 6. What this means for graph-link
 
