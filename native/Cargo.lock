@@ -372,7 +372,7 @@ dependencies = [
 [[package]]
 name = "graphlink-core"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=a173c03a6bbecc22ff6565633ccfeef4416da5fb#a173c03a6bbecc22ff6565633ccfeef4416da5fb"
+source = "git+https://github.com/chedim/graphlink?rev=1de38544aaf58257c3ccc799eed2018754c80b59#1de38544aaf58257c3ccc799eed2018754c80b59"
 dependencies = [
  "serde_json",
 ]
@@ -380,7 +380,7 @@ dependencies = [
 [[package]]
 name = "graphlink-shm"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=a173c03a6bbecc22ff6565633ccfeef4416da5fb#a173c03a6bbecc22ff6565633ccfeef4416da5fb"
+source = "git+https://github.com/chedim/graphlink?rev=1de38544aaf58257c3ccc799eed2018754c80b59#1de38544aaf58257c3ccc799eed2018754c80b59"
 dependencies = [
  "graphlink-core",
  "serde_json",

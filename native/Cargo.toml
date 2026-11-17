@@ -21,9 +21,9 @@ bytemuck = { version = "1.25.2", optional = true }
 pollster = { version = "1.0.1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 # the graph link's subscription table and replica notes (#1143): their own repo, pinned to a commit
-graphlink-core = { git = "https://github.com/chedim/graphlink", rev = "a173c03a6bbecc22ff6565633ccfeef4416da5fb" }
+graphlink-core = { git = "https://github.com/chedim/graphlink", rev = "1de38544aaf58257c3ccc799eed2018754c80b59" }
 # shared memory for the seat's local peers (Unix; an empty crate elsewhere): control rings and cell tables (docs/graph-link.md, section 18)
-graphlink-shm = { git = "https://github.com/chedim/graphlink", rev = "a173c03a6bbecc22ff6565633ccfeef4416da5fb", optional = true }
+graphlink-shm = { git = "https://github.com/chedim/graphlink", rev = "1de38544aaf58257c3ccc799eed2018754c80b59", optional = true }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }   # a stored f64 (a stamp, a number in a journal line) must parse back to the same bits (#1143)
 # the tokenizer (#1143): UAX #29 sentence and word boundaries, compiled in; no_std-capable, so wasm32 builds
 unicode-segmentation = { version = "=1.13.3", default-features = false }

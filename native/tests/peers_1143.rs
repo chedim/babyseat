@@ -27,6 +27,10 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 /// a peer name short enough for a region name (the longest region name is 31 bytes: `/gl-<name>-ctl`)
 fn peer_name() -> String { format!("t{}x{}", std::process::id() % 100000, common::unique().rsplit('-').next().unwrap()) }
 
+/// removes the region names of a peer when the test ends: the seat is killed, not stopped, so nobody else would
+struct Names(String);
+impl Drop for Names { fn drop(&mut self) { for part in ["ctl", "sc", "pc"] { let _ = graphlink_shm::remove_region(&format!("/gl-{}-{part}", self.0)); } } }
+
 fn command(dir: &std::path::Path, facts: &[String]) -> Command {
     let r = repo();
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
@@ -103,6 +107,7 @@ fn wait_for(port: u16, spec: &str, prop: &str, want: &str, secs: u64) -> String 
 #[test]
 fn a_declared_peer_opens_a_link_over_shared_memory_and_the_seat_shows_it_as_a_vm() {
     let name = peer_name();
+    let _names = Names(name.clone());
     let run = start(&tmp("open"), &[format!("peers={}", decl(&name))]);
     let mut peer = PeerEnd::attach(&name, "kitchen");
     assert!(peer.until(30_000, |ev| ev.iter().any(|e| matches!(e, Event::Opened { .. }))), "the seat's hello never came: {:?}", peer.events);
@@ -117,6 +122,7 @@ fn a_declared_peer_opens_a_link_over_shared_memory_and_the_seat_shows_it_as_a_vm
 #[test]
 fn a_peer_that_goes_away_is_shown_as_gone_not_deleted() {
     let name = peer_name();
+    let _names = Names(name.clone());
     let run = start(&tmp("gone"), &[format!("peers={}", decl(&name))]);
     let mut peer = PeerEnd::attach(&name, "garage");
     assert!(peer.until(30_000, |ev| ev.iter().any(|e| matches!(e, Event::Opened { .. }))));
@@ -148,4 +154,17 @@ fn a_declaration_the_seat_cannot_use_stops_the_start_and_names_the_fact() {
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(err.contains("peers") && err.contains(why), "{bad}: {err}");
     }
+}
+
+#[test]
+fn a_seat_that_died_leaves_stale_region_names_and_the_next_start_clears_its_own() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    // the names a dead seat would have left: made and never dropped
+    std::mem::forget(Shm::create(format!("/gl-{name}-ctl"), 4096).unwrap());
+    std::mem::forget(graphlink_shm::cells::Cells::create(format!("/gl-{name}-sc"), 4, 16, 16, 1).unwrap());
+    let run = start(&tmp("stale"), &[format!("peers={}", decl(&name))]);
+    let mut peer = PeerEnd::attach(&name, "kitchen");
+    assert!(peer.until(30_000, |ev| ev.iter().any(|e| matches!(e, Event::Opened { .. }))), "the seat could not use its own names: {}", std::fs::read_to_string(std::env::temp_dir()).unwrap_or_default());
+    drop(run);
 }

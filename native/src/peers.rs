@@ -43,6 +43,8 @@ impl Peers {
             let (slots, key_cap, val_cap) = (field(o, name, "slots")?, field(o, name, "key_cap")?, field(o, name, "val_cap")?);
             let (key_cap, val_cap) = (u32::try_from(key_cap).map_err(|_| "peers: `key_cap` is too big")?, u32::try_from(val_cap).map_err(|_| "peers: `val_cap` is too big")?);
             let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            // the names are THIS seat's (the owner declared them for it): what a dead seat left behind under them is removed first
+            for part in ["ctl", "sc"] { graphlink_shm::remove_region(&format!("/gl-{name}-{part}")).map_err(|e| format!("peers: {name}: {e}"))?; }
             let mut ctl = Shm::create(format!("/gl-{name}-ctl"), ring).map_err(|e| format!("peers: {name}: {e}"))?;
             let cells = Cells::create(format!("/gl-{name}-sc"), slots, key_cap, val_cap, epoch).map_err(|e| format!("peers: {name}: {e}"))?;
             let mut link = Link::new(Me { ns: seat_ns.into(), build: format!("cliffvm {}", env!("CARGO_PKG_VERSION")), epoch: epoch as f64, support: vec![VERSION], initiator: true });
