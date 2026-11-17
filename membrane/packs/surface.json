@@ -1457,7 +1457,9 @@
     ],
     "members": 10,
     "writes": [
+      "Alert:*.ack",
       "Alert:*.text",
+      "Alert:wipe.ack",
       "Alert:wipe.text",
       "Cron:watchdog=Cron()",
       "Watchdog:main.checkpoint"

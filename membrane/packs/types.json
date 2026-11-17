@@ -2355,6 +2355,7 @@
       "Watchdog.pin_line": "Text"
     },
     "writes": {
+      "Alert.ack": "Any",
       "Alert.text": "Any",
       "Watchdog.beat": "Any",
       "Watchdog.checkpoint": "Any",
