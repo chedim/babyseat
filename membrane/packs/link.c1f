@@ -36,10 +36,13 @@ Vm.hidden getter: prop(this.peer, 'hidden') if prop(this.peer, 'hidden') != None
 Vm.lease_s getter: ([b.lk_lease_hidden for b in instances('Boot')] or [600])[0] if this.hidden == True else ([b.lk_lease for b in instances('Boot')] or [60])[0]
 Vm.silent getter: clock - this.last if this.last != None else None
 Vm.state getter:
-  WHEN this.last == None: None
+  WHEN this.link == 'up': 'connected'
+  ELSE WHEN this.link == 'gone': 'gone'
+  ELSE WHEN this.last == None: None
   ELSE WHEN this.silent >= this.lease_s: 'stale'
   ELSE: 'connected'
-Vm.kind getter: 'page'
+-- a Vm with a `link` (written by the seat's peer driver, native/src/peers.rs: `up` or `gone`) is a PEER (a program on this machine over shared memory); any other is a page
+Vm.kind getter: 'peer' if this.link != None else 'page'
 
 Vm.caps on-setter link-caps:
   WHEN this.caps != None:

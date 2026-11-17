@@ -201,7 +201,18 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
     let mut code = 0;
     #[cfg(feature = "alloc-stats")]
     let mut last_mem = std::time::Instant::now();
+    // the local peers over shared memory (docs/graph-link.md, section 18): declared by the fact `peers`, driven from this loop's turns
+    #[cfg(all(unix, feature = "store"))]
+    let mut peers = match fact("peers") {
+        Some(v) => {
+            h.set_ns("membrane");
+            match crate::peers::Peers::from_fact("membrane", v) { Ok(p) => Some(p), Err(e) => { eprintln!("cliffvm: {e}"); return 2; } }
+        }
+        None => None,
+    };
     h.run(stop, 1.0, &mut |h| {
+        #[cfg(all(unix, feature = "store"))]
+        if let Some(p) = peers.as_mut() { p.pump(h); }
         #[cfg(feature = "alloc-stats")]
         if last_mem.elapsed().as_secs() >= 2 { last_mem = std::time::Instant::now(); eprintln!("{}", h.mem_line()); }
         if up { return; }

@@ -329,7 +329,9 @@ The VM could split a pack by RULE (getter/setter) instead of by pack: rules that
 5. **The cost.** Extra round trips: fine for coarse events, bad for fine-grained ones; the traffic budget of section 11 applies to each cut.
 6. **Why placement stays at PACK granularity (section 16) for slices 1-3:** a file is a reviewable unit, a refusal names it, the operator splits it with an editor; a rule-level cut needs the dataflow analysis, the equivalence test and measured traffic to choose cuts. It is decided later from measured traffic, not now.
 
-## 18. Local peers: the seat's peer driver, shared memory, and the bridges (design, not built; operator 2026-11-16)
+## 18. Local peers: the seat's peer driver, shared memory, and the bridges (slice 1 built, the rest design; operator 2026-11-16)
+
+**Built (slice 1, `native/src/peers.rs`, `native/tests/peers_1143.rs`):** the fact `peers` (a list of `{name, ring_bytes, slots, key_cap, val_cap}`; every number is the owner's, a bad declaration stops the start and names the fact); for each peer the seat makes the control rings `/gl-<name>-ctl` and its cell table `/gl-<name>-sc` (the table is made but nothing is written to it yet), runs a `graphlink_core::Link` over the rings (the seat is the initiator), and on the peer's `hello` shows it as `Vm:<its namespace>` with `link: up` (`kind` `peer`, `state` `connected`); a peer that closes or goes away is `link: gone` (`state` `gone`), and its `Vm` stays. The driver is called on every turn of the loop's callback, in the seat's `cli.rs`. Not built: everything else in this section (subscriptions, cells, forwarded writes, supervision, the upgrade from TCP, the bridges). A seat that died without cleaning up leaves its region names behind and the next start says so (a way to remove stale regions is a change in graphlink-shm).
 
 This section is how the seat talks to code that runs OUTSIDE the engine process: out-of-process modules (drivers, devices, tools). It is not how packs load: a pack is c1f source the engine loads from `membrane/apps/barest.packs` (and later from packages, #1089).
 

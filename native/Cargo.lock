@@ -372,8 +372,17 @@ dependencies = [
 [[package]]
 name = "graphlink-core"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=72f78d733efda55906322bba237aaffbd61b0e73#72f78d733efda55906322bba237aaffbd61b0e73"
+source = "git+https://github.com/chedim/graphlink?rev=a173c03a6bbecc22ff6565633ccfeef4416da5fb#a173c03a6bbecc22ff6565633ccfeef4416da5fb"
 dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "graphlink-shm"
+version = "0.0.1"
+source = "git+https://github.com/chedim/graphlink?rev=a173c03a6bbecc22ff6565633ccfeef4416da5fb#a173c03a6bbecc22ff6565633ccfeef4416da5fb"
+dependencies = [
+ "graphlink-core",
  "serde_json",
 ]
 
@@ -565,6 +574,7 @@ version = "0.7.62"
 dependencies = [
  "bytemuck",
  "graphlink-core",
+ "graphlink-shm",
  "libc",
  "objc2",
  "objc2-foundation",
