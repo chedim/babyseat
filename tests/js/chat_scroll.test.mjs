@@ -64,7 +64,7 @@ try {
   for (const m of ids.slice(-6)) for (let t = 0; t < 300; t++) { const v = await (await fetch(`${url}/membrane/chat/message/${m.id}`)).json(); if (v.state === 'done' || v.state === 'error') break; await sleep(100); }
   await sleep(1500);
 
-  let tabs; for (let i = 0; i < 50 && !tabs; i++) { await sleep(200); try { tabs = await (await fetch(`http://127.0.0.1:${dbg}/json`)).json(); } catch {} }
+  let tabs; for (let i = 0; i < 50 && !tabs; i++) { await sleep(200); try { const got = await (await fetch(`http://127.0.0.1:${dbg}/json`)).json(); if (Array.isArray(got) && got.some(t => t.type === "page")) tabs = got; } catch {} }
   ws = new WebSocket(tabs.find((t) => t.type === 'page').webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener('open', r, { once: true }));
   ws.addEventListener('message', (m) => { const d = JSON.parse(m.data); if (waiting.has(d.id)) { waiting.get(d.id)(d); waiting.delete(d.id); } else if (d.method === 'Runtime.exceptionThrown') errors.push(d.params.exceptionDetails.text); });
@@ -143,4 +143,4 @@ try {
   assert.deepEqual(errors, [], 'no script error');
   if (process.env.SHOTS) { mkdirSync(process.env.SHOTS, { recursive: true }); writeFileSync(path.join(process.env.SHOTS, 'chat-scroll.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64')); }
   console.log('chat scroll: ok');
-} finally { try { ws.close(); } catch {} br.kill(); seat.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true }); rmSync(dir, { recursive: true, force: true }); }
+} finally { try { ws.close(); } catch {} br.kill(); seat.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); rmSync(dir, { recursive: true, force: true }); }

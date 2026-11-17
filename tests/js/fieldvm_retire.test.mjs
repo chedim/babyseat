@@ -17,7 +17,7 @@ const br = spawn(chrome, ['--headless=new', '--no-first-run', '--no-default-brow
   `--remote-debugging-port=${dbg}`, 'about:blank'], { stdio: 'ignore' });
 try {
   let tabs;
-  for (let i = 0; i < 50 && !tabs; i++) { await sleep(200); try { tabs = await (await fetch(`http://127.0.0.1:${dbg}/json`)).json(); } catch {} }
+  for (let i = 0; i < 50 && !tabs; i++) { await sleep(200); try { const got = await (await fetch(`http://127.0.0.1:${dbg}/json`)).json(); if (Array.isArray(got) && got.some(t => t.type === "page")) tabs = got; } catch {} }
   const ws = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl);
   await new Promise(r => ws.addEventListener('open', r, { once: true }));
   let id = 0; const waiting = new Map();
@@ -43,4 +43,4 @@ try {
   assert.equal(r.after.bElement, true, 'a sibling stays');
   assert.deepEqual(r.after.nodes, ['DomNode:t:b'], 'the host forgets the removed nodes');
   console.log('fieldvm retire: ok');
-} finally { br.kill(); srv.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true }); }
+} finally { br.kill(); srv.kill(); await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }

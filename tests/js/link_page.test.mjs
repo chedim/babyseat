@@ -217,5 +217,5 @@ try {
 } catch (e) { console.error(e); code = 1; }
 for (const w of open) try { w.close(); } catch {}
 br.kill(); seat.stop(); seat2.stop();
-await sleep(200); rmSync(prof, { recursive: true, force: true });
+await sleep(200); rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 process.exit(code);
