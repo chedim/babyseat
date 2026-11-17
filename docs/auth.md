@@ -68,3 +68,9 @@ in anything the child prints (only values of 16 or more characters: a shorter on
 
 A pack reads the seat's environment through ONE entity, `Environment:host` (docs/cliffvm.md, "The environment"; `Help:environment` for the model): its properties are the variables. Only a short default list (`HOME`, `USER`, `LANG`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `TMPDIR`, `CLAUDE_BIN`, `MEMBRANE_DATA_DIR`) and the names in the launch fact `env_allow` carry their value.
 A name holding KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL reads the text `set` when set, never its value, and `env_allow` refuses such a name. So `ANTHROPIC_API_KEY` is visible to a pack only as `set`; the key itself still reaches only the claude child.
+
+## Peers over shared memory
+
+A seat with a door secret asks every local peer (the fact `peers`, docs/graph-link.md section 18) for a token in its `hello`. The seat makes the token itself: `<data-dir>/peers/<name>.token` (mode 0600, new at every start, `sub` `peer:<name>`,
+an `ns` claim with the namespace the owner declared in the fact, the admin token's life), and the peer reads the file. The seat accepts a hello only when the token verifies and its `ns` is the hello's namespace and the declared one;
+otherwise the peer is told `refused: auth` and gets no `Vm`. This is not the page's admin rule: a peer's token names one namespace and nothing else. `native/tests/peers_auth_1143.rs`.

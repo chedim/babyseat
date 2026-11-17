@@ -206,7 +206,8 @@ pub fn run_with(r: &RunArgs, stop: &AtomicBool, on_up: &dyn Fn(&str, u64)) -> i3
     let mut peers = match fact("peers") {
         Some(v) => {
             h.set_ns("membrane");
-            match crate::peers::Peers::from_fact("membrane", v) { Ok(p) => Some(p), Err(e) => { eprintln!("cliffvm: {e}"); return 2; } }
+            let auth = match crate::admin::peer_auth(&r.facts) { Ok(a) => a, Err(e) => { eprintln!("cliffvm: peers: {e}"); return 2; } };
+            match crate::peers::Peers::from_fact("membrane", v, auth, now) { Ok(p) => Some(p), Err(e) => { eprintln!("cliffvm: {e}"); return 2; } }
         }
         None => None,
     };

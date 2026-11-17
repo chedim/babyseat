@@ -41,6 +41,11 @@ struct Peer {
     /// the peer's namespace, from its hello
     ns: Option<String>,
     gone: bool,
+    /// with a door secret: the namespace the owner declared for this peer (its token says it), and the secret every hello is checked against
+    declared: Option<String>,
+    secret: Option<Vec<u8>>,
+    /// a hello that failed its check: the link is closed and nothing the peer sends is taken
+    refused: bool,
 }
 
 pub struct Peers {
@@ -55,7 +60,7 @@ fn field(o: &Map<String, J>, name: &str, k: &str) -> Result<u64, String> {
 
 impl Peers {
     /// The fact `peers`: a list of `{name, ring_bytes, slots, key_cap, val_cap, spins, depth}` (all the owner's numbers: the first four size the seat's side, `spins` and `depth` say how the seat reads the peer's cell table); the seat makes the regions `/gl-<name>-ctl` (the control rings) and `/gl-<name>-sc` (its cell table).
-    pub fn from_fact(seat_ns: &str, v: &J) -> Result<Peers, String> {
+    pub fn from_fact(seat_ns: &str, v: &J, auth: Option<crate::admin::PeerAuth>, now: f64) -> Result<Peers, String> {
         let items = v.as_array().ok_or("peers: the fact must be a list of {name, ring_bytes, slots, key_cap, val_cap}")?;
         let mut list = vec![];
         for item in items {
@@ -65,6 +70,17 @@ impl Peers {
             let ring = field(o, name, "ring_bytes")? as usize;
             let (slots, key_cap, val_cap) = (field(o, name, "slots")?, field(o, name, "key_cap")?, field(o, name, "val_cap")?);
             let (spins, depth) = (field(o, name, "spins")?, field(o, name, "depth")? as usize);
+            // with a door secret a peer's namespace is declared: the seat mints the peer's token with it (`ns` claim), and a hello must carry that token
+            let declared = match &auth {
+                None => None,
+                Some(a) => {
+                    let ns = o.get("ns").and_then(J::as_str).filter(|n| !n.is_empty() && !n.contains("::") && *n != seat_ns).ok_or_else(|| format!("peers: `ns` of {name:?} must be the peer's namespace (a name without `::`, not {seat_ns:?}): the seat has a door secret, so a peer's token names the namespace it may own"))?;
+                    std::fs::create_dir_all(&a.dir).map_err(|e| format!("peers: {}: {e}", a.dir.display()))?;
+                    let token = crate::jwt::mint_with(&a.secret, &format!("peer:{name}"), name, &[("ns", json!(ns))], a.ttl, now)?;
+                    crate::admin::replace_private(&a.dir.join(format!("{name}.token")), &token)?;
+                    Some(ns.to_string())
+                }
+            };
             let (key_cap, val_cap) = (u32::try_from(key_cap).map_err(|_| "peers: `key_cap` is too big")?, u32::try_from(val_cap).map_err(|_| "peers: `val_cap` is too big")?);
             let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             // the names are THIS seat's (the owner declared them for it): what a dead seat left behind under them is removed first
@@ -73,7 +89,7 @@ impl Peers {
             let cells = Cells::create(format!("/gl-{name}-sc"), slots, key_cap, val_cap, epoch).map_err(|e| format!("peers: {name}: {e}"))?;
             let mut link = Link::new(Me { ns: seat_ns.into(), build: format!("cliffvm {}", env!("CARGO_PKG_VERSION")), epoch: epoch as f64, support: vec![VERSION], initiator: true });
             ctl.send(&link.open()).map_err(|e| format!("peers: {name}: {e}"))?;
-            list.push(Peer { name: name.to_string(), ctl, cells, subs: vec![], published: HashMap::new(), reader: None, spins, depth, asked: HashMap::new(), seen: HashMap::new(), told_down: HashSet::new(), reported: HashSet::new(), link, ns: None, gone: false });
+            list.push(Peer { name: name.to_string(), ctl, cells, subs: vec![], published: HashMap::new(), reader: None, spins, depth, asked: HashMap::new(), seen: HashMap::new(), told_down: HashSet::new(), reported: HashSet::new(), link, ns: None, gone: false, declared, secret: auth.as_ref().map(|a| a.secret.clone()), refused: false });
         }
         Ok(Peers { list, wanted: BTreeMap::new() })
     }
@@ -110,8 +126,21 @@ impl Peer {
     fn eid(&self) -> Option<String> { self.ns.as_ref().map(|n| format!("Vm:{n}")) }
 
     fn event(&mut self, h: &Host, ev: Event) {
+        if self.refused { return; }
         match ev {
-            Event::Opened { peer_ns, peer_build, peer_epoch, .. } => {
+            Event::Opened { peer_ns, peer_build, peer_epoch, peer_token, .. } => {
+                // with a door secret the hello's token must verify and name the namespace the owner declared for this peer; the peer is told only `refused: auth`, the reason goes to the log
+                if let Some(secret) = self.secret.as_ref() {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+                    let verdict = graphlink_auth::check_hello(peer_token.as_deref(), &peer_ns, &["membrane"], secret, now)
+                        .and_then(|_| if self.declared.as_deref() == Some(peer_ns.as_str()) { Ok(()) } else { Err(format!("namespace: this peer was declared for {:?}, not {peer_ns:?}", self.declared)) });
+                    if let Err(why) = verdict {
+                        eprintln!("cliffvm: peer {}: hello refused: {why}", self.name);
+                        self.refused = true;
+                        if let Ok(f) = self.link.send(vec![Op::Bye { why: "refused: auth".into() }]) { let _ = self.ctl.send(&f); self.ctl.flush(); }
+                        return;
+                    }
+                }
                 let eid = format!("Vm:{peer_ns}");
                 let mut props = Map::new();
                 props.insert("link".into(), json!("up"));

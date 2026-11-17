@@ -370,9 +370,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphlink-auth"
+version = "0.0.1"
+source = "git+https://github.com/chedim/graphlink?rev=482c16b4d50029f29c387e81f634ffdbc330fe5d#482c16b4d50029f29c387e81f634ffdbc330fe5d"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "graphlink-core"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=1de38544aaf58257c3ccc799eed2018754c80b59#1de38544aaf58257c3ccc799eed2018754c80b59"
+source = "git+https://github.com/chedim/graphlink?rev=482c16b4d50029f29c387e81f634ffdbc330fe5d#482c16b4d50029f29c387e81f634ffdbc330fe5d"
 dependencies = [
  "serde_json",
 ]
@@ -380,7 +388,7 @@ dependencies = [
 [[package]]
 name = "graphlink-shm"
 version = "0.0.1"
-source = "git+https://github.com/chedim/graphlink?rev=1de38544aaf58257c3ccc799eed2018754c80b59#1de38544aaf58257c3ccc799eed2018754c80b59"
+source = "git+https://github.com/chedim/graphlink?rev=482c16b4d50029f29c387e81f634ffdbc330fe5d#482c16b4d50029f29c387e81f634ffdbc330fe5d"
 dependencies = [
  "graphlink-core",
  "serde_json",
@@ -573,6 +581,7 @@ name = "membrane_vm"
 version = "0.7.62"
 dependencies = [
  "bytemuck",
+ "graphlink-auth",
  "graphlink-core",
  "graphlink-shm",
  "libc",
