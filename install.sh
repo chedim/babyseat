@@ -2,7 +2,7 @@
 # babyseat installer, for a machine without pip (#1143, docs/packaging-plan.md):
 #
 #   curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh | sh
-#   sh install.sh --version 0.7.62
+#   sh install.sh --version 0.7.63
 #
 # It downloads the release tarball of your platform (macOS arm64/x86_64, Linux x86_64/aarch64 on glibc or musl), CHECKS its sha256 against the release's .sha256 file BEFORE extracting,
 # extracts it into a staging folder, checks every file against the folder's own MANIFEST.sha256, and only then moves it to
@@ -79,7 +79,7 @@ if [ -z "$version" ]; then
   url=${MEMBRANE_RELEASES_URL:-https://api.github.com/repos/$REPO/releases?per_page=1}
   tag=$(curl -fsSL "$url" 2>/dev/null | sed -n 's/.*"tag_name"[^"]*"\([^"]*\)".*/\1/p' | head -n 1)
   if [ -z "$tag" ]; then
-    # the API said nothing (a rate limit, no network): the redirect of /releases/latest names the stable tag: v0.7.62
+    # the API said nothing (a rate limit, no network): the redirect of /releases/latest names the stable tag: v0.7.63
     tag=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") || die "could not ask GitHub for the latest release: name one with --version"
   fi
   version=${tag##*/}

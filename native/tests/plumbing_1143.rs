@@ -1,4 +1,4 @@
-//! The release plumbing (#1143, operator 2026-11-14): ONE launcher (`scripts/seat`, the barest app) with the strict door, the version 0.7.62, `run --help`, the real
+//! The release plumbing (#1143, operator 2026-11-14): ONE launcher (`scripts/seat`, the barest app) with the strict door, the version 0.7.63, `run --help`, the real
 //! auth mode of `/ui/conf`, and the dead code gone (the `ui_views` fact, the degraded map shapes). Every seat here is private: a free port, its own data folder, a fake claude,
 //! no chat turn. Every wait has a timeout and the child is always reaped.
 #![cfg(feature = "bin")]
@@ -77,13 +77,13 @@ fn json(b: &str) -> serde_json::Value { serde_json::from_str(b).unwrap_or_else(|
 #[test]
 fn the_binary_the_health_route_and_the_conf_report_the_version_0_7_60() {
     let o = Command::new(BIN).arg("--version").output().unwrap();
-    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "cliffvm 0.7.62");
+    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "cliffvm 0.7.63");
     let run = launcher("version");
     let tok = admin_token(&run);
     let (st, _, b) = http(run.port, "GET", "/global/health", &bearer(&tok), "");
-    assert_eq!((st, json(&b)["version"].as_str().map(String::from)), (200, Some("0.7.62".to_string())), "{b}");
+    assert_eq!((st, json(&b)["version"].as_str().map(String::from)), (200, Some("0.7.63".to_string())), "{b}");
     let (st, _, b) = http(run.port, "GET", "/ui/conf", &bearer(&tok), "");
-    assert_eq!((st, json(&b)["build"].as_str().map(String::from)), (200, Some("cliffvm-0.7.62".to_string())), "{b}");
+    assert_eq!((st, json(&b)["build"].as_str().map(String::from)), (200, Some("cliffvm-0.7.63".to_string())), "{b}");
 }
 
 // ---- (2) the one launcher --------------------------------------------------------------------------------------------------------------
