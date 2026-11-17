@@ -1,12 +1,14 @@
 //! `MAPPED <Class> f16 derived` (#1143, step 3 of the field on SemText; a language-surface change awaiting the operator): a MAPPED class whose entities a RULE writes keeps
 //! those writes DERIVED, like every other class: stored (the row, the vector table) and restored at a restart, but NOT journalled. The plain `MAPPED <Class> f16` keeps
 //! journalling them whole (docs/cliffvm.md, "MAPPED"). The field's states, seeds, episodes and background are such classes: stored rows, never replayed.
+mod common;
+
 use membrane_vm::host::{Host, Line, Options};
 use membrane_vm::syntax::parse_full;
 use serde_json::{json, Map, Value as J};
 
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("mapped-derived-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 fn open(file: Option<&str>) -> Host { let mut o = Options::new(file.map(String::from)); o.effects = false; Host::open(o).unwrap() }

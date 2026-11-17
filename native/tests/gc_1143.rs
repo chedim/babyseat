@@ -1,11 +1,13 @@
 //! GARBAGE COLLECTION OF VIRTUAL ENTITIES (#1143, operator 2026-11-13; docs/cliffvm.md, "Garbage collection"): a virtual entity is collected at the end of the round in which nothing
 //! holds it any more. Holders: ownership (a colon-path child lives with its parent), a reference (a `{"$ref": id}` value in a property of a live entity), in-flight drivers (a
 //! connection, an effect, a running command's chunks). A plain read holds nothing. Roots: stored entities, packs, the drivers' in-flight work.
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("gc-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }

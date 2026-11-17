@@ -1,13 +1,15 @@
 //! APPS and TRUST BY POSITION (docs/c1f-layers.md): an app is a folder `<name>.c1f/` (or one pack file); `.c1f` files are packs loaded in
 //! dependency order (a pack after the packs it imports), the rest alphabetical by path; every other file is DATA. The first app given
 //! is the root of trust: its packs are privileged, nothing is trusted by name, a later app is a layer above with no privilege.
+mod common;
+
 use membrane_vm::expr;
 use membrane_vm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::{Path, PathBuf};
 
 fn tmp(tag: &str) -> PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("apps1143-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

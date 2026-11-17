@@ -1,6 +1,8 @@
 //! An idle seat is idle (#1143): started on a store with big rows (the real store's 800 KB chat rows, scaled), with no client, the process
 //! uses (almost) no CPU. The packs and the app are the SHIPPED folders; no `claude` is ever run; the port is ephemeral; the child is always reaped.
 #![cfg(feature = "bin")]
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use serde_json::json;
 use std::io::{BufRead, BufReader};
@@ -22,7 +24,7 @@ fn cpu_s(pid: u32) -> f64 {
 
 #[test]
 fn a_seat_on_a_store_with_big_rows_is_idle_when_nobody_asks() {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let dir = std::env::temp_dir().join(format!("cliffvm-idle-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let store = dir.join("seat.sqlite");

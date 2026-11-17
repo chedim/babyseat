@@ -1,11 +1,13 @@
 //! A RETIRED ENTITY'S DELETE COSTS WHAT IT DELETES, NOT THE SIZE OF THE STORE (#1143, the seat that froze on a 1.4 GB store, 2026-11-15): the rows under `<eid>:` are a key
 //! RANGE of the primary key, not a `substr` test of every row. The plan of each delete must search the key index, never scan the table.
+mod common;
+
 use membrane_vm::host::{namespace_delete_sql, retire_delete_sql, Host, Options, ROWS, VECTORS};
 use rusqlite::Connection;
 use serde_json::{json, Map, Value as J};
 
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("retire-delete-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }

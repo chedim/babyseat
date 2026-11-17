@@ -2,6 +2,8 @@
 //! the old `embed` flag, which nothing reads now) or found in the store (the backlog: the bodies of the imported history) gets a vector, made by the local model server through the Fetch driver
 //! (`POST <seat_backend>/api/embed {model, input}`), stored as `Vector:of:<key>:s:<start>`, by a gentle one-request-at-a-time queue that waits while a chat turn runs.
 //! There is NEVER a real model server here: the receipts are written by the test (the Fetch driver's own writes), or, in the two end-to-end tests, a tiny HTTP server in this file answers.
+mod common;
+
 use membrane_vm::host::{boot_started, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -347,7 +349,7 @@ fn until(what: &str, mut f: impl FnMut() -> bool, h: &Host) {
     while !f() { assert!(t.elapsed() < Duration::from_secs(60), "timed out waiting for {what}"); h.pump(); std::thread::sleep(Duration::from_millis(25)); }
 }
 fn tmp(tag: &str) -> PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("embed-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

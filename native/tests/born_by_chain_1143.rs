@@ -1,6 +1,8 @@
 //! The chain of a turn's creations (#1143, operator 2026-11-14): the turn's MCP config carries `X-Turn: <the message's id>`; an entity a door `entity_write` creates says `born_by` = the call's Request
 //! (the VM's own), and the Request's `mc_message` is the message of the turn: entity -> born_by -> Request -> message, with plain reads. The seat is the shipped one with a fake `claude`.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -29,7 +31,7 @@ const KEY: &str = "sk-ant-settings-sentinel-7731";
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn setup(tag: &str) -> Dir {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-settings-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     let bin = d.join("fake-claude");

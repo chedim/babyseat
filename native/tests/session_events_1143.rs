@@ -46,7 +46,7 @@ impl Drop for Seat { fn drop(&mut self) { self.stop.store(true, Ordering::SeqCst
 /// finished (their receipts are in) until all N receipts are there; then it takes them together with the chunks that came before them.
 fn seat(tag: &str) -> Seat { seat_with(tag, QUICK) }
 fn seat_with(tag: &str, script: &str) -> Seat {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let dir = std::env::temp_dir().join(format!("cliffvm-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let bin = dir.join("fake-claude");

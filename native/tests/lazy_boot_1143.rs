@@ -2,6 +2,8 @@
 //! on first reference and in the background (the warm boot, newest `updated` first, up to the boot fact `warm_rows`). The seat is the shipped one (the packs of
 //! `membrane/apps/barest.packs` and the barest app) against a store of synthetic entities; there is no real `claude`, every wait has a timeout, the port is ephemeral.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -19,7 +21,7 @@ impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-lazy-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

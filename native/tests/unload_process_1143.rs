@@ -1,6 +1,8 @@
 //! The VM's own eviction policy in the real binary (no pack, no write) (#1143): the shipped packs and the barest app on a store of synthetic entities, the memory budget and the fractions as boot facts, the
 //! resident size read from the test's own file (`MEMBRANE_TEST_RSS`: the path of a file holding the size in bytes, consulted only by the policy). No real `claude`; ephemeral port.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -30,7 +32,7 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
 
 #[test]
 fn a_seat_over_its_memory_budget_unloads_its_coldest_and_a_reference_loads_one_back() {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let dir = std::env::temp_dir().join(format!("cliffvm-unload-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     {

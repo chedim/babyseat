@@ -1,6 +1,8 @@
 //! The store's WAL stays small (#1143): a reader that holds a snapshot while rows are written keeps SQLite from resetting the log, so it grows;
 //! the host's tick folds it back into the file and truncates it once it is over WAL_LIMIT_BYTES (a threshold, flagged for the operator).
 #![cfg(feature = "bin")]
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use serde_json::json;
 
@@ -8,7 +10,7 @@ fn size(p: &std::path::Path) -> u64 { std::fs::metadata(p).map(|m| m.len()).unwr
 
 #[test]
 fn a_wal_that_grew_behind_a_reader_is_truncated_by_the_next_tick() {
-    let dir = std::env::temp_dir().join(format!("wal-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let dir = std::env::temp_dir().join(format!("wal-{}-{}", std::process::id(), common::unique()));
     std::fs::create_dir_all(&dir).unwrap();
     let db = dir.join("s.sqlite3");
     let wal = dir.join("s.sqlite3-wal");

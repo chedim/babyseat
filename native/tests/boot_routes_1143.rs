@@ -2,6 +2,8 @@
 //! token the seat writes). The answers are compared in SHAPE with the recorded answers of the released Python seat (tests/golden/boot/*.json,
 //! scripts/golden_boot.py). Every wait has a timeout: a request that never answers FAILS the test instead of hanging it. NEVER a real `claude`.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -14,7 +16,7 @@ struct Run { child: Child, port: u16, token: String, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("boot-routes-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

@@ -1,11 +1,13 @@
 //! The journal survives restarts (#1143): `c_journal` is the image of ALL the outside writes, in order. The line key used to be the in-memory count, which starts at 0 at every open, so a
 //! restarted run REPLACED the earlier run's first lines and a replay of the stored journal lost the births (the writes to them were dropped). The key now continues from the stored maximum.
 //! Content only, no clock: three runs on one store write and birth entities; the stored journal holds every line in order, and a replay from it rebuilds every entity the rows hold.
+mod common;
+
 use membrane_vm::host::{Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("journal-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

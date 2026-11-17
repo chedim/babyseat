@@ -2,6 +2,8 @@
 //!   SqlSource:<name> {path, mode: ro (default) | rw}      SqlQuery:<name> {source, sql}      SqlQuery.run = {id, args, max_rows?}
 //! A read-only source is opened with the immutable URI; a run is a write, its receipt `{id, status, rc, rows, changes, ms, started, finished, head, ...}`
 //! is the `run_result` of the query and is journalled; `rows` reads the latest receipt, an Error with the reason when the run failed.
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,7 +15,7 @@ fn pack(n: &str) -> String { std::fs::read_to_string(repo().join(format!("membra
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("sqldrv-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(d.join(".membrane")).unwrap();
     d.canonicalize().unwrap()

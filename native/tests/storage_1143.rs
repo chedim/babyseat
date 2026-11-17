@@ -1,6 +1,8 @@
 //! STORAGE MODES (#1143, operator 2026-11-13): a class is VIRTUAL (RAM only: never stored, restored or journalled), RESIDENT (stored and always loaded)
 //! or, by default, LAZY (stored, loaded on demand). The owner pack of a class declares it in its header (`VIRTUAL <Class>` / `RESIDENT <Class>`),
 //! as it declares its imports; docs/cliffvm.md, "Storage modes".
+mod common;
+
 use membrane_vm::fields::Storage;
 use membrane_vm::host::{Host, Options};
 use membrane_vm::syntax::parse_full;
@@ -82,7 +84,7 @@ fn the_shipped_packs_declare_the_per_run_classes_virtual_and_the_drivers_residen
 }
 
 fn tmpfile(tag: &str) -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     std::env::temp_dir().join(format!("storage-{tag}-{}-{n}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 

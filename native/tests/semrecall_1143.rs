@@ -3,6 +3,8 @@
 //! chat order), each step back counting half as much as the step before it; for any other text (a Memory note) the window is the text alone. The edge lane weighs the
 //! shared Word/Identifier/Path entities by that scale; the ask itself is never a hit (recent chat texts are: the model gets no chat history); near duplicates merge; no score
 //! cut-off. Every test runs on the SHIPPED packs of the barest seat, in process, with no model server (receipts are written by the test).
+mod common;
+
 use membrane_vm::host::{self, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
@@ -25,7 +27,7 @@ fn seat_opts(facts: &Map<String, J>, store: bool) -> Host {
     let file = store.then(|| {
         // the clock alone can give two parallel tests one name (it ticks in microseconds here): a counter keeps each store its own
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let n = common::unique();
         let s = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         std::env::temp_dir().join(format!("semrecall-{}-{n}-{s}.sqlite", std::process::id())).to_str().unwrap().to_string()
     });

@@ -1,6 +1,8 @@
 //! The ONE-SHOT NAME CARRY-OVER at the history cutover (#1143, operator 2026-11-15): when the cutover has found the old store and the new seat has no name, ONE read-only query reads the old
 //! name (`membrane::name` in `c_entities`) and the seat sends the model one message in the main chat that asks it to store the name in `Setting:chat.name`. Once (the ledger `Legacy:name`),
 //! never when the name is already set (the row or the launch fact `seat_name`), nothing when the old store holds no name. Host-level tests on a small synthetic store.
+mod common;
+
 use membrane_vm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,7 +14,7 @@ use legacy_fixture::*;
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn pack(n: &str) -> String { std::fs::read_to_string(repo().join(format!("membrane/packs/{n}.c1f"))).unwrap_or_else(|e| panic!("{n}.c1f: {e}")) }
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cutover-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(d.join(".membrane")).unwrap();
     std::fs::create_dir_all(d.join("cwd")).unwrap();

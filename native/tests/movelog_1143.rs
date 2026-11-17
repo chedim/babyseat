@@ -6,6 +6,8 @@
 //! held) so the voter reads only the question's things, never every text.
 //! The seat runs in process with its store (chat order is the store's key order) and its drivers; the model server is a tiny one in the test (loopback), whose vectors are
 //! the table `model` below. The question is a text like the others: its vectors land too, so it holds what it mentions (it is never a row of its own vote).
+mod common;
+
 use membrane_vm::host::{boot_started, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -56,7 +58,7 @@ fn server() -> u16 {
 
 static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn tmpfile() -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let s = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     std::env::temp_dir().join(format!("movelog-{}-{n}-{s}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }

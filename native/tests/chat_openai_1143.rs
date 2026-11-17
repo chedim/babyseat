@@ -3,6 +3,8 @@
 //! function tools, each tool call run through the SAME `/mcp tools/call`, the results sent back, until a text answer or `chat_max_turns`.
 //! There is NEVER a real endpoint, a real key or a real `claude` here: the endpoint is a tiny HTTP server in this file (`Fake`), on 127.0.0.1.
 #![cfg(feature = "bin")]
+mod common;
+
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -19,7 +21,7 @@ struct Run { child: Child, _lines: Receiver<String>, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let n = common::unique();
     let d = std::env::temp_dir().join(format!("cliffvm-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     d

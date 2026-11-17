@@ -1,6 +1,8 @@
 //! PRIVILEGE (docs/c1f-layers.md, "Privilege"): exemption from rule B (a pack writes only classes it owns or imports) ONLY. Rule A stays
 //! (only the owner defines getters and setters on a class). The grant is a write, `Pack:<name>.privileged = true`, by a privileged writer;
 //! the host records `granted_by` from the writer; the boot pack is the root of trust.
+mod common;
+
 use membrane_vm::expr;
 use membrane_vm::host::{is_outside, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
@@ -150,7 +152,7 @@ fn the_grant_is_recorded_with_its_writer_a_pack_setter_grants_and_the_grant_outl
 
 #[test]
 fn a_grant_for_a_file_loaded_pack_does_not_remove_it_and_survives_a_restart() {
-    let file = std::env::temp_dir().join(format!("priv-{}-{}.sqlite3", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())).to_string_lossy().to_string();
+    let file = std::env::temp_dir().join(format!("priv-{}-{}.sqlite3", std::process::id(), common::unique())).to_string_lossy().to_string();
     let open = || { let mut o = Options::new(Some(file.clone())); o.clock = ticking(); o.effects = false; Host::open(o).unwrap() };
     let t = "PACK filed 1\nBox.label getter: 'f' + str(this.w)\n";
     NOW.with(|n| n.set(0));
