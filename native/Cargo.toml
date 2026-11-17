@@ -20,6 +20,8 @@ required-features = ["bin"]
 bytemuck = { version = "1.25.2", optional = true }
 pollster = { version = "1.0.1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
+# the graph link's subscription table and replica notes (#1143): their own repo, pinned to a commit
+graphlink-core = { git = "https://github.com/chedim/graphlink", rev = "72f78d733efda55906322bba237aaffbd61b0e73" }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }   # a stored f64 (a stamp, a number in a journal line) must parse back to the same bits (#1143)
 # the tokenizer (#1143): UAX #29 sentence and word boundaries, compiled in; no_std-capable, so wasm32 builds
 unicode-segmentation = { version = "=1.13.3", default-features = false }

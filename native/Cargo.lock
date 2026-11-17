@@ -370,6 +370,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphlink-core"
+version = "0.0.1"
+source = "git+https://github.com/chedim/graphlink?rev=72f78d733efda55906322bba237aaffbd61b0e73#72f78d733efda55906322bba237aaffbd61b0e73"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -556,6 +564,7 @@ name = "membrane_vm"
 version = "0.7.62"
 dependencies = [
  "bytemuck",
+ "graphlink-core",
  "libc",
  "objc2",
  "objc2-foundation",
