@@ -350,6 +350,32 @@ fn the_messages_page_by_rows_limit_and_before() {
     assert_eq!(older.as_array().unwrap().iter().map(|r| r["info"]["id"].clone()).collect::<Vec<_>>(), all[2..4].iter().map(|r| r["info"]["id"].clone()).collect::<Vec<_>>());
 }
 
+/// A `before` cursor that the listing returned exists, so it is never a 404, whatever order the store's answers arrive in: the cursor check is a store read of its own and a read that has not returned is not
+/// "found nothing". (On the macOS CI runner `the_messages_page_by_rows_limit_and_before` answered 404 for a cursor it had just listed; the race could not be made to happen here, so this is a guard:
+/// many concurrent reads of an existing cursor.)
+#[test]
+fn a_before_cursor_that_the_listing_returned_is_never_not_found_under_concurrent_reads() {
+    let (_run, port, _dir) = seat("ses-before-conc", STEPS);
+    let sid = new_session(port, "P");
+    for t in ["quick 1", "quick 2", "quick 3"] { assert_eq!(say(port, &sid, t), 204); finished(port, &sid, 0); std::thread::sleep(Duration::from_millis(30)); wait("rows", || (rows(port, &sid).len() >= 2 * (["quick 1", "quick 2", "quick 3"].iter().position(|x| *x == t).unwrap() + 1)).then_some(())); }
+    let all = finished(port, &sid, 6);
+    let before = all[4]["info"]["id"].as_str().unwrap().to_string();
+    let bad: Vec<(u16, String)> = (0..8).map(|_| { let (sid, before) = (sid.clone(), before.clone()); std::thread::spawn(move || (0..12).map(|_| api(port, "GET", &format!("/session/{sid}/message?limit=2&before={before}"), J::Null)).filter(|(st, _)| *st != 200).map(|(st, b)| (st, b.to_string())).collect::<Vec<_>>()) }).collect::<Vec<_>>().into_iter().flat_map(|h| h.join().unwrap()).collect();
+    assert!(bad.is_empty(), "{} of 96 concurrent reads of an existing cursor failed, for example {:?}", bad.len(), bad.first());
+}
+
+/// A cursor that does not exist is still a 404 (the lookup returned nothing), and so is one that is not a message id at all.
+#[test]
+fn a_before_cursor_that_does_not_exist_is_still_not_found() {
+    let (_run, port, _dir) = seat("ses-before-missing", STEPS);
+    let sid = new_session(port, "P");
+    assert_eq!(say(port, &sid, "quick 1"), 204); finished(port, &sid, 2);
+    let (st, body) = api(port, "GET", &format!("/session/{sid}/message?limit=2&before=msg_000000000000100000001001"), J::Null);
+    assert_eq!((st, body["error"]["message"].as_str()), (404, Some("not found")), "{body}");
+    let (st, _) = api(port, "GET", &format!("/session/{sid}/message?limit=2&before=nonsense"), J::Null);
+    assert_eq!(st, 404);
+}
+
 // ---- the event streams -----------------------------------------------------------------------------------------------------------------------
 /// An open event stream: the head, then the frames as they arrive: (event name, json data); None at the end of the stream or after `secs` of quiet.
 struct Sse { r: BufReader<TcpStream>, head: String }

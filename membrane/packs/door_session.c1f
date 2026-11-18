@@ -235,7 +235,9 @@ Request.ml_reply getter:
   WHEN this.ss_view == None: this.ss_missing
   ELSE WHEN this.ml_all == None: None
   ELSE WHEN len([x for x in this.ml_users if x['row'] == None]) > 0: None
-  ELSE WHEN this.ml_before != '' and (this.ml_cut == None or len(this.ml_cut) == 0): {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}
+  -- the cursor check is a store read of its own, and a read that has not returned is None: the page waits for it, as it waits for its rows; only a read that returned NOTHING ([]) is a 404
+  ELSE WHEN this.ml_before != '' and this.ml_cut == None: None
+  ELSE WHEN this.ml_before != '' and len(this.ml_cut) == 0: {'status': 404, 'body': {'type': 'error', 'error': {'message': 'not found'}}}
   ELSE: {'status': 200, 'body': tail(this.ml_flat, this.ml_limit) if this.ml_limit > 0 else this.ml_flat}
 
 -- GET /session/<sid>/message/<mid>: one row, the user's or the assistant's
