@@ -78,7 +78,7 @@ in a debug build).
 
 ## Built: the first slice (#1143, operator decisions 2026-11-13)
 What landed, where, and what it changed against the design above. Packs: `membrane/packs/semtext.c1f` (class, layers, spans) and `membrane/packs/mentions.c1f`
-(form classes, mentions, recall by edges), both in `membrane/apps/barest.packs`; the chat packs write the bodies. Tests: `native/tests/semtext_1143.rs`,
+(form classes, mentions, recall by edges), both in `membrane/apps/barest.packs`; the chat packs write the bodies. Tests: `seat-tests/tests/semtext_1143.rs`,
 `semtext_process_1143.rs`, `chat_process.rs` (`a_message_body_and_the_answer_are_semtexts_...`), `help_1143.rs`. Model-facing page: `Help:semtext`
 (`membrane/apps/barest.c1f/help/semtext.md`); it never teaches `spans`, the builtin is internal to the SemText pack.
 
@@ -143,9 +143,9 @@ vector pack's: MAPPED, f16). `<key>` is the text's eid with `::` written `/` (th
 - WHEN IT FAILS (no model server, the model not installed (the reason says `ollama pull <model>`), a timeout, a wrong answer): `fail`/`reason`/`line`/`state: stuck` say why, the sentences stay pending, and the queue is held until the next
   change that is not its own: a chat event (message, turn start or end) or a new ask; then, with no turn running, it tries again. No timer, no loop, never an Error that stops a round.
 - REPLAY: the Fetch driver's receipt is a derived write (`driver:request`), but a write to a MAPPED class (`Vector`) is journalled whole and compact, so a replay of the journal remakes the vectors (docs/cliffvm.md, "MAPPED").
-- Tests: `native/tests/embed_1143.rs` (in-process, receipts written by the test, one end-to-end test against a tiny model server in the test) and `native/tests/embed_process_1143.rs` (the real seat, a closed port).
+- Tests: `seat-tests/tests/embed_1143.rs` (in-process, receipts written by the test, one end-to-end test against a tiny model server in the test) and `seat-tests/tests/embed_process_1143.rs` (the real seat, a closed port).
 
-### The field (#1143, step 3; `membrane/packs/field.c1f`, tests `native/tests/field_1143.rs`)
+### The field (#1143, step 3; `membrane/packs/field.c1f`, tests `seat-tests/tests/field_1143.rs`)
 The old membrane's entity field, in SemText terms. When a text's sentence vectors land (the embed queue writes its `emb_n`), every Word / Identifier / Path entity a landed sentence mentions moves:
 `state <- unit(state + GAIN (x - state))`, x the sentence's unit vector. The step `|GAIN (x - state before)|` is the MOVE, written on the text as a row of `field_moves` (`{e, s, m}`: the entity, the
 sentence number, the move); `field_n` on the text counts the sentences applied.
@@ -170,7 +170,7 @@ sentence number, the move); `field_n` on the text counts the sentences applied.
   getters compute the walk; when every chain is computed, one setter writes each state, each text's moves, the nursery, the episodes and the background. The steps are collected when the round ends.
 - `recall` reads the field through entity recall and the move-log voter (below), each its own getter, in its vote (step 6, "Recall: one getter on SemText").
 
-### Entity recall by worldline (#1143, step 5; `membrane/packs/entityrecall.c1f`, tests `native/tests/entityrecall_1143.rs`)
+### Entity recall by worldline (#1143, step 5; `membrane/packs/entityrecall.c1f`, tests `seat-tests/tests/entityrecall_1143.rs`)
 The old membrane's entity recall voter. For an ask whose `recall_on` is true, `SemText.entity_votes` is the list of texts that moved the entities nearest the ask, best first, as rows
 `{key, of, text, score}` (`key` = the text's eid + `#` + the start of its sentence, the row shape of the other lanes). The vote of `recall` reads it with the weight `ent_weight` (0.75, a getter of this pack).
 - **The query** is the cosine lane's `r_query` (the weighted sum of the window's text vectors).
@@ -198,7 +198,7 @@ The old membrane's entity recall voter. For an ask whose `recall_on` is true, `S
   the vote there (`budget exceeded`, never a wrong list). Nothing is cut.
 - Not built: the move log's previous turn (`held`), the answerable-events filter of the old voter, the old seat's word hop (it was off for the vote: `hop=False`).
 
-### The move-log voter (#1143, step 4; `membrane/packs/movelog.c1f`, tests `native/tests/movelog_1143.rs`)
+### The move-log voter (#1143, step 4; `membrane/packs/movelog.c1f`, tests `seat-tests/tests/movelog_1143.rs`)
 The old membrane's `movelog.settle`, over the move log above (`field_moves`). It is ONE getter, `SemText.movelog_votes`, computed while `recall_on` is true (as `recall`); the vote of `recall` reads it
 (step 6).
 - **Held**: an event (a text) holds, for each thing (Word / Identifier / Path entity), the LARGER of its own move of it (the largest of its sentences') and the move of its PREVIOUS TURN (that
@@ -234,7 +234,7 @@ mention rules for urls and numbers (they have spans, no entities), re-mentioning
 
 ## Recall: one getter on SemText (#1143, operator 2026-11-15)
 `SemText.recall` (`membrane/packs/mentions.c1f`) is the ONE recall: the banner part and `Memory` both read it. The ask is the SemText itself; the caller gives no list of texts, and the recall
-finds the rest in the graph. It computes only while `recall_on` is true (the banner writes it on its ask's body and takes it off the body before; a `Memory` has it always). Tests: `native/tests/semrecall_1143.rs`.
+finds the rest in the graph. It computes only while `recall_on` is true (the banner writes it on its ask's body and takes it off the body before; a `Memory` has it always). Tests: `seat-tests/tests/semrecall_1143.rs`.
 - **The window.** A chat text (`<message>:body`, `<message>:turn:response:body`) reads the chat's texts counting back from itself in chat order: the ask, the answer before it, that message, the answer
   before that, ... (6 texts: the length of `r_weights`). The older message keys come from the store's key order (one `sql` over the `(cls, k)` index, key order is time order inside a chat,
   docs/chat-keys.md); the bodies are read by their ids; a text that is not there (a turn with no answer) is skipped. Each step back counts half as much as the step before it (`r_ratio`, 0.5, a getter a
@@ -250,7 +250,7 @@ finds the rest in the graph. It computes only while `recall_on` is true (the ban
   a message is embedded once (`a_chat_asks_own_call_writes_the_sentence_vectors_of_its_message`, `a_chat_message_is_embedded_once`); any other text embeds its whole text as one input
   (one vector, not kept). The queue leaves a text alone while its own call is out (`in_flight`) and while it is the body of a message queued for a turn that has not started (the
   banner is about to ask it); once the turn starts or ends it is the queue's again (so a failed call or a missing banner part only delays it).
-- **The vote** (step 6; the old seat's `recall_vote.py`, operator 2026-11-11 and 2026-11-15; `r_ballots`, `r_voted`; tests `native/tests/vote_1143.rs` and
+- **The vote** (step 6; the old seat's `recall_vote.py`, operator 2026-11-11 and 2026-11-15; `r_ballots`, `r_voted`; tests `seat-tests/tests/vote_1143.rs` and
   `the_recall_sums_the_points_of_the_shipped_voters` in `movelog_1143.rs`): weighted Borda. Each voter's ballot is its first `vote_depth` (20) rows, and its i-th row (from 0) earns the voter's
   weight x (20 - i). The voters: the move log (`movelog_votes`, weight `ml_weight` 2), entity recall (`entity_votes`, `ent_weight` 0.75), the embedder = the cosine lane (`r_cos_weight` 0.125)
   and the word lane = the edge lane (`r_edge_weight` 0.125). The weights are the approved ones, kept as they are with the old seat's other voters missing; each is a getter a layer overrides

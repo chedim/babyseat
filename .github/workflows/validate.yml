@@ -43,6 +43,30 @@ jobs:
         working-directory: native
       - run: cargo test --release --no-default-features --features bin --doc
         working-directory: native
+  # The seat's pack-tied tests (seat-tests/): they run on the pinned cliffvm release (CLIFFVM_VERSION), as a library at that version and as the downloaded program (CLIFFVM_DIST).
+  seat:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5   # the tests use a system python3 as a fake `claude` and an http.server
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: seat-tests
+      - uses: taiki-e/install-action@nextest
+      - run: scripts/dist/fetch_cliffvm.sh "$(cat CLIFFVM_VERSION)" ${{ matrix.target }} "$RUNNER_TEMP/cliffvm"
+      - run: cargo nextest run --release --no-fail-fast
+        working-directory: seat-tests
+        env:
+          CLIFFVM_DIST: ${{ runner.temp }}/cliffvm
   js:
     strategy:
       fail-fast: false

@@ -1,6 +1,6 @@
 # Auth: who may talk to the seat
 
-Status: describes `cliffvm serve` at 0.7.63 (`membrane/packs/door.c1f`, `door_auth.c1f`, `native/src/{jwt,admin,http}.rs`). Pinned by `native/tests/door_auth_1143.rs` and `release_verify_1143.rs` (real processes; see docs/release-verification.md for the checklist).
+Status: describes `cliffvm serve` at 0.7.63 (`membrane/packs/door.c1f`, `door_auth.c1f`, `native/src/{jwt,admin,http}.rs`). Pinned by `seat-tests/tests/door_auth_1143.rs` and `release_verify_1143.rs` (real processes; see docs/release-verification.md for the checklist).
 
 ## No users: every valid token is the admin
 
@@ -73,4 +73,4 @@ A name holding KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL reads the text
 
 A seat with a door secret asks every local peer (the fact `peers`, docs/graph-link.md section 18) for a token in its `hello`. The seat makes the token itself: `<data-dir>/peers/<name>.token` (mode 0600, new at every start, `sub` `peer:<name>`,
 an `ns` claim with the namespace the owner declared in the fact, the admin token's life), and the peer reads the file. The seat accepts a hello only when the token verifies and its `ns` is the hello's namespace and the declared one;
-otherwise the peer is told `refused: auth` and gets no `Vm`. This is not the page's admin rule: a peer's token names one namespace and nothing else. `native/tests/peers_auth_1143.rs`.
+otherwise the peer is told `refused: auth` and gets no `Vm`. This is not the page's admin rule: a peer's token names one namespace and nothing else. `seat-tests/tests/peers_auth_1143.rs`.

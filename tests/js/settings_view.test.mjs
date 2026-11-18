@@ -1,7 +1,7 @@
 // The SETTINGS VIEW as a c1f view pack (membrane/apps/barest.c1f/settings_view.c1f, #1143), plugged into the shell, on the wasm engine in Node: the page's VM with the packs `dom`, `fetch`,
 // `shell_view`, `chat_view`, `settings_view`. The test plays the HOST (a DomNode event is a write; a `Fetch:<x>.request` is answered by a write of `request_result`; `retire` removes the
 // entity) and the SEAT (the rows of GET /ui/settings come from a REAL seat's answer, tests/js/fixtures/settings_feed.json; a write of `Setting:<id>.set` is answered here as the seat's own
-// setter would: native/tests/settings_1143.rs proves the seat side). Asserted: the rows per group in order, hidden rows absent, a live write applies and the row updates, an out-of-range
+// setter would: seat-tests/tests/settings_1143.rs proves the seat side). Asserted: the rows per group in order, hidden rows absent, a live write applies and the row updates, an out-of-range
 // number shows the seat's reason and the value in force is unchanged, a refusal of the call itself (403) is text, a restart row has no control, the list and the allow-list editors round
 // trip, a model list is a select, a failed read says so and can be tried again, no secret is on the page, and an idle page does no work.
 import { readFileSync } from 'node:fs';
@@ -63,7 +63,7 @@ function world(extra = {}) {
   return w;
 }
 const byId = (rows, id) => rows.find((r) => r.id === id);
-// what the seat's setter answers to `Setting:<id>.set = v` for the rows used here (the seat side is tested in native/tests/settings_1143.rs): the new feed
+// what the seat's setter answers to `Setting:<id>.set = v` for the rows used here (the seat side is tested in seat-tests/tests/settings_1143.rs): the new feed
 const applied = (rows, id, v) => { const r = byId(rows, id); r.current = v; r.refused = ''; r.applied = 1.7e9; };
 const refused = (rows, id, why) => { byId(rows, id).refused = why; };
 const MCP_OK = (text = 'wrote') => ({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text }], isError: false } });
@@ -324,7 +324,7 @@ scenario('an answer of an older read (a newer one was asked for) is dropped', ()
 scenario('no secret is on the page: the view shows only what the feed holds, and the feed holds names of variables, never values', () => {
   const SECRETS = ['sk-ant-secret-0001', 'hunter2pw', 'admin-jwt-token-xyz'];
   const w = world().open((rows) => {
-    byId(rows, 'model.cloud').current = [{ name: 'gpt', backend: 'openai', api_key_env: 'OTHER_PROVIDER_KEY' }];   // what the seat's feed carries (native/tests/settings_1143.rs: the real feed holds no secret)
+    byId(rows, 'model.cloud').current = [{ name: 'gpt', backend: 'openai', api_key_env: 'OTHER_PROVIDER_KEY' }];   // what the seat's feed carries (seat-tests/tests/settings_1143.rs: the real feed holds no secret)
     byId(rows, 'access.token_file').current = '/data/admin.token';
   });
   const page = allText(w) + JSON.stringify(w.log.filter((x) => x.eid.startsWith('DomNode:')).map((x) => x.new));

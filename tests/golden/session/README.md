@@ -9,7 +9,7 @@ The consumer compares SHAPE, never values: every key of the fixture must be in t
 fixture accepts any type: the recorded value was empty); extra keys in the answer are fine; for a list each element of the answer must
 match SOME element of the fixture's list (a parts list holds a text, a tool and a step part). Ids, times, the working folder
 (`/srv/seat`) are placeholders: only their type counts. The Python seat's own bookkeeping keys (`owner`, `_announced`, `readonly`) are
-dropped from the fixtures: they are not the contract. The comparer is `native/tests/session_1143.rs` (`shape_misses`).
+dropped from the fixtures: they are not the contract. The comparer is `seat-tests/tests/session_1143.rs` (`shape_misses`).
 
 `python3 scripts/golden_session.py --tree <dir> --check` exits 1 when the Python tree's answers differ in shape from the committed files.
 

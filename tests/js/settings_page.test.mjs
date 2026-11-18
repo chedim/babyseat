@@ -1,5 +1,5 @@
 // The SETTINGS VIEW in a real browser (#1143): a REAL private cliffvm barest seat (the shipped packs + the barest app + the page's ui folder, own store, own port; the barest door is open: everyone who
-// reaches the page is the admin, as in the view; that any token with any sub writes is proved in native/tests/settings_1143.rs) and the page in headless Chrome over the DevTools protocol. Asserted:
+// reaches the page is the admin, as in the view; that any token with any sub writes is proved in seat-tests/tests/settings_1143.rs) and the page in headless Chrome over the DevTools protocol. Asserted:
 //   1. Settings opens: one section per group in the operator's order (Model, Chat, Home, Import, Access, Limits), no Map group, no Field tab, no dead setting, a restart row has no control;
 //   2. the chat step limit is changed with the keyboard (type, Enter): the row says Applied, "In force" shows the new value, and the SEAT holds it (read back through its own door);
 //   3. 0 is refused: the seat's reason is shown next to the row, the value in force is unchanged;
@@ -127,7 +127,7 @@ try {
   await b.fill(K('chat.max_steps', 'in'), '2.5'); await b.enter();
   await b.until(`/whole number/.test(${textOf(K('chat.max_steps', 'state'))})`, 'a step count is whole');
 
-  // 4. the chat model is a DROPDOWN (a select) of the seat's models, with the Save button (a refused name is tested in settings_view.test.mjs and native/tests/ollama_default_1143.rs)
+  // 4. the chat model is a DROPDOWN (a select) of the seat's models, with the Save button (a refused name is tested in settings_view.test.mjs and seat-tests/tests/ollama_default_1143.rs)
   assert.equal(await b.ev(`document.querySelector(${JSON.stringify(K('model.chat', 'in'))}).tagName`), 'SELECT', 'the model row is a select');
   assert.ok(await b.ev(`!!document.querySelector(${JSON.stringify(K('model.chat', 'o:gpt'))})`), 'the seat\'s model list is its options');
   await b.ev(`(() => { const e = document.querySelector(${JSON.stringify(K('model.chat', 'in'))}); e.value = 'gpt'; e.dispatchEvent(new Event('change', { bubbles: true })); })()`);

@@ -1,0 +1,15 @@
+[package]
+name = "seat-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "babyseat's tests of the seat: the pack-tied tests, run on the pinned cliffvm release (CLIFFVM_VERSION). Not part of any release."
+
+# the engine as a library (its lib is `membrane_vm`) at the pinned version (CLIFFVM_VERSION: tests/wrapper/test_seat_tests_pin.py keeps the two equal), and as a program through CLIFFVM_DIST (tests/common `bin`)
+[dependencies]
+cliffvm = { version = "=0.1.1", features = ["bin"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+graphlink-net = "0.1.1"
+libc = "0.2"

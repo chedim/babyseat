@@ -1,6 +1,6 @@
 # Settings: the rows, the write door and the window (BUILT, #1143)
 
-Status: built and tested. The server side is `membrane/packs/settings.c1f` (tests `native/tests/settings_1143.rs`, the model's page `Help:settings`); the window is the c1f view pack
+Status: built and tested. The server side is `membrane/packs/settings.c1f` (tests `seat-tests/tests/settings_1143.rs`, the model's page `Help:settings`); the window is the c1f view pack
 `membrane/apps/barest.c1f/settings_view.c1f` (tests `tests/js/settings_view.test.mjs`, `tests/js/settings_page.test.mjs`: a real private seat and headless Chrome). The design questions this page once carried were answered
 by the operator on 2026-11-14 and are recorded as the rules below.
 
@@ -56,4 +56,4 @@ Live host limits (a verb for the command timeout, the worker count, the memory l
 The feed `GET /ui/settings` says per row whether it is `chosen` (`Setting.chosen`: the chat's model is in force; the name was set by a person, by `--fact seat_name` or by an imported old name: the default Bob is not a choice). The page reads it at every load and opens a window
 while the model or the name is not chosen (a function of those two values, no "first run" flag): a dropdown of the listed models and a name field (prefilled when a name is chosen already; an empty name keeps the window open). One submit writes both
 through the rows' own door (`entity_write` of `Setting:model.chat.set` and `Setting:chat.name.set`); the seat's reason for a refusal is shown in the window. With no model listed it says how to pull one (`ollama pull <name>`) and has *Refresh*.
-Tests: `tests/js/firstrun_view.test.mjs` (the page side), `native/tests/ollama_default_1143.rs` (the seat side).
+Tests: `tests/js/firstrun_view.test.mjs` (the page side), `seat-tests/tests/ollama_default_1143.rs` (the seat side).

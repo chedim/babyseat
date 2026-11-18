@@ -1,6 +1,6 @@
 """A REAL cliffvm seat for the component's tests (#1143): the shipped packs, the door's secret (so every route needs a token, as on a user's
 seat), a token minted by `cliffvm token mint`, and a FAKE `claude` script as the turn's binary. Never a real model, never a real `claude`;
-loopback only; the child is always reaped. The pattern of native/tests/session_1143.rs.
+loopback only; the child is always reaped. The pattern of seat-tests/tests/session_1143.rs.
 
 The binary is native/target/{debug,release}/cliffvm (`cd native && cargo build --features bin`) or $CLIFFVM_BIN; no binary: the tests
 that need a real seat are skipped with that command as the reason.

@@ -24,7 +24,7 @@ Measured before the cut, on a copy of a real store with a fake `claude`: the rep
 | a `mention` write of a note | 62-97 KB | the growing `edge_rows` / `mentioned_in` lists of the Word entities (66-84 %), and about 18 entries per transient Span |
 | `Command:x.run`, a `Pack:x.text`, a lone property | under 1.5 KB | nothing to cut |
 
-What the model needs: the written property, the receipt, the reason of every null and Error, the target's own derived properties and its direct children, and the ids of what the write touched elsewhere. What it does not: a getter recomputed on many unrelated entities with the same value, values that repeat each other, transient entities (Spans live until the cascade ends), and the growing list values of shared entities, whose full value is one `entity_read` away. With the rule above those writes answer in 0.5-2.7 KB (tests in `native/tests/chat_process.rs`: `a_keep_write_with_running_turns...`, `a_mention_write_answers_small...`).
+What the model needs: the written property, the receipt, the reason of every null and Error, the target's own derived properties and its direct children, and the ids of what the write touched elsewhere. What it does not: a getter recomputed on many unrelated entities with the same value, values that repeat each other, transient entities (Spans live until the cascade ends), and the growing list values of shared entities, whose full value is one `entity_read` away. With the rule above those writes answer in 0.5-2.7 KB (tests in `seat-tests/tests/chat_process.rs`: `a_keep_write_with_running_turns...`, `a_mention_write_answers_small...`).
 
 Only RUNNING turns recompute the Chat getters: a finished message no longer reads the banner (`chat_turn.c1f`, "THE PROMPT PROPS END WITH THE TURN").
 
