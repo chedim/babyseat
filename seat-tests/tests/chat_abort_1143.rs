@@ -10,7 +10,7 @@ use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 struct Run { child: Child, _lines: Receiver<String>, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
 fn tmp(tag: &str) -> std::path::PathBuf {
@@ -45,7 +45,7 @@ fn seat(tag: &str) -> (Run, u16, std::path::PathBuf) {
     let src = format!("{}/../membrane/packs", env!("CARGO_MANIFEST_DIR"));
     for n in PACKS { std::fs::copy(format!("{src}/{n}"), pd.join(n)).unwrap(); }
     std::fs::copy(format!("{}/../membrane/apps/barest.c1f/default_banner.c1f", env!("CARGO_MANIFEST_DIR")), pd.join("default_banner.c1f")).unwrap();
-    let mut child = Command::new(BIN).current_dir(&dir).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000")
+    let mut child = Command::new(cliffvm_bin()).current_dir(&dir).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000")
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(),
                "--fact", &format!("chat_claude_bin={}", bin.display()), "--fact", "seat_default=claude"])
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();

@@ -9,7 +9,7 @@ use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 struct Run { child: Child, _lines: Receiver<String>, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
 
@@ -23,7 +23,7 @@ fn start() -> (Run, u16) {
     std::fs::create_dir_all(&pd).unwrap();
     let src = format!("{}/../membrane/packs", env!("CARGO_MANIFEST_DIR"));
     for f in ["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f"] { std::fs::copy(format!("{src}/{f}"), pd.join(f)).unwrap(); }
-    let mut child = Command::new(BIN).current_dir(&dir)
+    let mut child = Command::new(cliffvm_bin()).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
         .stdout(Stdio::piped()).stderr(std::fs::File::create(dir.join("stderr.txt")).unwrap()).spawn().unwrap();
     let out = child.stdout.take().unwrap();

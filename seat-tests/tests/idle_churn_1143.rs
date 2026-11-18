@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 /// the bound (FLAGGED for the operator): CPU seconds the idle process may use in IDLE_WINDOW_S seconds, 5 % of one core
 const IDLE_CPU_BOUND_S: f64 = 0.25;
 const IDLE_WINDOW_S: u64 = 5;
@@ -39,7 +39,7 @@ fn a_seat_on_a_store_with_big_rows_is_idle_when_nobody_asks() {
     let r = repo();
     let packs: Vec<String> = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap().lines().map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect();
-    let mut child = Command::new(BIN).current_dir(&dir).arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f"))
+    let mut child = Command::new(cliffvm_bin()).current_dir(&dir).arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f"))
         .args(["--store", store.to_str().unwrap(), "--port", "0", "--fact", "request_keep_s=0"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();

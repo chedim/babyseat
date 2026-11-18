@@ -9,7 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 struct Run { child: Child, _lines: Receiver<String>, port: u16, said: Vec<String> }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
@@ -24,7 +24,7 @@ fn script() -> String { format!("{}/../scripts/seat", env!("CARGO_MANIFEST_DIR")
 
 fn start(data: &std::path::Path, extra: &[&str]) -> Run {
     let mut child = Command::new("sh").arg(script()).args(["--data-dir", data.to_str().unwrap(), "--port", "0"]).args(extra)
-        .env("CLIFFVM", BIN).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+        .env("CLIFFVM", cliffvm_bin()).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });

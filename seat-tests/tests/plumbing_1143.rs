@@ -10,7 +10,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 fn repo() -> std::path::PathBuf { std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..") }
 
 struct Run { child: Child, _lines: Receiver<String>, port: u16, data: std::path::PathBuf }
@@ -37,7 +37,7 @@ fn watch(mut child: Child, data: std::path::PathBuf) -> Run {
 fn launcher(tag: &str) -> Run {
     let data = tmp(tag);
     let child = Command::new("sh").arg(repo().join("scripts/seat")).args(["--data-dir", data.to_str().unwrap(), "--port", "0", "--fact", "seat_default=claude"])
-        .env("CLIFFVM", BIN).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+        .env("CLIFFVM", cliffvm_bin()).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     watch(child, data)
 }
 /// the barest packs with NO door secret (the seat the strict door is opt-in on), straight on the binary
@@ -48,7 +48,7 @@ fn open_seat(tag: &str) -> Run {
         args.push(repo().join(format!("membrane/packs/{l}.c1f")).display().to_string());
     }
     args.extend(["membrane/apps/barest.c1f".into(), "--store".into(), data.join("s.sqlite").display().to_string(), "--port".into(), "0".into()].map(String::from));
-    let child = Command::new(BIN).current_dir(repo()).args(&args).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let child = Command::new(cliffvm_bin()).current_dir(repo()).args(&args).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     watch(child, data)
 }
 fn http(port: u16, method: &str, path: &str, extra: &str, body: &str) -> (u16, String, String) {
@@ -75,15 +75,16 @@ fn json(b: &str) -> serde_json::Value { serde_json::from_str(b).unwrap_or_else(|
 // ---- (1) the version -------------------------------------------------------------------------------------------------------------------
 
 #[test]
-fn the_binary_the_health_route_and_the_conf_report_the_version_0_7_60() {
-    let o = Command::new(BIN).arg("--version").output().unwrap();
-    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "cliffvm 0.7.63");
+fn the_binary_the_health_route_and_the_conf_report_the_engine_version() {
+    let v = common::engine_version();
+    let o = Command::new(cliffvm_bin()).arg("--version").output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), format!("cliffvm {v}"));
     let run = launcher("version");
     let tok = admin_token(&run);
     let (st, _, b) = http(run.port, "GET", "/global/health", &bearer(&tok), "");
-    assert_eq!((st, json(&b)["version"].as_str().map(String::from)), (200, Some("0.7.63".to_string())), "{b}");
+    assert_eq!((st, json(&b)["version"].as_str().map(String::from)), (200, Some(v.to_string())), "{b}");
     let (st, _, b) = http(run.port, "GET", "/ui/conf", &bearer(&tok), "");
-    assert_eq!((st, json(&b)["build"].as_str().map(String::from)), (200, Some("cliffvm-0.7.63".to_string())), "{b}");
+    assert_eq!((st, json(&b)["build"].as_str().map(String::from)), (200, Some(format!("cliffvm-{v}"))), "{b}");
 }
 
 // ---- (2) the one launcher --------------------------------------------------------------------------------------------------------------
@@ -109,7 +110,7 @@ fn the_launcher_makes_a_door_secret_and_an_admin_token_and_the_strict_door_serve
     assert!(body.to_lowercase().contains("<html") || body.to_lowercase().contains("<!doctype"), "the page");
     assert_eq!(http(run.port, "GET", "/membrane/ha/calls", "", "").0, 401, "no token, no house route");
     // `cliffvm token mint` works on the launcher's secret, and so does the admin's own token
-    let minted = Command::new(BIN).args(["token", "mint", "--sub", "admin", "--ttl", "15m", "--secret-file", secret.to_str().unwrap()]).output().unwrap();
+    let minted = Command::new(cliffvm_bin()).args(["token", "mint", "--sub", "admin", "--ttl", "15m", "--secret-file", secret.to_str().unwrap()]).output().unwrap();
     assert!(minted.status.success(), "{}", String::from_utf8_lossy(&minted.stderr));
     let minted = String::from_utf8_lossy(&minted.stdout).trim().to_string();
     for t in [tok.clone(), minted] {
@@ -134,7 +135,7 @@ fn the_launcher_binds_loopback_by_default() {
     // the wrapper names no address, and `cliffvm serve` states loopback as the default and binds it
     let t = std::fs::read_to_string(repo().join("scripts/seat")).unwrap();
     assert!(!t.contains("0.0.0.0") && !t.contains("--bind"), "the wrapper sets no bind");
-    let help = Command::new(BIN).args(["serve", "--help"]).output().unwrap();
+    let help = Command::new(cliffvm_bin()).args(["serve", "--help"]).output().unwrap();
     let h = String::from_utf8_lossy(&help.stdout);
     assert!(h.contains("Default 127.0.0.1") && !h.contains("Default 0.0.0.0"), "{h}");
 }
@@ -144,11 +145,11 @@ fn the_launcher_binds_loopback_by_default() {
 #[test]
 fn run_help_prints_the_usage_and_exits_zero() {
     for a in [&["run", "--help"][..], &["run", "-h"][..], &["token", "mint", "--help"][..]] {
-        let o = Command::new(BIN).args(a).output().unwrap();
+        let o = Command::new(cliffvm_bin()).args(a).output().unwrap();
         assert_eq!(o.status.code(), Some(0), "{a:?}: {}", String::from_utf8_lossy(&o.stderr));
         assert!(String::from_utf8_lossy(&o.stdout).contains("usage: cliffvm"), "{a:?}");
     }
-    assert_eq!(Command::new(BIN).args(["run", "--nope"]).output().unwrap().status.code(), Some(64), "an unknown option is still refused");
+    assert_eq!(Command::new(cliffvm_bin()).args(["run", "--nope"]).output().unwrap().status.code(), Some(64), "an unknown option is still refused");
 }
 
 #[test]

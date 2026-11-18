@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-const BIN: &str = common::bin("cliffvm");
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
+fn version() -> &'static str { common::product_version() }
 
 fn repo() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn tmp(tag: &str) -> PathBuf {
@@ -20,7 +20,7 @@ fn tmp(tag: &str) -> PathBuf {
     d
 }
 fn build(out: &Path, extra: &[&str]) -> std::process::Output {
-    Command::new("sh").arg(repo().join("scripts/dist/build.sh")).args(["--bin", BIN, "--out", out.to_str().unwrap()]).args(extra).output().unwrap()
+    Command::new("sh").arg(repo().join("scripts/dist/build.sh")).args(["--bin", cliffvm_bin(), "--out", out.to_str().unwrap()]).args(extra).output().unwrap()
 }
 fn files(dir: &Path, base: &Path, out: &mut Vec<String>) {
     for e in std::fs::read_dir(dir).unwrap() {
@@ -41,11 +41,11 @@ fn get(port: u16, path: &str, extra: &str) -> (String, String) {
 #[test]
 fn the_build_makes_the_version_stamped_tree_with_a_manifest_that_lists_every_file() {
     let t = tmp("a");
-    let out = t.join("dist").join(VERSION);
+    let out = t.join("dist").join(version());
     let o = build(&out, &[]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     assert!(out.join("bin/cliffvm").is_file());
-    assert_eq!(std::fs::read_to_string(out.join("VERSION")).unwrap().trim(), VERSION, "the stamp is the crate's version");
+    assert_eq!(std::fs::read_to_string(out.join("VERSION")).unwrap().trim(), version(), "the stamp is the product's version");
     // the packs of the barest seat, the barest app, the page, the help
     let list = std::fs::read_to_string(repo().join("membrane/apps/barest.packs")).unwrap();
     for name in list.lines().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')) { assert!(out.join("packs").join(format!("{name}.c1f")).is_file(), "pack {name}"); }
@@ -91,7 +91,7 @@ fn the_manifest_is_the_same_for_the_same_inputs() {
 #[test]
 fn serve_from_the_built_folder_finds_its_packs_there_and_not_in_the_repo() {
     let t = tmp("c");
-    let out = t.join("dist").join(VERSION);
+    let out = t.join("dist").join(version());
     assert!(build(&out, &[]).status.success());
     // a pack of the dist is edited: the seat must read THIS copy (a mark in boot's neighbour that makes the launcher default port 0), proving the repo's packs are not the ones read
     let pack = out.join("packs/launcher.c1f");
@@ -118,7 +118,7 @@ fn serve_from_the_built_folder_finds_its_packs_there_and_not_in_the_repo() {
 #[test]
 fn the_wheel_payload_is_the_dist_without_a_version_folder_and_names_its_interface() {
     let t = tmp("d");
-    let out = t.join("dist").join(VERSION);
+    let out = t.join("dist").join(version());
     assert!(build(&out, &[]).status.success());
     let payload = t.join("payload");
     let o = Command::new("sh").arg(repo().join("scripts/dist/assemble_wheel_payload.sh")).arg(&out).arg(&payload).output().unwrap();
@@ -127,12 +127,12 @@ fn the_wheel_payload_is_the_dist_without_a_version_folder_and_names_its_interfac
     use std::os::unix::fs::PermissionsExt;
     assert!(std::fs::metadata(payload.join("dist/bin/cliffvm")).unwrap().permissions().mode() & 0o111 != 0);
     for d in ["packs", "apps"] { assert!(payload.join("dist").join(d).is_dir(), "{d}"); }
-    assert_eq!(std::fs::read_to_string(payload.join("dist/VERSION")).unwrap().trim(), VERSION);
+    assert_eq!(std::fs::read_to_string(payload.join("dist/VERSION")).unwrap().trim(), version());
     let v = Command::new("sh").arg(repo().join("scripts/dist/verify.sh")).arg(payload.join("dist")).output().unwrap();
     assert!(v.status.success(), "{}", String::from_utf8_lossy(&v.stderr));
-    // `cliffvm --version` from the payload
+    // `cliffvm --version` from the payload: the engine's version (the product's is in the stamp above)
     let r = Command::new(payload.join("dist/bin/cliffvm")).arg("--version").output().unwrap();
-    assert!(String::from_utf8_lossy(&r.stdout).contains(VERSION));
+    assert!(String::from_utf8_lossy(&r.stdout).contains(common::engine_version()));
     let _ = std::fs::remove_dir_all(&t);
 }
 

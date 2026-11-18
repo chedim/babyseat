@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 struct Run { child: Child, lines: Receiver<String>, port: u16, said: Vec<String> }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
@@ -36,7 +36,7 @@ fn copy_dir(from: &Path, to: &Path) {
 fn dist(tag: &str) -> PathBuf {
     let d = tmp(tag).join("dist");
     std::fs::create_dir_all(d.join("bin")).unwrap();
-    std::fs::copy(BIN, d.join("bin/cliffvm")).unwrap();
+    std::fs::copy(cliffvm_bin(), d.join("bin/cliffvm")).unwrap();
     copy_dir(&repo_membrane().join("packs"), &d.join("packs"));
     copy_dir(&repo_membrane().join("apps"), &d.join("apps"));
     d
@@ -94,11 +94,11 @@ fn bearer(data: &Path) -> String { format!("Authorization: Bearer {}\r\n", std::
 
 #[test]
 fn help_names_every_option_and_where_the_defaults_live() {
-    let o = Command::new(BIN).args(["serve", "--help"]).output().unwrap();
+    let o = Command::new(cliffvm_bin()).args(["serve", "--help"]).output().unwrap();
     assert!(o.status.success());
     let t = String::from_utf8_lossy(&o.stdout);
     for w in ["cliffvm serve", "--port", "--data-dir", "--bind", "--fact", "--store", "--root", "127.0.0.1", "ANTHROPIC_API_KEY", "chat_auth=login", "CLAUDE_BIN", "launcher.c1f"] { assert!(t.contains(w), "help names {w}: {t}"); }
-    let top = Command::new(BIN).arg("--help").output().unwrap();
+    let top = Command::new(cliffvm_bin()).arg("--help").output().unwrap();
     assert!(String::from_utf8_lossy(&top.stdout).contains("serve"), "the top usage lists serve");
 }
 
@@ -137,7 +137,7 @@ fn it_finds_packs_apps_and_ui_next_to_its_own_binary_and_serves_the_page_and_the
 fn a_binary_with_no_packs_beside_it_says_where_it_looked_and_how_to_name_the_folder() {
     let d = tmp("b");
     std::fs::create_dir_all(d.join("bin")).unwrap();
-    std::fs::copy(BIN, d.join("bin/cliffvm")).unwrap();
+    std::fs::copy(cliffvm_bin(), d.join("bin/cliffvm")).unwrap();
     let o = busy_retry(|| Command::new(d.join("bin/cliffvm")).args(["serve", "--port", "0", "--data-dir", d.join("data").to_str().unwrap()]).current_dir(&d).output());
     assert_eq!(o.status.code(), Some(2), "refused");
     let e = String::from_utf8_lossy(&o.stderr);
@@ -152,7 +152,7 @@ fn root_names_a_folder_that_is_not_the_binarys_own_and_the_repo_tree_is_one() {
     let data = d.join("data");
     let claude = fake_claude(&d);
     // the repo's membrane/ has the dist's shape (packs/ apps/): the dev wrapper names it with --root
-    let run = start(Path::new(BIN), &["--port", "0", "--data-dir", data.to_str().unwrap(), "--root", repo_membrane().to_str().unwrap()], &[("CLAUDE_BIN", claude.to_str().unwrap())], &[]);
+    let run = start(Path::new(cliffvm_bin()), &["--port", "0", "--data-dir", data.to_str().unwrap(), "--root", repo_membrane().to_str().unwrap()], &[("CLAUDE_BIN", claude.to_str().unwrap())], &[]);
     assert!(get(run.port, "/global/health", &bearer(&data)).0.starts_with("HTTP/1.1 200"));
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -205,7 +205,7 @@ fn with_no_data_dir_the_seat_lives_under_the_users_data_location() {
 #[test]
 fn bad_arguments_are_refused_with_the_serve_usage() {
     for args in [&["serve", "--port", "x"][..], &["serve", "--nope"], &["serve", "app"], &["serve", "--fact", "novalue"]] {
-        let o = Command::new(BIN).args(args).output().unwrap();
+        let o = Command::new(cliffvm_bin()).args(args).output().unwrap();
         assert_eq!(o.status.code(), Some(64), "{args:?}");
         assert!(String::from_utf8_lossy(&o.stderr).contains("cliffvm serve"), "{args:?}");
     }
@@ -308,7 +308,7 @@ fn with_no_legacy_and_no_variable_no_legacy_path_is_told_and_help_names_both() {
     let run = start(&d.join("bin/cliffvm"), &["--port", "0", "--data-dir", data.to_str().unwrap()], &[("CLAUDE_BIN", "/usr/bin/true")], &["MEMBRANE_DATA_DIR"]);
     assert_eq!(legacy_fact(&run, &data), None, "nothing named: the cutover pack searches its own places");
     drop(run);
-    let h = Command::new(BIN).args(["serve", "--help"]).output().unwrap();
+    let h = Command::new(cliffvm_bin()).args(["serve", "--help"]).output().unwrap();
     let h = String::from_utf8_lossy(&h.stdout);
     assert!(h.contains("--legacy") && h.contains("MEMBRANE_DATA_DIR") && h.contains("legacy_path"), "{h}");
     let _ = std::fs::remove_dir_all(t);

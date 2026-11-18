@@ -11,7 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 struct Run { child: Child, _lines: Receiver<String>, port: u16, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
 
@@ -30,7 +30,7 @@ fn command(dir: &std::path::Path, facts: &[String], extra: &[std::path::PathBuf]
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
     let mut packs: Vec<String> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect();
     packs.extend(extra.iter().map(|p| p.to_string_lossy().to_string()));
-    let mut cmd = Command::new(BIN);
+    let mut cmd = Command::new(cliffvm_bin());
     cmd.current_dir(dir).arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f")).args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"]);
     cmd.arg("--fact").arg(format!("door_secret_file={}", dir.join("door.secret").display()));
     cmd.arg("--fact").arg(format!("seat_data_dir={}", dir.display()));
@@ -75,7 +75,7 @@ use graphlink_core::link::{Event, Link, Me};
 use graphlink_core::transport::Transport;
 use graphlink_net::{Listener, Tcp};
 
-const BRIDGE: &str = common::bin("graphlink-bridge");
+fn bridge_bin() -> &'static str { common::bin("graphlink-bridge") }
 struct Kill(Child);
 impl Drop for Kill { fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); } }
 
@@ -140,7 +140,7 @@ impl Remote {
 
 fn bridge(mode: &str, addr: &str, name: &str, dir: &std::path::Path) -> Kill {
     let token = dir.join("peers").join(format!("{name}.token"));
-    Kill(Command::new(BRIDGE).args([mode, addr, "--peer", name, "--slots", "64", "--key-cap", "128", "--val-cap", "1024", "--epoch", "1", "--spins", "1000000", "--depth", "32", "--token-file"]).arg(token)
+    Kill(Command::new(bridge_bin()).args([mode, addr, "--peer", name, "--slots", "64", "--key-cap", "128", "--val-cap", "1024", "--epoch", "1", "--spins", "1000000", "--depth", "32", "--token-file"]).arg(token)
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(std::fs::File::create(dir.join("bridge.log")).unwrap()).spawn().unwrap())
 }
 
@@ -172,7 +172,7 @@ fn a_remote_that_reaches_the_seat_through_a_listening_bridge_writes_a_node_only_
     let dir = tmp("write");
     let run = start(&dir, &[format!("peers={}", decl(&name, Some("kitchen"))), rule("kitchen", "Lamp:")]);
     // the listening bridge prints its address
-    let mut child = Command::new(BRIDGE).args(["listen", "127.0.0.1:0", "--peer", &name, "--slots", "64", "--key-cap", "128", "--val-cap", "1024", "--epoch", "1", "--spins", "1000000", "--depth", "32", "--token-file"])
+    let mut child = Command::new(bridge_bin()).args(["listen", "127.0.0.1:0", "--peer", &name, "--slots", "64", "--key-cap", "128", "--val-cap", "1024", "--epoch", "1", "--spins", "1000000", "--depth", "32", "--token-file"])
         .arg(run.dir.join("peers").join(format!("{name}.token"))).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(std::fs::File::create(dir.join("bridge.log")).unwrap()).spawn().unwrap();
     let mut line = String::new();
     BufReader::new(child.stdout.as_mut().unwrap()).read_line(&mut line).unwrap();
@@ -199,7 +199,8 @@ fn a_bridge_the_seat_supervises_is_started_again_when_it_dies_and_the_remotes_va
     let (mut remote, addr) = Remote::listening();
     // the seat starts the bridge itself: the program is `sh`, which notes its pid and becomes the bridge
     let token = dir.join("peers").join(format!("{name}.token"));
-    let line = format!("echo $$ >> {}; exec {BRIDGE} connect {addr} --peer {name} --slots 64 --key-cap 128 --val-cap 1024 --epoch 1 --spins 1000000 --depth 32 --token-file {} --die-with-parent", marker.display(), token.display());
+    let bridge = bridge_bin();
+    let line = format!("echo $$ >> {}; exec {bridge} connect {addr} --peer {name} --slots 64 --key-cap 128 --val-cap 1024 --epoch 1 --spins 1000000 --depth 32 --token-file {} --die-with-parent", marker.display(), token.display());
     let mut decl = json!([{"name": name, "ns": "kitchen", "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 1024, "spins": 1_000_000, "depth": 32,
                            "run": {"argv": ["sh", "-c", line], "restart_wait_s": 0.5, "max_restarts": 3, "reset_after_s": 600}}]);
     decl[0]["ns"] = json!("kitchen");
@@ -232,7 +233,8 @@ fn probe_of(dir: &std::path::Path, reads: &str) -> std::path::PathBuf {
 /// the supervised program of a seat: `sh` notes nothing, it becomes the bridge
 fn bridge_run(mode: &str, addr: &str, name: &str, dir: &std::path::Path, seat_name: &str) -> J {
     let token = dir.join("peers").join(format!("{name}.token"));
-    let line = format!("exec {BRIDGE} {mode} {addr} --peer {name} --seat-name {seat_name} --slots 64 --key-cap 128 --val-cap 1024 --epoch 1 --spins 1000000 --depth 32 --token-file {} --die-with-parent", token.display());
+    let bridge = bridge_bin();
+    let line = format!("exec {bridge} {mode} {addr} --peer {name} --seat-name {seat_name} --slots 64 --key-cap 128 --val-cap 1024 --epoch 1 --spins 1000000 --depth 32 --token-file {} --die-with-parent", token.display());
     json!({"argv": ["sh", "-c", line], "restart_wait_s": 0.5, "max_restarts": 20, "reset_after_s": 600})
 }
 
