@@ -33,7 +33,7 @@ IMPORT semtext 1
 -- ---- which model, which endpoint ---------------------------------------------------------------------------------------------------------------------
 ChatMessage.oai_entry getter:
   WHEN this.over: None
-  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') != 'claude-agent'] or [None])[0]
+  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') not in ['claude-agent', 'membrama']] or [None])[0]
 ChatMessage.oai_local getter: prop('Model:' + this.model_eff, 'backend') == 'ollama'
 ChatMessage.oai_base getter:
   WHEN this.oai_entry != None: str(prop(this.oai_entry, 'base_url') or '')
@@ -61,7 +61,7 @@ ChatMessage.oai_tools getter:
   ELSE WHEN prop(this.oai_trr, 'rc') != 0 or prop(this.oai_trr, 'http_status') != 200 or not (this.oai_tlist is List): {'fail': 'The door\'s tool list could not be read for the model ' + this.model_eff + ' (' + str(prop(this.oai_trr, 'head')) + '): ' + str(prop(this.oai_trr, 'body') or '')}
   ELSE: {'tools': [{'type': 'function', 'function': {'name': prop(t, 'name'), 'description': prop(t, 'description'), 'parameters': prop(t, 'inputSchema')}} for t in this.oai_tlist]}
 Chat.oai_tools on-setter oai-first:
-  WHEN prop(this.oai_tools, 'tools') != None and not this.over:
+  WHEN prop(this.oai_tools, 'tools') != None and not this.over and this.mb_cfg == None:
     membrane::Chat[this.cp]:turn.oai_tools = prop(this.oai_tools, 'tools')
     membrane::Chat[this.cp]:turn:round[1] = ChatRound(cp: this.cp, n: 1, messages: [{'role': 'system', 'content': join([this.note, this.banner_slot], '\n\n')}, {'role': 'user', 'content': this.text}])
     membrane::Chat[this.cp]:turn:round[1].go = True
