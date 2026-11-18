@@ -10,7 +10,7 @@ decisions; it is in git history. Nothing is published by any workflow; publishin
 | 1 | packs and apps | files in a version-stamped folder next to the binary, not embedded |
 | 2 | launcher shape | the defaults live in c1f (`membrane/packs/launcher.c1f`: no hidden Rust defaults); `cliffvm serve` only finds the install folder, the data folder and the claude CLI and runs the seat; a Python command only executes it |
 | 3 | Home Assistant integration | NOT frozen on the old package: it downloads the release tarball of its own version and runs the seat inside Home Assistant (the default), or connects to a seat (`requirements: []`, docs/home-assistant.md) |
-| 4 | version | `0.7.61` everywhere user-facing (`cliffvm:Cargo.toml`, `pyproject.toml`, the Home Assistant manifest, the dist `VERSION`); CITATION.cff and CHANGELOG.md are written at the release commit |
+| 4 | version | `0.7.61` everywhere user-facing (`pyproject.toml`, the Home Assistant manifest, the dist `VERSION`; the engine's own version is the dist `ENGINE`); CITATION.cff and CHANGELOG.md are written at the release commit |
 | 5 | default bind | `127.0.0.1` (`--bind` opens it) |
 | 6 | default port | `4096` (`--port` changes it; there is no second port: the 0.7 OpenAI/Ollama proxy on 11500 is gone) |
 | 7 | data folder | named `membrane`: `$XDG_DATA_HOME/membrane`, else `~/Library/Application Support/membrane` (macOS) or `~/.local/share/membrane`; `--data-dir` overrides |

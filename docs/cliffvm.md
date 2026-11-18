@@ -4,7 +4,7 @@ Status: describes `cliffvm` 0.7.63 (the engine is the cliffvm repository, `cliff
 Python is only the pip wrapper (`membrane/launcher.py`) and the Home Assistant component. The user-facing page is the README; auth is docs/auth.md. Items still in progress are marked with the branch that carries them.
 
 `cliffvm` is the cliffhanger field VM as a process of its own: no Python, no pyo3. `cliffvm --version` prints `cliffvm 0.7.63`
-(the `version` of `cliffvm:Cargo.toml`, the one number of the release: pyproject, the Home Assistant manifest and the dist folder's `VERSION` carry the same). `cliffvm --help` prints the usage;
+(the product's version is `pyproject.toml`'s: the Home Assistant manifest and the dist folder's `VERSION` carry the same; the engine has its own, the `version` of `cliffvm:Cargo.toml`, stamped in the dist folder as `ENGINE`). `cliffvm --help` prints the usage;
 `cliffvm serve --help` the launcher's options. The command name lives in ONE place, the `[[bin]] name` in `cliffvm:Cargo.toml`.
 
 **The door is strict and there are no users** (docs/auth.md). `cliffvm serve` makes a door secret and an admin token in the data folder; every route but the page's shell needs a verified token and every verified token is the
