@@ -6,7 +6,7 @@ mod common;
 use graphlink_core::frame::{Frame, Op, Target, VERSION};
 use graphlink_core::link::{Event, Link, Me};
 use graphlink_core::transport::Transport;
-use graphlink_shm::cells::{Cell, CellState, CellsReader};
+use graphlink_shm::cells::{Cell, CellState, Cells, CellsReader, Reclaim};
 use graphlink_shm::Shm;
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -426,4 +426,52 @@ fn a_peer_cannot_ask_the_seat_to_write_a_node_of_another_namespace() {
     let why = receipt(&peer.events, "w1").unwrap().expect("refused");
     assert!(why.contains("not a node of this seat"), "{why}");
     drop(run);
+}
+
+// ---- reclaiming slots (graphlink docs/shared-memory.md, 4b): a retired entity becomes Gone cells, and the seat's table is reused once the peer has acknowledged the removals
+
+/// the same declaration with the number of slots the test chooses
+fn decl_slots(name: &str, slots: u64) -> String { json!([{"name": name, "ring_bytes": 65536, "slots": slots, "key_cap": 128, "val_cap": 1024, "spins": 1_000_000, "depth": 32}]).to_string() }
+fn state_of(r: &CellsReader, eid: &str, prop: &str) -> Option<CellState> { r.get(&key(eid, prop), 1_000_000, 32).unwrap().map(|c| c.state) }
+
+#[test]
+fn a_retired_entity_under_a_subscribed_prefix_becomes_gone_cells_node_and_props() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("retire"), &[format!("peers={}", decl(&name))]);
+    put(run.port, "Lamp:desk", "power", json!("off"));
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    let cells = seat_cells(&name);
+    peer.say(vec![Op::Sub { target: Target::Prefix("Lamp:".into()), props: None, limit: None }]);
+    assert!(cell_when(&cells, &key("Lamp:desk", "power"), 30, |c| matches!(c, Some(c) if c.state == CellState::Live)).is_some());
+    put(run.port, "Lamp:desk", "retire", json!(true));
+    let node = cell_when(&cells, &key("Lamp:desk", ""), 30, |c| matches!(c, Some(c) if c.state == CellState::Gone));
+    assert!(matches!(node, Some(ref c) if c.state == CellState::Gone), "the retired entity's own cell never became Gone: {node:?}");
+    assert_eq!(state_of(&cells, "Lamp:desk", "power"), Some(CellState::Gone), "its props are Gone too, or their slots could never be reclaimed");
+}
+
+#[test]
+fn entities_born_and_retired_round_after_round_pass_through_a_seat_table_too_small_for_them_all() {
+    // 12 slots; each round makes three lamps of THREE cells each (the entity's own cell, its prop, and the `summary` the seat adds): nine cells, so two rounds cannot fit without reclaiming;
+    // the peer acknowledges the removals as the library tells it to
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("churn"), &[format!("peers={}", decl_slots(&name, 12))]);
+    let mut peer = PeerEnd::open(&name, "kitchen");
+    let cells = seat_cells(&name);
+    let _ = graphlink_shm::remove_region(&format!("/gl-{name}-pc"));
+    let mut mine = Cells::create(format!("/gl-{name}-pc"), 8, 128, 1024, 1).unwrap();   // the peer's own table: the seat reads it, and the acknowledgements go in it
+    let mut rec = Reclaim::new();
+    peer.say(vec![Op::Sub { target: Target::Prefix("Lamp:".into()), props: None, limit: None }]);
+    for round in 0..4 {
+        let ids: Vec<String> = (0..3).map(|i| format!("Lamp:r{round}e{i}")).collect();
+        for id in &ids { put(run.port, id, "power", json!("on")); }
+        for id in &ids { for prop in ["", "power"] { assert!(cell_when(&cells, &key(id, prop), 30, |c| matches!(c, Some(c) if c.state == CellState::Live)).is_some_and(|c| c.state == CellState::Live), "round {round}: {id} {prop:?} never became a cell"); } }
+        for id in &ids { put(run.port, id, "retire", json!(true)); }
+        for id in &ids { assert!(cell_when(&cells, &key(id, ""), 30, |c| matches!(c, Some(c) if c.state == CellState::Gone)).is_some_and(|c| c.state == CellState::Gone), "round {round}: {id} never became Gone"); }
+        // the peer has seen the removals and says so
+        let seen = Reclaim::before(&cells);
+        let _ = cells.scan("", 1_000_000, 32).unwrap();
+        rec.after(seen, &cells, &mut mine, 1_000_000, 32).unwrap();
+    }
 }
