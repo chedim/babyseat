@@ -4,7 +4,7 @@
 //! zone with no daylight saving (`TZ=Etc/GMT-2`, UTC+2), so the expected epochs are plain arithmetic.
 mod common;
 
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -42,7 +42,7 @@ fn host_at(d: &std::path::Path, c: &Clock, boot: bool) -> Host {
     for n in ["entity", "boot", "cron", "cron_probe"] { h.load_pack(n, &pack_or_probe(n)).unwrap_or_else(|e| panic!("pack {n}: {e}")); }
     h.load_stored_entities();
     h.rebuild();
-    if boot { membrane_vm::host::boot_started(&h, &Map::new(), true); }
+    if boot { cliffvm::host::boot_started(&h, &Map::new(), true); }
     h.pump();
     h
 }
@@ -225,7 +225,7 @@ fn the_fire_is_journalled_once_and_a_replay_ends_in_the_same_state_without_firin
     go(&h, &c, t0() + 20.0);
     assert_eq!(s(&h, "j", "seen"), json!(2));
     let j = h.journal();
-    let receipts: Vec<_> = j.iter().filter(|l| matches!(l, membrane_vm::host::Line::Write { eid, prop, .. } if eid == "Cron:j" && prop == "arm_result")).collect();
+    let receipts: Vec<_> = j.iter().filter(|l| matches!(l, cliffvm::host::Line::Write { eid, prop, .. } if eid == "Cron:j" && prop == "arm_result")).collect();
     assert_eq!(receipts.len(), 2, "each fire is ONE outside write: {receipts:?}");
     assert!(receipts.iter().all(|l| l.writer() == "host:record:arm"), "stamped as a recorded receipt");
     // replay: no drivers (no timer to arm, nothing to wait for), the clock far ahead: nothing may fire

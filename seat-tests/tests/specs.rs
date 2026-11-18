@@ -1,5 +1,5 @@
 //! Every spec in tests/specs/*.json runs (the harness is src/spec.rs); a failure prints each wrong value.
-use membrane_vm::spec;
+use cliffvm::spec;
 
 #[test]
 fn every_spec_passes() {

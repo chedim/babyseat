@@ -1,8 +1,8 @@
 //! A malformed JSON body to the door is handled exactly as before `json(bad text)` became an Error (#1143, operator decision 2026-11-13):
 //! every pack line that read "not JSON is fine" treats the Error as the plain null it used to be.
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host};
 use serde_json::{json, Value as J};
 
 struct H;
@@ -40,7 +40,7 @@ fn ask(path: &str, body: &str) -> (serde_json::Map<String, J>, std::path::PathBu
     let p = d.join("field.sqlite3").to_str().unwrap().to_string();
     { let c = rusqlite::Connection::open(&p).unwrap(); c.pragma_update(None, "journal_mode", "WAL").unwrap();
       c.execute_batch("CREATE TABLE IF NOT EXISTS c_field (k TEXT PRIMARY KEY, body TEXT NOT NULL, cls TEXT, updated REAL NOT NULL DEFAULT 0);").unwrap(); }
-    c.store = Some(Store::with_exec(&p, std::sync::Arc::new(membrane_vm::sqlexec::NativeSqlExec::new(&p).unwrap())));
+    c.store = Some(Store::with_exec(&p, std::sync::Arc::new(cliffvm::sqlexec::NativeSqlExec::new(&p).unwrap())));
     c.load("Boot:seat".into(), "Boot".into(), json!({"ui_dir": "/x", "facts": {"seat_data_dir": d.to_str().unwrap()}}).as_object().unwrap().clone(), None, 0.0);
     let req = json!({"method": "POST", "query": "", "headers": {}, "peer": "127.0.0.1:5", "path": path, "conn": 7, "body": body, "authed": true, "sub": "admin", "claims": {"sub": "admin"}});
     let mut seq = 1;

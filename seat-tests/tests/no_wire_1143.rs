@@ -1,7 +1,7 @@
 //! The write feed is gone (#1143, operator 2026-11-14): the host no longer notes applied writes and no longer writes a batch entity per round. A pack that owns the class `Wire` (the
 //! feed's old marker) with a setter on `batch` gets NO `Wire` entity and no evaluation when a stored class is written; the eval accounting shows no `Wire` row.
 #![cfg(feature = "bin")]
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::json;
 
 #[test]

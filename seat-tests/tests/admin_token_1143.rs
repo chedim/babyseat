@@ -82,7 +82,7 @@ fn the_boot_makes_the_secret_and_writes_an_admin_token_that_the_door_accepts_and
     assert!(secret_of(&dir).len() >= 32);
     assert_eq!(mode(&dir.join("admin.token")), 0o600);
     let tok = token_of(&dir);
-    let claims = membrane_vm::jwt::verify(&tok, &secret_of(&dir), now()).expect("the token verifies with the door's secret");
+    let claims = cliffvm::jwt::verify(&tok, &secret_of(&dir), now()).expect("the token verifies with the door's secret");
     assert_eq!(claims["sub"], "admin");
     assert_eq!(claims["exp"].as_f64().unwrap() - claims["iat"].as_f64().unwrap(), 2592000.0, "the default life is 30 days");
     // a bare loopback caller: the released 401; with the file's token: served
@@ -94,9 +94,9 @@ fn the_boot_makes_the_secret_and_writes_an_admin_token_that_the_door_accepts_and
     assert_eq!(http(port, "GET", "/global/health", &bearer(&tok), "").0, 200);
     assert_eq!(http(port, "GET", "/ui/serve/global/health", &bearer(&tok), "").0, 200);
     // another key, and a token past its life: 401
-    let other = membrane_vm::jwt::mint(b"another secret of at least 32 bytes!!", "admin", "admin", 3600.0, now()).unwrap();
+    let other = cliffvm::jwt::mint(b"another secret of at least 32 bytes!!", "admin", "admin", 3600.0, now()).unwrap();
     assert_eq!(http(port, "GET", "/global/health", &bearer(&other), "").0, 401);
-    let old = membrane_vm::jwt::mint(&secret_of(&dir), "admin", "admin", 60.0, now() - 7200.0).unwrap();
+    let old = cliffvm::jwt::mint(&secret_of(&dir), "admin", "admin", 60.0, now() - 7200.0).unwrap();
     assert_eq!(http(port, "GET", "/global/health", &bearer(&old), "").0, 401);
     // the public set stays public, and the page's cookie flow works: the page from this machine is given the admin cookie, /ui/login turns a token into one
     for p in ["/", "/index.html", "/membrane"] { assert_ne!(http(port, "GET", p, "", "").0, 401, "{p}"); }
@@ -132,7 +132,7 @@ fn the_path_is_a_fact_of_the_boot_and_the_token_is_nowhere_in_the_field() {
 fn the_life_is_a_boot_fact_and_the_sub_is_always_admin() {
     let dir = tmp("admin-token-facts");
     let (_run, _port) = launch_secret(&dir, &["--fact", "operator=ann", "--fact", "admin_token_ttl_s=120"]);
-    let claims = membrane_vm::jwt::verify(&token_of(&dir), &secret_of(&dir), now()).unwrap();
+    let claims = cliffvm::jwt::verify(&token_of(&dir), &secret_of(&dir), now()).unwrap();
     assert_eq!(claims["sub"], "admin", "no users: the operator fact names nobody (a leftover `--fact operator=` is ignored)");
     assert_eq!(claims["exp"].as_f64().unwrap() - claims["iat"].as_f64().unwrap(), 120.0);
 }
@@ -149,7 +149,7 @@ fn a_restart_keeps_the_secret_and_replaces_the_token_file_with_a_fresh_one() {
     assert_ne!(first, second, "every boot rotates the token");
     assert_eq!(secret_of(&dir), secret, "the secret is kept");
     assert_eq!(mode(&dir.join("admin.token")), 0o600);
-    assert_eq!(membrane_vm::jwt::verify(&second, &secret, now()).unwrap()["sub"], "admin");
+    assert_eq!(cliffvm::jwt::verify(&second, &secret, now()).unwrap()["sub"], "admin");
     assert_eq!(http(port, "GET", "/global/health", &bearer(&second), "").0, 200);
     let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.contains("admin.token") && n != "admin.token").collect();
     assert!(leftovers.is_empty(), "the replace leaves no temp file: {leftovers:?}");

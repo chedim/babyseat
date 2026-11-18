@@ -102,7 +102,7 @@ fn admin_token(dir: &Dir) -> String { wait("the admin token", || std::fs::read_t
 fn person_token(dir: &Dir, sub: &str) -> String {
     let secret = wait("the secret", || std::fs::read_to_string(dir.0.join("door.secret")).ok().filter(|t| !t.trim().is_empty()));
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-    membrane_vm::jwt::mint(secret.trim().as_bytes(), sub, sub, 3600.0, now).unwrap()
+    cliffvm::jwt::mint(secret.trim().as_bytes(), sub, sub, 3600.0, now).unwrap()
 }
 
 /// (id, kind, live): the rows of the design after the operator's answers

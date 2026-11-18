@@ -2,7 +2,7 @@
 //! by their WORLDLINE (a young entity's mean, an old one's episodes), centred on the field's background, then the texts that moved those entities, each scored by the sum over
 //! the entities of (similarity x the move the text made of it). One getter, `SemText.entity_votes`, rows `{key, of, text, score}`; the vote of `recall` reads it (vote_1143.rs).
 //! Every test runs the shipped packs in process, with no model server: the receipts are written by the test (the field_1143 harness).
-use membrane_vm::host::{boot_started, Host, Options};
+use cliffvm::host::{boot_started, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -29,7 +29,7 @@ fn load(h: &Host, layer: Option<&str>) {
     h.rebuild();
 }
 fn seat_with(layer: Option<&str>) -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let mut o = Options::new(None);
     o.effects = false;
     let h = Host::open(o).unwrap();
@@ -350,22 +350,22 @@ fn a_realistic_field_stays_inside_the_step_budget() {
     if std::env::var("ER_BISECT").is_ok() {
         // the smallest step budget under which no evaluation of the entity recall fails (the recall is asked again under each budget)
         let ok = |b: u64| -> bool {
-            membrane_vm::expr::set_eval_budget(Some(b));
+            cliffvm::expr::set_eval_budget(Some(b));
             h.write(&leaf("q"), "recall_on", json!(false), "person"); h.pump();
             h.write(&leaf("q"), "recall_on", json!(true), "person"); h.pump();
             let f = h.get(&leaf("q"), "failed");
             let good = f.as_object().map(|m| m.keys().all(|k| !k.starts_with("ent"))).unwrap_or(true) && h.get(&leaf("q"), "entity_votes").as_array().map(|a| a.len()) == Some(20);
-            membrane_vm::expr::set_eval_budget(None);
+            cliffvm::expr::set_eval_budget(None);
             good
         };
         let (mut lo, mut hi) = (1u64, 100_000u64);
         assert!(ok(hi));
         while hi - lo > 100 { let mid = (lo + hi) / 2; if ok(mid) { hi = mid } else { lo = mid } }
         eprintln!("ER_BISECT texts {n}: the largest evaluation of the entity recall takes about {hi} steps");
-        membrane_vm::expr::set_eval_budget(Some(hi - 200));
+        cliffvm::expr::set_eval_budget(Some(hi - 200));
         h.write(&leaf("q"), "recall_on", json!(false), "person"); h.pump();
         h.write(&leaf("q"), "recall_on", json!(true), "person"); h.pump();
         eprintln!("ER_BISECT failing first under it: {}", h.get(&leaf("q"), "failed"));
-        membrane_vm::expr::set_eval_budget(None);
+        cliffvm::expr::set_eval_budget(None);
     }
 }

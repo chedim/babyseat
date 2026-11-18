@@ -3,9 +3,9 @@
 //! as it declares its imports; docs/cliffvm.md, "Storage modes".
 mod common;
 
-use membrane_vm::fields::Storage;
-use membrane_vm::host::{Host, Options};
-use membrane_vm::syntax::parse_full;
+use cliffvm::fields::Storage;
+use cliffvm::host::{Host, Options};
+use cliffvm::syntax::parse_full;
 use std::path::PathBuf;
 
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }

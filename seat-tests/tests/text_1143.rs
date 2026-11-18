@@ -1,7 +1,7 @@
 //! The native tokenizer (#1143, docs/semtext-and-legs.md "Tokenizer (built)"): span layers over a flat string, offsets in
 //! Unicode scalar values (chars), never bytes. Every test also checks the invariants: sorted, non-overlapping within the
 //! layer, inside the string, and slicing by the offsets gives the surface.
-use membrane_vm::text::{spans, Layer, Span};
+use cliffvm::text::{spans, Layer, Span};
 
 fn chars_of(t: &str, s: &Span) -> String { t.chars().skip(s.start).take(s.end - s.start).collect() }
 

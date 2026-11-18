@@ -2,8 +2,8 @@
 //! compact native store (not in the entity's row), and the builtin `near(list, 'Vector', k)` finds the k nearest by cosine. docs/cliffvm.md ("Storage modes"), docs/c1f-stdlib.md.
 mod common;
 
-use membrane_vm::host::{Host, Line, MemoryConfig, Options};
-use membrane_vm::syntax::parse_full;
+use cliffvm::host::{Host, Line, MemoryConfig, Options};
+use cliffvm::syntax::parse_full;
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};

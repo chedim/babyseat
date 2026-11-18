@@ -4,7 +4,7 @@
 //! Host-level tests on small synthetic stores (seat-tests/tests/legacy_fixture); the real-store numbers are measured on a private seat (see the report), never here. No clock: counts and contents only.
 mod common;
 
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -46,8 +46,8 @@ fn host_with_env(d: &std::path::Path, extra: &[(&str, J)], env: &[(&str, String)
     for n in PACKS { h.load_pack(n, &pack(n)).unwrap_or_else(|e| panic!("pack {n}: {e}")); }
     h.load_stored_entities();
     h.rebuild();
-    membrane_vm::host::boot_environment(&h, &facts_of(d, extra), &env.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<Vec<_>>());
-    membrane_vm::host::boot_started(&h, &facts_of(d, extra), true);
+    cliffvm::host::boot_environment(&h, &facts_of(d, extra), &env.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<Vec<_>>());
+    cliffvm::host::boot_started(&h, &facts_of(d, extra), true);
     h.pump();
     h
 }
@@ -335,7 +335,7 @@ fn the_import_leaves_what_it_wrote_out_of_memory_so_the_loaded_entities_stay_a_f
     // the VM's own policy bounds it (no pack, no write): the budget is a boot fact, the reading is the test's (the process is over its budget the whole import), the batch is
     // what one drain may evict; the import writes rows nobody reads back, so the coldest are always the ones it wrote first
     let h = host_with(&d, &[("legacy_batch", json!(batch))]);
-    h.set_memory(membrane_vm::host::MemoryConfig { budget_mb: Some(100), soft: None, hard: Some(0.9), batch: Some(64) });
+    h.set_memory(cliffvm::host::MemoryConfig { budget_mb: Some(100), soft: None, hard: Some(0.9), batch: Some(64) });
     h.set_rss_reading(Box::new(|| Some(95 << 20)));
     let mut peak = 0usize;
     pump_until(&h, "the end", |h| { peak = peak.max(loaded_message_entities(h)); ended(h) });

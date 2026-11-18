@@ -5,7 +5,7 @@
 //! There is NEVER a real model server here: the receipts are written by the test (the Fetch driver's own writes).
 mod common;
 
-use membrane_vm::host::{boot_started, Host, Line, Options};
+use cliffvm::host::{boot_started, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -34,7 +34,7 @@ fn load(h: &Host, layer: Option<&str>) {
     h.rebuild();
 }
 fn open(file: Option<&str>) -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let mut o = Options::new(file.map(String::from));
     o.effects = false;
     Host::open(o).unwrap()

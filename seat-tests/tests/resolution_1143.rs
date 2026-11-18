@@ -1,7 +1,7 @@
 //! ONE precedence rule (#1143, operator 2026-11-13). For each (entity, property) the getters form ONE ordered list of arms: the entity's own
 //! class first, then its `parents` in list order, then the root `Entity`; within one class the top layer first. The first arm whose WHEN
 //! holds wins; an arm without a WHEN (a default) ends the search. A WHEN that fails falls through to the next-nearer class's arm.
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }

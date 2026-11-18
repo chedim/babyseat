@@ -3,7 +3,7 @@
 //! never when the name is already set (the row or the launch fact `seat_name`), nothing when the old store holds no name. Host-level tests on a small synthetic store.
 mod common;
 
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -47,8 +47,8 @@ fn host_pre(d: &std::path::Path, extra: &[(&str, J)], pre: impl Fn(&Host)) -> Ho
     h.load_stored_entities();
     h.rebuild();
     pre(&h);
-    membrane_vm::host::boot_environment(&h, &facts_of(d, extra), &env);
-    membrane_vm::host::boot_started(&h, &facts_of(d, extra), true);
+    cliffvm::host::boot_environment(&h, &facts_of(d, extra), &env);
+    cliffvm::host::boot_started(&h, &facts_of(d, extra), true);
     h.pump();
     h
 }

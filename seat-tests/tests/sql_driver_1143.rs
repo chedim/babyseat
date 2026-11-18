@@ -4,7 +4,7 @@
 //! is the `run_result` of the query and is journalled; `rows` reads the latest receipt, an Error with the reason when the run failed.
 mod common;
 
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -357,7 +357,7 @@ fn the_boot_fact_sql_sources_births_the_same_entities_and_a_model_write_may_make
     make_db(&d.join("b.db"));
     let h = host_at(&d);
     let facts = props(json!({"sql_sources": [{"name": "a", "path": d.join("a.db").to_string_lossy(), "mode": "rw"}, {"name": "b", "path": d.join("b.db").to_string_lossy()}]}));
-    membrane_vm::host::boot_started(&h, &facts, true);
+    cliffvm::host::boot_started(&h, &facts, true);
     h.pump();
     assert_eq!(h.get("SqlSource:a", "path"), json!(d.join("a.db").to_string_lossy()));
     assert_eq!(h.get("SqlSource:a", "mode"), json!("rw"));
@@ -441,14 +441,14 @@ fn the_launch_fact_only_seeds_a_source_that_does_not_exist_a_model_write_wins_ov
     let fact = |p: &str| props(json!({"sql_sources": [{"name": "legacy", "path": d.join(p).to_string_lossy(), "mode": "ro"}]}));
     {
         let h = host_at(&d);
-        membrane_vm::host::boot_started(&h, &fact("fact.db"), true);
+        cliffvm::host::boot_started(&h, &fact("fact.db"), true);
         h.pump();
         assert_eq!(h.get("SqlSource:legacy", "path"), json!(d.join("fact.db").to_string_lossy()), "the fact seeds a source that is not there");
         source(&h, "legacy", &d.join("mine.db"), None);                     // the model points it elsewhere
         assert_eq!(h.get("SqlSource:legacy", "path"), json!(d.join("mine.db").to_string_lossy()));
     }
     let h = host_at(&d);                                                      // a restart with the same fact
-    membrane_vm::host::boot_started(&h, &fact("fact.db"), true);
+    cliffvm::host::boot_started(&h, &fact("fact.db"), true);
     h.pump();
     assert_eq!(h.get("SqlSource:legacy", "path"), json!(d.join("mine.db").to_string_lossy()), "the model's choice survives the next launch");
     assert_eq!(h.get("SqlSource:legacy", "mode_eff"), json!("ro"));

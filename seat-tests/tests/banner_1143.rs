@@ -1,7 +1,7 @@
 //! The barest seat's banner (#1143, operator 2026-11-13): the banner is FULLY the model's. `Banner:admin:main` is born once by the app's
 //! `default_banner` pack, whose `text` is a live getter (header, the previous turn's error); the model REPLACES it by loading a pack that
 //! imports `default_banner` and defines `Banner.text` (the upper layer's arm wins). The seat never edits what the model puts there; it only shows every `Banner:*` instance together (the last tests).
-use membrane_vm::host::{self, Host, Options};
+use cliffvm::host::{self, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 

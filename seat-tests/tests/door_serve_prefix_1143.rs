@@ -1,8 +1,8 @@
 //! The UI shell and its files through the door, DECIDED IN c1f (packs/door.c1f: the route table, the content types, the path
 //! rules); rust only sends the file the pack names (`Request:<n>.respond = {status, headers, file}`).
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host, Write};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host, Write};
 use serde_json::{json, Value as J};
 use std::io::{Read, Write as IoWrite};
 use std::net::TcpStream;
@@ -78,7 +78,7 @@ fn req(path: &str, extra: &str) -> String { format!("GET {path} HTTP/1.1\r\nHost
 // the page's own calls carry the token the page was given (door_auth.c1f); the bare routes need none from this machine
 fn bearer() -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-    format!("Authorization: Bearer {}\r\n", membrane_vm::jwt::mint(SECRET.as_bytes(), "ann", "ann", 3600.0, now).unwrap())
+    format!("Authorization: Bearer {}\r\n", cliffvm::jwt::mint(SECRET.as_bytes(), "ann", "ann", 3600.0, now).unwrap())
 }
 fn auth(path: &str) -> String { req(path, &bearer()) }
 

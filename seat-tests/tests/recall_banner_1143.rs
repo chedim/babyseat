@@ -3,7 +3,7 @@
 //! (sentence vectors), with the move log and entity recall, combined by the vote (vote_1143.rs), reranked by the fitted weights, shown with their origin under the header recall always had.
 //! Every test runs on the SHIPPED packs of the barest seat. Until the native `near` builtin and the embedding pipeline merge, the cosine lane's hits are
 //! written by the test (`cos_in`) and the ask's vector arrives as a stubbed receipt of the one embedding call.
-use membrane_vm::host::{self, Host, Options};
+use cliffvm::host::{self, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -16,7 +16,7 @@ fn seat() -> Host { seat_with(&props(json!({"chat_claude_bin": "/usr/bin/true", 
 fn seat_with(facts: &Map<String, J>) -> Host { seat_opts(facts, false) }
 fn seat_with_effects(facts: &Map<String, J>) -> Host { seat_opts(facts, true) }
 fn seat_opts(facts: &Map<String, J>, effects: bool) -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let mut o = Options::new(None);
     o.effects = effects;
     let h = Host::open(o).unwrap();
