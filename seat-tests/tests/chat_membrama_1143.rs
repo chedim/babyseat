@@ -38,7 +38,9 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 }
 
 /// a scratch seat whose only model is `local`, answered by membrama (the peer `peer`, the owner's numbers: 512 slots, key cap 128, value cap 65,536)
-fn seat(tag: &str, bin: &str, model: &str) -> Run {
+fn seat(tag: &str, bin: &str, model: &str) -> Run { seat_with(tag, bin, model, 5) }
+/// the same with the seconds the seat waits before it starts the peer again (a test that kills the peer makes it long, so the peer stays gone)
+fn seat_with(tag: &str, bin: &str, model: &str, restart_wait_s: u64) -> Run {
     let dir = tmp(tag);
     let peer = format!("m{}x{}", std::process::id() % 100000, common::unique().rsplit('-').next().unwrap());
     let r = repo();
@@ -48,8 +50,8 @@ fn seat(tag: &str, bin: &str, model: &str) -> Run {
     let mut argv: Vec<String> = vec![bin.into(), "serve".into(), "--peer".into(), peer.clone(), "--ns".into(), "membrama".into(), "--model".into(), model.into(), "--n-ctx".into(), "4096".into(), "--bank-cap".into(), "2000000000".into(), "--die-with-parent".into()];
     argv.extend(numbers.iter().map(|s| s.to_string()));
     let peers = json!([{"name": peer, "ns": "membrama", "ring_bytes": 65536, "slots": 512, "key_cap": 128, "val_cap": 65536, "spins": 1_000_000, "depth": 32,
-                        "run": {"argv": argv, "restart_wait_s": 5, "max_restarts": 5, "reset_after_s": 60}}]);
-    let entry = json!([{"name": "local", "backend": "membrama", "peer": peer, "max_new": 200, "enable_thinking": false}]);
+                        "run": {"argv": argv, "restart_wait_s": restart_wait_s, "max_restarts": 5, "reset_after_s": 60}}]);
+    let entry = json!([{"name": "local", "backend": "membrama", "peer": peer, "ns": "membrama", "max_new": 200, "enable_thinking": false}]);
     let mut cmd = Command::new(cliffvm_bin());
     cmd.current_dir(&dir).arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f")).args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"])
         .args(["--fact", &format!("cloud_models={entry}"), "--fact", "router_on=false", "--fact", "seat_backend=http://127.0.0.1:1",
@@ -137,4 +139,33 @@ fn a_tool_call_runs_through_the_doors_own_tool_logic_and_the_model_answers_from_
     assert_eq!(v["state"], "done", "{v}");
     assert!(v["tools"].as_array().map_or(false, |t| t.iter().any(|n| n == "entity_read")), "the model should have called entity_read: {v}");
     assert!(v["response"].as_str().unwrap_or("").contains("zebra-42"), "the answer should come from the tool's result: {v}");
+}
+
+fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})) }
+
+#[test]
+fn a_turn_whose_peer_is_gone_fails_and_says_membrama_is_not_up() {
+    let Some((bin, model)) = gate() else { return };
+    let run = seat_with("gone", &bin, &model, 600);
+    wait_until("the peer to come up", || read(run.port, "Vm:membrama", "link") == "up");
+    let _ = Command::new("pkill").args(["-f", &format!("membrama serve --peer {}", run.peer)]).status();   // the peer dies; the seat waits 600 s before it would start it again
+    wait_until("the link to say gone", || read(run.port, "Vm:membrama", "link") == "gone");
+    let id = send(run.port, "What is 2 plus 2? Answer with just the number.");
+    let v = ended(run.port, &id);
+    assert_eq!(v["state"], "error", "{v}");
+    assert!(v["response"].as_str().unwrap_or("").contains("membrama is not up"), "the turn should say why: {v}");
+}
+
+#[test]
+fn stopping_a_turn_writes_abort_on_the_open_request_and_ends_the_turn_stopped() {
+    let Some((bin, model)) = gate() else { return };
+    let run = seat("stop", &bin, &model);
+    wait_until("the peer to come up", || read(run.port, "Vm:membrama", "link") == "up");
+    let id = send(run.port, "Count from 1 to 150, one number per line, and nothing else.");
+    wait_until("the request to be written", || count(run.port, "LlmRequest") > 0);
+    let (st, body) = http(run.port, "POST", &format!("/membrane/chat/message/{id}/abort"), "");
+    assert_eq!(st, 200, "{body}");
+    let v = ended(run.port, &id);
+    assert_eq!(v["state"], "error", "{v}");
+    assert!(v["response"].as_str().unwrap_or("").to_lowercase().contains("stopped"), "the turn should say it was stopped: {v}");
 }
