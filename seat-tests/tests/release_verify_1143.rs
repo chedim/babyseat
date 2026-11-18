@@ -18,7 +18,7 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 fn repo() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn tmp(tag: &str) -> PathBuf {
@@ -77,9 +77,9 @@ fn try_start(dir: &Path, bind: Option<&str>, facts: &[&str]) -> Result<Seat, Ref
         cmd.arg(r.join("scripts/seat")).args(["--data-dir", dir.to_str().unwrap(), "--port", "0"]);
         cmd.args(["--fact", "seat_backend=http://127.0.0.1:9", "--fact", "seat_default=claude"]);   // serve defaults the model server to the real Ollama's port: a dead one, so no message of a test ever reaches it
         for f in facts { cmd.arg("--fact").arg(f); }
-        cmd.env("CLIFFVM", BIN).env("CLAUDE_BIN", &fake);
+        cmd.env("CLIFFVM", cliffvm_bin()).env("CLAUDE_BIN", &fake);
     } else {
-        cmd = Command::new(BIN);
+        cmd = Command::new(cliffvm_bin());
         cmd.arg("run").args(barest_packs()).arg(r.join("membrane/apps/barest.c1f"))
             .args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0", "--ui-dir", r.join("membrane/ui").to_str().unwrap(), "--bind", bind.unwrap()])
             .args(["--fact", &format!("door_secret_file={}", dir.join("door.secret").display()), "--fact", &format!("seat_data_dir={}", dir.display()), "--fact", &format!("chat_claude_bin={}", fake.display()), "--fact", "seat_default=claude"]);
@@ -189,7 +189,7 @@ fn secret_of(dir: &Path) -> Vec<u8> { std::fs::read_to_string(dir.join("door.sec
 fn admin_token(dir: &Path) -> String { std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string() }
 fn mode(p: &Path) -> u32 { std::fs::metadata(p).unwrap().permissions().mode() & 0o777 }
 fn mint_cli(dir: &Path, sub: &str, name: &str) -> String {
-    let o = Command::new(BIN).args(["token", "mint", "--sub", sub, "--name", name, "--ttl", "1h", "--secret-file", dir.join("door.secret").to_str().unwrap()]).output().unwrap();
+    let o = Command::new(cliffvm_bin()).args(["token", "mint", "--sub", sub, "--name", name, "--ttl", "1h", "--secret-file", dir.join("door.secret").to_str().unwrap()]).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     String::from_utf8_lossy(&o.stdout).trim().to_string()
 }

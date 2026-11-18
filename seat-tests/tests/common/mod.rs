@@ -51,3 +51,19 @@ pub fn engine_dir() -> &'static std::path::Path {
         std::path::Path::new(p["manifest_path"].as_str().unwrap()).parent().unwrap().to_path_buf()
     })
 }
+
+/// The product's version (babyseat's own: `pyproject.toml`, which `scripts/dist/build.sh` stamps into the dist). Not this package's (`CARGO_PKG_VERSION` is 0.0.0 here: it was the product's when the
+/// tests lived in the seat's own crate).
+pub fn product_version() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../pyproject.toml")).expect("pyproject.toml");
+        text.lines().find_map(|l| l.strip_prefix("version = \"").and_then(|v| v.strip_suffix('"'))).expect("a version in pyproject.toml").to_string()
+    })
+}
+
+/// The engine's version the product is pinned to (`CLIFFVM_VERSION`): what the program reports.
+pub fn engine_version() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../CLIFFVM_VERSION")).expect("CLIFFVM_VERSION").trim().to_string())
+}

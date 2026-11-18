@@ -10,7 +10,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 struct Run { child: Child, _lines: Receiver<String>, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
@@ -35,7 +35,7 @@ fn start_env(tag: &str, names: &[&str], extra: &[&str], env: &[(&str, &str)]) ->
     let pd = dir.join("packs");
     std::fs::create_dir_all(&pd).unwrap();
     for (n, t) in shipped(names) { std::fs::write(pd.join(n), t).unwrap(); }
-    let mut child = Command::new(BIN).current_dir(&dir)
+    let mut child = Command::new(cliffvm_bin()).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
         .args(extra).envs(env.iter().copied()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
@@ -218,7 +218,7 @@ fn launch(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str]) -> (Run,
 fn launch_env(dir: &std::path::Path, bin: &std::path::Path, extra: &[&str], env: &[(&str, &str)]) -> (Run, u16) {
     let pd = dir.join("packs");
     let fact = format!("chat_claude_bin={}", bin.display());
-    let mut cmd = Command::new(BIN);
+    let mut cmd = Command::new(cliffvm_bin());
     cmd.current_dir(dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap(), "--fact", &fact, "--fact", "seat_default=claude"])
         .args(extra);

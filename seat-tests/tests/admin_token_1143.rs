@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 struct Run { child: Child, _lines: Receiver<String> }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
@@ -32,7 +32,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 /// start the binary in `dir` (a second start in the same folder is a restart); -> the run and the door's port
 fn launch(dir: &std::path::Path, extra: &[&str]) -> (Run, u16) {
     let pd = dir.join("packs");
-    let mut child = Command::new(BIN).current_dir(dir)
+    let mut child = Command::new(cliffvm_bin()).current_dir(dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
         .args(extra).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();

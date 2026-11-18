@@ -13,7 +13,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 const KEY: &str = "sk-oai-PLANTED-0123456789-abcdefghij";
 const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "router.c1f", "chat.c1f", "chat_turn.c1f", "chat_oai.c1f"];
 
@@ -115,7 +115,7 @@ fn seat(tag: &str, base_url: &str, key_env: Option<(&str, &str)>, extra: &[&str]
         Some((var, _)) => json!([{"name": "gpt-fake", "backend": "openai", "base_url": base_url, "api_key_env": var}]),
         None => json!([{"name": "gpt-fake", "backend": "openai", "base_url": base_url}]),
     };
-    let mut cmd = Command::new(BIN);
+    let mut cmd = Command::new(cliffvm_bin());
     cmd.current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
         .args(["--fact", &format!("cloud_models={entry}"), "--fact", "router_on=false", "--fact", "seat_backend=http://127.0.0.1:1",

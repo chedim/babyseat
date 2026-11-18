@@ -10,7 +10,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 struct Run { child: Child, _lines: Receiver<String>, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
@@ -30,7 +30,7 @@ fn start(tag: &str, dir: Option<std::path::PathBuf>) -> (Run, u16) {
     std::fs::create_dir_all(&pd).unwrap();
     let src = format!("{}/../membrane/packs", env!("CARGO_MANIFEST_DIR"));
     for n in PACKS { std::fs::write(pd.join(n), std::fs::read_to_string(format!("{src}/{n}")).unwrap_or_else(|e| panic!("{n}: {e}"))).unwrap(); }
-    let mut child = Command::new(BIN).current_dir(&dir)
+    let mut child = Command::new(cliffvm_bin()).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();

@@ -11,7 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 /// The bound the door must come up within on a store of `SYNTHETIC` entities (a threshold, flagged: a debug build of the test binary, a busy machine).
 const BOOT_BOUND: Duration = Duration::from_secs(20);
 const SYNTHETIC: usize = 5000;
@@ -42,7 +42,7 @@ fn start(dir: &std::path::Path, facts: &[&str]) -> (Run, u16, Duration) {
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
     let packs: Vec<String> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect();
     let t = Instant::now();
-    let mut cmd = Command::new(BIN);
+    let mut cmd = Command::new(cliffvm_bin());
     cmd.current_dir(dir).arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f"))
         .args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"]);
     for f in facts { cmd.arg("--fact").arg(f); }

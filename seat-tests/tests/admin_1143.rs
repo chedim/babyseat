@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 struct Run { child: Child, _lines: Receiver<String> }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
@@ -34,7 +34,7 @@ fn launch(dir: &std::path::Path, secret: bool, more: &[&str]) -> (Run, u16) {
     let mut args: Vec<String> = ["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()].iter().map(|s| s.to_string()).collect();
     if secret { args.extend(["--fact".into(), format!("door_secret_file={}", dir.join("door.secret").display()), "--fact".into(), format!("seat_data_dir={}", dir.display())]); }
     args.extend(more.iter().map(|s| s.to_string()));
-    let mut child = Command::new(BIN).current_dir(dir).args(&args).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let mut child = Command::new(cliffvm_bin()).current_dir(dir).args(&args).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
@@ -151,7 +151,7 @@ fn the_barest_seat_is_open_makes_no_persons_and_the_caller_may_write() {
 // ---- cliffvm token mint -------------------------------------------------------------------------------------------------------------------
 
 fn mint(args: &[&str]) -> (i32, String, String) {
-    let o = Command::new(BIN).arg("token").arg("mint").args(args).output().unwrap();
+    let o = Command::new(cliffvm_bin()).arg("token").arg("mint").args(args).output().unwrap();
     (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).to_string(), String::from_utf8_lossy(&o.stderr).to_string())
 }
 fn secret_file(tag: &str) -> std::path::PathBuf {

@@ -10,7 +10,7 @@ use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 const SECRETS: [&str; 3] = ["sk-secret-w115", "xyz-w115", "pw-w115"];
 struct Seat { child: Child, port: u16, stdout: Vec<String>, stderr: std::path::PathBuf }
 impl Seat { fn stop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
@@ -43,7 +43,7 @@ fn start(dir: &std::path::Path, env: &[(&str, &str)], facts: &[&str]) -> Seat {
     let packs: Vec<String> = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap().lines().map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect();
     let stderr = dir.join("stderr.log");
-    let mut cmd = Command::new(BIN);
+    let mut cmd = Command::new(cliffvm_bin());
     cmd.current_dir(dir).env_remove("ANTHROPIC_API_KEY").arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f"))
         .args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0", "--fact", &format!("seat_data_dir={}", dir.display()), "--fact", "warm_rows=0"]);
     for f in facts { cmd.arg("--fact").arg(f); }

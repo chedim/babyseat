@@ -8,7 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 struct Run { child: Child, _lines: Receiver<String>, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
@@ -28,7 +28,7 @@ fn start(tag: &str, packs: &[(&str, &str)], ui: &[(&str, &str)], extra: &[&str])
     std::fs::create_dir_all(&ud).unwrap();
     for (n, t) in packs { std::fs::write(pd.join(format!("{n}.c1f")), t).unwrap(); }
     for (n, t) in ui { std::fs::write(ud.join(n), t).unwrap(); }
-    let mut child = Command::new(BIN)
+    let mut child = Command::new(cliffvm_bin())
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", ud.to_str().unwrap()])
         .args(extra).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
@@ -67,14 +67,14 @@ const DOOR: &str = include_str!("../../membrane/packs/door.c1f");
 
 #[test]
 fn version_prints_and_exits() {
-    let o = Command::new(BIN).arg("--version").output().unwrap();
+    let o = Command::new(cliffvm_bin()).arg("--version").output().unwrap();
     assert!(o.status.success());
     assert!(String::from_utf8_lossy(&o.stdout).starts_with("cliffvm "));
 }
 
 #[test]
 fn a_bad_command_is_refused_with_usage() {
-    let o = Command::new(BIN).args(["run"]).stderr(Stdio::piped()).stdout(Stdio::null()).output().unwrap();
+    let o = Command::new(cliffvm_bin()).args(["run"]).stderr(Stdio::piped()).stdout(Stdio::null()).output().unwrap();
     assert_eq!(o.status.code(), Some(64));
     assert!(String::from_utf8_lossy(&o.stderr).contains("usage"));
 }
@@ -115,7 +115,7 @@ fn the_binary_boots_through_the_plan_and_answers_the_shipped_routes() {
     let pd = dir.join("packs");
     std::fs::create_dir_all(&pd).unwrap();
     for (n, t) in &files { std::fs::write(pd.join(n), t).unwrap(); }
-    let mut child = Command::new(BIN).current_dir(&dir)
+    let mut child = Command::new(cliffvm_bin()).current_dir(&dir)
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", dir.to_str().unwrap()])
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
@@ -147,7 +147,7 @@ fn apps_are_layers_the_upper_apps_file_wins_and_the_first_argument_is_the_root()
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, t).unwrap();
     }
-    let mut child = Command::new(BIN).current_dir(&dir)
+    let mut child = Command::new(cliffvm_bin()).current_dir(&dir)
         .args(["run", root.join("boot.c1f").to_str().unwrap(), root.to_str().unwrap(), a.to_str().unwrap(), b.to_str().unwrap(),
                "--store", dir.join("field.sqlite3").to_str().unwrap(), "--port", "0"])
         .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();

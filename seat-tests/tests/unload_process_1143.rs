@@ -9,7 +9,7 @@ use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 const MB: u64 = 1 << 20;
 struct Run { child: Child, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
@@ -46,7 +46,7 @@ fn a_seat_over_its_memory_budget_unloads_its_coldest_and_a_reference_loads_one_b
     let r = repo();
     let packs: Vec<String> = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap().lines().map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect();
-    let mut cmd = Command::new(BIN);
+    let mut cmd = Command::new(cliffvm_bin());
     cmd.current_dir(&dir).env("MEMBRANE_TEST_RSS", &rss_file).arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f"))
         .args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"]);
     for f in ["warm_rows=300", "memory_budget_mb=100", "unload_soft=0.5", "unload_hard=0.9", "unload_batch=50"] { cmd.arg("--fact").arg(f); }

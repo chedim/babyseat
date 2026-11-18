@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 const PACKS: &[&str] = &["boot.c1f", "entity.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f",
     "door_session.c1f", "door_auth.c1f", "router.c1f", "door_models.c1f", "door_state.c1f", "ha.c1f"];
 const FACTS: [&str; 4] = [
@@ -54,7 +54,7 @@ fn setup(tag: &str) -> Dir {
 fn launch(dir: &Dir) -> (Run, u16) {
     let d = &dir.0;
     let pd = d.join("packs");
-    let mut child = Command::new(BIN).current_dir(d).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000")
+    let mut child = Command::new(cliffvm_bin()).current_dir(d).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000")
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", d.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", d.to_str().unwrap(),
                "--fact", &format!("chat_claude_bin={}", d.join("fake-claude").display()), "--fact", "seat_cwd=/srv/seat", "--fact", "seat_project=membrane", "--fact", "seat_version=1.0",
                "--fact", &format!("door_secret_file={}", d.join("door.secret").display()), "--fact", &format!("seat_data_dir={}", d.display())])

@@ -10,7 +10,7 @@ use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 struct Run { child: Child, port: u16, token: String, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
@@ -37,7 +37,7 @@ fn launch(dir: std::path::PathBuf, facts: &[&str], full: bool) -> Run {
     let mut child = if full {
         let d = dir.join("d");
         std::fs::create_dir_all(&d).unwrap();
-        Command::new(BIN).current_dir(&root).args(["run", "membrane/packs/boot.c1f", "membrane/packs", "--store", d.join("seat.sqlite").to_str().unwrap(), "--port", "0",
+        Command::new(cliffvm_bin()).current_dir(&root).args(["run", "membrane/packs/boot.c1f", "membrane/packs", "--store", d.join("seat.sqlite").to_str().unwrap(), "--port", "0",
                 "--fact", &format!("door_secret_file={}", d.join("door.secret").display()), "--fact", &format!("seat_data_dir={}", d.display()),
                 "--fact", r#"minds={"loops":"claude","cortex":"claude","workers":"claude","seat_default":"claude","loops_auth":"chat","cortex_auth":"chat","workers_auth":"chat","think":"auto"}"#,
                 "--fact", "seat_backend=http://127.0.0.1:11434", "--fact", "router_on=false", "--fact", r#"cloud_models=[{"name":"claude","backend":"claude-agent"}]"#, "--fact", "chat_claude_bin=/usr/bin/true"])
@@ -45,7 +45,7 @@ fn launch(dir: std::path::PathBuf, facts: &[&str], full: bool) -> Run {
     } else {
         Command::new("sh").arg(format!("{root}/scripts/seat")).args(["--data-dir", dir.join("d").to_str().unwrap(), "--port", "0", "--fact", "seat_default=claude"])
             .args(facts.iter().flat_map(|f| ["--fact", *f]))
-            .env("CLIFFVM", BIN).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap()
+            .env("CLIFFVM", cliffvm_bin()).env("CLAUDE_BIN", "/usr/bin/true").stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap()
     };
     let out = child.stdout.take().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();

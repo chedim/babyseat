@@ -13,7 +13,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
-const BIN: &str = common::bin("cliffvm");
+fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 
 struct Run { child: Child, _lines: Receiver<String> }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); } }
@@ -57,7 +57,7 @@ fn setup(tag: &str) -> Dir {
 fn launch(dir: &Dir, facts: &[&str]) -> (Run, u16) {
     let d = &dir.0;
     let pd = d.join("packs");
-    let mut child = Command::new(BIN).current_dir(d).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000")
+    let mut child = Command::new(cliffvm_bin()).current_dir(d).env("ANTHROPIC_API_KEY", "sk-ant-harness-default-0000")
         .args(["run", pd.join("boot.c1f").to_str().unwrap(), pd.to_str().unwrap(), "--store", d.join("field.sqlite3").to_str().unwrap(), "--port", "0", "--ui-dir", d.to_str().unwrap(),
                "--fact", &format!("chat_claude_bin={}", d.join("fake-claude").display()), "--fact", "seat_cwd=/srv/seat", "--fact", "seat_project=membrane", "--fact", "seat_version=1.0",
                "--fact", &format!("door_secret_file={}", d.join("door.secret").display()), "--fact", &format!("seat_data_dir={}", d.display())])
