@@ -102,7 +102,7 @@ fn admin_token(dir: &Dir) -> String { wait("the admin token", || std::fs::read_t
 fn now() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() }
 fn person_token(dir: &Dir, sub: &str) -> String {
     let secret = std::fs::read_to_string(dir.0.join("door.secret")).unwrap().trim().as_bytes().to_vec();
-    membrane_vm::jwt::mint(&secret, sub, sub, 3600.0, now()).unwrap()
+    cliffvm::jwt::mint(&secret, sub, sub, 3600.0, now()).unwrap()
 }
 
 /// the model's tool: one entity_write on /mcp (the admin's token, as the turn's CLI carries it) -> the reply text

@@ -1,7 +1,7 @@
 //! SemText (#1143, docs/semtext-and-legs.md): the class whose one stored string is `text` and whose layers are getters over the
 //! tokenizer; its span entities (virtual, attached by a write), the form classes of a word span, the mentions (Word entities and
 //! their edges), the message body and the recall by edges. Every test runs on the SHIPPED packs of the barest seat (`barest.packs`).
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -10,7 +10,7 @@ fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
 /// the barest seat's packs and app, no drivers (no effects), as the help harness loads them
 fn seat() -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));   // the 10 ms self-time allowance of a debug build under a loaded machine would kill a getter at random: pin it
+    cliffvm::expr::set_eval_time_ms(Some(10_000));   // the 10 ms self-time allowance of a debug build under a loaded machine would kill a getter at random: pin it
     let mut o = Options::new(None);
     o.effects = false;
     let h = Host::open(o).unwrap();
@@ -100,7 +100,7 @@ fn a_span_is_virtual_never_a_stored_row() {
     let h = with_body(T);
     h.write(B, "attach", json!({"layer": "word", "start": 0}), "person");
     h.pump();
-    assert_eq!(h.storage_of("Span"), membrane_vm::fields::Storage::Virtual);
+    assert_eq!(h.storage_of("Span"), cliffvm::fields::Storage::Virtual);
 }
 
 #[test]

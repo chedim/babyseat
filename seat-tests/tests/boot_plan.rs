@@ -1,9 +1,9 @@
 //! The boot plan, native: order and policy come from boot.json / boot.c1f; the runner only walks them.
 use std::sync::Mutex;
 
-use membrane_vm::fields::Fields;
-use membrane_vm::plan::{self, Engine, Outcome};
-use membrane_vm::vm::{Core, Host};
+use cliffvm::fields::Fields;
+use cliffvm::plan::{self, Engine, Outcome};
+use cliffvm::vm::{Core, Host};
 
 struct H;
 impl Host for H {

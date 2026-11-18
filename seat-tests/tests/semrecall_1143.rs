@@ -5,7 +5,7 @@
 //! cut-off. Every test runs on the SHIPPED packs of the barest seat, in process, with no model server (receipts are written by the test).
 mod common;
 
-use membrane_vm::host::{self, Host, Options};
+use cliffvm::host::{self, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -23,7 +23,7 @@ fn seat() -> Host { seat_opts(&props(json!({"chat_claude_bin": "/usr/bin/true", 
 /// a seat with no store and no drivers: the receipts are the test's
 fn seat_with(facts: &Map<String, J>) -> Host { seat_opts(facts, false) }
 fn seat_opts(facts: &Map<String, J>, store: bool) -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let file = store.then(|| {
         // the clock alone can give two parallel tests one name (it ticks in microseconds here): a counter keeps each store its own
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

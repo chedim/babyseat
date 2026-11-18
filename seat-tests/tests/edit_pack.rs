@@ -1,9 +1,9 @@
 //! The edit app (membrane/packs/edit.c1f): a hunk applied to a file by a write, guarded and undoable.
 //! The pack is plain c1f over the fs stdlib: `Edit:<n> {path, old, new, base_mtime}`, `apply` and `revert` are writes, the refusal
 //! is a reason in `problem`, and the file is changed by the ordinary `File.write` effect (real files, in a temp folder).
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host, Write};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host, Write};
 use serde_json::{json, Value as J};
 
 struct H;

@@ -1,6 +1,6 @@
 //! `SemText.related` on a store like the live one (#1143, w36): a text of ~170 distinct words, 20 of them in every other text (the, a, and ...).
-use membrane_vm::host::{Host, Options};
-use membrane_vm::stats::{self, KIND_GETTER};
+use cliffvm::host::{Host, Options};
+use cliffvm::stats::{self, KIND_GETTER};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -9,7 +9,7 @@ static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 fn seat() -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(60_000));
+    cliffvm::expr::set_eval_time_ms(Some(60_000));
     let mut o = Options::new(None);
     o.effects = false;
     let h = Host::open(o).unwrap();
@@ -123,7 +123,7 @@ SemText.x_final getter: [{'semtext': r['text'], 'sentence_index': r['sent'], 'te
 fn real_store_report() {
     let Ok(path) = std::env::var("W36_STORE") else { return };
     stats::set_on(true);
-    membrane_vm::expr::set_eval_time_ms(Some(60_000));
+    cliffvm::expr::set_eval_time_ms(Some(60_000));
     let mut o = Options::new(Some(path));
     o.effects = false;
     let h = Host::open(o).unwrap();

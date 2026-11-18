@@ -1,8 +1,8 @@
 //! The host publishes the eval accounting on `Stats:eval` (#1143): every window, as an outside-style write that is NOT journalled (like an unload: not part of a replay);
 //! `Stats:eval.reset = true` clears the table; with the accounting off there is no entity. One test: the table is the process's, and a reset clears all of it.
 #![cfg(feature = "bin")]
-use membrane_vm::host::{Host, Options};
-use membrane_vm::stats;
+use cliffvm::host::{Host, Options};
+use cliffvm::stats;
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

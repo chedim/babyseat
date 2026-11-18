@@ -1,8 +1,8 @@
 //! The decision family's two store-backed routes (packs/door_decisions.c1f): /membrane/entity-history and /membrane/item-chat read the
 //! store's delta and relation rows with `sql()`. The spec harness has no store, so these two are tested here, against a real SQLite file.
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host};
 use serde_json::{json, Value as J};
 
 struct H;
@@ -50,7 +50,7 @@ fn world(p: &std::path::Path) -> (Core, Fields) {
     }
     let mut c = Core::new();
     let path = p.to_str().unwrap().to_string();
-    c.store = Some(Store::with_exec(&path, std::sync::Arc::new(membrane_vm::sqlexec::NativeSqlExec::new(&path).unwrap())));
+    c.store = Some(Store::with_exec(&path, std::sync::Arc::new(cliffvm::sqlexec::NativeSqlExec::new(&path).unwrap())));
     let o = |v: J| v.as_object().unwrap().clone();
     c.load("Boot:seat".into(), "Boot".into(), o(json!({"ui_dir": "/x"})), None, 0.0);
     c.load("Goal:g".into(), "Goal".into(), o(json!({"name": "g", "status": "open"})), None, 0.0);

@@ -58,7 +58,7 @@ fn http(port: u16, method: &str, path: &str, tok: Option<&str>, body: &str) -> (
 fn now() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() }
 fn secret_of(dir: &std::path::Path) -> Vec<u8> { std::fs::read_to_string(dir.join("door.secret")).unwrap().trim().as_bytes().to_vec() }
 fn admin_token(dir: &std::path::Path) -> String { std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string() }
-fn person_token(dir: &std::path::Path, sub: &str, name: &str) -> String { membrane_vm::jwt::mint(&secret_of(dir), sub, name, 3600.0, now()).unwrap() }
+fn person_token(dir: &std::path::Path, sub: &str, name: &str) -> String { cliffvm::jwt::mint(&secret_of(dir), sub, name, 3600.0, now()).unwrap() }
 
 /// one tools/call on /mcp; -> (http status, body)
 fn call(port: u16, tok: &str, tool: &str, args: J) -> (u16, J) {

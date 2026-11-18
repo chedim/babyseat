@@ -132,7 +132,7 @@ fn a_memory_with_nothing_alike_answers_with_just_the_head() {
 /// `Memory.associations` words them the same way (the swap to the fused edge + cosine result is that one line).
 #[test]
 fn the_associations_read_one_source_getter_a_layer_can_replace() {
-    use membrane_vm::host::{Host, Options};
+    use cliffvm::host::{Host, Options};
     let mut o = Options::new(None);
     o.effects = false;
     let h = Host::open(o).unwrap();

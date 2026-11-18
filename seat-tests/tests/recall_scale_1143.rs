@@ -1,7 +1,7 @@
 //! THE RECALL SCALES (#1143, operator 2026-11-15): the parts of `SemText.recall` that read long lists hand them to builtins that cost one step each (`props`, `vmean`,
 //! `group_by` with sums), so their steps do not grow with the mentions they read. Measured here by the engine's own accounting (`stats`): the steps of the candidates'
 //! means in entity recall (`entityrecall.c1f`) and of the edge lane (`mentions.c1f` `r_edge`) on a field where three words are in every text.
-use membrane_vm::host::{boot_started, Host, Options};
+use cliffvm::host::{boot_started, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -11,7 +11,7 @@ const MAKER: &str = "PACK rsmaker 1\nIMPORT semtext 1\nIMPORT mentions 1\nIMPORT
 Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[prop(this.say, 'id')]:body = SemText(text: prop(this.say, 'text'))\n    membrane::Chat:main:message[prop(this.say, 'id')]:body.mention = True\n";
 
 fn seat() -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let mut o = Options::new(None);
     o.effects = false;
     let h = Host::open(o).unwrap();
@@ -65,11 +65,11 @@ fn steps_of_one_recall(n: usize) -> (Host, Vec<(String, u64)>) {
     say("q", "Which item uses id0_x id5_x id10_x id15_x id20_x with u_7x?");
     drain(&h);
     let e = "membrane::Chat:main:message:q:body";
-    membrane_vm::stats::set_on(true);
-    membrane_vm::stats::global_clear();
+    cliffvm::stats::set_on(true);
+    cliffvm::stats::global_clear();
     h.write(e, "recall_on", json!(true), "person"); h.pump();
-    let rows = membrane_vm::stats::global_lifetime().into_iter().filter(|r| r.cls == "SemText" && r.kind == "getter").map(|r| (r.prop, r.steps)).collect();
-    membrane_vm::stats::set_on(false);
+    let rows = cliffvm::stats::global_lifetime().into_iter().filter(|r| r.cls == "SemText" && r.kind == "getter").map(|r| (r.prop, r.steps)).collect();
+    cliffvm::stats::set_on(false);
     (h, rows)
 }
 fn sum(rows: &[(String, u64)], pick: &dyn Fn(&str) -> bool) -> u64 { rows.iter().filter(|(p, _)| pick(p)).map(|(_, s)| s).sum() }

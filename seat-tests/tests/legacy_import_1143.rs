@@ -4,7 +4,7 @@
 //! and synthetic text; the real copy is used only by the `#[ignore]`d measuring test at the end (read-only). No model runs and no `claude` exists here.
 mod common;
 
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -33,7 +33,7 @@ fn host_facts(d: &std::path::Path, facts: Map<String, J>) -> Host {
     for n in PACKS { h.load_pack(n, &pack(n)).unwrap_or_else(|e| panic!("pack {n}: {e}")); }
     h.load_stored_entities();
     h.rebuild();
-    membrane_vm::host::boot_started(&h, &facts, true);
+    cliffvm::host::boot_started(&h, &facts, true);
     h.pump();
     h
 }
@@ -230,7 +230,7 @@ fn the_barest_seat_has_no_persons_and_still_imports_with_the_owner_named_on_the_
     let h = Host::open({ let mut o = Options::new(Some(store_path(&d))); o.clock = ticking(); o }).unwrap();
     for n in PACKS.iter().filter(|n| !["door_auth", "legacy_persons"].contains(n)) { h.load_pack(n, &pack(n)).unwrap_or_else(|e| panic!("pack {n}: {e}")); }
     h.rebuild();
-    membrane_vm::host::boot_started(&h, &Map::new(), true);
+    cliffvm::host::boot_started(&h, &Map::new(), true);
     h.pump();
     legacy_source(&h, &d.join("old.sqlite"));
     import(&h, json!({"id": "i1", "sessions": "all", "page": 10}));

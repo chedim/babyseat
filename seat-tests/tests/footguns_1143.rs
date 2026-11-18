@@ -1,6 +1,6 @@
 //! Silent foot-guns made loud (#1143, operator 2026-11-14): each is a refusal with a reason the writer can read (a receipt `refused` on the writing entity), never a silent "wrote".
 //! The host's own writes and the engine's own stay open; every refusal below is for a setter (the door's `entity_write` is one) or for a pack's declaration.
-use membrane_vm::host::{boot_environment, boot_started, Host, Options};
+use cliffvm::host::{boot_environment, boot_started, Host, Options};
 use serde_json::{json, Map, Value as J};
 
 fn open() -> Host { let mut o = Options::new(None); o.effects = false; Host::open(o).unwrap() }
@@ -200,8 +200,8 @@ fn a_write_of_the_model_call_target_is_refused_on_the_seat_and_still_handed_on_b
     let r = refused(&h, "Box:a");
     assert!(r.contains("llm.call") && r.contains("this seat"), "a receipt: {r:?}");
     // the engine without a host (the browser's) keeps handing the call to its page
-    use membrane_vm::fields::Fields;
-    use membrane_vm::vm::{Core, Write};
+    use cliffvm::fields::Fields;
+    use cliffvm::vm::{Core, Write};
     let mut f = Fields::goalgraph();
     f.set_pack("lc", "PACK lc 1\nBox.ask on-setter ask:\n  ALWAYS:\n    membrane::llm.call = {'prompt': 'hi'}\n").unwrap();
     let mut c = Core::new();
@@ -211,7 +211,7 @@ fn a_write_of_the_model_call_target_is_refused_on_the_seat_and_still_handed_on_b
     seq += 1;
     let w = Write { eid: "Box:a".into(), prop: "ask".into(), new: json!(1), old: J::Null, writer: "person".into(), chain: json!({}), seq };
     struct H;
-    impl membrane_vm::vm::Host for H {
+    impl cliffvm::vm::Host for H {
         fn resolve(&self, s: &str) -> Option<String> { Some(s.to_string()) }
         fn resolve_exact(&self, s: &str) -> Option<String> { Some(s.to_string()) }
         fn dispatch(&self, _: &str, _: &str) -> Option<String> { None }

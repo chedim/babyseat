@@ -83,7 +83,7 @@ fn admin_token(dir: &Dir) -> String { wait("the admin token", || std::fs::read_t
 fn person_token(dir: &Dir, sub: &str) -> String {
     let secret = wait("the secret", || std::fs::read_to_string(dir.0.join("door.secret")).ok().filter(|t| !t.trim().is_empty()));
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-    membrane_vm::jwt::mint(secret.trim().as_bytes(), sub, sub, 3600.0, now).unwrap()
+    cliffvm::jwt::mint(secret.trim().as_bytes(), sub, sub, 3600.0, now).unwrap()
 }
 /// a bounded retry (3 tries) when the connection gives no answer at all (a loaded machine can stall a seat; the posts here are safe to send again)
 fn http(port: u16, method: &str, path: &str, tok: &str, body: &str) -> (u16, J) {

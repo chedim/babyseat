@@ -193,11 +193,11 @@ fn mint_cli(dir: &Path, sub: &str, name: &str) -> String {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     String::from_utf8_lossy(&o.stdout).trim().to_string()
 }
-fn b64u(b: &[u8]) -> String { membrane_vm::jwt::base64_encode(b).trim_end_matches('=').replace('+', "-").replace('/', "_") }
+fn b64u(b: &[u8]) -> String { cliffvm::jwt::base64_encode(b).trim_end_matches('=').replace('+', "-").replace('/', "_") }
 /// a token signed by hand: the header and the claims are the caller's JSON, the signature is HS256 of `secret` (or the given text)
 fn forge(secret: &[u8], header: J, claims: J) -> String {
     let (h, c) = (b64u(header.to_string().as_bytes()), b64u(claims.to_string().as_bytes()));
-    let sig = b64u(&membrane_vm::jwt::hmac_sha256(secret, format!("{h}.{c}").as_bytes()));
+    let sig = b64u(&cliffvm::jwt::hmac_sha256(secret, format!("{h}.{c}").as_bytes()));
     format!("{h}.{c}.{sig}")
 }
 fn hs256() -> J { json!({"alg": "HS256", "typ": "JWT"}) }
@@ -279,7 +279,7 @@ fn the_secret_and_every_token_are_in_no_reply_log_store_or_journal() {
     for (what, n) in &needles {
         assert!(!corpus.contains(*n), "{what} is in a reply or an entity");
         // the secret in the other encodings a reply could carry it in
-        assert!(!corpus.contains(&b64u(n.as_bytes())) && !corpus.contains(&membrane_vm::jwt::hex(n.as_bytes())), "{what} (base64url or hex) is in a reply or an entity");
+        assert!(!corpus.contains(&b64u(n.as_bytes())) && !corpus.contains(&cliffvm::jwt::hex(n.as_bytes())), "{what} (base64url or hex) is in a reply or an entity");
     }
     assert!(!corpus.contains(&format!("{}", &own[own.find('.').unwrap() + 1..own.rfind('.').unwrap()])), "not even the admin token's claims part");
     let scan_files = |label: &str| {
@@ -472,7 +472,7 @@ fn a_token_is_read_only_from_the_authorization_header_or_this_seats_cookie() {
     let s = seat("placement");
     let (own, sec) = (admin_token(&s.dir), secret_of(&s.dir));
     let path = "/global/health";
-    let cname = membrane_vm::jwt::cookie_name(&sec);
+    let cname = cliffvm::jwt::cookie_name(&sec);
     let st = |target: &str, h: &[(&str, &str)]| raw("127.0.0.1", s.port, "GET", target, h, "").status;
     // never from the URL
     for q in ["access_token", "token", "jwt", "bearer", "auth", "api_key", "key"] {
@@ -483,11 +483,11 @@ fn a_token_is_read_only_from_the_authorization_header_or_this_seats_cookie() {
     for (h, v) in [("Authorization", format!("Bearer {own}")), ("authorization", format!("Bearer {own}")), ("AUTHORIZATION", format!("Bearer {own}")), ("aUtHoRiZaTiOn", format!("Bearer {own}")), ("Authorization", format!("bearer {own}"))] {
         assert_eq!(st(path, &[(h, &v)]), 200, "{h}: {}", &v[..12]);
     }
-    let basic = format!("Basic {}", membrane_vm::jwt::base64_encode(format!("opencode:{own}").as_bytes()));
+    let basic = format!("Basic {}", cliffvm::jwt::base64_encode(format!("opencode:{own}").as_bytes()));
     assert_eq!(st(path, &[("Authorization", &basic)]), 200, "Basic with the token as the password");
-    let basic_empty = format!("Basic {}", membrane_vm::jwt::base64_encode(b"opencode:"));
+    let basic_empty = format!("Basic {}", cliffvm::jwt::base64_encode(b"opencode:"));
     assert_eq!(st(path, &[("Authorization", &basic_empty)]), 401, "Basic with an empty password");
-    let basic_user = format!("Basic {}", membrane_vm::jwt::base64_encode(format!("{own}:x").as_bytes()));
+    let basic_user = format!("Basic {}", cliffvm::jwt::base64_encode(format!("{own}:x").as_bytes()));
     assert_eq!(st(path, &[("Authorization", &basic_user)]), 401, "the token as the USER NAME of Basic is nothing");
     for v in [format!("Token {own}"), format!("Bearer{own}"), format!("Bearer: {own}"), own.clone(), format!("Digest {own}")] { assert_eq!(st(path, &[("Authorization", &v)]), 401, "scheme {:?}", &v[..8]); }
     // the cookie: this seat's name works, the old shared name works, another seat's name does not
@@ -622,12 +622,12 @@ fn the_page_fetched_from_this_machine_is_given_the_admin_cookie_with_the_attribu
     let r = raw("127.0.0.1", s.port, "GET", "/", &[], "");
     assert_eq!(r.status, 200);
     let ck = cookie_of(&r).expect("a cookie");
-    let name = membrane_vm::jwt::cookie_name(&sec);
+    let name = cliffvm::jwt::cookie_name(&sec);
     assert!(ck.starts_with(&format!("{name}=")), "the name is this seat's: {ck}");
     for a in ["; Path=/", "; HttpOnly", "; SameSite=Strict", "; Max-Age=604800"] { assert!(ck.contains(a), "{a} in {ck}"); }
     assert!(!ck.contains("Secure") && !ck.contains("Domain"), "plain http, host-only: {ck}");
     let tok = ck.split(';').next().unwrap().split_once('=').unwrap().1;
-    let c = membrane_vm::jwt::verify(tok, &sec, now()).unwrap();
+    let c = cliffvm::jwt::verify(tok, &sec, now()).unwrap();
     assert_eq!(c["sub"], "admin");
     assert!((c["exp"].as_f64().unwrap() - c["iat"].as_f64().unwrap() - 604800.0).abs() < 2.0, "7 days");
     assert_eq!(r.header("cache-control"), Some("no-store, max-age=0"), "a cookie-bearing page is never cached");
@@ -641,7 +641,7 @@ fn the_page_fetched_from_this_machine_is_given_the_admin_cookie_with_the_attribu
     let d2 = tmp("cookie-op");
     let mut s2 = start(&d2, None, &["operator=ann"]);
     let ck2 = cookie_of(&raw("127.0.0.1", s2.port, "GET", "/", &[], "")).unwrap();
-    let c2 = membrane_vm::jwt::verify(ck2.split(';').next().unwrap().split_once('=').unwrap().1, &secret_of(&d2), now()).unwrap();
+    let c2 = cliffvm::jwt::verify(ck2.split(';').next().unwrap().split_once('=').unwrap().1, &secret_of(&d2), now()).unwrap();
     assert_eq!(c2["sub"], "admin");
     stop(&mut s2);
     let _ = std::fs::remove_dir_all(&d2);
@@ -652,7 +652,7 @@ fn the_login_route_turns_a_token_into_the_cookie_and_logout_clears_it() {
     let s = seat("login");
     let (own, sec) = (admin_token(&s.dir), secret_of(&s.dir));
     let bob = mint_cli(&s.dir, "bob", "Bob");
-    let name = membrane_vm::jwt::cookie_name(&sec);
+    let name = cliffvm::jwt::cookie_name(&sec);
     let login = |ct: &str, body: &str| raw("127.0.0.1", s.port, "POST", "/ui/login", &[("Content-Type", ct)], body);
     let r = login("application/json", &json!({"token": bob}).to_string());
     assert_eq!(r.status, 200, "{}", r.body);
@@ -715,7 +715,7 @@ fn the_page_cookie_is_given_only_for_a_host_name_of_this_machine_and_a_rebinding
     // admin cookie. Only localhost, 127.0.0.1, [::1] (any case, any port) and the names of the fact `host_names` are. The decision: NO COOKIE (the page answers 200 and shows its plain text),
     // not a 421/400: the shell is public and static, a refusal would add nothing a missing cookie does not already deny, and a refusal would break a legitimate proxy name the operator forgot to list.
     let s = seat("host-rebind");
-    let name = membrane_vm::jwt::cookie_name(&secret_of(&s.dir));
+    let name = cliffvm::jwt::cookie_name(&secret_of(&s.dir));
     for h in ["evil.example:80", "evil.example", "localhost.evil.example", "127.0.0.1.evil.example:80", "[::2]:80", "10.0.0.5", "", "localhostx"] {
         let hdrs: Vec<(&str, &str)> = vec![("Host", h)];
         let r = raw("127.0.0.1", s.port, "GET", "/", &hdrs, "");
@@ -891,15 +891,15 @@ fn the_token_checks_of_the_door_are_the_old_seats_not_a_weaker_reading() {
     let sec = b"0123456789abcdef0123456789abcdef";
     let t = now();
     let tok = |h: J, c: J| forge(sec, h, c);
-    assert!(membrane_vm::jwt::verify(&tok(hs256(), claims("a", 600.0)), sec, t).is_ok());
-    assert!(membrane_vm::jwt::verify(&tok(json!({"alg": "HS256", "crit": []}), claims("a", 600.0)), sec, t).is_err(), "crit");
+    assert!(cliffvm::jwt::verify(&tok(hs256(), claims("a", 600.0)), sec, t).is_ok());
+    assert!(cliffvm::jwt::verify(&tok(json!({"alg": "HS256", "crit": []}), claims("a", 600.0)), sec, t).is_err(), "crit");
     let mut c = claims("a", 600.0); c["aud"] = json!(["x"]);
-    assert!(membrane_vm::jwt::verify(&tok(hs256(), c), sec, t).is_err(), "aud (the seat names no audience)");
+    assert!(cliffvm::jwt::verify(&tok(hs256(), c), sec, t).is_err(), "aud (the seat names no audience)");
     let mut c = claims("a", 600.0); c["nbf"] = json!("x");
-    assert!(membrane_vm::jwt::verify(&tok(hs256(), c), sec, t).is_err(), "nbf that is not a number");
+    assert!(cliffvm::jwt::verify(&tok(hs256(), c), sec, t).is_err(), "nbf that is not a number");
     let mut c = claims("a", 600.0); c["iat"] = json!([1]);
-    assert!(membrane_vm::jwt::verify(&tok(hs256(), c), sec, t).is_err(), "iat that is not a number");
+    assert!(cliffvm::jwt::verify(&tok(hs256(), c), sec, t).is_err(), "iat that is not a number");
     // the leeway is exactly 30 s on each side
-    let c = json!({"sub": "a", "exp": (t - 29.0) as i64}); assert!(membrane_vm::jwt::verify(&tok(hs256(), c), sec, t).is_ok());
-    let c = json!({"sub": "a", "exp": (t - 31.0) as i64}); assert!(membrane_vm::jwt::verify(&tok(hs256(), c), sec, t).is_err());
+    let c = json!({"sub": "a", "exp": (t - 29.0) as i64}); assert!(cliffvm::jwt::verify(&tok(hs256(), c), sec, t).is_ok());
+    let c = json!({"sub": "a", "exp": (t - 31.0) as i64}); assert!(cliffvm::jwt::verify(&tok(hs256(), c), sec, t).is_err());
 }

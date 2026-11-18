@@ -1,8 +1,8 @@
 //! The models' routes end to end (membrane/packs/router.c1f + door_models.c1f): a request for /v1/models makes the pack ask the
 //! backend for its tags (the Fetch driver, a real socket), the rows become Model entities and the reply is built from them.
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host};
 use serde_json::{json, Value as J};
 use std::io::{Read, Write as IoWrite};
 use std::net::TcpListener;
@@ -73,7 +73,7 @@ fn the_list_comes_from_the_backends_tags_screened_with_the_lanes_and_rungs() {
     let (port, rx) = backend(r#"{"models":[{"name":"glm-4:9b","size":5000000000,"capabilities":["completion","tools"]},{"name":"nomic-embed-text:latest","size":270000000},{"name":"huge:70b","size":40000000000},{"name":"kimi:cloud","size":0,"remote_host":"https://x"}]}"#);
     let (mut c, mut f) = world(&format!("http://127.0.0.1:{port}"));
     let mut s = 5;
-    let boot = membrane_vm::vm::Write { eid: "Boot:seat".into(), prop: "started".into(), new: json!(5), old: J::Null, writer: "person".into(), chain: json!({}), seq: 4 };
+    let boot = cliffvm::vm::Write { eid: "Boot:seat".into(), prop: "started".into(), new: json!(5), old: J::Null, writer: "person".into(), chain: json!({}), seq: 4 };
     c.hear(boot.clone(), None, 2.0);
     f.react(&mut c, &H, boot, 2.0, &mut s);
     arrive(&mut c);

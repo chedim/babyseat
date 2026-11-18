@@ -1,9 +1,9 @@
 //! The seat's default model backend is the local Ollama (#1143, operator 2026-11-16): with no model facts the chat's model is UNSET until the person picks one from what the backend lists;
 //! the `claude` CLI is a developer mode told with `--fact seat_default=claude`. In-process (no seat process, no real model): the launcher's defaults, the settings feed (`GET /ui/settings`:
 //! the model row's choices, `chosen` for the first-run window), the model row's refusals and the turn that has no model to run.
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host, Write};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host, Write};
 use serde_json::{json, Value as J};
 use std::io::{Read, Write as IoWrite};
 use std::net::TcpListener;

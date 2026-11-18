@@ -59,7 +59,7 @@ fn http(port: u16, method: &str, path: &str, tok: Option<&str>, body: &str) -> (
 fn now() -> f64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() }
 fn secret_of(dir: &std::path::Path) -> Vec<u8> { std::fs::read_to_string(dir.join("door.secret")).unwrap().trim().as_bytes().to_vec() }
 fn admin_token(dir: &std::path::Path) -> String { std::fs::read_to_string(dir.join("admin.token")).unwrap().trim().to_string() }
-fn token_with_sub(dir: &std::path::Path, sub: &str, name: &str) -> String { membrane_vm::jwt::mint(&secret_of(dir), sub, name, 3600.0, now()).unwrap() }
+fn token_with_sub(dir: &std::path::Path, sub: &str, name: &str) -> String { cliffvm::jwt::mint(&secret_of(dir), sub, name, 3600.0, now()).unwrap() }
 
 /// one tools/call on /mcp; -> (http status, body)
 fn call(port: u16, tok: &str, tool: &str, args: J) -> (u16, J) {
@@ -115,7 +115,7 @@ fn no_person_is_made_by_a_verified_request_and_nobody_reads_a_sub_as_an_identity
     let who: J = serde_json::from_str(&b).unwrap();
     assert_eq!(who["who"]["sub"], "admin", "{b}");
     // a refused token is 401 (the control: nothing about the sub opens the door)
-    let eve = membrane_vm::jwt::mint(b"another secret of at least 32 bytes!!", "admin", "Admin", 3600.0, now()).unwrap();
+    let eve = cliffvm::jwt::mint(b"another secret of at least 32 bytes!!", "admin", "Admin", 3600.0, now()).unwrap();
     assert_eq!(http(port, "GET", "/global/health", Some(&eve), "").0, 401);
     assert_eq!(http(port, "GET", "/global/health", None, "").0, 401);
 }
@@ -126,13 +126,13 @@ fn the_boot_token_is_the_admin_token_in_admin_token_and_there_is_no_operator_fac
     let (_run, port) = launch(&dir, true, &[]);
     assert!(!dir.join(format!("{}.token", "ow".to_string() + "ner")).exists() && dir.join("admin.token").exists(), "the file is admin.token now");
     let t = admin_token(&dir);
-    let c = membrane_vm::jwt::verify(&t, &secret_of(&dir), now()).unwrap();
+    let c = cliffvm::jwt::verify(&t, &secret_of(&dir), now()).unwrap();
     assert_eq!(c["sub"], "admin");
     assert_eq!(http(port, "GET", "/global/health", Some(&t), "").0, 200);
     // `--fact operator=<name>` names nobody any more: the boot token is still the admin's
     let dir2 = tmp("admin-operator-fact");
     let (_run2, _port2) = launch(&dir2, true, &["--fact", "operator=ann"]);
-    assert_eq!(membrane_vm::jwt::verify(&admin_token(&dir2), &secret_of(&dir2), now()).unwrap()["sub"], "admin");
+    assert_eq!(cliffvm::jwt::verify(&admin_token(&dir2), &secret_of(&dir2), now()).unwrap()["sub"], "admin");
     let facts = std::fs::read_to_string(format!("{}/../membrane/packs/facts.json", env!("CARGO_MANIFEST_DIR"))).unwrap();
     assert!(!facts.contains("\"operator\"") && !facts.contains(&("ow".to_string() + "ner_token")) && facts.contains("admin_token_file"), "the facts name no operator and no admin token");
 }
@@ -169,7 +169,7 @@ fn token_mint_prints_a_token_the_door_accepts_with_the_sub_the_name_and_the_ttl(
     assert_eq!(rc, 0, "{err}");
     let tok = out.trim();
     assert_eq!(out.lines().count(), 1, "one line: the token");
-    let claims = membrane_vm::jwt::verify(tok, &secret_of(&dir), now()).unwrap();
+    let claims = cliffvm::jwt::verify(tok, &secret_of(&dir), now()).unwrap();
     assert_eq!((claims["sub"].as_str(), claims["name"].as_str()), (Some("cara"), Some("Cara")));
     assert_eq!(claims["exp"].as_f64().unwrap() - claims["iat"].as_f64().unwrap(), 7200.0);
     assert_eq!(http(port, "GET", "/global/health", Some(tok), "").0, 200, "the running door takes it");
@@ -178,7 +178,7 @@ fn token_mint_prints_a_token_the_door_accepts_with_the_sub_the_name_and_the_ttl(
     for (ttl, secs) in [("90", 90.0), ("45s", 45.0), ("15m", 900.0), ("12h", 43200.0), ("30d", 2592000.0)] {
         let (rc, out, err) = mint(&["--sub", "x", "--ttl", ttl, "--secret-file", sf.to_str().unwrap()]);
         assert_eq!(rc, 0, "{ttl}: {err}");
-        let c = membrane_vm::jwt::verify(out.trim(), &secret_of(&dir), now()).unwrap();
+        let c = cliffvm::jwt::verify(out.trim(), &secret_of(&dir), now()).unwrap();
         assert_eq!(c["exp"].as_f64().unwrap() - c["iat"].as_f64().unwrap(), secs, "{ttl}");
         assert_eq!(c["name"], "x", "no name: the sub is the name, as the person line reads it");
     }

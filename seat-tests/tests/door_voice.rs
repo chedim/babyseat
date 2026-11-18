@@ -1,9 +1,9 @@
 //! The voice family's two routes that touch the outside (packs/door_voice.c1f): /membrane/voice reads the person's voice entities with
 //! `sql()` over the store, /ui/log appends to a real file (and rotates it). The spec harness has no store and does not read files back,
 //! so these are tested here, against a real SQLite file and a real folder.
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host};
 use serde_json::{json, Value as J};
 
 struct H;
@@ -62,7 +62,7 @@ fn world(d: &std::path::Path) -> (Core, Fields) {
     }
     let mut c = Core::new();
     let path = db(d).to_str().unwrap().to_string();
-    c.store = Some(Store::with_exec(&path, std::sync::Arc::new(membrane_vm::sqlexec::NativeSqlExec::new(&path).unwrap())));
+    c.store = Some(Store::with_exec(&path, std::sync::Arc::new(cliffvm::sqlexec::NativeSqlExec::new(&path).unwrap())));
     let o = |v: J| v.as_object().unwrap().clone();
     for (k, p) in voice_ents() { c.load(k.into(), "Config".into(), p.as_object().unwrap().clone(), None, 0.0); }
     c.load("Boot:seat".into(), "Boot".into(), o(json!({"ui_dir": "/x", "facts": {"seat_data_dir": d.to_str().unwrap()}})), None, 0.0);
@@ -100,7 +100,7 @@ fn ask_with(d: &std::path::Path, path: &str, body: &str, who: Option<&str>, late
             wt.wait(Some(std::time::Duration::from_millis(20)));
             f.settle(&mut c, &H, 2.5, &mut seq);
         }
-        let wr = membrane_vm::vm::Write { eid: "Request:1".into(), prop: "body".into(), new: json!(body), old: J::Null, writer: "person".into(), chain: json!({}), seq: 2 };
+        let wr = cliffvm::vm::Write { eid: "Request:1".into(), prop: "body".into(), new: json!(body), old: J::Null, writer: "person".into(), chain: json!({}), seq: 2 };
         c.hear(wr.clone(), None, 2.0);
         f.react(&mut c, &H, wr, 2.0, &mut seq);
     }

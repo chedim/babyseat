@@ -1,8 +1,8 @@
 //! #1143: getters are ordered by what they read, class-aware. A getter reading `prop(x, 'text')` (x's class unknown) used to
 //! be ordered after EVERY getter named `text`, whatever its class, which closed false cycles and left a getter computing from
 //! a stale input. Also: levels stay cheap (they are computed at every pack load).
-use membrane_vm::fields::{levels, levels_by_name, Fields, Getter};
-use membrane_vm::vm::{Core, Host};
+use cliffvm::fields::{levels, levels_by_name, Fields, Getter};
+use cliffvm::vm::{Core, Host};
 use serde_json::{json, Map, Value as J};
 
 struct H;
@@ -24,7 +24,7 @@ Box.plan2 getter: this.plan + this.src_name\n\
 Lamp.text getter: join([b.plan2 for b in instances('Box')], ',')\n\
 Lamp.shout getter: this.text + '?'\n";
 
-fn gs(src: &str) -> Vec<Getter> { membrane_vm::syntax::parse_full(src).unwrap().getters }
+fn gs(src: &str) -> Vec<Getter> { cliffvm::syntax::parse_full(src).unwrap().getters }
 fn lv_of(gs: &[Getter], cls: &str, prop: &str) -> usize { levels(gs)[gs.iter().position(|g| g.cls == cls && g.prop == prop).unwrap()] }
 
 #[test]
@@ -68,7 +68,7 @@ fn shipped_getters() -> Vec<Getter> {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../membrane/packs");
     let mut files: Vec<_> = std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map_or(false, |x| x == "c1f")).collect();
     files.sort();
-    let mut all = gs(membrane_vm::translate::GOALGRAPH_CH);
+    let mut all = gs(cliffvm::translate::GOALGRAPH_CH);
     for p in files { all.extend(gs(&std::fs::read_to_string(p).unwrap())); }
     all
 }
@@ -96,7 +96,7 @@ fn shipped_packs_level_as_before_except_where_the_name_scan_was_the_bug() {
     // the order that matters: a getter above every getter it provably reads (a known class). A cycle may keep a violation (its
     // closing edge reads the previous value); the new levels must violate no more edges than the old ones did.
     let triples: Vec<(&str, &str, &str)> = g.iter().map(|x| (x.cls.as_str(), x.prop.as_str(), x.expr.as_str())).collect();
-    let reads = membrane_vm::infer::getter_reads(&triples);
+    let reads = cliffvm::infer::getter_reads(&triples);
     let (mut vn, mut vo, mut edges) = (0, 0, 0);
     for (i, rs) in reads.iter().enumerate() {
         for r in rs.iter().flatten() {

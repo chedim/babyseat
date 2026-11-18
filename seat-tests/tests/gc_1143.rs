@@ -3,7 +3,7 @@
 //! connection, an effect, a running command's chunks). A plain read holds nothing. Roots: stored entities, packs, the drivers' in-flight work.
 mod common;
 
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::{json, Map, Value as J};
 
 fn tmpfile(tag: &str) -> String {

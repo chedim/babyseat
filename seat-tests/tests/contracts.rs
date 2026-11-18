@@ -6,7 +6,7 @@
 //!  3. every Boot fact a pack reads is in the facts registry (membrane/packs/facts.json), and a fact the registry says the
 //!     launcher writes (`wired`) is written by the launcher.
 mod common;
-use membrane_vm::fields::Fields;
+use cliffvm::fields::Fields;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -270,7 +270,7 @@ fn surface_of(text: &str) -> serde_json::Value {
     facts.retain(|f| !boot_decl.contains(f) && !["eid", "name", "summary", "cls", "state", "facts"].contains(&f.as_str()));
     let mut s = json!({"imports": imports(text), "classes": classes, "members": members.len(), "writes": writes, "claims": claims, "boot_facts": facts});
     // the storage modes the pack declares (header lines `VIRTUAL <Class>` / `RESIDENT <Class>`), listed only when there are some
-    let p = membrane_vm::syntax::parse_full(text).expect("a shipped pack parses");
+    let p = cliffvm::syntax::parse_full(text).expect("a shipped pack parses");
     if !p.virtuals.is_empty() { s["virtual"] = json!(p.virtuals); }
     if !p.residents.is_empty() { s["resident"] = json!(p.residents); }
     s
@@ -314,7 +314,7 @@ fn the_inferred_types_of_every_pack_match_the_reviewed_snapshot() {
     use serde_json::json;
     let all = packs();
     let texts: Vec<&str> = all.iter().map(|p| p.1.as_str()).collect();
-    let reports = membrane_vm::infer::infer_packs(&texts).expect("every shipped pack parses");
+    let reports = cliffvm::infer::infer_packs(&texts).expect("every shipped pack parses");
     let mut now = serde_json::Map::new();
     let (mut total, mut concrete) = (0, 0);
     for ((stem, _), (_, r)) in all.iter().zip(&reports) {
@@ -322,7 +322,7 @@ fn the_inferred_types_of_every_pack_match_the_reviewed_snapshot() {
         concrete += r.getters.values().filter(|t| *t != "Any").count();
         let mut entry = json!({"getters": r.getters, "writes": r.writes, "findings": r.findings});
         // the storage modes the pack declares, listed only when there are some
-        let p = membrane_vm::syntax::parse_full(&all.iter().find(|(s, _)| s == stem).unwrap().1).expect("a shipped pack parses");
+        let p = cliffvm::syntax::parse_full(&all.iter().find(|(s, _)| s == stem).unwrap().1).expect("a shipped pack parses");
         if !p.virtuals.is_empty() { entry["virtual"] = json!(p.virtuals); }
         if !p.residents.is_empty() { entry["resident"] = json!(p.residents); }
         now.insert(stem.clone(), entry);

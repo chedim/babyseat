@@ -4,7 +4,7 @@
 //! standing: a write of `parents` reorders, adds or replaces classes, and getters, setters, kind matching and rule B follow the list.
 mod common;
 
-use membrane_vm::host::{self, Host, Line, Options};
+use cliffvm::host::{self, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 

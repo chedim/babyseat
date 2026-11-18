@@ -3,7 +3,7 @@
 //! (the rule's text), so the turn's own finish writes the response the way it does for any answer. Every test runs on the SHIPPED packs of the barest seat; nothing is stubbed
 //! but the model backend (a path that would fail loudly if a model were started).
 #![cfg(feature = "store")]
-use membrane_vm::host::{self, Host, Options};
+use cliffvm::host::{self, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -18,7 +18,7 @@ const LAYER: &str = "PACK myanswers 1\nIMPORT chat_turn 1\nChatMessage.plan gett
 const M: &str = "membrane::Chat:main:message:";
 
 fn seat(layer: Option<&str>) -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let mut o = Options::new(None);
     o.effects = true;
     let h = Host::open(o).unwrap();

@@ -4,7 +4,7 @@
 //! There is NEVER a real model server here: the receipts are written by the test (the Fetch driver's own writes), or, in the two end-to-end tests, a tiny HTTP server in this file answers.
 mod common;
 
-use membrane_vm::host::{boot_started, Host, Options};
+use cliffvm::host::{boot_started, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -36,7 +36,7 @@ fn load_skip(h: &Host, extra: &str, skip: &[&str]) {
     h.rebuild();
 }
 fn open(file: Option<&str>, effects: bool) -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let mut o = Options::new(file.map(String::from));
     o.effects = effects;
     Host::open(o).unwrap()

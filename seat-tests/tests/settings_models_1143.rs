@@ -1,9 +1,9 @@
 //! The Settings window's model row (#1143, operator 2026-11-15: "why are the models gone from the dropdown?"): the feed `GET /ui/settings` asks the backend for its model list the way
 //! `GET /v1/models` does, so the chat model row's `choices` (the page shows a select when it is not empty) lists the backend's chat models and the rungs without anything else asking first.
 //! An embedding model is not a chat choice. An unreachable backend leaves the list as it was and the feed still answers.
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host};
 use serde_json::{json, Value as J};
 use std::io::{Read, Write as IoWrite};
 use std::net::TcpListener;
@@ -46,7 +46,7 @@ fn world(backend_url: &str) -> (Core, Fields) {
     c.load("Boot:seat".into(), "Boot".into(), json!({"ui_dir": "/x", "seat_backend": backend_url, "router_on": false,
         "cloud_models": [{"name": "claude", "backend": "claude-agent"}]}).as_object().unwrap().clone(), None, 0.0);
     let mut s = 0; f.rebuild(&mut c, 1.0, &mut s);
-    let boot = membrane_vm::vm::Write { eid: "Boot:seat".into(), prop: "started".into(), new: json!(5), old: J::Null, writer: "person".into(), chain: json!({}), seq: 4 };
+    let boot = cliffvm::vm::Write { eid: "Boot:seat".into(), prop: "started".into(), new: json!(5), old: J::Null, writer: "person".into(), chain: json!({}), seq: 4 };
     c.hear(boot.clone(), None, 2.0);
     f.react(&mut c, &H, boot, 2.0, &mut s);
     (c, f)

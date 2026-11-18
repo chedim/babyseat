@@ -5,7 +5,7 @@
 //! stay hits with no points (no cut-off); the ask is never a row. The rerank of the first `rerank_top` reads the `legacy` weight set.
 //! The ported scenarios of the old `tests/test_recall_vote_0752.py`: Borda by rank, a missing voter, ties by key, an item one voter finds, the move log outranks, the sum
 //! across voters, no cut-off, the ask never a row. The voters are stubbed by a layer (`votestub`) so the points are exact; one test runs the real voters.
-use membrane_vm::host::{self, Host, Options};
+use cliffvm::host::{self, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -26,7 +26,7 @@ SemText.r_edge_rows getter WHEN prop('Stub:s', 'on') == True:\n  prop('Stub:s', 
 SemText.r_cos_rows getter WHEN prop('Stub:s', 'on') == True:\n  prop('Stub:s', 'cos') or []\n";
 
 fn seat_with(layers: &[&str]) -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let mut o = Options::new(None);
     o.effects = false;
     let h = Host::open(o).unwrap();
@@ -226,20 +226,20 @@ fn full_ballots_of_long_sentences_stay_inside_the_step_budget() {
     assert_eq!(r.len(), 114, "every hit");
     if std::env::var("VOTE_BISECT").is_ok() {
         let ok = |b: u64| -> bool {
-            membrane_vm::expr::set_eval_budget(Some(b));
+            cliffvm::expr::set_eval_budget(Some(b));
             h.write(ASK, "recall_on", json!(false), "person"); h.pump();
             h.write(ASK, "recall_on", json!(true), "person"); h.pump();
             let good = h.get(ASK, "failed").is_null() && h.get(ASK, "recall").as_array().map(|a| a.len()) == Some(114);
-            membrane_vm::expr::set_eval_budget(None);
+            cliffvm::expr::set_eval_budget(None);
             good
         };
         let (mut lo, mut hi) = (1u64, 1_000_000u64);
         while hi - lo > 50 { let mid = (lo + hi) / 2; if ok(mid) { hi = mid } else { lo = mid } }
-        membrane_vm::expr::set_eval_budget(Some(lo));
+        cliffvm::expr::set_eval_budget(Some(lo));
         h.write(ASK, "recall_on", json!(false), "person"); h.pump();
         h.write(ASK, "recall_on", json!(true), "person"); h.pump();
         eprintln!("VOTE_BISECT 114 hits: the largest evaluation takes about {hi} steps; under it fails: {}", h.get(ASK, "failed"));
-        membrane_vm::expr::set_eval_budget(None);
+        cliffvm::expr::set_eval_budget(None);
     }
 }
 
@@ -292,11 +292,11 @@ fn measure_the_step_budget_of_the_whole_recall() {
     drain(&h, &hashed);
     let e = "membrane::Chat:main:message:q:body";
     let fails = |b: Option<u64>| -> Vec<String> {
-        membrane_vm::expr::set_eval_budget(b);
+        cliffvm::expr::set_eval_budget(b);
         h.write(e, "recall_on", json!(false), "person"); h.pump();
         h.write(e, "recall_on", json!(true), "person"); h.pump();
         let f = h.get(e, "failed");
-        membrane_vm::expr::set_eval_budget(None);
+        cliffvm::expr::set_eval_budget(None);
         f.as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default()
     };
     // (`r_older` fails here: this seat has no store, so the window is the ask alone)
@@ -305,12 +305,12 @@ fn measure_the_step_budget_of_the_whole_recall() {
     let full = |k: &str| h.get(e, k).as_array().map(|a| a.len()).unwrap_or(0);
     let sizes = format!("edge {} cosine {} move log {} entity {} recall {}", full("r_edge_rows"), full("r_cos_rows"), full("movelog_votes"), full("entity_votes"), full("recall"));
     // the steps of each getter in one recall (the engine's own accounting: calls and steps)
-    membrane_vm::stats::set_on(true);
-    membrane_vm::stats::global_clear();
+    cliffvm::stats::set_on(true);
+    cliffvm::stats::global_clear();
     fails(None);
-    let mut rows: Vec<(String, u64, u64)> = membrane_vm::stats::global_lifetime().into_iter().filter(|r| r.cls == "SemText" && r.kind == "getter" && part(&r.prop) != "other").map(|r| (r.prop, r.calls, r.steps)).collect();
+    let mut rows: Vec<(String, u64, u64)> = cliffvm::stats::global_lifetime().into_iter().filter(|r| r.cls == "SemText" && r.kind == "getter" && part(&r.prop) != "other").map(|r| (r.prop, r.calls, r.steps)).collect();
     rows.sort_by(|a, b| b.2.cmp(&a.2));
-    membrane_vm::stats::set_on(false);
+    cliffvm::stats::set_on(false);
     let bisect = |pick: &dyn Fn(&str) -> bool| -> u64 {
         let (mut lo, mut hi) = (1u64, 2_000_000u64);
         while hi - lo > 50 { let mid = (lo + hi) / 2; if fails(Some(mid)).iter().any(|k| pick(k)) { lo = mid } else { hi = mid } }

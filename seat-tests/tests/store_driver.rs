@@ -1,8 +1,8 @@
 //! The store driver (`sql(...)`, store.rs): `.c1f` reads the seat's SQLite store directly. Read-only, bound
 //! arguments, rows as dicts, a runaway query interrupted on its budget, and a reader that never waits for a writer.
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host, Write};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host, Write};
 use serde_json::{json, Value as J};
 
 struct H;
@@ -29,7 +29,7 @@ fn db() -> (std::path::PathBuf, rusqlite::Connection) {
 }
 fn open_store(p: &std::path::Path) -> Store {
     let path = p.to_str().unwrap().to_string();
-    Store::with_exec(&path, std::sync::Arc::new(membrane_vm::sqlexec::NativeSqlExec::new(&path).unwrap()))
+    Store::with_exec(&path, std::sync::Arc::new(cliffvm::sqlexec::NativeSqlExec::new(&path).unwrap()))
 }
 fn rand_tag() -> usize {
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

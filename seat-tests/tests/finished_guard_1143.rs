@@ -3,7 +3,7 @@
 //! the store rows stay slim and a restart derives nothing for them. Also the store's durability: WAL with `synchronous=NORMAL`.
 mod common;
 
-use membrane_vm::host::{self, Host, Options};
+use cliffvm::host::{self, Host, Options};
 use rusqlite::Connection;
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;

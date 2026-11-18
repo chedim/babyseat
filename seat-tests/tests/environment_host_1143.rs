@@ -4,7 +4,7 @@
 //! Tests assert content, never the clock.
 mod common;
 
-use membrane_vm::host::{boot_environment, boot_started, environment_props, Host, Line, Options};
+use cliffvm::host::{boot_environment, boot_started, environment_props, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }

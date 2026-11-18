@@ -4,7 +4,7 @@
 //! the getter keeps recomputing. Both rows persist, so a restart brings the Errors back.
 mod common;
 
-use membrane_vm::host::{self, Host, Line, Options};
+use cliffvm::host::{self, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 use std::time::{Duration, Instant};
 

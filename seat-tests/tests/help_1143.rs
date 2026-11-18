@@ -4,7 +4,7 @@
 //! Directives in the block's `--` comments: `-- given <eid> <json props>`, `-- write <eid>.<prop> = <json>`, `-- reads <eid>.<prop> = <json>`
 //! (checked in order, after the pack loaded), `-- error: <text the loader's message holds>`.
 mod common;
-use membrane_vm::host::{Host, Options};
+use cliffvm::host::{Host, Options};
 use serde_json::Value as J;
 use std::path::PathBuf;
 

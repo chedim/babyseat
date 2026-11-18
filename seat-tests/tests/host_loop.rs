@@ -1,8 +1,8 @@
 //! The host loop in Rust (src/host.rs): stamps, the journal of OUTSIDE writes, and replay = the same state.
 mod common;
 
-use membrane_vm::expr;
-use membrane_vm::host::{self, is_outside, stamp_born_writer, stamp_writer, Host, Line, Options};
+use cliffvm::expr;
+use cliffvm::host::{self, is_outside, stamp_born_writer, stamp_writer, Host, Line, Options};
 use serde_json::{json, Map, Value as J};
 use std::cell::Cell;
 use std::io::{Read, Write};

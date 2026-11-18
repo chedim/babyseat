@@ -1,8 +1,8 @@
 //! The UI shell and its files through the door, DECIDED IN c1f (packs/door.c1f: the route table, the content types, the path
 //! rules); rust only sends the file the pack names (`Request:<n>.respond = {status, headers, file}`).
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host, Write};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host, Write};
 use serde_json::{json, Value as J};
 use std::io::{Read, Write as IoWrite};
 use std::net::TcpStream;
@@ -77,7 +77,7 @@ fn split(r: &[u8]) -> (String, Vec<u8>) {
 
 fn token(sub: &str) -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-    membrane_vm::jwt::mint(SECRET.as_bytes(), sub, sub, 3600.0, now).unwrap()
+    cliffvm::jwt::mint(SECRET.as_bytes(), sub, sub, 3600.0, now).unwrap()
 }
 fn status(r: &[u8]) -> String { split(r).0.lines().next().unwrap().to_string() }
 fn header(r: &[u8], name: &str) -> Option<String> {
@@ -92,11 +92,11 @@ fn the_page_fetched_from_loopback_sets_the_admin_cookie() {
         let r = get(&mut c, &mut f, port, &req(path, ""));
         assert!(status(&r).starts_with("HTTP/1.1 200"), "{path}: {}", status(&r));
         let ck = header(&r, "set-cookie").unwrap_or_else(|| panic!("{path}: no cookie"));
-        let name = membrane_vm::jwt::cookie_name(SECRET.as_bytes());
+        let name = cliffvm::jwt::cookie_name(SECRET.as_bytes());
         assert!(ck.starts_with(&format!("{name}=")), "{ck}");
         assert!(ck.contains("; HttpOnly") && ck.contains("; SameSite=Strict") && ck.contains("; Path=/"), "{ck}");
         let tok = ck[name.len() + 1..].split(';').next().unwrap();
-        let claims = membrane_vm::jwt::verify(tok, SECRET.as_bytes(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()).unwrap();
+        let claims = cliffvm::jwt::verify(tok, SECRET.as_bytes(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()).unwrap();
         assert_eq!(claims["sub"], "admin", "the admin's token");
         assert_eq!(split(&r).1, std::fs::read(format!("{}/index.html", ui_dir())).unwrap(), "{path}: the page's bytes");
     }
@@ -113,7 +113,7 @@ fn a_forwarded_page_request_gets_the_page_and_no_cookie() {
 #[test]
 fn the_served_routes_need_the_cookie_or_a_bearer_and_answer_401_in_the_released_shape() {
     let (mut c, mut f, port) = world();
-    let name = membrane_vm::jwt::cookie_name(SECRET.as_bytes());
+    let name = cliffvm::jwt::cookie_name(SECRET.as_bytes());
     let page = get(&mut c, &mut f, port, &req("/", ""));
     let ck = header(&page, "set-cookie").unwrap();
     let cookie = ck.split(';').next().unwrap().to_string();
@@ -131,7 +131,7 @@ fn the_served_routes_need_the_cookie_or_a_bearer_and_answer_401_in_the_released_
     let body: J = serde_json::from_slice(&split(&r).1).unwrap();
     assert_eq!(body, json!({"error": {"message": "missing or invalid token", "type": "unauthorized"}}));
     // a bad JWT (cookie and bearer): the same 401; a token signed with another key too
-    let other = membrane_vm::jwt::mint(b"another secret of at least 32 bytes!!", "admin", "admin", 3600.0, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()).unwrap();
+    let other = cliffvm::jwt::mint(b"another secret of at least 32 bytes!!", "admin", "admin", 3600.0, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()).unwrap();
     for extra in [format!("Cookie: {name}=garbage\r\n"), "Authorization: Bearer not.a.jwt\r\n".to_string(), format!("Authorization: Bearer {other}\r\n")] {
         let r = get(&mut c, &mut f, port, &req("/ui/serve/global/health", &extra));
         assert!(status(&r).starts_with("HTTP/1.1 401"), "{extra}: {}", status(&r));
@@ -186,7 +186,7 @@ fn a_bare_loopback_caller_is_not_the_admin_when_the_door_has_a_secret() {
     assert!(status(&r).starts_with("HTTP/1.1 200"), "{}", status(&r));
     // a token past its life (beyond the 30 s leeway) is the same 401
     let old = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64() - 7200.0;
-    let expired = membrane_vm::jwt::mint(SECRET.as_bytes(), "admin", "admin", 60.0, old).unwrap();
+    let expired = cliffvm::jwt::mint(SECRET.as_bytes(), "admin", "admin", 60.0, old).unwrap();
     let r = get(&mut c, &mut f, port, &req("/global/health", &format!("Authorization: Bearer {expired}\r\n")));
     assert!(status(&r).starts_with("HTTP/1.1 401"), "{}", status(&r));
 }

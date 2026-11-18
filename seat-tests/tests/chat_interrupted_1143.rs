@@ -1,7 +1,7 @@
 //! What the model had said is not lost when its turn ends in an error (#1143, operator 2026-11-15): the text streamed so far becomes the turn's response body (a SemText, mentioned and
 //! embedded like any answer) and the response is marked `interrupted` with the error's reason beside it. The turn still ends as an error and its answer text still says so. No text
 //! streamed: nothing is written (today's behaviour). In process on the SHIPPED packs of the barest seat; nothing runs (effects off): the streamed words and the receipt are stubbed.
-use membrane_vm::host::{self, Host, Options};
+use cliffvm::host::{self, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::path::PathBuf;
 
@@ -12,7 +12,7 @@ fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 const MAKER: &str = "PACK recallmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nBox.go on-setter make:\n  ALWAYS:\n    membrane::Chat:main:message[this.k] = ChatMessage(text: this.t, at: this.at)\n    membrane::Chat:main:message[this.k]:body = SemText(text: this.t)\n    membrane::Chat:main:message[this.k]:body.mention = True\n    membrane::Chat:main:message[this.k]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.k, queued_at: this.at)\n    FOR a IN ([1] if this.q == True else []):\n      membrane::Chat:main:message[this.k].queued = True\n";
 
 fn seat(extra: J) -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let mut f = props(json!({"chat_claude_bin": "/usr/bin/true", "seat_default": "claude", "chat_auth": "login"}));
     for (k, v) in props(extra) { f.insert(k, v); }
     let mut o = Options::new(None);

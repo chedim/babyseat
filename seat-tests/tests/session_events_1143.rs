@@ -6,8 +6,8 @@
 //! next round. There is NEVER a real `claude` here: the turn's binary is a fake script.
 #![cfg(feature = "bin")]
 mod common;
-use membrane_vm::cli::{self, RunArgs};
-use membrane_vm::host::{self, Host, Options};
+use cliffvm::cli::{self, RunArgs};
+use cliffvm::host::{self, Host, Options};
 use serde_json::{json, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;

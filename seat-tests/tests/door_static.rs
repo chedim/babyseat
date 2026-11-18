@@ -2,9 +2,9 @@
 //! rules); rust only sends the file the pack names (`Request:<n>.respond = {status, headers, file}`).
 mod common;
 
-use membrane_vm::fields::Fields;
-use membrane_vm::store::Store;
-use membrane_vm::vm::{Core, Host, Write};
+use cliffvm::fields::Fields;
+use cliffvm::store::Store;
+use cliffvm::vm::{Core, Host, Write};
 use serde_json::{json, Value as J};
 use std::io::{Read, Write as IoWrite};
 use std::net::TcpStream;
@@ -101,7 +101,7 @@ fn a_missing_file_a_traversal_and_a_post_are_refused() {
                           ("GET /nowhere HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer TOKEN\r\n\r\n", "404"),
                           ("GET /nowhere HTTP/1.1\r\nHost: t\r\n\r\n", "401")] {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-        let tok = membrane_vm::jwt::mint(b"0123456789abcdef0123456789abcdef", "admin", "admin", 3600.0, now).unwrap();
+        let tok = cliffvm::jwt::mint(b"0123456789abcdef0123456789abcdef", "admin", "admin", 3600.0, now).unwrap();
         let (head, _) = split(&get(&mut c, &mut f, port, &raw.replace("TOKEN", &tok)));
         assert!(head.starts_with(&format!("HTTP/1.1 {status}")), "{raw}: {head}");
     }

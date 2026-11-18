@@ -8,7 +8,7 @@
 //! the table `model` below. The question is a text like the others: its vectors land too, so it holds what it mentions (it is never a row of its own vote).
 mod common;
 
-use membrane_vm::host::{boot_started, Host, Options};
+use cliffvm::host::{boot_started, Host, Options};
 use serde_json::{json, Map, Value as J};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -63,7 +63,7 @@ fn tmpfile() -> String {
     std::env::temp_dir().join(format!("movelog-{}-{n}-{s}.sqlite3", std::process::id())).to_string_lossy().to_string()
 }
 fn seat_with(layer: Option<&str>) -> Host {
-    membrane_vm::expr::set_eval_time_ms(Some(10_000));
+    cliffvm::expr::set_eval_time_ms(Some(10_000));
     let o = Options::new(Some(tmpfile()));
     let h = Host::open(o).unwrap();
     let r = repo();
@@ -411,13 +411,13 @@ fn measure_the_step_budget() {
     leaf(&h, "q", MANY_Q);
     let e = leaf_eid("q");
     let vote_ok = |b: u64| -> bool {
-        membrane_vm::expr::set_eval_budget(Some(b));
+        cliffvm::expr::set_eval_budget(Some(b));
         h.write(&e, "recall_on", json!(false), "person"); h.pump();
         h.write(&e, "recall_on", json!(true), "person"); h.pump();
         let failed = h.get(&e, "failed");
         let mine = failed.as_object().map(|o| o.keys().any(|k| k.starts_with("ml_") || k.starts_with("movelog"))).unwrap_or(false);
         let ok = h.get(&e, "movelog_votes").is_array() && !mine;
-        membrane_vm::expr::set_eval_budget(None);
+        cliffvm::expr::set_eval_budget(None);
         ok
     };
     let (mut lo, mut hi) = (1u64, 10_000_000u64);
@@ -428,10 +428,10 @@ fn measure_the_step_budget() {
     let mut post_ok = |b: u64| -> bool {
         k += 1;
         let p = format!("Probe:p{k}");
-        membrane_vm::expr::set_eval_budget(Some(b));
+        cliffvm::expr::set_eval_budget(Some(b));
         h.born(&p, "Probe", props(json!({"e": "Identifier:name:c_alpha", "t": "Leaf:x:new:body"})), "person"); h.pump();
         let ok = h.get(&p, "post").is_array() && h.get(&p, "failed").is_null();
-        membrane_vm::expr::set_eval_budget(None);
+        cliffvm::expr::set_eval_budget(None);
         ok
     };
     let (mut lo, mut hi) = (1u64, 2_000_000u64);
