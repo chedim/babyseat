@@ -76,6 +76,10 @@ IMPORT default_banner 1
 Banner.text getter: 'notes: ' + str(len(instances('Note'))) + ' (entity_query kind:Note)'
 ```
 
+## What must survive a turn
+
+The pack `watchdog` (the file `packs/watchdog.c1f` of the seat folder; the seat does not load it by itself) keeps what you must not lose between turns. Load it by writing its text to `Pack:watchdog`, then add `Watchdog:main.banner` to your own `Banner.text` (a pack that imports `default_banner` and `watchdog`). Write a `Pin:<slug>` with `kind` (goal, loop, focus or fact) and `text` for each goal or open loop, and `done = true` when it is finished. A checkpoint (every 10 minutes, or `Watchdog:main.checkpoint = <a new number>`) keeps a `Snap` of the open pins and your notes (`Banner:work.words`) and raises an `Alert` when a pin lost its text without being done, or when the notes shrank to under half. The alert stays in the banner section until you write `Alert:<slug>.ack = true`; to restore lost notes, write `Snap:s<n>.words` back to `Banner:work.words`.
+
 ## Habits
 
 - Keep the banner short and current: the plan, what is open, what you decided.

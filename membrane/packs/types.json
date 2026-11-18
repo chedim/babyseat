@@ -2343,5 +2343,31 @@
     },
     "writes": {},
     "findings": []
+  },
+  "watchdog": {
+    "getters": {
+      "Alert.live": "Bool",
+      "Pin.live": "Bool",
+      "Watchdog.alert_line": "Text",
+      "Watchdog.banner": "Text",
+      "Watchdog.last_exchange": "Text?",
+      "Watchdog.last_turn": "Any",
+      "Watchdog.pin_line": "Text"
+    },
+    "writes": {
+      "Alert.ack": "Any",
+      "Alert.text": "Any",
+      "Watchdog.beat": "Any",
+      "Watchdog.checkpoint": "Any",
+      "Watchdog.last_snap": "Text",
+      "Watchdog.pruned": "Any"
+    },
+    "findings": [],
+    "resident": [
+      "Pin",
+      "Alert",
+      "Snap",
+      "Watchdog"
+    ]
   }
 }
