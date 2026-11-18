@@ -25,6 +25,7 @@ A path written `cliffvm:<path>` is a file of the engine's repository, github.com
 | page | what it is |
 |---|---|
 | [porting-brief.md](porting-brief.md) | the rules for c1f and Rust work (read first) |
+| [membrama-chat.md](membrama-chat.md) | design, in progress (branch `chat-membrama-design`): a chat turn answered by the local model peer membrama, as a rung beside `chat_oai`: the entry, the peer, the nodes of a round, retirement, errors |
 | [c1f-layers.md](c1f-layers.md) | apps and layers, trust by position, privilege, class ownership, storage-mode header lines |
 | [c1f-stdlib.md](c1f-stdlib.md) | the Request contract, boot facts, the builtins, locals, entity literals, constructors, the step budget, the contract tests |
 | [c1f-error.md](c1f-error.md) | the `Error` value kind: a failure that is not a null |
