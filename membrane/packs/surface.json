@@ -138,6 +138,49 @@
       "Doorbell"
     ]
   },
+  "chat_membrama": {
+    "imports": [
+      "chat",
+      "chat_turn",
+      "chat_oai",
+      "fetch"
+    ],
+    "classes": [
+      "Chat",
+      "ChatMessage",
+      "LlmMsg",
+      "LlmRequest",
+      "LlmTool",
+      "MbRound"
+    ],
+    "members": 47,
+    "writes": [
+      "*.abort",
+      "*.retire",
+      "Fetch:*.request",
+      "membrane:*.content",
+      "membrane:*.go",
+      "membrane:*.mb_nodes",
+      "membrane:*.messages",
+      "membrane:*.oai",
+      "membrane:*.oai_tools",
+      "membrane:*.role",
+      "membrane:*.round",
+      "membrane:*.server",
+      "membrane:*.settings",
+      "membrane:*.spec",
+      "membrane:*.started",
+      "membrane:*.state",
+      "membrane:*.tool_calls",
+      "membrane:*.tools",
+      "membrane:*=ChatTool()",
+      "membrane:*=MbRound()"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "cloud_models"
+    ]
+  },
   "chat_oai": {
     "imports": [
       "chat",

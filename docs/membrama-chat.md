@@ -1,10 +1,10 @@
-# The chat turn over membrama (design, in progress: branch `chat-membrama-design`; nothing here is built yet)
+# The chat turn over membrama (built in `packs/chat_membrama.c1f`; what is not built is listed at the end)
 
-membrama (github.com/chedim/membrama) is a GraphLink peer that runs a local model on llama.cpp for the seat. This page says how a chat turn would be answered by it: a rung of the turn beside `chat_oai.c1f` (any OpenAI-compatible endpoint) and the claude rung, selected by the model's entry, with the same tool loop. membrama's own design is its `docs/design.md`; the protocol under both is [graph-link.md](graph-link.md).
+membrama (github.com/chedim/membrama) is a GraphLink peer that runs a local model on llama.cpp for the seat. This page says how a chat turn is answered by it: a rung of the turn beside `chat_oai.c1f` (any OpenAI-compatible endpoint) and the claude rung, selected by the model's entry, with the same tool loop. membrama's own design is its `docs/design.md`; the protocol under both is [graph-link.md](graph-link.md).
 
 ## Choosing the rung
 
-A model is a `cloud_models` entry (`chat_oai.c1f` header). An entry with `backend: "membrama"` selects this rung: `{name, backend: "membrama", peer, max_new, enable_thinking?}`. `name` is the model name shown to the person; `peer` is the name of the peer in the fact `peers`; **`max_new` is required and has no default** (it is the owner's number; a request without it is an error reply). `chat_oai.c1f` takes every entry whose backend is not `claude-agent`, so it must also leave `membrama` alone.
+A model is a `cloud_models` entry (`chat_oai.c1f` header). An entry with `backend: "membrama"` selects this rung: `{name, backend: "membrama", peer, ns, max_new, enable_thinking?}`. `name` is the model name shown to the person; `peer` is the name of the peer in the fact `peers`; `ns` is the namespace it owns (the node `Vm:<ns>` says whether its link is up); **`max_new` is required and has no default** (it is the owner's number; an entry without it, or without `peer` or `ns`, refuses the turn and says what to add). `chat_oai.c1f` leaves `membrama` entries alone.
 
 ## The peer (the owner declares it, in the fact `peers`)
 
@@ -18,20 +18,25 @@ A round is what `chat_oai` calls one model call. Instead of a `Fetch`:
 3. **Request:** `membrane::LlmRequest:<cp>-<n>` with `server`, `messages` (the ids), `tools` (the shared ids), `settings` (`max_new`, `enable_thinking`). The request is written last.
 4. **Reply:** `membrama::Reply:<cp>-<n>` is read (the seat subscribes on the first read of a foreign node and gets the value on later reads): `state` (running, done, error, aborted), `chunks`, `finish` (`stop` or `tool_calls`), `tool_calls` (`[{name, arguments}]`), `usage`, `error`. The text is in `membrama::Chunk:<cp>-<n>:<k>`; the page's partial text reads the chunks as they grow.
 5. **Tool calls** become `ChatCall` entities exactly as in `chat_oai`: the door's own `tools/call`, results as `ChatTool` entities. The arguments arrive as an object (not JSON text); the next round's assistant message carries them as the object.
-6. **Retire:** when the round's reply has been read (and its tool calls have been made), the request and its message nodes are retired. Their cells become `Gone`; membrama sees that, retires the reply and its chunks, and the slots come back once each side has acknowledged (graphlink `docs/shared-memory.md`, 4b). Nothing here deletes anything by hand.
+6. **Retire:** every round records the ids of its request and message nodes on the turn (`mb_nodes`). When the **turn** ends they are all retired (not at the end of each round: a round's tool calls are made from what its reply said, and the reply is read from membrama's cells, which go with the request). Their cells become `Gone`; membrama sees that, retires the reply and its chunks, and the slots come back once each side has acknowledged (graphlink `docs/shared-memory.md`, 4b). The shared tool nodes stay.
 
 Cells for a round with two messages and four tools: 6 for the request and 4 per message (the own cell, `role`, `content`, `summary` the seat adds), plus the shared tools once (3 each). Measured on a scratch seat: 26 cells in all for that round; 7 on membrama's side.
 
 ## Errors, interruption, the link
 
-- A reply in state `error` fails the turn with membrama's cause. A reply that does not arrive because the peer is down fails it with "membrama is not up" (the `Vm:membrama` node says `link: gone`).
-- Interrupting the turn writes `abort` on the request node; membrama stops at its next piece of text and answers `aborted`.
+- A reply in state `error` fails the turn with membrama's cause.
+- **The peer's link gone** (`Vm:<ns>` says `link: gone`) while a round has no final reply fails the turn with "membrama is not up". A peer that never came up has no `Vm` node yet and is not detected: the turn waits (no timeout is invented here).
+- **Stopping** (the page's Stop, the abort route, which marks the message `aborted`): the round fails the turn as stopped, and `abort` is written on the open requests so membrama stops at its next piece of text. The test checks that the turn ends stopped; that membrama really stops mid-answer is not asserted over the real model.
 - Banks (entity parts) are not used by this rung: the prompt is one text, rendered with the model's own template. The prefix reuse across rounds still applies.
 
-## What would be tested
+## What is tested
 
-A scratch seat (its own port and folder, never a person's seat) with the real cliffvm release and membrama: the same prompt through this rung and through `chat_oai` (an OpenAI-compatible server on the same model), a turn with a tool call and a second round, an abort, and a request whose value is too big for the table. Parity means the same answer for the same prompt with greedy decoding, and the same tool calls.
+Gated tests (`seat-tests/tests/chat_membrama_1143.rs`; `MEMBRAMA_BIN` and `MEMBRAMA_TEST_MODEL` name the membrama program and a Qwen3 file, and without them the tests say they were skipped): a plain turn (the model answers 4), a turn with a real tool call through the door and an answer from its result, the retirement of the requests and messages at the end of the turn with the shared tools staying, a turn whose peer is gone, and a stopped turn. Each runs on a scratch seat (its own port and folder). The comparison with `chat_oai` on the same model is not automated: the OpenAI-compatible endpoint (Ollama) does not decode greedily, so only a loose check ("the answer contains 4") can be shared.
 
-## Not decided or not built
+## Not built or not decided
 
-Everything on this page. Open: where `enable_thinking` comes from when the entry does not say; what the page shows while membrama loads the model; whether a second model needs a second peer.
+- **Streaming:** the page gets the answer at the end of a round, not as it arrives (the partial text from the chunks is not wired).
+- **A peer that never comes up** (no `Vm` node) is not a failure of the turn; it waits.
+- **A reply of more than four chunks** (about 262,000 bytes with the owner's 65,536 value size) is read as its first four.
+- **`enable_thinking`** comes from the entry only; the model's `<think>` text is not separated from the answer when it is on.
+- **A second model** needs a second peer and a second entry.

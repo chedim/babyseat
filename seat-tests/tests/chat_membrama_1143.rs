@@ -38,9 +38,9 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 }
 
 /// a scratch seat whose only model is `local`, answered by membrama (the peer `peer`, the owner's numbers: 512 slots, key cap 128, value cap 65,536)
-fn seat(tag: &str, bin: &str, model: &str) -> Run { seat_with(tag, bin, model, 5) }
+fn seat(tag: &str, bin: &str, model: &str) -> Run { seat_with(tag, bin, model, 5, 200) }
 /// the same with the seconds the seat waits before it starts the peer again (a test that kills the peer makes it long, so the peer stays gone)
-fn seat_with(tag: &str, bin: &str, model: &str, restart_wait_s: u64) -> Run {
+fn seat_with(tag: &str, bin: &str, model: &str, restart_wait_s: u64, max_new: u64) -> Run {
     let dir = tmp(tag);
     let peer = format!("m{}x{}", std::process::id() % 100000, common::unique().rsplit('-').next().unwrap());
     let r = repo();
@@ -51,7 +51,7 @@ fn seat_with(tag: &str, bin: &str, model: &str, restart_wait_s: u64) -> Run {
     argv.extend(numbers.iter().map(|s| s.to_string()));
     let peers = json!([{"name": peer, "ns": "membrama", "ring_bytes": 65536, "slots": 512, "key_cap": 128, "val_cap": 65536, "spins": 1_000_000, "depth": 32,
                         "run": {"argv": argv, "restart_wait_s": restart_wait_s, "max_restarts": 5, "reset_after_s": 60}}]);
-    let entry = json!([{"name": "local", "backend": "membrama", "peer": peer, "ns": "membrama", "max_new": 200, "enable_thinking": false}]);
+    let entry = json!([{"name": "local", "backend": "membrama", "peer": peer, "ns": "membrama", "max_new": max_new, "enable_thinking": false}]);
     let mut cmd = Command::new(cliffvm_bin());
     cmd.current_dir(&dir).arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f")).args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"])
         .args(["--fact", &format!("cloud_models={entry}"), "--fact", "router_on=false", "--fact", "seat_backend=http://127.0.0.1:1",
@@ -146,7 +146,7 @@ fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read",
 #[test]
 fn a_turn_whose_peer_is_gone_fails_and_says_membrama_is_not_up() {
     let Some((bin, model)) = gate() else { return };
-    let run = seat_with("gone", &bin, &model, 600);
+    let run = seat_with("gone", &bin, &model, 600, 200);
     wait_until("the peer to come up", || read(run.port, "Vm:membrama", "link") == "up");
     let _ = Command::new("pkill").args(["-f", &format!("membrama serve --peer {}", run.peer)]).status();   // the peer dies; the seat waits 600 s before it would start it again
     wait_until("the link to say gone", || read(run.port, "Vm:membrama", "link") == "gone");
@@ -157,11 +157,13 @@ fn a_turn_whose_peer_is_gone_fails_and_says_membrama_is_not_up() {
 }
 
 #[test]
-fn stopping_a_turn_writes_abort_on_the_open_request_and_ends_the_turn_stopped() {
+/// What this proves is that the turn ends stopped. That `abort` reaches the open request and membrama stops at its next piece of text is not asserted here (the request is retired when the turn ends, so
+/// its cell cannot be read afterwards); membrama's own tests cover an abort before a run starts.
+fn stopping_a_turn_ends_it_as_an_error_that_says_it_was_stopped() {
     let Some((bin, model)) = gate() else { return };
-    let run = seat("stop", &bin, &model);
+    let run = seat_with("stop", &bin, &model, 5, 1500);   // a long answer, so the stop lands in the middle of it
     wait_until("the peer to come up", || read(run.port, "Vm:membrama", "link") == "up");
-    let id = send(run.port, "Count from 1 to 150, one number per line, and nothing else.");
+    let id = send(run.port, "Count from 1 to 1000, one number per line, and nothing else.");
     wait_until("the request to be written", || count(run.port, "LlmRequest") > 0);
     let (st, body) = http(run.port, "POST", &format!("/membrane/chat/message/{id}/abort"), "");
     assert_eq!(st, 200, "{body}");

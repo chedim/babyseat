@@ -4,7 +4,7 @@ IMPORT chat_turn 1
 IMPORT chat_oai 1
 IMPORT fetch 1
 -- THE CHAT TURN OVER MEMBRAMA (#1143, docs/membrama-chat.md): a chat turn answered by the local model peer membrama (github.com/chedim/membrama), a rung beside packs/chat_oai.c1f.
--- WHICH MODEL: an entry of the boot fact `cloud_models` whose `backend` is `membrama`: {name, backend: 'membrama', peer, max_new, enable_thinking?}. `peer` is the peer's name in the fact `peers`;
+-- WHICH MODEL: an entry of the boot fact `cloud_models` whose `backend` is `membrama`: {name, backend: 'membrama', peer, ns, max_new, enable_thinking?}. `peer` is the peer's name in the fact `peers` and `ns` the namespace it owns (the `Vm:<ns>` node says whether its link is up);
 -- `max_new` is the most tokens an answer may take: the owner's number, no default.
 -- THE TURN is chat_oai's, with the transport swapped: the door's tool list is read the same way (`Fetch:oai:<cp>:tools`), each round (MbRound) writes its messages and a request as nodes
 -- (`membrane::LlmMsg:<rid>:<i>`, `membrane::LlmRequest:<rid>`; the tools are shared nodes `membrane::LlmTool:door:<i>`), reads membrama's reply (`membrama::Reply:<rid>`, its chunks),
@@ -22,8 +22,8 @@ ChatMessage.mb_entry getter:
   ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') == 'membrama'] or [None])[0]
 ChatMessage.mb_cfg getter:
   WHEN this.mb_entry == None: None
-  ELSE WHEN prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'max_new') == None: {'refuse': 'The model ' + this.model_eff + ' is answered by membrama, and its cloud_models entry must name "peer" (the peer in the fact peers) and "max_new" (the most tokens an answer may take: your number, there is no default).'}
-  ELSE: {'peer': prop(this.mb_entry, 'peer'), 'model': this.model_eff, 'max_new': prop(this.mb_entry, 'max_new'), 'thinking': prop(this.mb_entry, 'enable_thinking'), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
+  ELSE WHEN prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None or prop(this.mb_entry, 'max_new') == None: {'refuse': 'The model ' + this.model_eff + ' is answered by membrama, and its cloud_models entry must name "peer" (the peer in the fact peers), "ns" (the namespace it owns) and "max_new" (the most tokens an answer may take: your number, there is no default).'}
+  ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'max_new': prop(this.mb_entry, 'max_new'), 'thinking': prop(this.mb_entry, 'enable_thinking'), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
 ChatMessage.mb_plan getter: {'refuse': prop(this.mb_cfg, 'refuse')} if prop(this.mb_cfg, 'refuse') != None else {'mb': this.mb_cfg}
 
 -- ---- start: the door's tool list (chat_oai's), then round 1 --------------------------------------------------------------------------------------------------
@@ -61,6 +61,7 @@ Chat.mb_out on-setter mb-send:
       ('membrane::LlmMsg:' + this.rid + ':' + str(r['i'])).content = str(prop(r['m'], 'content') or '')
       FOR tc IN [x for x in [prop(r['m'], 'tool_calls')] if x != None]:
         ('membrane::LlmMsg:' + this.rid + ':' + str(r['i'])).tool_calls = tc
+    membrane::Chat[this.cp]:turn.mb_nodes = concat(prop(this.turn_e, 'mb_nodes') or [], concat(prop(this.mb_out, 'ids'), ['membrane::LlmRequest:' + this.rid]))
     ('membrane::LlmRequest:' + this.rid).server = prop(this.mb_out, 'peer')
     ('membrane::LlmRequest:' + this.rid).messages = prop(this.mb_out, 'ids')
     ('membrane::LlmRequest:' + this.rid).tools = prop(this.mb_out, 'tools')
@@ -79,8 +80,12 @@ MbRound.chunks_here getter: len([x for x in this.chunks_in if x == None]) == 0
 MbRound.said getter: join([str(x) for x in this.chunks_in if x != None], '')
 MbRound.usage getter: prop(this.reply_e, 'usage')
 MbRound.calls getter: fold([], [concat(acc, [{'i': len(acc), 'id': 'call_' + str(this.n) + '_' + str(len(acc)), 'name': c['name'], 'args': str(prop(c, 'arguments') or {})}]) for c in (this.rcalls or [])])
+MbRound.peer_gone getter: prop('Vm:' + str(prop(this.cfg, 'ns')), 'link') == 'gone'
+MbRound.stopped getter: prop('membrane::Chat:' + this.cp, 'aborted') == True
 MbRound.step getter:
-  WHEN this.rstate == None or this.rstate == 'running': None
+  WHEN this.stopped and this.rstate not in ['done', 'error', 'aborted']: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' was stopped.'}
+  ELSE WHEN this.peer_gone and this.rstate not in ['done', 'error', 'aborted']: {'fail': 'membrama is not up (the link of ' + str(prop(this.cfg, 'peer')) + ' is gone), so the model ' + str(prop(this.cfg, 'model')) + ' cannot answer.'}
+  ELSE WHEN this.rstate == None or this.rstate == 'running': None
   ELSE WHEN this.rstate == 'error': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' could not answer through membrama: ' + str(this.rerr)}
   ELSE WHEN this.rstate == 'aborted': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' was stopped.'}
   ELSE WHEN this.rfinish == None or not this.chunks_here: None
@@ -115,15 +120,17 @@ MbRound.names getter: concat(this.names_before, [c['name'] for c in this.calls])
 MbRound.cum getter: {'in': (prop(prop(this.prev, 'cum'), 'in') or 0) + (prop(this.usage, 'read') or 0) + (prop(this.usage, 'loaded') or 0), 'out': (prop(prop(this.prev, 'cum'), 'out') or 0) + (prop(this.usage, 'generated') or 0), 'seen': prop(this.usage, 'read') != None or prop(prop(this.prev, 'cum'), 'seen') == True}
 MbRound.usage_out getter: {'input_tokens': prop(this.cum, 'in'), 'output_tokens': prop(this.cum, 'out')} if prop(this.cum, 'seen') == True else None
 
--- ---- the end of the turn: the rounds' requests and messages are retired ----------------------------------------------------------------------------------------------
--- Their cells become Gone; membrama sees it and retires its replies and chunks, and the slots come back once each side has acknowledged (graphlink docs/shared-memory.md, 4b). It waits for the end of
--- the turn, not the end of each round: a round's tool calls are made from what its reply said, and a reply is read from membrama's cells, which go with the request. The shared tool nodes stay.
--- (`mb_cfg` is null once the turn is over, so the marker is the turn's own `oai` settings, which name the peer.)
-MbRound.mb_round getter: True
+-- ---- the end of the turn: the rounds' requests and messages are retired; a stopped turn tells membrama --------------------------------------------------------------------
+-- Every round records the ids of the nodes it wrote on the turn (`mb_nodes`). At the end of the turn they are retired: their cells become Gone; membrama sees it and retires its replies and chunks, and the
+-- slots come back once each side has acknowledged (graphlink docs/shared-memory.md, 4b). It waits for the end of the turn, not of each round: a round's tool calls are made from what its reply said, and a reply
+-- is read from membrama's cells, which go with the request. The shared tool nodes stay. (`mb_cfg` is null once the turn is over, so the marker is the turn's own `oai` settings, which name the peer.)
 ChatMessage.mb_done getter: prop(prop(this.turn_eid, 'oai'), 'peer') != None and prop(this.turn_eid, 'state') in ['done', 'error']
 Chat.mb_done on-setter mb-retire:
   WHEN this.mb_done == True:
-    FOR r IN [x for x in instances('MbRound') if x.cp == this.cp]:
-      FOR row IN r.msg_rows:
-        ('membrane::LlmMsg:' + r.rid + ':' + str(row['i'])).retire = True
-      ('membrane::LlmRequest:' + r.rid).retire = True
+    FOR e IN (prop(this.turn_eid, 'mb_nodes') or []):
+      (e).retire = True
+-- STOP (the abort route of chat.c1f marks the message `aborted`): membrama is told by `abort` on the open requests, and stops at its next piece of text; the round says the model was stopped (`step`)
+Chat.aborted on-setter mb-abort:
+  WHEN this.aborted == True and prop(prop(this.turn_eid, 'oai'), 'peer') != None:
+    FOR e IN [x for x in (prop(this.turn_eid, 'mb_nodes') or []) if startswith(x, 'membrane::LlmRequest:')]:
+      (e).abort = True
