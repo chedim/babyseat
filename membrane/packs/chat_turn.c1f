@@ -157,6 +157,8 @@ ChatMessage.plan getter:
   -- NO MODEL IS CHOSEN (the default: the seat answers through the local Ollama, and the person picks which model): nothing starts, the answer says so and how to pick
   ELSE WHEN this.model_eff == '': {'refuse': this.no_model_text}
   -- a model that is not a claude rung is answered over an OpenAI-compatible endpoint (packs/chat_oai.c1f): its own plan, none of the claude CLI's checks apply
+  -- a model answered by the local model peer membrama (packs/chat_membrama.c1f): its own plan
+  ELSE WHEN this.mb_cfg != None: this.mb_plan
   ELSE WHEN this.oai_cfg != None: this.oai_plan
   ELSE WHEN this.bin == '': {'refuse': 'The chat answers through the claude CLI, and its path is not named yet (chat_claude_bin). Name it with CLAUDE_BIN=<path to claude> when you start scripts/seat, or start cliffvm with --fact chat_claude_bin=<path>, then send the message again.'}
   ELSE WHEN this.auth not in ['api_key', 'login']: {'refuse': 'The chat_auth fact says ' + str(this.auth) + ', which is not a way the claude CLI is run here. Use chat_auth=api_key (the default: the key of ANTHROPIC_API_KEY) or chat_auth=login (the login of the claude CLI itself), then send the message again.'}

@@ -1,0 +1,136 @@
+PACK chat_membrama 1
+IMPORT chat 1
+IMPORT chat_turn 1
+IMPORT chat_oai 1
+IMPORT fetch 1
+-- THE CHAT TURN OVER MEMBRAMA (#1143, docs/membrama-chat.md): a chat turn answered by the local model peer membrama (github.com/chedim/membrama), a rung beside packs/chat_oai.c1f.
+-- WHICH MODEL: an entry of the boot fact `cloud_models` whose `backend` is `membrama`: {name, backend: 'membrama', peer, ns, max_new, enable_thinking?}. `peer` is the peer's name in the fact `peers` and `ns` the namespace it owns (the `Vm:<ns>` node says whether its link is up);
+-- `max_new` is the most tokens an answer may take: the owner's number, no default.
+-- THE TURN is chat_oai's, with the transport swapped: the door's tool list is read the same way (`Fetch:oai:<cp>:tools`), each round (MbRound) writes its messages and a request as nodes
+-- (`membrane::LlmMsg:<rid>:<i>`, `membrane::LlmRequest:<rid>`; the tools are shared nodes `membrane::LlmTool:door:<i>`), reads membrama's reply (`membrama::Reply:<rid>`, its chunks),
+-- and a round with tool calls runs them through chat_oai's own ChatCall (the door's `tools/call`) and opens the next round. An id has no colon (a colon makes a child path, and a retired node takes
+-- its children): `rid` is the turn's id with `/` for `:`, then `-` and the round number. A round's request and message nodes are retired once its reply has been read, which frees their slots.
+
+-- the classes of the nodes a round writes: the pack must OWN a class (declare a getter on it) for a write of one of its entities to create it (docs/c1f-stdlib.md, Constructors)
+LlmMsg.kind getter: 'message'
+LlmRequest.kind getter: 'request'
+LlmTool.kind getter: 'tool'
+
+-- ---- which model, which peer -----------------------------------------------------------------------------------------------------------------------------
+ChatMessage.mb_entry getter:
+  WHEN this.over: None
+  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') == 'membrama'] or [None])[0]
+ChatMessage.mb_cfg getter:
+  WHEN this.mb_entry == None: None
+  ELSE WHEN prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None or prop(this.mb_entry, 'max_new') == None: {'refuse': 'The model ' + this.model_eff + ' is answered by membrama, and its cloud_models entry must name "peer" (the peer in the fact peers), "ns" (the namespace it owns) and "max_new" (the most tokens an answer may take: your number, there is no default).'}
+  ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'max_new': prop(this.mb_entry, 'max_new'), 'thinking': prop(this.mb_entry, 'enable_thinking'), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
+ChatMessage.mb_plan getter: {'refuse': prop(this.mb_cfg, 'refuse')} if prop(this.mb_cfg, 'refuse') != None else {'mb': this.mb_cfg}
+
+-- ---- start: the door's tool list (chat_oai's), then round 1 --------------------------------------------------------------------------------------------------
+Chat.plan on-setter mb-start:
+  WHEN prop(this.plan, 'mb') != None:
+    membrane::Chat[this.cp]:turn.state = 'running'
+    membrane::Chat[this.cp]:turn.started = clock
+    membrane::Chat[this.cp]:turn.oai = prop(this.plan, 'mb')
+    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': prop(prop(this.plan, 'mb'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'mb'), 'admin_env'), 'timeout_s': prop(prop(this.plan, 'mb'), 'timeout_s')}
+-- the tools are shared nodes, written with the same values every turn (a cell is rewritten only when its value changes), and never retired
+Chat.oai_tools on-setter mb-first:
+  WHEN prop(this.oai_tools, 'tools') != None and not this.over and this.mb_cfg != None:
+    membrane::Chat[this.cp]:turn.oai_tools = prop(this.oai_tools, 'tools')
+    FOR t IN fold([], [concat(acc, [{'i': len(acc), 'spec': x}]) for x in prop(this.oai_tools, 'tools')]):
+      ('membrane::LlmTool:door:' + str(t['i'])).spec = t['spec']
+    membrane::Chat[this.cp]:turn:round[1] = MbRound(cp: this.cp, n: 1, messages: [{'role': 'system', 'content': join([this.note, this.banner_slot], '\n\n')}, {'role': 'user', 'content': this.text}])
+    membrane::Chat[this.cp]:turn:round[1].go = True
+    membrane::Chat[this.cp]:turn.round = 1
+
+-- ---- a round: its nodes, its request ----------------------------------------------------------------------------------------------------------------------
+MbRound.kind getter: 'round'
+MbRound.turn_e getter: 'membrane::Chat:' + this.cp + ':turn'
+MbRound.cfg getter: prop(this.turn_e, 'oai')
+MbRound.rid getter: replace(this.cp, ':', '/') + '-' + str(this.n)
+MbRound.tool_specs getter: prop(this.turn_e, 'oai_tools')
+MbRound.msg_rows getter: fold([], [concat(acc, [{'i': len(acc), 'm': x}]) for x in (this.messages or [])])
+MbRound.tool_rows getter: fold([], [concat(acc, [len(acc)]) for x in (this.tool_specs or [])])
+MbRound.mb_out getter:
+  WHEN this.go != True or this.messages == None or this.cfg == None or this.tool_specs == None: None
+  ELSE: {'rows': this.msg_rows, 'ids': ['membrane::LlmMsg:' + this.rid + ':' + str(r['i']) for r in this.msg_rows], 'tools': ['membrane::LlmTool:door:' + str(i) for i in this.tool_rows], 'settings': {'max_new': prop(this.cfg, 'max_new'), 'enable_thinking': prop(this.cfg, 'thinking')}, 'peer': prop(this.cfg, 'peer')}
+Chat.mb_out on-setter mb-send:
+  WHEN this.mb_out != None:
+    FOR r IN prop(this.mb_out, 'rows'):
+      ('membrane::LlmMsg:' + this.rid + ':' + str(r['i'])).role = r['m']['role']
+      ('membrane::LlmMsg:' + this.rid + ':' + str(r['i'])).content = str(prop(r['m'], 'content') or '')
+      FOR tc IN [x for x in [prop(r['m'], 'tool_calls')] if x != None]:
+        ('membrane::LlmMsg:' + this.rid + ':' + str(r['i'])).tool_calls = tc
+    membrane::Chat[this.cp]:turn.mb_nodes = concat(prop(this.turn_e, 'mb_nodes') or [], concat(prop(this.mb_out, 'ids'), ['membrane::LlmRequest:' + this.rid]))
+    ('membrane::LlmRequest:' + this.rid).server = prop(this.mb_out, 'peer')
+    ('membrane::LlmRequest:' + this.rid).messages = prop(this.mb_out, 'ids')
+    ('membrane::LlmRequest:' + this.rid).tools = prop(this.mb_out, 'tools')
+    ('membrane::LlmRequest:' + this.rid).settings = prop(this.mb_out, 'settings')
+
+-- ---- what membrama said: the reply node and its chunks (a foreign read is `pending` until the value arrives, and the readers recompute then) ------------------------------
+MbRound.reply_e getter: 'membrama::Reply:' + this.rid
+MbRound.rstate getter: prop(this.reply_e, 'state')
+MbRound.rfinish getter: prop(this.reply_e, 'finish')
+MbRound.rcalls getter: prop(this.reply_e, 'tool_calls')
+MbRound.rerr getter: prop(this.reply_e, 'error')
+MbRound.nchunks getter: prop(this.reply_e, 'chunks') or 0
+-- the chunks that exist (a reply of up to four chunks: the cell size less 3 bytes each, 262,000 bytes with the owner's 65,536)
+MbRound.chunks_in getter: [prop('membrama::Chunk:' + this.rid + ':' + str(k), 'text') for k in [0, 1, 2, 3] if k < this.nchunks]
+MbRound.chunks_here getter: len([x for x in this.chunks_in if x == None]) == 0
+MbRound.said getter: join([str(x) for x in this.chunks_in if x != None], '')
+MbRound.usage getter: prop(this.reply_e, 'usage')
+MbRound.calls getter: fold([], [concat(acc, [{'i': len(acc), 'id': 'call_' + str(this.n) + '_' + str(len(acc)), 'name': c['name'], 'args': str(prop(c, 'arguments') or {})}]) for c in (this.rcalls or [])])
+MbRound.peer_gone getter: prop('Vm:' + str(prop(this.cfg, 'ns')), 'link') == 'gone'
+MbRound.stopped getter: prop('membrane::Chat:' + this.cp, 'aborted') == True
+MbRound.step getter:
+  WHEN this.stopped and this.rstate not in ['done', 'error', 'aborted']: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' was stopped.'}
+  ELSE WHEN this.peer_gone and this.rstate not in ['done', 'error', 'aborted']: {'fail': 'membrama is not up (the link of ' + str(prop(this.cfg, 'peer')) + ' is gone), so the model ' + str(prop(this.cfg, 'model')) + ' cannot answer.'}
+  ELSE WHEN this.rstate == None or this.rstate == 'running': None
+  ELSE WHEN this.rstate == 'error': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' could not answer through membrama: ' + str(this.rerr)}
+  ELSE WHEN this.rstate == 'aborted': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' was stopped.'}
+  ELSE WHEN this.rfinish == None or not this.chunks_here: None
+  ELSE WHEN this.rfinish == 'tool_calls' and this.rcalls == None: None
+  ELSE WHEN len(this.calls) > 0 and this.n >= prop(this.cfg, 'max_turns'): {'capped': True}
+  ELSE WHEN len(this.calls) > 0: {'calls': True}
+  ELSE WHEN strip(this.said) == '': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' answered with no text and no tool call (finish: ' + str(this.rfinish) + ')'}
+  ELSE: {'final': this.said}
+MbRound.said_all getter: join([x for x in [str(prop(this.prev, 'said_all') or ''), strip(this.said)] if x != ''], '\n\n')
+
+-- ---- the round's tool calls are chat_oai's: each is a ChatCall (the door's own `tools/call`); then the next round -----------------------------------------------------
+MbRound.call_eids getter: ['membrane::Chat:' + this.cp + ':turn:round:' + str(this.n) + ':call:' + str(c['i']) for c in this.calls]
+MbRound.results getter:
+  WHEN prop(this.step, 'calls') != True: None
+  ELSE: ([r for r in [[prop(e, 'out') for e in this.call_eids]] if len([x for x in r if x == None]) == 0] or [None])[0]
+MbRound.assistant getter: {'role': 'assistant', 'content': (this.said or ''), 'tool_calls': [{'type': 'function', 'function': {'name': c['name'], 'arguments': json(c['args'] or '{}')}} for c in this.calls]}
+MbRound.mb_next getter: {'messages': concat(concat(this.messages, [this.assistant]), [{'role': 'tool', 'content': r['text']} for r in this.results])} if this.results != None else None
+Chat.mb_next on-setter mb-next:
+  WHEN this.mb_next != None:
+    FOR r IN this.results:
+      membrane::Chat[this.cp]:turn:tool[r['id']] = ChatTool(name: r['name'], input: r['input'], result: r['text'])
+    membrane::Chat[this.cp]:turn:round[str(this.n + 1)] = MbRound(cp: this.cp, n: this.n + 1, messages: prop(this.mb_next, 'messages'))
+    membrane::Chat[this.cp]:turn:round[str(this.n + 1)].go = True
+    membrane::Chat[this.cp]:turn.round = this.n + 1
+
+-- ---- what the turn has used, over its rounds (chat_oai's shape; membrama's usage is {read, loaded, generated}) ---------------------------------------------------------
+MbRound.prev getter: 'membrane::Chat:' + this.cp + ':turn:round:' + str(this.n - 1) if this.n > 1 else None
+MbRound.ids_before getter: prop(this.prev, 'ids') or []
+MbRound.names_before getter: prop(this.prev, 'names') or []
+MbRound.ids getter: concat(this.ids_before, [c['id'] for c in this.calls])
+MbRound.names getter: concat(this.names_before, [c['name'] for c in this.calls])
+MbRound.cum getter: {'in': (prop(prop(this.prev, 'cum'), 'in') or 0) + (prop(this.usage, 'read') or 0) + (prop(this.usage, 'loaded') or 0), 'out': (prop(prop(this.prev, 'cum'), 'out') or 0) + (prop(this.usage, 'generated') or 0), 'seen': prop(this.usage, 'read') != None or prop(prop(this.prev, 'cum'), 'seen') == True}
+MbRound.usage_out getter: {'input_tokens': prop(this.cum, 'in'), 'output_tokens': prop(this.cum, 'out')} if prop(this.cum, 'seen') == True else None
+
+-- ---- the end of the turn: the rounds' requests and messages are retired; a stopped turn tells membrama --------------------------------------------------------------------
+-- Every round records the ids of the nodes it wrote on the turn (`mb_nodes`). At the end of the turn they are retired: their cells become Gone; membrama sees it and retires its replies and chunks, and the
+-- slots come back once each side has acknowledged (graphlink docs/shared-memory.md, 4b). It waits for the end of the turn, not of each round: a round's tool calls are made from what its reply said, and a reply
+-- is read from membrama's cells, which go with the request. The shared tool nodes stay. (`mb_cfg` is null once the turn is over, so the marker is the turn's own `oai` settings, which name the peer.)
+ChatMessage.mb_done getter: prop(prop(this.turn_eid, 'oai'), 'peer') != None and prop(this.turn_eid, 'state') in ['done', 'error']
+Chat.mb_done on-setter mb-retire:
+  WHEN this.mb_done == True:
+    FOR e IN (prop(this.turn_eid, 'mb_nodes') or []):
+      (e).retire = True
+-- STOP (the abort route of chat.c1f marks the message `aborted`): membrama is told by `abort` on the open requests, and stops at its next piece of text; the round says the model was stopped (`step`)
+Chat.aborted on-setter mb-abort:
+  WHEN this.aborted == True and prop(prop(this.turn_eid, 'oai'), 'peer') != None:
+    FOR e IN [x for x in (prop(this.turn_eid, 'mb_nodes') or []) if startswith(x, 'membrane::LlmRequest:')]:
+      (e).abort = True
