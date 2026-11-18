@@ -107,6 +107,26 @@ fn a_plain_turn_is_answered_by_the_local_model_through_membrama() {
     assert!(v["response"].as_str().unwrap_or("").contains('4'), "the answer should be 4: {v}");
 }
 
+/// how many entities of a class the seat has (`entity_query` says `0 entity(ies)` for none and lists one entity a line otherwise)
+fn count(port: u16, class: &str) -> usize {
+    let t = call(port, "entity_query", json!({"q": format!("kind:{class}"), "k": 100}));
+    if t.starts_with("0 entity") { 0 } else { t.lines().filter(|l| l.trim_end().ends_with(&format!("({class})"))).count() }
+}
+fn wait_until(what: &str, mut f: impl FnMut() -> bool) { let t = Instant::now(); while !f() { assert!(t.elapsed() < Duration::from_secs(60), "timed out waiting for {what}"); std::thread::sleep(Duration::from_millis(200)); } }
+
+#[test]
+fn when_the_turn_ends_the_requests_and_messages_of_its_rounds_are_retired_and_the_shared_tools_stay() {
+    let Some((bin, model)) = gate() else { return };
+    let run = seat("retire", &bin, &model);
+    call(run.port, "entity_write", json!({"spec": "Lamp:desk", "prop": "power", "value": "zebra-42"}));
+    let id = send(run.port, "Use the entity_read tool to read the property power of the entity Lamp:desk, then tell me its value exactly.");   // two rounds
+    let v = ended(run.port, &id);
+    assert_eq!(v["state"], "done", "{v}");
+    wait_until("the request nodes to be retired", || count(run.port, "LlmRequest") == 0);
+    wait_until("the message nodes to be retired", || count(run.port, "LlmMsg") == 0);
+    assert!(count(run.port, "LlmTool") > 0, "the shared tool nodes stay: they are the same for every turn");
+}
+
 #[test]
 fn a_tool_call_runs_through_the_doors_own_tool_logic_and_the_model_answers_from_its_result() {
     let Some((bin, model)) = gate() else { return };
