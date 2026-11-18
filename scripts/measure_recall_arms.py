@@ -4,7 +4,7 @@ One command, one process at a time. Arms: edges (today's `related`), cosine (the
 An arm the seat cannot serve prints `not available`, never zeros. Held-out discipline: --test-convs are only measured, --tune-convs (default none)
 are the only ones anything may be tuned on; the two lists must not overlap. --max-embed-calls has NO default and is a hard stop, enforced by a counting
 loopback proxy that the seat's `seat_backend` is pointed at; the proxy forwards to --ollama (loopback only unless --allow-remote). --dry-run sends nothing.
-real run : scripts/measure_recall_arms.py --repo R --binary R/native/target/release/cliffvm --data locomo10.json --scratch S --test-convs 0,1 --arms edges,cosine,fused --max-embed-calls N
+real run : scripts/measure_recall_arms.py --repo R --binary <folder>/bin/cliffvm --data locomo10.json --scratch S --test-convs 0,1 --arms edges,cosine,fused --max-embed-calls N
 test run : --driver-module tests/fake_recall_seat.py  (a stub: make(ollama_url, NotAvailable, **kw) -> object with ingest_turn/ingest_question/ask/close)
 The per-arm QUERY is the ARM_READS table below: edit the `fused` / `cosine` line to point at the final entity (see the doc)."""
 import argparse, fcntl, hashlib, http.server, importlib.util, json, os, re, socket, statistics as st, sys, tempfile, threading, time, urllib.parse, urllib.request

@@ -54,7 +54,8 @@ macOS and Linux (x86_64 and arm64); there is no Windows build. The macOS binarie
 
 ```
 git clone https://github.com/chedim/membrane && cd membrane
-scripts/dist/build.sh --out ./dist/0.7.63          # builds native/ (about a minute warm) and assembles the dist folder
+scripts/dist/fetch_cliffvm.sh "$(cat CLIFFVM_VERSION)" <target> ./engine   # the pinned engine release (aarch64-apple-darwin, x86_64-unknown-linux-gnu, ...)
+scripts/dist/build.sh --bin ./engine/bin/cliffvm --engine-version "$(cat CLIFFVM_VERSION)" --out ./dist/0.7.63   # assembles the dist folder
 ollama pull <a chat model> && ollama pull mxbai-embed-large   # the model that makes the memory's vectors
 ./dist/0.7.63/bin/cliffvm serve                 # then pick the model in the window the page opens
 ```
@@ -130,7 +131,7 @@ node tests/js/<name>.test.mjs                                            # the p
 pytest tests/ha tests/wrapper                                            # the Home Assistant component and the thin Python launcher
 ```
 
-Layout: `native/` (the VM and the host: Rust), `membrane/packs/` (the seat's packs, c1f), `membrane/apps/` (the barest app: the packs and the page; `field.c1f`, the disabled 3D view),
+Layout: `seat-tests/` (the seat's tests, on the pinned engine; the engine itself, the VM and the host in Rust, is github.com/chedim/cliffvm, taken at `CLIFFVM_VERSION`), `membrane/packs/` (the seat's packs, c1f), `membrane/apps/` (the barest app: the packs and the page; `field.c1f`, the disabled 3D view),
 `membrane/launcher.py` (the whole Python: finds the binary and execs it), `custom_components/membrane/` (Home Assistant), `scripts/` (`seat`, `dist/`), `docs/`.
 [AGENTS.md](AGENTS.md) is the checklist for contributors and coding agents.
 

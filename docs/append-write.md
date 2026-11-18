@@ -4,7 +4,7 @@ Nothing here exists in the code: c1f has no append statement (`x.list << element
 question is not asked again from nothing. Recommendation: do not build it yet; the measured value is low.
 
 ## The problem
-Inside one cascade a (entity, property) is written once; a second write is refused (`loop: (<e>, <p>) already written this round by the field; refused ...`, `native/src/fields.rs`, `emit_as`).
+Inside one cascade a (entity, property) is written once; a second write is refused (`loop: (<e>, <p>) already written this round by the field; refused ...`, `cliffvm:src/fields.rs`, `emit_as`).
 A write assigns the whole value, so "add to a list" is a read-modify-write (`concat(this.l or [], [x])`) and two producers in one round collide. Driver verbs (`Request.send`, `Command.run`, ...) are exempt
 (`is_driver_verb`): a verb is a command, one effect per write, and its slot is consumed.
 

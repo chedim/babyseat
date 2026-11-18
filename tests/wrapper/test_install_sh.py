@@ -152,7 +152,7 @@ def test_build_sh_archive_has_the_sha256_sidecar_install_sh_checks(tmp_path):
     fake = tmp_path / "cliffvm"
     fake.write_text('#!/bin/sh\necho "cliffvm $*"\n')
     fake.chmod(0o755)
-    ver = (ROOT / "native" / "Cargo.toml").read_text().split('version = "')[1].split('"')[0]
+    ver = (ROOT / "pyproject.toml").read_text().split('version = "')[1].split('"')[0]   # the product's version: the folder's VERSION
     tb = tmp_path / f"babyseat-{ver}-{TARGET}.tar.gz"
     subprocess.run(["sh", str(ROOT / "scripts" / "dist" / "build.sh"), "--bin", str(fake), "--out", str(tmp_path / "o" / ver), "--archive", str(tb)], check=True, capture_output=True)
     side = (tmp_path / (tb.name + ".sha256")).read_text()

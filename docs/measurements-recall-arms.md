@@ -6,7 +6,7 @@ Internal numbers: no public LoCoMo claim comes from this page. Prepared for 0.7.
 
 ```
 S=<scratch dir>                      # outside the repo
-python3 -I scripts/measure_recall_arms.py --repo $PWD --binary $PWD/native/target/release/cliffvm \
+python3 -I scripts/measure_recall_arms.py --repo $PWD --binary <folder>/bin/cliffvm \
   --data <locomo10.json> --scratch $S --test-convs 0,1 --arms edges,cosine,fused --max-embed-calls <N> --dry-run
 # read the estimate, then run it again without --dry-run
 # <locomo10.json> is the LoCoMo data file; it is not in this repository. A real run needs an Ollama with the embed model (the `embed_model` fact, default mxbai-embed-large) at --ollama.

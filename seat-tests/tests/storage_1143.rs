@@ -427,7 +427,7 @@ fn a_class_a_pack_lists_with_instances_is_loaded_whole_or_is_virtual() {
     // `instances('<Class>')` sees only the loaded entities of a lazy class: a shipped pack that lists a class must declare it RESIDENT (or VIRTUAL: all live ones are loaded)
     let mut all = shipped_texts();
     let r = repo();
-    all.push(("goalgraph".into(), std::fs::read_to_string(r.join("native/packs/goalgraph.c1f")).unwrap()));   // the built-in pack owns Goal, Task, Wait and Decision
+    all.push(("goalgraph".into(), std::fs::read_to_string(common::engine_dir().join("packs/goalgraph.c1f")).unwrap()));   // the built-in pack owns Goal, Task, Wait and Decision
     for f in std::fs::read_dir(r.join("membrane/packs")).unwrap().flatten() {
         let p = f.path();
         if p.extension().map_or(false, |e| e == "c1f") { let n = p.file_stem().unwrap().to_string_lossy().to_string(); if !all.iter().any(|(m, _)| *m == n) { all.push((n, std::fs::read_to_string(&p).unwrap())); } }

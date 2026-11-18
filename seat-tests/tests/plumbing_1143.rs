@@ -91,7 +91,7 @@ fn the_binary_the_health_route_and_the_conf_report_the_version_0_7_60() {
 #[test]
 fn scripts_seat_full_is_gone_and_no_script_names_it() {
     assert!(!repo().join("scripts/seat-full").exists(), "the second launcher is removed");
-    for f in ["scripts/seat", "native/tests/seat_process.rs", "native/tests/boot_routes_1143.rs"] {
+    for f in ["scripts/seat", "seat-tests/tests/seat_process.rs", "seat-tests/tests/boot_routes_1143.rs"] {
         let t = std::fs::read_to_string(repo().join(f)).unwrap();
         assert!(!t.contains("scripts/seat-full"), "{f} still names scripts/seat-full");
     }

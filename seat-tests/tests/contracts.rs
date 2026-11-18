@@ -5,6 +5,7 @@
 //!     one of the reserved ones; `m_<f>` without `o_<f>` is dead; no `door_*` pack redefines a getter the door owns;
 //!  3. every Boot fact a pack reads is in the facts registry (membrane/packs/facts.json), and a fact the registry says the
 //!     launcher writes (`wired`) is written by the launcher.
+mod common;
 use membrane_vm::fields::Fields;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -51,12 +52,12 @@ fn ident_after(t: &str, pat: &str) -> Vec<String> {                    // every 
     out
 }
 
-/// Every pack the repo ships, view packs (they import `dom`) and the packs under native/packs included, passes the loader's own
+/// Every pack the repo ships, view packs (they import `dom`) and the packs of the cliffvm crate (its packs/ folder) included, passes the loader's own
 /// checks (parse, stale-setter, shadowing...). Only a pack that waits for an import it cannot have here may be refused, and only for that.
 #[test]
 fn no_shipped_pack_is_refused_by_the_loader_for_anything_but_a_missing_import() {
     let mut all = packs();
-    let dir = root().join("native/packs");
+    let dir = common::engine_dir().join("packs");
     for e in std::fs::read_dir(&dir).unwrap().flatten() {
         let p = e.path();
         if p.extension().map(|x| x == "c1f").unwrap_or(false) {
@@ -152,7 +153,7 @@ fn the_boot_facts_packs_read_are_registered_and_the_wired_ones_are_written_by_th
     let reg: serde_json::Value = serde_json::from_str(&reg_text).unwrap();
     let facts = reg["facts"].as_object().expect("facts: {name: {wired, why}}");
     // the launcher is what tells the seat its facts: the `cliffvm run` command line and the boot (cli.rs, host.rs) and the release launcher's own `--fact` list (scripts/seat)
-    let launcher = std::fs::read_to_string(root().join("native/src/cli.rs")).unwrap() + &std::fs::read_to_string(root().join("native/src/host.rs")).unwrap() + &std::fs::read_to_string(root().join("scripts/seat")).unwrap();
+    let launcher = std::fs::read_to_string(common::engine_dir().join("src/cli.rs")).unwrap() + &std::fs::read_to_string(common::engine_dir().join("src/host.rs")).unwrap() + &std::fs::read_to_string(root().join("scripts/seat")).unwrap();
     // and the defaults `cliffvm serve` tells through the pack packs/launcher.c1f (a setter on Boot.started writes `this.<fact> = ...` when none was told)
     let launcher = launcher + &std::fs::read_to_string(root().join("membrane/packs/launcher.c1f")).unwrap();
     let mut bad = vec![];
@@ -161,7 +162,7 @@ fn the_boot_facts_packs_read_are_registered_and_the_wired_ones_are_written_by_th
     }
     for (name, f) in facts {
         if f["wired"].as_bool() == Some(true) && !(launcher.contains(&format!("\"{name}\"")) || launcher.contains(&format!("{name}=")) || launcher.contains(&format!("this.{name} = "))) {
-            bad.push(format!("fact `{name}` is marked wired but the launcher (native/src/cli.rs, host.rs / scripts/seat) never writes it"));
+            bad.push(format!("fact `{name}` is marked wired but the launcher (cliffvm:src/cli.rs, host.rs / scripts/seat) never writes it"));
         }
         if f["why"].as_str().unwrap_or("").is_empty() { bad.push(format!("fact `{name}` has no `why`")); }
     }

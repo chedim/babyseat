@@ -7,8 +7,8 @@ Shape (operator, 2026-11-12): everything that decides is `.c1f`; Rust stays mini
 ## Rules (all of them bit someone)
 1. **Test first, always.** A failing test, seen red for the right reason, then the code. A test that passes the first time has not
    been proven to test anything: break the code and watch it fail (mutation check) before you trust it. Pack behavior is a JSON
-   spec in `tests/specs/*.json` (`{name, packs, given, writes, expect}`, run by `native/src/spec.rs` through
-   `cargo test --test specs`; expectations take a dotted path: `reply.body.name`). Rust drivers get a Rust test in `native/tests/`.
+   spec in `tests/specs/*.json` (`{name, packs, given, writes, expect}`, run by `cliffvm:src/spec.rs` through
+   `cargo test --test specs`; expectations take a dotted path: `reply.body.name`). Rust drivers get a Rust test in `cliffvm:tests/`.
    Python tests (`tests/wrapper`, `tests/ha`) only for the wrapper and the Home Assistant component.
 2. **No Python logic.** A driver (Rust) performs the bare effect and returns raw data; parsing, policy, wording and formatting are
    getters/setters in a pack.

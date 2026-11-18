@@ -1,5 +1,5 @@
 // W3 (#1143): a page `Fetch` with `request.stream = true` reads the body as a stream and writes each SSE frame as `Chunk:<fetch>:<n>`
-// ({fetch, id, n, data, done}: the seat's Fetch Chunk, native/src/fetch.rs), then the receipt. A fake fetch with a ReadableStream, node, no browser.
+// ({fetch, id, n, data, done}: the seat's Fetch Chunk, cliffvm:src/fetch.rs), then the receipt. A fake fetch with a ReadableStream, node, no browser.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';

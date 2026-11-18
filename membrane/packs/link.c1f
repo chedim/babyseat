@@ -42,7 +42,7 @@ Vm.state getter:
   ELSE WHEN this.last == None: None
   ELSE WHEN this.silent >= this.lease_s: 'stale'
   ELSE: 'connected'
--- a Vm with a `link` (written by the seat's peer driver, native/src/peers.rs: `up` or `gone`) is a PEER (a program on this machine over shared memory); any other is a page
+-- a Vm with a `link` (written by the seat's peer driver, cliffvm:src/peers.rs: `up` or `gone`) is a PEER (a program on this machine over shared memory); any other is a page
 Vm.kind getter: 'peer' if this.link != None else 'page'
 
 Vm.caps on-setter link-caps:
@@ -62,7 +62,7 @@ Boot.old_vms on-setter link-sweep:
     FOR r IN this.old_vms:
       (prop(r, 'k')).retire = True
 
--- A WRITE A PEER ASKED FOR (docs/graph-link.md, sections 7 and 18): a peer's `wr` over shared memory becomes `LinkWrite:<peer name>:<wid>` {peer, id, prop, value} (the seat's peer driver, native/src/peers.rs; the driver reads the verdict and retires it at once: a question is not memory),
+-- A WRITE A PEER ASKED FOR (docs/graph-link.md, sections 7 and 18): a peer's `wr` over shared memory becomes `LinkWrite:<peer name>:<wid>` {peer, id, prop, value} (the seat's peer driver, cliffvm:src/peers.rs; the driver reads the verdict and retires it at once: a question is not memory),
 -- and the verdict below decides. THE POLICY IS DATA, A FACT THE OWNER SETS: `peer_writes`, a list of rules `{peer, prefix}`: the peer whose namespace is `peer` may write the nodes whose id starts with `prefix`. No rule, no write: the default is
 -- refusal, and the peer's receipt says which fact decides. The driver applies an accepted write as an ordinary outside write (writer `link:<peer>`); it never writes a node of another namespace, whatever the rules say.
 Boot.pw_rules getter: this.peer_writes if this.peer_writes is List else []

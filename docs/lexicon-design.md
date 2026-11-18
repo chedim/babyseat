@@ -44,7 +44,7 @@ Rejected: lazy stored entities (265k `c_field` rows; the 50,000-row measure in `
 so ~265k would be ~1.5 s and ~100+ MB noted-but-unloaded: an extrapolation, not a measure); RESIDENT (all of it in RAM).
 
 ## (c) How a pack reads it, the smallest way
-Today `sql(query, args)` reads only the seat's own store (`native/src/sqlexec.rs`: read-only, `query_only`, ATTACH refused in the writer, async
+Today `sql(query, args)` reads only the seat's own store (`cliffvm:src/sqlexec.rs`: read-only, `query_only`, ATTACH refused in the writer, async
 `Pending`), so the file needs a way in. Options, from least to most native:
 1. **No native piece:** a `Command` runs `sqlite3 lexicon.sqlite "..."` (grep or sqlite per word, one process per batch).
    Works today, async, but a process per ask and a `sqlite3` binary on PATH. Fine as the stop-gap, not as the SemText path (it would run per mention).

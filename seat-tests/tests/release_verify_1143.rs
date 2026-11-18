@@ -829,7 +829,7 @@ fn a_tokenless_caller_meets_the_documented_public_set_and_nothing_else() {
     for p in ["/", "/index.html", "/membrane", "/favicon.ico", "/ui/www/boot.js", "/ui/www/app.css"] { assert_eq!(raw("127.0.0.1", s.port, "GET", p, &[], "").status, 200, "{p}"); }
     assert_eq!(raw("127.0.0.1", s.port, "GET", "/ui/www/nothing-here.js", &[], "").status, 404);
     assert_eq!(raw("127.0.0.1", s.port, "GET", "/ui/www/../../Cargo.toml", &[], "").status, 404, "no climbing out of the ui folder");
-    assert_eq!(raw("127.0.0.1", s.port, "GET", "/ui/www/%2e%2e/%2e%2e/native/Cargo.toml", &[], "").status, 404);
+    assert_eq!(raw("127.0.0.1", s.port, "GET", "/ui/www/%2e%2e/%2e%2e/seat-tests/Cargo.toml", &[], "").status, 404);
     assert_eq!(raw("127.0.0.1", s.port, "POST", "/ui/logout", &[("Content-Type", "application/json")], "{}").status, 200);
     // NOT public (docs/auth.md names them): health, the opencode probes, the page's config
     for p in ["/global/health", "/command", "/vcs", "/path", "/project", "/project/current", "/agent", "/config", "/ui/conf", "/ui/fieldvm", "/ui/settings", "/session", "/event", "/global/event", "/v1/models", "/state", "/membrane/state"] {

@@ -71,8 +71,6 @@ jobs:
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ] || { echo "this run is on $GITHUB_SHA, the tag $tag is $(git rev-parse HEAD): dispatch with --ref $tag"; exit 1; }
           ver=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           [ "${tag#v}" = "$ver" ] || { echo "tag $tag is not the package version $ver: bump pyproject.toml before releasing"; exit 1; }
-          native=$(sed -n 's/^version = "\(.*\)"$/\1/p' native/Cargo.toml | head -1)
-          [ "$native" = "$ver" ] || { echo "native/Cargo.toml is $native, not $ver: the binary would carry another version than the wheel"; exit 1; }
           # the shim is the same version and pins exactly it (#303)
           shim=$(python -c "import tomllib; print(tomllib.load(open('shim/membrane-seat/pyproject.toml', 'rb'))['project']['version'])")
           [ "$shim" = "$ver" ] || { echo "shim/membrane-seat is $shim, not $ver: bump it with pyproject.toml"; exit 1; }

@@ -1,6 +1,6 @@
 # Cliffhanger fields: the design (issue #994)
 
-The design of cliffvm's field language (getters, setters, packs), BUILT in `native/` and used by every pack of the release; the sections below keep the reasoning. The syntax a model writes is taught by `Help:c1f`, `Help:packs` and `Help:upgrade`
+The design of cliffvm's field language (getters, setters, packs), BUILT in the cliffvm repository (`cliffvm:src/`) and used by every pack of the release; the sections below keep the reasoning. The syntax a model writes is taught by `Help:c1f`, `Help:packs` and `Help:upgrade`
 (`membrane/apps/barest.c1f/help/`), each code block of which is a test. The reference of what the host does is docs/cliffvm.md.
 Syntax source: github.com/chedim/cliffhanger README (read 2026-11-09). Where the README is silent
 the doc says so ("MEMBRANE EXTENSION") instead of inventing cliffhanger syntax.
@@ -30,7 +30,7 @@ IMPORT dom 1
 - **Creation:** a write to an entity that doesn't exist creates it when its id is `<Class>:<key>` and the class is
   the pack's own or imported (`('DomNode:inflight:' + this.eid).text = ...`). Its getters compute as a birth.
 - **Reads** (getters, conditions) may read any entity. It's parsed by
-`native/src/syntax.rs`, and the goal graph ships in it (`native/packs/goalgraph.c1f`):
+`cliffvm:src/syntax.rs`, and the goal graph ships in it (`cliffvm:packs/goalgraph.c1f`):
 
 ```
 -- a comment
@@ -135,14 +135,14 @@ Cold start: new world = effects run once; warm restart = none; rebuild = silent 
 
 ## 4. The goal graph
 
-The built-in goal graph (`PACK goalgraph 1`, `native/packs/goalgraph.c1f`; the engine loads it first, `Fields::goalgraph`) is the first pack written in this syntax: the getters `finished`, `open_blockers` and `due` and the
-setters that ready a task, arm a wait and ask a goal to replan. The file is the source of truth (a copy here would drift). `native/src/translate.rs` turns the old WHEN/WHERE/WRITE triggers into this form and
-`native/tests/syntax_994.rs` holds the text pack equal to the translated triggers. A counting getter (`open_blockers`) replaces decrement-on-event: it is idempotent and replay-safe.
+The built-in goal graph (`PACK goalgraph 1`, `cliffvm:packs/goalgraph.c1f`; the engine loads it first, `Fields::goalgraph`) is the first pack written in this syntax: the getters `finished`, `open_blockers` and `due` and the
+setters that ready a task, arm a wait and ask a goal to replan. The file is the source of truth (a copy here would drift). `cliffvm:src/translate.rs` turns the old WHEN/WHERE/WRITE triggers into this form and
+`cliffvm:tests/syntax_994.rs` holds the text pack equal to the translated triggers. A counting getter (`open_blockers`) replaces decrement-on-event: it is idempotent and replay-safe.
 
 ## 5. The field engine in the browser
 
-The same Rust engine (getters, setters, `.c1f` packs, imports) is compiled to WebAssembly (`native/build-web.sh`,
-binding `native/src/web.rs`) and runs in the babyseat client (`membrane/apps/barest.c1f/ui/fieldvm.js`, loaded by `index.html`).
+The same Rust engine (getters, setters, `.c1f` packs, imports) is compiled to WebAssembly (`scripts/build_wasm.sh`,
+binding `cliffvm:src/web.rs`) and runs in the babyseat client (`membrane/apps/barest.c1f/ui/fieldvm.js`, loaded by `index.html`).
 
 - **Following the seat:** the page starts from `GET /ui/fieldvm` (the seat's packs and every entity of a class they
   declare on), then applies each `field.write` and `field.pack` event from `/ui/serve/event`. When the stream drops it
@@ -195,8 +195,8 @@ binding `native/src/web.rs`) and runs in the babyseat client (`membrane/apps/bar
 - **Tests:** `tests/js/fieldvm_core.test.mjs` (the wasm engine in Node) and `tests/js/fieldvm_link.test.mjs` (the page
   link in headless Chrome over the DevTools protocol).
   `tests/js/fieldvm_clock.test.mjs` covers the eval clock: time decides no value, but stats read it, and on wasm32 std's `Instant` panics, so `expr.rs` reads `Date.now`
-  there. `native/tests/wasm_check_1143.rs` keeps `cargo check --target wasm32-unknown-unknown --no-default-features --features wasm`
-  green (it skips when the target is missing); the shipped `fieldvm_core*` files are rebuilt with `native/build-web.sh`.
+  there. `cliffvm:tests/wasm_check_1143.rs` keeps `cargo check --target wasm32-unknown-unknown --no-default-features --features wasm`
+  green (it skips when the target is missing); the shipped `fieldvm_core*` files are rebuilt with `scripts/build_wasm.sh`.
 
 ## 6. The language, 2026-11-10: setters and getters support the same forms
 

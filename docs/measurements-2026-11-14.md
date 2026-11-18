@@ -123,7 +123,7 @@ Misses are mostly paraphrases with no shared word (Agatha = "liveaboard", "what 
 - Tokens of the most recent real turns (the copy has only 110 turns with usage and ends before the newest).
 - Recall @1/3 like-for-like: needs the old per-question rank lists for @1/@3, or the same conversations through the 11-07 vote.
 - All 10 conversations (this run: 2; about 15 min), LongMemEval, a reranker comparison (cliffvm has none).
-- The 2 GB burst (R3) and the 50,000-row synthetic boot (R1): re-run with the `native/tests` harnesses.
+- The 2 GB burst (R3) and the 50,000-row synthetic boot (R1): re-run with the `cliffvm:tests` harnesses.
 - Idle evaluations without the stats window's own cost.
 
 ## 5. Re-run (the operator will bench again after the paraphrase ladder)
@@ -131,10 +131,10 @@ Misses are mostly paraphrases with no shared word (Agatha = "liveaboard", "what 
 ```
 cd <checkout> && (cd native && cargo build --release --no-default-features --features bin)
 S=<scratch>; sqlite3 <live store> ".backup $S/seat.sqlite"          # a COPY; never the live store
-python3 -I scripts/measure_speed.py  $PWD $PWD/native/target/release/cliffvm $S/seat.sqlite $S/speed   > $S/speed.json    # ~7 min
+python3 -I scripts/measure_speed.py  $PWD <folder>/bin/cliffvm $S/seat.sqlite $S/speed   > $S/speed.json    # ~7 min
 python3 -I scripts/measure_usage.py  $S/seat.sqlite                                                                        # seconds
-python3 -I scripts/measure_locomo.py $PWD $PWD/native/target/release/cliffvm <locomo10.json> $S/loco 0,1 > $S/loco.json   # ~15 min
-python3 -I scripts/measure_facts.py  $PWD $PWD/native/target/release/cliffvm $S/seat.sqlite scripts/facts_throwy.json $S/facts > $S/facts.json   # ~4 min
+python3 -I scripts/measure_locomo.py $PWD <folder>/bin/cliffvm <locomo10.json> $S/loco 0,1 > $S/loco.json   # ~15 min
+python3 -I scripts/measure_facts.py  $PWD <folder>/bin/cliffvm $S/seat.sqlite scripts/facts_throwy.json $S/facts > $S/facts.json   # ~4 min
 ```
 
 Each script starts its own seat (fake claude, `--port 0`, never 4096) and kills it. `scripts/measure_lib.py` holds the helpers. Run one at a time; check `vm_stat` and the load first.
@@ -166,5 +166,5 @@ Private seat, release build, imported 1,605 session headers + 200 sessions (27,3
 | `GET /` | 50 | 25 |
 | evaluation self time of 11 requests (`Stats:eval.total_ms`) | 302 | 16 |
 
-What it was: (1) `/session/status` ran, per session, a subquery over every `Chat` row with `json_extract` of each turn's body (sessions x turns: 41 M row visits); it now lists the running turns once (`IN (SELECT ...)`: 1.94 M sqlite steps at 300 sessions became 16 k; `seat-tests/tests/status_work_1143.rs` counts the steps and asks that doubling the store does not quadruple them). While it ran the single sql thread was busy, so every other query waited. (2) Every request is a born `Request` entity, and a birth dropped EVERY kept `instances(<class>)` answer: the 30-40 getters of a request that read `instances('Boot')` (`ui_root`, `cookie_name`, `fv_seat`, `ha_pending`, `wg_all`, ... on the live seat, 6-25 ms per nine requests each) each walked all loaded entities again. An entity's arrival now drops only the answers it can be in (`Core::inst_touch`); `native/tests/instances_cost_1143.rs` counts walks (30 `Request` births: 30 walks before, 0 now). (3) The "idle" 100% CPU of the demo seat was not idle: its Firefox tab holds six connections and polls `/session/status` (the old page's `panel.js`, since removed) and the history routes; every poll was a request that cost the two things above, and a 51 s status poll queued the next ones (the `/` at 3.5 s and the 404 at 12 s were waiting in that queue, not slow themselves). A seat with no page open idles at 0% CPU and 20 evaluations per ten seconds (the banner's clock).
+What it was: (1) `/session/status` ran, per session, a subquery over every `Chat` row with `json_extract` of each turn's body (sessions x turns: 41 M row visits); it now lists the running turns once (`IN (SELECT ...)`: 1.94 M sqlite steps at 300 sessions became 16 k; `seat-tests/tests/status_work_1143.rs` counts the steps and asks that doubling the store does not quadruple them). While it ran the single sql thread was busy, so every other query waited. (2) Every request is a born `Request` entity, and a birth dropped EVERY kept `instances(<class>)` answer: the 30-40 getters of a request that read `instances('Boot')` (`ui_root`, `cookie_name`, `fv_seat`, `ha_pending`, `wg_all`, ... on the live seat, 6-25 ms per nine requests each) each walked all loaded entities again. An entity's arrival now drops only the answers it can be in (`Core::inst_touch`); `cliffvm:tests/instances_cost_1143.rs` counts walks (30 `Request` births: 30 walks before, 0 now). (3) The "idle" 100% CPU of the demo seat was not idle: its Firefox tab holds six connections and polls `/session/status` (the old page's `panel.js`, since removed) and the history routes; every poll was a request that cost the two things above, and a 51 s status poll queued the next ones (the `/` at 3.5 s and the 404 at 12 s were waiting in that queue, not slow themselves). A seat with no page open idles at 0% CPU and 20 evaluations per ten seconds (the banner's clock).
 

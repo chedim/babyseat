@@ -18,14 +18,14 @@ OLD_FLAGS = ("--backend", "--model", "--embed-model", "--field", "--audit", "--t
 
 
 def binary() -> str | None:
-    """The cliffvm binary: $CLIFFVM, else the wheel's (dist/bin/cliffvm next to this file; a lost exec bit is restored), else a development checkout's release build."""
+    """The cliffvm binary: $CLIFFVM, else the wheel's (dist/bin/cliffvm next to this file; a lost exec bit is restored)."""
     wheel = HERE / "dist" / "bin" / "cliffvm"
     if wheel.is_file() and not os.access(wheel, os.X_OK):
         try:
             wheel.chmod(wheel.stat().st_mode | 0o111)
         except OSError:
             pass
-    for c in (os.environ.get("CLIFFVM"), wheel, HERE.parent / "native" / "target" / "release" / "cliffvm"):
+    for c in (os.environ.get("CLIFFVM"), wheel):
         if c and os.access(c, os.X_OK) and Path(c).is_file():
             return str(c)
     return None
@@ -54,8 +54,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(2)
     exe = binary()
     if exe is None:
-        print("no binary for this platform: this install carries no cliffvm (set CLIFFVM to one, or build native/ with "
-              "`cargo build --release --no-default-features --features bin`).", file=sys.stderr)
+        print("no binary for this platform: this install carries no cliffvm (set CLIFFVM to one: a cliffvm release from "
+              "github.com/chedim/cliffvm, or scripts/dist/fetch_cliffvm.sh in a checkout).", file=sys.stderr)
         raise SystemExit(1)
     if Path(exe) == HERE / "dist" / "bin" / "cliffvm" and dist_version() != __version__:
         print(f"this install is broken: its dist folder is version {dist_version()}, the package is {__version__}. "

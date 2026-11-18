@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { initSync, Field } from '../../membrane/apps/barest.c1f/ui/fieldvm_core.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const bin = process.env.CLIFFVM || path.join(repo, 'native/target/release/cliffvm');
+const bin = process.env.CLIFFVM || path.join(process.env.CLIFFVM_DIST || '', 'bin', 'cliffvm');
 const port = 21000 + Math.floor(Math.random() * 1000);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 if (!existsSync(bin)) { console.log(`fieldvm snapshot: skipped, no cliffvm at ${bin} (build it, or set CLIFFVM)`); process.exit(0); }

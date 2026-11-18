@@ -163,7 +163,7 @@
   },
   "memory_budget_mb": {
    "wired": false,
-   "why": "the memory budget of the seat in MB (native/src/host.rs `evict_under_pressure`; default: 10% of the machine's memory, or a container's lower limit; `MemoryConfig::with_defaults`): the VM itself evicts the coldest loaded stored entities when the process is over the lines; unset = no pressure and nothing is evicted; told by `--fact memory_budget_mb=<n>`"
+   "why": "the memory budget of the seat in MB (cliffvm:src/host.rs `evict_under_pressure`; default: 10% of the machine's memory, or a container's lower limit; `MemoryConfig::with_defaults`): the VM itself evicts the coldest loaded stored entities when the process is over the lines; unset = no pressure and nothing is evicted; told by `--fact memory_budget_mb=<n>`"
   },
   "unload_soft": {
    "wired": false,
@@ -175,11 +175,11 @@
   },
   "unload_batch": {
    "wired": false,
-   "why": "how many of the coldest entities one eviction pass takes out of the engine (native/src/host.rs; default 200): unset = the default; a pass runs at the end of every drain while the process is over a line; told by `--fact unload_batch=<n>`"
+   "why": "how many of the coldest entities one eviction pass takes out of the engine (cliffvm:src/host.rs; default 200): unset = the default; a pass runs at the end of every drain while the process is over a line; told by `--fact unload_batch=<n>`"
   },
   "command_timeout_s": {
    "wired": false,
-   "why": "the time limit in seconds of a Command run that states no `timeout_s` (native/src/drivers.rs; default 120, the operator-delegated sensible default 2026-11-13): past it the process group gets SIGTERM, 2 s later SIGKILL, and the receipt is status timeout; told by `--fact command_timeout_s=<n>`"
+   "why": "the time limit in seconds of a Command run that states no `timeout_s` (cliffvm:src/drivers.rs; default 120, the operator-delegated sensible default 2026-11-13): past it the process group gets SIGTERM, 2 s later SIGKILL, and the receipt is status timeout; told by `--fact command_timeout_s=<n>`"
   },
   "chat_turn_timeout_s": {
    "wired": false,
@@ -187,7 +187,7 @@
   },
   "sql_sources": {
    "wired": false,
-   "why": "second SQLite files to open as entities (membrane/packs/sql.c1f, native/src/sqldrv.rs): a LIST of {name, path, mode} (mode ro, the default, opens the file read-only and immutable; rw may write); each entry SEEDS `SqlSource:<name>` as if it were written by hand, and a source that already has a path is left alone; the seat's own store is refused; told by `--fact sql_sources='[{\"name\": \"lex\", \"path\": \"/data/words.sqlite\"}]'`"
+   "why": "second SQLite files to open as entities (membrane/packs/sql.c1f, cliffvm:src/sqldrv.rs): a LIST of {name, path, mode} (mode ro, the default, opens the file read-only and immutable; rw may write); each entry SEEDS `SqlSource:<name>` as if it were written by hand, and a source that already has a path is left alone; the seat's own store is refused; told by `--fact sql_sources='[{\"name\": \"lex\", \"path\": \"/data/words.sqlite\"}]'`"
   },
   "legacy_path": {
    "wired": true,
@@ -195,7 +195,7 @@
   },
   "env_allow": {
    "wired": false,
-   "why": "names of environment variables that carry their VALUE on `Environment:host` besides the default list (HOME, USER, LANG, XDG_DATA_HOME, XDG_CONFIG_HOME, TMPDIR, CLAUDE_BIN, MEMBRANE_DATA_DIR; native/src/host.rs `boot_environment`, membrane/packs/environment.c1f); a JSON list or text with commas; a name with KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL in it is refused (it reads `set`, never its value) and the start says so; told by `--fact env_allow=FOO_BAR`"
+   "why": "names of environment variables that carry their VALUE on `Environment:host` besides the default list (HOME, USER, LANG, XDG_DATA_HOME, XDG_CONFIG_HOME, TMPDIR, CLAUDE_BIN, MEMBRANE_DATA_DIR; cliffvm:src/host.rs `boot_environment`, membrane/packs/environment.c1f); a JSON list or text with commas; a name with KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL in it is refused (it reads `set`, never its value) and the start says so; told by `--fact env_allow=FOO_BAR`"
   },
   "legacy_batch": {
    "wired": false,
@@ -207,11 +207,11 @@
   },
   "effect_workers": {
    "wired": false,
-   "why": "the cap on Command / File / Fetch / SqlQuery effects running at once (native/src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"
+   "why": "the cap on Command / File / Fetch / SqlQuery effects running at once (cliffvm:src/store.rs `effect_limited`; default 4, operator-approved 2026-11-13): an effect past the cap waits for a slot; a held door request, an open stream and `Command.stop` are no workers; told by `--fact effect_workers=<n>`"
   },
   "eval_stats": {
    "wired": false,
-   "why": "the eval accounting (native/src/stats.rs): default ON; `--fact eval_stats=false` turns it off (no counting, no `Stats:eval` entity). On, `Stats:eval` holds the top 20 getters/setters by self time of the last window and of the lifetime"
+   "why": "the eval accounting (cliffvm:src/stats.rs): default ON; `--fact eval_stats=false` turns it off (no counting, no `Stats:eval` entity). On, `Stats:eval` holds the top 20 getters/setters by self time of the last window and of the lifetime"
   },
   "eval_stats_window_s": {
    "wired": false,
@@ -227,7 +227,7 @@
   },
   "admin_token_ttl_s": {
    "wired": false,
-   "why": "how long the admin token minted at every boot lives, in seconds (native/src/admin.rs); default 2592000 (30 days), a threshold flagged for the operator; told by `--fact admin_token_ttl_s=<n>`"
+   "why": "how long the admin token minted at every boot lives, in seconds (cliffvm:src/admin.rs); default 2592000 (30 days), a threshold flagged for the operator; told by `--fact admin_token_ttl_s=<n>`"
   },
   "quota_probe_s": {
    "wired": false,
