@@ -114,3 +114,16 @@ MbRound.ids getter: concat(this.ids_before, [c['id'] for c in this.calls])
 MbRound.names getter: concat(this.names_before, [c['name'] for c in this.calls])
 MbRound.cum getter: {'in': (prop(prop(this.prev, 'cum'), 'in') or 0) + (prop(this.usage, 'read') or 0) + (prop(this.usage, 'loaded') or 0), 'out': (prop(prop(this.prev, 'cum'), 'out') or 0) + (prop(this.usage, 'generated') or 0), 'seen': prop(this.usage, 'read') != None or prop(prop(this.prev, 'cum'), 'seen') == True}
 MbRound.usage_out getter: {'input_tokens': prop(this.cum, 'in'), 'output_tokens': prop(this.cum, 'out')} if prop(this.cum, 'seen') == True else None
+
+-- ---- the end of the turn: the rounds' requests and messages are retired ----------------------------------------------------------------------------------------------
+-- Their cells become Gone; membrama sees it and retires its replies and chunks, and the slots come back once each side has acknowledged (graphlink docs/shared-memory.md, 4b). It waits for the end of
+-- the turn, not the end of each round: a round's tool calls are made from what its reply said, and a reply is read from membrama's cells, which go with the request. The shared tool nodes stay.
+-- (`mb_cfg` is null once the turn is over, so the marker is the turn's own `oai` settings, which name the peer.)
+MbRound.mb_round getter: True
+ChatMessage.mb_done getter: prop(prop(this.turn_eid, 'oai'), 'peer') != None and prop(this.turn_eid, 'state') in ['done', 'error']
+Chat.mb_done on-setter mb-retire:
+  WHEN this.mb_done == True:
+    FOR r IN [x for x in instances('MbRound') if x.cp == this.cp]:
+      FOR row IN r.msg_rows:
+        ('membrane::LlmMsg:' + r.rid + ':' + str(row['i'])).retire = True
+      ('membrane::LlmRequest:' + r.rid).retire = True
