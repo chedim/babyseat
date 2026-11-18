@@ -1,6 +1,6 @@
 # c1f `Error`: a value kind for failure, distinct from null
 
-Built (#1143). Tests: `native/tests/error_1143.rs`, `error_ops_1143.rs`, `error_producers_1143.rs`, `error_store_1143.rs`, `error_infer_1143.rs`, `error_class_1143.rs`. The model-facing page is `Help:c1f` (and "Errors" in `Help:upgrade`).
+Built (#1143). Tests: `cliffvm:tests/error_1143.rs`, `error_ops_1143.rs`, `error_producers_1143.rs`, `error_store_1143.rs`, `error_infer_1143.rs`, `error_class_1143.rs`. The model-facing page is `Help:c1f` (and "Errors" in `Help:upgrade`).
 
 `null` means not initialised, absent or not applicable; it may carry a reason (`why(x)`). `Error` means something FAILED; it is a value kind that carries its reason (the remedy is part of the text).
 `x == None` is False for an Error. `or` stays the default operator and never hides an Error (there is no `??`). `x is Error` tests it, `x is not Error` is accepted, `why(x)` reads its text.
@@ -22,7 +22,7 @@ Time never makes an Error: only the step budget does (docs/c1f-stdlib.md, "Time 
   `x is (Float, Text)` is a parse error (no value is both). `Num` is a value kind that Int and Float extend (`x is Num` holds for both). The names `Error` and `Num` are reserved (no class, no local).
 - Inside one evaluation a list or dict element may be an Error (`[x for x in xs if not (x is Error)]` drops failed items); the container is not itself an Error. Across a store the element is a plain null.
 - A setter or constructor that writes an Error is refused with a `refused` receipt and the old value stays. A setter local or FOR list that is an Error stops the setter (a receipt).
-- Inference (`native/src/infer.rs`): Error is a kind, a failure site types as `T | Error`; `membrane/packs/types.json` is the snapshot.
+- Inference (`cliffvm:src/infer.rs`): Error is a kind, a failure site types as `T | Error`; `membrane/packs/types.json` is the snapshot.
 
 ## Stored, and the class `Error`
 A derived Error is never stored as a value: the cell is null and the VM keeps the failure beside it. `Error` is a REAL CLASS, owned by the root pack `membrane/packs/entity.c1f`, with one property, `failed` (a dict `{property: reason}`).
@@ -34,4 +34,4 @@ so `failed` names only properties whose CURRENT result is the failure. `x is Err
 Loop safety: the class entry wakes the readers of the class list (`x is Error`, `instances('Error')`) but none of the entity's own getters; an entity's class entry flips at most twice (gain, lose) in one run, and a third flip waits for the end of the run.
 
 `entity_read` and `entity_query` with `full: true` or `props` show a failed property as `Error: <reason>`; `run_cliff` answers an Error as `Error: <reason>` (an error result) and a null with a reason as `null: <reason>` (not an error). The JSON routes read named properties and show an Error as null.
-The browser page's entity JSON (`native/src/web.rs`) carries `parents` and `failed`.
+The browser page's entity JSON (`cliffvm:src/web.rs`) carries `parents` and `failed`.

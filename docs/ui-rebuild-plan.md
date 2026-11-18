@@ -10,7 +10,7 @@ The old JavaScript page and its folder `membrane/ui/` are gone.
 
 | slice | state | where |
 |---|---|---|
-| W1 dom v2: inputs, forms, SVG tags, events as writes (`value`, `submitted`, `key`, `focused`, `scroll`) | built | `fieldvm.js`, `native/src/web.rs` |
+| W1 dom v2: inputs, forms, SVG tags, events as writes (`value`, `submitted`, `key`, `focused`, `scroll`) | built | `fieldvm.js`, `cliffvm:src/web.rs` |
 | W2 page `Fetch`: same-origin only, the receipt comes back as a write | built | `fieldvm.js`; `tests/js/fieldvm_fetch.test.mjs` |
 | W3 streams: a `Fetch` with `request.stream = true` writes each SSE frame as a `Chunk` | built (open: the SSE `event` name key, auto-reconnect, chunk retention) | docs/cliffhanger-fields.md section 9 |
 | W4 events and lists: keyed children (`before`), `scroll` write, clock driver, `composing`, hidden-tab flag | built (virtualization of long lists: not in the release) | `fieldvm.js` |
@@ -46,4 +46,4 @@ Constants tried, not decided: `shell_status_ms` 3000, `shell_panel_chars` 200, `
 ## Tests
 
 `tests/js/*.test.mjs` run packs against the wasm engine in Node (`fieldvm_core`, `chat_view`, `markdown`, `settings_view`, `shell_view`, `field_view`, `link_caps`) and the page itself in headless Chrome against a private seat
-with a fake `claude` (`markdown_page`, `settings_page`, `shell_page`, `link_page`, `chat_scroll`, `release_verify`; `CHROME=` names the browser). `native/tests/wasm_check_1143.rs` keeps the wasm in step with the native VM. Red test first, every change.
+with a fake `claude` (`markdown_page`, `settings_page`, `shell_page`, `link_page`, `chat_scroll`, `release_verify`; `CHROME=` names the browser). `cliffvm:tests/wasm_check_1143.rs` keeps the wasm in step with the native VM. Red test first, every change.

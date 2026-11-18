@@ -2,8 +2,7 @@
 seat), a token minted by `cliffvm token mint`, and a FAKE `claude` script as the turn's binary. Never a real model, never a real `claude`;
 loopback only; the child is always reaped. The pattern of seat-tests/tests/session_1143.rs.
 
-The binary is native/target/{debug,release}/cliffvm (`cd native && cargo build --features bin`) or $CLIFFVM_BIN; no binary: the tests
-that need a real seat are skipped with that command as the reason.
+The binary is $CLIFFVM_BIN (bin/cliffvm of the release scripts/dist/fetch_cliffvm.sh downloads); no binary: the tests that need a real seat are skipped with that as the reason.
 """
 from __future__ import annotations
 
@@ -40,14 +39,14 @@ out({"type": "result", "subtype": "success", "is_error": False, "result": "Done:
 
 
 def binary() -> Path | None:
-    cands = [os.environ.get("CLIFFVM_BIN", "")] + [str(ROOT / "native" / "target" / t / "cliffvm") for t in ("debug", "release")]
+    cands = [os.environ.get("CLIFFVM_BIN", "")]
     return next((Path(c) for c in cands if c and Path(c).is_file()), None)
 
 
 def need_binary() -> Path:
     b = binary()
     if b is None:
-        pytest.skip("no cliffvm binary: cd native && cargo build --features bin")
+        pytest.skip("no cliffvm binary: set CLIFFVM_BIN (scripts/dist/fetch_cliffvm.sh downloads the pinned release)")
     return b
 
 
@@ -115,7 +114,7 @@ class RealSeat:
 
     def mint_at(self, exp_offset: float, sub="ha") -> str:
         """A token signed with the seat's own secret whose `exp` is now + `exp_offset` seconds (negative: long past; the door's leeway is 30 s,
-        native/src/jwt.rs): `token mint` takes only a ttl of 1 s or more."""
+        cliffvm:src/jwt.rs): `token mint` takes only a ttl of 1 s or more."""
         import base64, hashlib, hmac, json
         b = lambda o: base64.urlsafe_b64encode(json.dumps(o, separators=(",", ":")).encode()).rstrip(b"=")
         now = int(time.time())

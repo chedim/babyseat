@@ -10,7 +10,7 @@ decisions; it is in git history. Nothing is published by any workflow; publishin
 | 1 | packs and apps | files in a version-stamped folder next to the binary, not embedded |
 | 2 | launcher shape | the defaults live in c1f (`membrane/packs/launcher.c1f`: no hidden Rust defaults); `cliffvm serve` only finds the install folder, the data folder and the claude CLI and runs the seat; a Python command only executes it |
 | 3 | Home Assistant integration | NOT frozen on the old package: it downloads the release tarball of its own version and runs the seat inside Home Assistant (the default), or connects to a seat (`requirements: []`, docs/home-assistant.md) |
-| 4 | version | `0.7.61` everywhere user-facing (`native/Cargo.toml`, `pyproject.toml`, the Home Assistant manifest, the dist `VERSION`); CITATION.cff and CHANGELOG.md are written at the release commit |
+| 4 | version | `0.7.61` everywhere user-facing (`cliffvm:Cargo.toml`, `pyproject.toml`, the Home Assistant manifest, the dist `VERSION`); CITATION.cff and CHANGELOG.md are written at the release commit |
 | 5 | default bind | `127.0.0.1` (`--bind` opens it) |
 | 6 | default port | `4096` (`--port` changes it; there is no second port: the 0.7 OpenAI/Ollama proxy on 11500 is gone) |
 | 7 | data folder | named `membrane`: `$XDG_DATA_HOME/membrane`, else `~/Library/Application Support/membrane` (macOS) or `~/.local/share/membrane`; `--data-dir` overrides |
@@ -22,7 +22,7 @@ decisions; it is in git history. Nothing is published by any workflow; publishin
 - **The dist folder** (`scripts/dist/build.sh [--bin] [--engine-version] [--out] [--target] [--archive]`): `bin/cliffvm` (and `bin/graphlink-bridge` when one is beside it), `packs/` (only the packs `apps/barest.packs` lists, `launcher.c1f` and `boot.json`), `apps/barest.packs`, `apps/barest.c1f/` (the page is its `ui/`), `LICENSE`,
   `VERSION` (the PRODUCT's version, pyproject.toml's), `ENGINE` (the engine binary's own version, when it came from a cliffvm release: `--engine-version`; `scripts/dist/smoke.sh` checks `cliffvm --version` against it), `MANIFEST.sha256`. `field.c1f` (the disabled 3D view) is not shipped. Reproducible manifest; `scripts/dist/verify.sh <dir>` checks it; `scripts/dist/smoke.sh <dir>` runs `--version`, `serve --port 0` from the folder alone and `/global/health`
   with and without the admin token; `scripts/dist/assemble_wheel_payload.sh <dist> <payload>` makes the folder the wheel wrapper packages as `membrane/dist/`. Tests: `seat-tests/tests/dist_1143.rs`.
-- **The launcher**: `cliffvm serve` (`native/src/cli.rs`, docs/cliffvm.md): finds the dist folder above `bin/`, the data folder, `CLAUDE_BIN` or `claude` on PATH; tells `door_secret_file`, `seat_data_dir`, `chat_claude_bin`, `legacy_path`; prints the URL and the curl line. Tests: `serve_1143.rs`.
+- **The launcher**: `cliffvm serve` (`cliffvm:src/cli.rs`, docs/cliffvm.md): finds the dist folder above `bin/`, the data folder, `CLAUDE_BIN` or `claude` on PATH; tells `door_secret_file`, `seat_data_dir`, `chat_claude_bin`, `legacy_path`; prints the URL and the curl line. Tests: `serve_1143.rs`.
 - **The Python wrapper** (`membrane/launcher.py`, entry points `membrane` and `babyseat`): finds the binary (`$CLIFFVM`, the wheel's `dist/bin/cliffvm`, a checkout's release build) and `exec`s `cliffvm serve` with the arguments. It parses nothing and chooses nothing.
   The old subcommands (`opencode review ingest backfill move toybox self shadow store connect auth doctor bench codegraph erase-field install`) say they are not in this release and point at `pip install babyseat==0.7.53`. A few common flags of the Python seat, by exact name (`OLD_FLAGS`: `--backend`, `--model`, `--field`, `--cortex`, `--serve-port` ...), name the flags `cliffvm serve` takes (`--port`, `--data-dir`, `--bind`, `--fact name=value`) and exit 2 instead of reaching cliffvm's bare usage error; any other argument goes to `cliffvm serve` untouched. Tests: `tests/wrapper/`.
 - **The engine comes from its own repository** (the move, github.com/chedim/cliffvm README): the file `CLIFFVM_VERSION` names the cliffvm release; `scripts/dist/fetch_cliffvm.sh <version> <target> <folder>` downloads `cliffvm-<version>-<target>.tar.gz`, checks its sha256, its manifest file by file and its version, and leaves `bin/cliffvm` and `bin/graphlink-bridge` for `build.sh --bin`. Tests: `tests/wrapper/test_fetch_cliffvm.py`, `test_dist_engine.py`.
@@ -32,7 +32,7 @@ decisions; it is in git history. Nothing is published by any workflow; publishin
 
 ## Open (not decided; listed so they are not forgotten)
 
-- The wasm drift check in CI: `native/build-web.sh` rewrites the committed browser wasm and its version hash; whether the build is byte-reproducible across machines is unverified, so no job runs it yet.
+- The wasm drift check in CI: `scripts/build_wasm.sh` rewrites the committed browser wasm and its version hash; whether the build is byte-reproducible across machines is unverified, so no job runs it yet.
 - Signing and notarization of the macOS binary (a downloaded binary may be quarantined by Gatekeeper).
 - A patch line for 0.7.5x: patches of the Python line are `0.7.54+` and the wrapper is `0.7.61`, so `pip install -U babyseat` picks `0.7.61` everywhere a wheel exists; users of the Python line pin `babyseat==0.7.5N`.
 

@@ -6,7 +6,7 @@ IMPORT semtext 1
 -- THE OPENAI-COMPATIBLE CHAT RUNG (#1143, step 1b of the release swap): a chat turn answered by a model that is NOT a claude rung. Same turn as the claude one (packs/chat_turn.c1f):
 -- the system message is the doctrine then the banner (the claude turn sends the doctrine alone as the system prompt and the banner as a block of the user message), the prompt is the message ALONE (no history), the model's tools are the door's own
 -- (`POST /mcp`, packs/door_tools.c1f), the answer becomes the turn's ChatResponse, the tools it ran are ChatTool entities under the turn. What differs is the transport:
--- ONE streamed `POST <base_url>/v1/chat/completions` per round (a `Fetch` with `stream`, `lines` and `bearer_env`, native/src/fetch.rs), no process.
+-- ONE streamed `POST <base_url>/v1/chat/completions` per round (a `Fetch` with `stream`, `lines` and `bearer_env`, cliffvm:src/fetch.rs), no process.
 --
 -- WHICH MODEL: the message's model (`model_eff`, packs/chat_turn.c1f) is an entry of the boot fact `cloud_models` whose `backend` is not `claude-agent`
 --   {name, backend, base_url, api_key_env, chat_path?}   name = the model id the endpoint is asked for; `base_url` = the endpoint's root (no trailing slash needed), the call goes to

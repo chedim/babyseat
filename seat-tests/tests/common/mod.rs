@@ -38,3 +38,16 @@ pub fn bin(name: &str) -> &'static str {
     assert!(p.is_file(), "{} is not a file: CLIFFVM_DIST is not a cliffvm release folder", p.display());
     Box::leak(p.to_string_lossy().into_owned().into_boxed_str())
 }
+
+/// The folder of the pinned cliffvm crate's source (its `src/`, `packs/`, `tests/`), from the dependency itself: `cargo metadata` names where cargo unpacked it.
+pub fn engine_dir() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let out = std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+            .args(["metadata", "--format-version", "1", "--manifest-path"]).arg(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).output().expect("cargo metadata");
+        assert!(out.status.success(), "cargo metadata failed: {}", String::from_utf8_lossy(&out.stderr));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let p = v["packages"].as_array().unwrap().iter().find(|p| p["name"] == "cliffvm").expect("the cliffvm dependency");
+        std::path::Path::new(p["manifest_path"].as_str().unwrap()).parent().unwrap().to_path_buf()
+    })
+}

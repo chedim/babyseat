@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const chrome = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const bin = process.env.CLIFFVM || path.join(repo, 'native/target/release/cliffvm');
+const bin = process.env.CLIFFVM || path.join(process.env.CLIFFVM_DIST || '', 'bin', 'cliffvm');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 if (!existsSync(bin)) { console.log(`chat scroll: skipped, no cliffvm at ${bin}`); process.exit(0); }
 if (!existsSync(chrome)) { console.log(`chat scroll: skipped, no Chrome at ${chrome}`); process.exit(0); }

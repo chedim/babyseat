@@ -4,9 +4,9 @@ NEEDS (nothing here installs anything; it is a manual run, not a CI job):
   - a venv with Home Assistant Core (`python3.14 -m venv V && V/bin/pip install homeassistant`); run THIS script with that venv's python.
     Home Assistant installs the pip requirements of the components it sets up (the frontend, conversation's intents) into the same venv
     on its first start.
-  - a cliffvm binary (`cd native && cargo build --release --no-default-features --features bin`, or any built one): --cliffvm or $CLIFFVM.
+  - a cliffvm binary (the release scripts/dist/fetch_cliffvm.sh downloads, or any built one): --cliffvm or $CLIFFVM.
 
-  V/bin/python scripts/ha_core_smoke.py --cliffvm native/target/release/cliffvm [--work DIR] [--ha-port 8133] [--keep] [--skip-rest] [--skip-discovery] [--skip-inside]
+  V/bin/python scripts/ha_core_smoke.py --cliffvm <folder>/bin/cliffvm [--work DIR] [--ha-port 8133] [--keep] [--skip-rest] [--skip-discovery] [--skip-inside]
 
 What it does, all on 127.0.0.1, all removed at the end (the work folder too, unless --keep):
   1. a private seat: the release launcher (scripts/seat: strict door, its own data folder, a free port), a FAKE claude that answers
@@ -610,7 +610,7 @@ class ReleaseFolder:
 
 
 def old_store(path: Path) -> None:
-    """A 0.7 Python seat's store, the real schema (c_sessions, c_messages, c_entities: native/tests/legacy_fixture), one session of one question and its answer."""
+    """A 0.7 Python seat's store, the real schema (c_sessions, c_messages, c_entities: seat-tests/tests/legacy_fixture), one session of one question and its answer."""
     import sqlite3
     path.parent.mkdir(parents=True, exist_ok=True)
     cx = sqlite3.connect(path)
@@ -803,7 +803,7 @@ async def drive_inside(work: Path, cliffvm: str, ha_port: int, s) -> None:
 
 async def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cliffvm", default=os.environ.get("CLIFFVM", str(ROOT / "native" / "target" / "release" / "cliffvm")))
+    ap.add_argument("--cliffvm", default=os.environ.get("CLIFFVM", "cliffvm"))
     ap.add_argument("--work", default="")
     ap.add_argument("--ha-port", type=int, default=8133)
     ap.add_argument("--keep", action="store_true", help="keep the work folder (logs, config)")

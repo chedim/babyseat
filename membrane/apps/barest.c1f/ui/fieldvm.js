@@ -1,5 +1,5 @@
 // The field engine in the page: the same Rust VM as the seat (getters, setters, `.c1f` packs, imports), compiled
-// to WebAssembly (fieldvm_core.js / fieldvm_core_bg.wasm, built by native/build-web.sh).
+// to WebAssembly (fieldvm_core.js / fieldvm_core_bg.wasm, built by scripts/build_wasm.sh).
 //
 // The DOM is a mount of the field: every `DomNode:<key>` entity is an element, keyed by its id.
 //   tag     the element's tag (from an allow-list; `div` otherwise), set when the element is made
@@ -28,7 +28,7 @@ import { WASM_VERSION } from './fieldvm_version.js';
 
 export const DOM_PACK = "PACK dom 1\n-- the page's DOM as entities: DomNode:<key>\nDomNode.tag getter: this.tag or 'div'\n";
 
-export const FETCH_PACK = "PACK fetch 1\nRESIDENT Fetch\n-- THE OUTBOUND HTTP DRIVER's class (native/src/fetch.rs): `Fetch:<x>.request = {id, url, ...}` is the effect, `request_result` the receipt\n-- ({id, status, rc, head, http_status, headers, body}). A pack that makes a call IMPORTs this pack and adds its own getters/setters.\nFetch.kind getter: 'fetch'\n";
+export const FETCH_PACK = "PACK fetch 1\nRESIDENT Fetch\n-- THE OUTBOUND HTTP DRIVER's class (cliffvm:src/fetch.rs): `Fetch:<x>.request = {id, url, ...}` is the effect, `request_result` the receipt\n-- ({id, status, rc, head, http_status, headers, body}). A pack that makes a call IMPORTs this pack and adds its own getters/setters.\nFetch.kind getter: 'fetch'\n";
 
 // THE ALLOW-LIST: the one table of what a pack may put in the page. Changing it is a one-line edit here.
 export const DOM_ALLOW = {
@@ -482,7 +482,7 @@ class Host {
   }
 
   // ---- W2: the page's `Fetch` entity (#1143). A pack writes `Fetch:<x>.request = {id, url, method?, headers?, body?, timeout_s?}`; this
-  // makes ONE fetch() and writes `request_result` back in the seat's shape (native/src/drivers.rs + fetch.rs: {id, status, rc, head,
+  // makes ONE fetch() and writes `request_result` back in the seat's shape (cliffvm:src/drivers.rs + fetch.rs: {id, status, rc, head,
   // http_status, headers, body, started, finished, ms}; a failure is {id, status:'error', rc, head: the reason, started, finished, ms}).
   // Same origin only, credentials same-origin (the admin cookie), never authorization or cookie. `abort = true` aborts the one in flight.
   // No timeout unless the request carries `timeout_s`. W3: with `stream: true` the body is read as SSE; each frame's `data` is a page-local

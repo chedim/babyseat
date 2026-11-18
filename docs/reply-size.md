@@ -1,6 +1,6 @@
 # The size of an `entity_write` reply (#1143)
 
-**Built (2026-11-14, operator-approved).** The model-facing reply of `entity_write` and `run_cliff` is built in ONE place, `Request.mc_w_text` (`membrane/packs/door_tools.c1f`, the `rx_*` getters); the host gives each reaction an exact `cls` field (`reactions_of` in `native/src/host.rs`). The full `reactions` list stays on the Request and on the JSON routes; only the MCP text is cut. The reference for the reply is `docs/cliffvm.md`, "The return entity".
+**Built (2026-11-14, operator-approved).** The model-facing reply of `entity_write` and `run_cliff` is built in ONE place, `Request.mc_w_text` (`membrane/packs/door_tools.c1f`, the `rx_*` getters); the host gives each reaction an exact `cls` field (`reactions_of` in `cliffvm:src/host.rs`). The full `reactions` list stays on the Request and on the JSON routes; only the MCP text is cut. The reference for the reply is `docs/cliffvm.md`, "The return entity".
 
 ## The rule (design B2: the written entity in full, the rest as counts)
 

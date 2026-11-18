@@ -19,30 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
-  # The release's own gates (#1143): the Rust seat is what ships, so its suites run here. Added BEFORE the Python
-  # jobs below are removed: nothing may be deleted while it is the only gate.
-  cargo:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5   # the native tests use a system python3 as a fake `claude` and an http.server
-        with:
-          python-version: "3.13"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: native
-      # nextest runs every test as its own process and all of them at once across the test binaries (cargo test runs the binaries one after another: 163 of them, 14 minutes of the 16 were waiting on seats
-      # one at a time); the tests name their temp folders, ports and shared-memory regions uniquely, so they may overlap. nextest does not run doc tests: they run on their own.
-      - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --release --no-default-features --features bin --no-fail-fast
-        working-directory: native
-      - run: cargo test --release --no-default-features --features bin --doc
-        working-directory: native
   # The seat's pack-tied tests (seat-tests/): they run on the pinned cliffvm release (CLIFFVM_VERSION), as a library at that version and as the downloaded program (CLIFFVM_DIST).
   seat:
     strategy:
@@ -81,16 +57,11 @@ jobs:
       - uses: actions/setup-python@v5   # the page tests serve the repo with `python3 -m http.server` and use a fake `claude`
         with:
           python-version: "3.13"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: native
-      - run: cargo build --release --no-default-features --features bin
-        working-directory: native
+      - run: scripts/dist/fetch_cliffvm.sh "$(cat CLIFFVM_VERSION)" x86_64-unknown-linux-gnu "$RUNNER_TEMP/cliffvm"   # the engine is the pinned cliffvm release (CLIFFVM_VERSION)
       # headless Chrome is on the runner image; every page test starts it itself
       - run: |
           set -e
-          export CLIFFVM="$PWD/native/target/release/cliffvm" CHROME="$(command -v google-chrome)"
+          export CLIFFVM="$RUNNER_TEMP/cliffvm/bin/cliffvm" CHROME="$(command -v google-chrome)"
           # the first start of Chrome on a fresh runner is slow (more than the 10 s some page tests wait for its debugging port): start it once here, before any test
           "$CHROME" --headless=new --no-first-run --no-default-browser-check --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null 2>&1 || true
           i=0
@@ -105,14 +76,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: native
-      - run: cargo build --release --no-default-features --features bin
-        working-directory: native
+      - run: scripts/dist/fetch_cliffvm.sh "$(cat CLIFFVM_VERSION)" x86_64-unknown-linux-gnu "$RUNNER_TEMP/cliffvm"
       - run: pip install pytest aiohttp
-      - run: CLIFFVM_BIN="$PWD/native/target/release/cliffvm" pytest -q -p no:cacheprovider tests/ha
+      - run: CLIFFVM_BIN="$RUNNER_TEMP/cliffvm/bin/cliffvm" pytest -q -p no:cacheprovider tests/ha
   # the browser VM is committed as a build output: it must be the build of the Rust source in this tree
   # a WARNING, not a gate (operator 2026-11-15): the same source builds to different bytes on a Mac and on this runner (the toolchains differ: Rust stable, wasm-pack and wasm-bindgen move), so the committed
   # wasm can never match the runner's build until the toolchain is pinned; the page's JS tests (the js job) are what prove the committed engine works
@@ -125,7 +91,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - run: cargo install wasm-pack --locked
-      - run: sh native/build-web.sh
+      - run: sh scripts/build_wasm.sh
       - run: git diff --exit-code -- membrane/apps/barest.c1f/ui/ || echo "::warning title=wasm differs::this runner's build of the wasm differs from the committed one (the toolchains differ); the js job tests the committed engine"
   # the Python wrapper (membrane/launcher.py) and the pins on versions, licence and names
   wrapper:

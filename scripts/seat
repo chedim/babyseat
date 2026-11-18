@@ -1,6 +1,6 @@
 #!/bin/sh
 # The dev wrapper of `cliffvm serve` (the users' launcher, docs/packaging-plan.md): the same seat on THIS checkout's membrane/ folder (packs/, apps/, ui/ have the dist's shape), the data in ./.cliffvm.
-# Builds nothing: build the binary once with `cargo build --release --no-default-features --features bin` in native/.
+# Builds nothing: download the pinned engine once (scripts/dist/fetch_cliffvm.sh "$(cat CLIFFVM_VERSION)" <target> <folder>) and name bin/cliffvm of it in CLIFFVM.
 #   scripts/seat [--open] [--data-dir <dir>] [--store <sqlite>] [--port <n>] [--fact name=value ...]     (every option of `cliffvm serve --help` passes through)
 # Every default lives in membrane/packs/launcher.c1f; the door is strict (the secret and the admin token are in the data folder).
 # CLIFFVM names the binary, CLAUDE_BIN the claude CLI (else the one on PATH). CLAUDE_AUTH=login passes --fact chat_auth=login (the claude CLI's login instead of ANTHROPIC_API_KEY).
@@ -8,12 +8,11 @@
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 bin=${CLIFFVM:-}
-[ -n "$bin" ] || { [ -x "$root/native/target/release/cliffvm" ] && bin=$root/native/target/release/cliffvm; } || true
 [ -n "$bin" ] || bin=$(command -v cliffvm || true)
 if [ -z "$bin" ]; then
-  echo "scripts/seat: cliffvm is not built yet. Build it once:" >&2
-  echo "  (cd $root/native && cargo build --release --no-default-features --features bin)" >&2
-  echo "or point CLIFFVM at the binary." >&2
+  echo "scripts/seat: no cliffvm. Download the pinned release once:" >&2
+  echo "  scripts/dist/fetch_cliffvm.sh \"\$(cat CLIFFVM_VERSION)\" <target> <folder>" >&2
+  echo "and point CLIFFVM at <folder>/bin/cliffvm (or put cliffvm on the PATH)." >&2
   exit 1
 fi
 open_page=0

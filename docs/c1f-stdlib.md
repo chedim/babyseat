@@ -1,6 +1,6 @@
 # The c1f standard library: the contracts and the builtins
 
-Status: the contracts below are built and pinned by `seat-tests/tests/contracts.rs`; the builtin list is the one in `native/src/expr.rs` (`RESERVED`, kept in step with `call` by a test). Spec files: `tests/specs/*.json`.
+Status: the contracts below are built and pinned by `seat-tests/tests/contracts.rs`; the builtin list is the one in `cliffvm:src/expr.rs` (`RESERVED`, kept in step with `call` by a test). Spec files: `tests/specs/*.json`.
 
 c1f has no functions and no macros. A pack is getters and setters over entities, so a "library" can only be **data contracts and
 shared getters on a class** that every pack imports. The standard library is therefore the contract of the classes the OS is
@@ -30,14 +30,14 @@ entity: `('Fetch:' + this.conn).request = {...}` and read its `request_result`.
 ## Boot facts
 The launcher writes each fact as a property of `Boot:seat` and also the whole set as the dict `facts`; a pack reads
 `prop(this.facts, 'seat_name')` instead of a comprehension over `instances('Boot')`.
-`cliffvm` builds them (`native/src/cli.rs` `facts`, `serve_plan`, then `launcher.c1f`): a missing source leaves its fact out (never None); `door_port` comes from `--port`;
+`cliffvm` builds them (`cliffvm:src/cli.rs` `facts`, `serve_plan`, then `launcher.c1f`): a missing source leaves its fact out (never None); `door_port` comes from `--port`;
 `door_secret_file` is a path, never the secret; `anthropic_key_set` is a yes or no, never the key. `membrane/packs/facts.json` is the registry (name, `wired`, `why`): a fact a pack reads must be there,
 and a fact marked `wired` must be written by the launcher (cli.rs, host.rs, `scripts/seat` or `launcher.c1f`). Facts the router adds after the boot (`router_on`, `cloud_models`, `minds`) come with `launcher.c1f`'s setters on `Boot.started`.
 
 `tail(text, n)` (added with the reply cap, #1143) is the mirror of `head`: a text's last n characters, a list's last n.
 
 ## Text builtins: `spans` (the tokenizer, #1143; needs the operator's approval as a new builtin)
-`spans(text, layer)` is the native tokenizer's door (`native/src/text.rs`, docs/semtext-and-legs.md "Tokenizer (built)"): it returns
+`spans(text, layer)` is the native tokenizer's door (`cliffvm:src/text.rs`, docs/semtext-and-legs.md "Tokenizer (built)"): it returns
 `[{start, end, text}]`, the layer's spans sorted and non-overlapping, `start`/`end` in chars (the unit of `len`, `head`, `tail`), `text`
 the surface. `layer` is one of `sentence word identifier path url number`; another name is an error that lists them. Typed
 `List(Dict)`; a pack cannot do this itself (UAX #29 tables are compiled in). `Msg.sents getter: spans(this.text, 'sentence')`.
@@ -45,7 +45,7 @@ It is INTERNAL: only the SemText pack (`membrane/packs/semtext.c1f`) calls it, a
 There is no `slice` builtin: a span's `text` is already cut, and `head(tail(t, len(t) - start), end - start)` cuts by offsets when a
 pack holds only the offsets.
 
-## The builtins (`native/src/expr.rs`, `RESERVED`)
+## The builtins (`cliffvm:src/expr.rs`, `RESERVED`)
 Casts `Int Float Num Text Bool List Dict` (checked, an Error on the wrong kind); constants `None True False`; math `dot norm distance unit vsum vmean near abs min max log fit clip`; text `len lower strip replace startswith lines words spans head tail join plain unspeak before after json str`;
 lists and dicts `sort_by pluck distinct group_by concat fold`; time `ago epoch localtime num`; the field `instances referencing prop props why`; host functions `jsonl listdir read sql stat recall rerank pronoun`
 (`pronoun` is what a bare `it`, `that`, `they` ... asks the host; the seat's host answers none, so a pronoun reads as the reasoned error `the pronoun "it" is not bound here`).
@@ -65,14 +65,14 @@ It is the comprehension's own shape (no lambda, no new syntax family: `lambda` s
 name of that name there; it is not reserved, so a local may still be called `acc` elsewhere); the loop's item may not be named `acc`. The call is one step and every node of `init`,
 `xs`, the `if` and each step costs its steps as anywhere else, so a long fold runs into the step budget like a long comprehension. An Error in the list, the `if` or a step is the
 answer at once. Any other shape (`fold(0, [1, 2])`, one argument) is an Error that shows the form. Typed `Any` (the step's `acc` is an untyped edge). Both are plain expression
-code (`native/src/expr.rs`), so the browser engine has them too. Tests: `native/tests/vsum_fold_1143.rs`.
+code (`cliffvm:src/expr.rs`), so the browser engine has them too. Tests: `cliffvm:tests/vsum_fold_1143.rs`.
 Rejected for the fold: `lambda` (a new syntax family, and the parser refuses it on purpose), a builtin that takes the step as TEXT (`fold(xs, init, 'acc + x')`: the getter ordering,
 the inferencer and the surface read strings as data, so the step's reads would be invisible), a builtin that names a getter to call per element (a getter is computed on an entity, never
 called with arguments), and an explicit accumulator name (`fold(init, 'acc', [...])`: the last string argument of a call is read as a property name).
 `log(x)` (#1143, operator 2026-11-15: the move-log voter's rarity is log(N / the events holding a thing), `membrane/packs/movelog.c1f`) is the natural log of a positive number: the f64 log
 rounded to f32, so two devices whose math libraries differ in the last bits of an f64 give the same answer (`log(1)` is 0.0). An Error with its reason on 0, a negative number, or anything that is
-not an Int or a Float (`log('e')`, `log(True)`, `log([1])`); a null gives a null (as every call). One step. Typed `Float`. Tests: `native/tests/log_1143.rs`.
-**Builtins over long lists** (#1143, operator 2026-11-15: the field's recall must scale; a comprehension pays steps per item, a builtin one step). Tests: `native/tests/props_vmean_1143.rs`;
+not an Int or a Float (`log('e')`, `log(True)`, `log([1])`); a null gives a null (as every call). One step. Typed `Float`. Tests: `cliffvm:tests/log_1143.rs`.
+**Builtins over long lists** (#1143, operator 2026-11-15: the field's recall must scale; a comprehension pays steps per item, a builtin one step). Tests: `cliffvm:tests/props_vmean_1143.rs`;
 what they bought: `seat-tests/tests/recall_scale_1143.rs` and docs/semtext-and-legs.md ("Cost of the whole recall").
 - `props(ids, 'name')` is `[prop(e, 'name') for e in ids]` in one step: one property of every entity of a list (an entity or its id; a dict item reads its key, as `prop`; a null item
   stays a null; a property an entity does not hold is its reasoned null `absent: ...`). `props(ids, at, 'name')` takes element `at[i]` of the i-th value, as `x[k]` does (a list by its
@@ -90,7 +90,7 @@ what they bought: `seat-tests/tests/recall_scale_1143.rs` and docs/semtext-and-l
   value that is not a number (or is missing), a column named `key` or `rows`, `sums` not a list of names. With no sums (or `[]`) the groups are as before.
 All three are one step however long the list (the reads and the arithmetic are the builtin's own cost, not counted: see Limits).
 There is NO `int()`, `dict()`, `merge` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
-`keys(d)` is the one that was added (#1143, operator 2026-11-16): the keys of a dict as a list of text, in the order the dict holds them (so `{'b': 1, 'a': 2}` gives `['b', 'a']`); a read still pending is `[]`, anything that is not a dict is an error. It costs one step whatever the size (`native/tests/keys_1143.rs`). `keys` is a reserved name, like the other builtins.
+`keys(d)` is the one that was added (#1143, operator 2026-11-16): the keys of a dict as a list of text, in the order the dict holds them (so `{'b': 1, 'a': 2}` gives `['b', 'a']`); a read still pending is `[]`, anything that is not a dict is an error. It costs one step whatever the size (`cliffvm:tests/keys_1143.rs`). `keys` is a reserved name, like the other builtins.
 A new builtin needs the operator's approval; it is an arm of `call` and a name in `RESERVED`, with a Rust test.
 
 ## Conventions (the traps that bit)
@@ -107,7 +107,7 @@ A new builtin needs the operator's approval; it is an arm of `call` and a name i
 - Lists are vectors: `+ - * /` on lists are element-wise and return floats; a length-1 list or a number broadcasts, so
   `[1] * N` is the vector `[N]` (not N ones) and `[x + 1 for x in [1] * N]` is `[N + 1.0]`; lengths that do not match (neither 1)
   are an error. There is no list repetition and no `range`: no construct builds a list of N copies (open decision).
-  Pinned by `native/tests/vector_arith_1143.rs`, shown in `Help:c1f`.
+  Pinned by `cliffvm:tests/vector_arith_1143.rs`, shown in `Help:c1f`.
 - `concat` joins lists (`+` is vector addition); there is no `int()`; `clock` is epoch seconds.
 - Getters are eager and cached: a getter is recomputed when an input it read changes, a read returns the cache, and a recompute that gives the value it already held wakes none of its readers (early cutoff, docs/cliffhanger-fields.md rule 5).
 - A class a shipped pack declares is owned: other packs `IMPORT` it.
@@ -125,10 +125,10 @@ A bare line `name = expr` (no dotted target; a write always has one, like `this.
     base + tax
   ```
 - a setter's body: locals feed the writes (and FOR loops) below them, per branch; a local made inside a FOR ends with it;
-- **Nulls and their reasons** (#1143; `native/tests/semantics_1143.rs`): reading a property an entity does not hold is the null `absent: <entity>.<property>`, an entity that is not there (not stored, not collected, not waiting to be loaded) the null `absent: <entity> does not exist` (`View::attr`; a getter that computed `None` is a plain null, `Core.nulled`; the help `Help:upgrade` says the same). A reasoned null inside a list or a dict is kept: in an expression it is the element itself; in a
+- **Nulls and their reasons** (#1143; `cliffvm:tests/semantics_1143.rs`): reading a property an entity does not hold is the null `absent: <entity>.<property>`, an entity that is not there (not stored, not collected, not waiting to be loaded) the null `absent: <entity> does not exist` (`View::attr`; a getter that computed `None` is a plain null, `Core.nulled`; the help `Help:upgrade` says the same). A reasoned null inside a list or a dict is kept: in an expression it is the element itself; in a
   value a getter STORED (JSON, where every null is plain: what is stored and sent is unchanged) the engine remembers the reason beside it in `Core.why` under `<prop> NUL <path>` (`expr::nested_nulls`, set by the getter that stores it, replaced with its next value, dropped with the entity) and a read of the stored list or dict puts the
   reasoned nulls back (`overlay_nested`). `str` of a list or a dict writes such a null as `{"$null": "<reason>"}` (`expr::to_json_shown`; a null without a reason stays `null`), which is what `run_cliff` prints. Not covered: a nested null a SETTER wrote (setter values keep plain nulls).
-- **Error: a failure is not a null** (#1143; `docs/c1f-error.md`, `native/tests/error_*_1143.rs`). `null` = not initialised, absent, not applicable (it keeps its
+- **Error: a failure is not a null** (#1143; `docs/c1f-error.md`, `cliffvm:tests/error_*_1143.rs`). `null` = not initialised, absent, not applicable (it keeps its
   `why`); `Error` = something FAILED: a value kind (`V::Error`) that carries its reason (the remedy is part of the text). `x == None` is False for an Error; `or`
   stays the default operator and never hides an Error (there is no `??`); `x is Error` is the test, `why(x)` reads its text. An Error PROPAGATES: arithmetic,
   `-x`, `x[i]`, `x.a`, comparisons (not `x == None`), `not`, `and`, `or`, an `if`/WHEN/comprehension condition and every call but `why` give that same Error
@@ -229,7 +229,7 @@ writing a new property, claiming a new path or importing a new pack fails the te
 (`SURFACE_UPDATE=1 cargo test --test contracts surface`). There is no `private` keyword: the contract is the surface.
 
 ## Inferred types (a report, enforces nothing)
-c1f is dynamic at run time, but a getter's type follows from its definition. `native/src/infer.rs` (`infer_expr`, `infer_pack`,
+c1f is dynamic at run time, but a getter's type follows from its definition. `cliffvm:src/infer.rs` (`infer_expr`, `infer_pack`,
 `infer_packs`) deduces it from literals, the builtins' signatures, the types of other getters it reads (any order; a cycle is `Any`
 and a finding), and the right-hand sides of setters (collected as the union of types WRITTEN to each `Class.prop`, shown next to
 the getter's type when the property has both). Plain properties written from outside (Boot facts, Request fields, driver receipts,

@@ -2,7 +2,7 @@ PACK sql 1
 IMPORT boot 1
 RESIDENT SqlSource
 RESIDENT SqlQuery
--- THE Sql DRIVER's classes (native/src/sqldrv.rs, #1143): a second SQLite file, as entities. No builtin; a run is a write.
+-- THE Sql DRIVER's classes (cliffvm:src/sqldrv.rs, #1143): a second SQLite file, as entities. No builtin; a run is a write.
 --   SqlSource:<name> {path, mode}   `mode` is `ro` (the default) or `rw`. `ro` opens the file with the immutable URI: SQLite writes nothing and takes no
 --                                  lock, so the file must not change while the seat runs. The seat's own store is never a source.
 --   SqlQuery:<name>  {source, sql}  `source` is the NAME of a SqlSource; `sql` is ONE statement, prepared on first use and kept in the connection's cache.

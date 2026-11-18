@@ -9,8 +9,8 @@ name: release-binaries
 # Platforms: macOS arm64 and x86_64 (the x86_64 one is cross-built on Apple silicon and smoke-tested under Rosetta), Linux x86_64 and aarch64 on glibc (built inside manylinux_2_28
 # containers so the glibc floor is 2.28, as the wheels of 0.7.5x were) and on musl (static, for Alpine / Home Assistant's container). Windows: none (the plan). Android/Termux: none.
 #
-# NOT here (a decision, listed in the packaging round's report): the wasm drift check. `native/build-web.sh` rewrites the committed browser wasm and its version hash; a job would run it
-# (rust wasm32-unknown-unknown + wasm-pack) and fail on `git diff --exit-code` on the files it writes (see native/build-web.sh; they live in the barest app's ui/ folder).
+# NOT here (a decision, listed in the packaging round's report): the wasm drift check. `scripts/build_wasm.sh` rewrites the committed browser wasm and its version hash; a job would run it
+# (rust wasm32-unknown-unknown + wasm-pack) and fail on `git diff --exit-code` on the files it writes (see scripts/build_wasm.sh; they live in the barest app's ui/ folder).
 # Whether the wasm build is byte-reproducible across machines is UNVERIFIED, so it is not switched on.
 
 on:

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Assemble the dist folder from a release build (docs/packaging-plan.md, decided 2026-11-14: packs and apps as FILES in a version-stamped folder next to the binary).
-#   scripts/dist/build.sh [--bin <cliffvm>] [--engine-version <x.y.z>] [--out <dir>] [--target <rust triple>] [--archive <file.tar.gz>]
-# --bin      the binary to put in bin/ (default: build it: `cargo build --release --no-default-features --features bin` in native/, with --target when given); a graphlink-bridge beside it goes into bin/ too
+#   scripts/dist/build.sh --bin <cliffvm> [--engine-version <x.y.z>] [--out <dir>] [--archive <file.tar.gz>]
+# --bin      the engine binary to put in bin/ (required: scripts/dist/fetch_cliffvm.sh downloads the pinned release; a graphlink-bridge beside it goes into bin/ too)
 # --engine-version  the version of the engine binary (the cliffvm release it came from, scripts/dist/fetch_cliffvm.sh): stamped as the file ENGINE, and the smoke test checks `cliffvm --version` against it
 # --out      the folder to make (default: <repo>/dist/<version>; <version> is the PRODUCT's version, pyproject.toml's, which is VERSION in the folder). An existing folder is replaced only if it is empty or a dist (it has a VERSION file).
 # --archive  also pack the folder as <file.tar.gz> (the one top folder is the out folder's name) and write <file.tar.gz>.sha256 next to it
@@ -13,34 +13,25 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/pyproject.toml" | head -1)
 [ -n "$version" ] || { echo "dist/build.sh: no version in pyproject.toml" >&2; exit 1; }
-bin=''; out=''; target=''; archive=''; engine=''
+bin=''; out=''; archive=''; engine=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --bin) bin=${2:?--bin needs a path}; shift 2 ;;
     --out) out=${2:?--out needs a folder}; shift 2 ;;
-    --target) target=${2:?--target needs a rust triple}; shift 2 ;;
     --archive) archive=${2:?--archive needs a file name}; shift 2 ;;
     --engine-version) engine=${2:?--engine-version needs a version}; shift 2 ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
-    *) echo "dist/build.sh: unknown option $1 (--bin --out --target --archive)" >&2; exit 2 ;;
+    *) echo "dist/build.sh: unknown option $1 (--bin --engine-version --out --archive)" >&2; exit 2 ;;
   esac
 done
-if [ -z "$bin" ]; then
-  if [ -n "$target" ]; then
-    (cd "$root/native" && cargo build --release --no-default-features --features bin --target "$target") >&2
-    bin=$root/native/target/$target/release/cliffvm
-  else
-    (cd "$root/native" && cargo build --release --no-default-features --features bin) >&2
-    bin=$root/native/target/release/cliffvm
-  fi
-fi
+[ -n "$bin" ] || { echo "dist/build.sh: name the engine with --bin (scripts/dist/fetch_cliffvm.sh downloads the pinned release: bin/cliffvm)" >&2; exit 2; }
 # x is set by the eval on the next line (shellcheck cannot see it)
 # shellcheck disable=SC2154
 for v in bin out archive; do eval "x=\$$v"; case $x in ""|/*) ;; *) eval "$v=\$PWD/\$x" ;; esac; done
 case $bin in /*) ;; *) bin=$PWD/$bin ;; esac   # the paths are used from inside other folders below
 case $out in ''|/*) ;; *) out=$PWD/$out ;; esac
 case $archive in ''|/*) ;; *) archive=$PWD/$archive ;; esac
-[ -f "$bin" ] || { echo "dist/build.sh: no binary at $bin (build it, or name it with --bin)" >&2; exit 1; }
+[ -f "$bin" ] || { echo "dist/build.sh: no binary at $bin (fetch it: scripts/dist/fetch_cliffvm.sh)" >&2; exit 1; }
 [ -n "$out" ] || out=$root/dist/$version
 if [ -e "$out" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ] && [ ! -f "$out/VERSION" ]; then
   echo "dist/build.sh: $out exists and is not a dist folder (no VERSION file): not replaced" >&2; exit 1

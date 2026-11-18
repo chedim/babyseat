@@ -50,10 +50,10 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          ver=$(sed -n 's/^version = "\(.*\)"$/\1/p' native/Cargo.toml | head -1)
-          [ -n "$ver" ] || { echo "no version in native/Cargo.toml"; exit 1; }
+          ver=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          [ -n "$ver" ] || { echo "no version in pyproject.toml"; exit 1; }
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$TAG" != "v$ver" ]; then
-            echo "tag $TAG is not v$ver (native/Cargo.toml): nothing built"; exit 1
+            echo "tag $TAG is not v$ver (pyproject.toml): nothing built"; exit 1
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
 
@@ -70,17 +70,13 @@ jobs:
           (cd docker-dist && for f in *.sha256; do sha256sum -c "$f"; done)
           ls -l docker-dist
 
-      - uses: dtolnay/rust-toolchain@stable
-        if: github.event_name == 'pull_request'
-      - uses: Swatinem/rust-cache@v2
-        if: github.event_name == 'pull_request'
-        with:
-          workspaces: native
-      - name: "the dist tarball of this tree (pull request: x86_64 only, built here)"
+      - name: "the dist tarball of this tree (pull request: x86_64 only, around the pinned cliffvm release)"
         if: github.event_name == 'pull_request'
         run: |
           VER=${{ steps.ver.outputs.version }}
-          sh scripts/dist/build.sh --archive "docker-dist/babyseat-$VER-x86_64-unknown-linux-gnu.tar.gz"
+          ENGINE=$(cat CLIFFVM_VERSION)
+          sh scripts/dist/fetch_cliffvm.sh "$ENGINE" x86_64-unknown-linux-gnu engine
+          sh scripts/dist/build.sh --bin engine/bin/cliffvm --engine-version "$ENGINE" --archive "docker-dist/babyseat-$VER-x86_64-unknown-linux-gnu.tar.gz"
 
       - uses: docker/setup-buildx-action@v3
       - name: build the image (linux/amd64, loaded for the checks)
@@ -99,7 +95,7 @@ jobs:
           [ "$(docker run --rm --entrypoint id babyseat:ci -u)" = 10001 ]
           docker inspect babyseat:ci --format '{{.Config.ExposedPorts}} {{.Config.Volumes}}' | grep -q '4096/tcp.*/data'
           docker run --rm --entrypoint sh babyseat:ci -c '! command -v claude'
-          docker run --rm babyseat:ci --version | grep -q "${{ steps.ver.outputs.version }}"
+          docker run --rm babyseat:ci --version | grep -q "$(cat CLIFFVM_VERSION)"
       - name: the seat answers (health 401 without the token, 200 with the admin token)
         run: |
           set -eu

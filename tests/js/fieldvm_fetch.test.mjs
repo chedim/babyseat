@@ -1,5 +1,5 @@
 // W2 (#1143): the page's `Fetch` entity. A pack writes `Fetch:<id>.request = {id, url, method, headers, body}`, the JS shell makes ONE fetch()
-// (same origin only, the admin cookie goes with it) and writes the receipt back in the seat's shape (native/src/drivers.rs, fetch.rs). A fake fetch, node, no browser.
+// (same origin only, the admin cookie goes with it) and writes the receipt back in the seat's shape (cliffvm:src/drivers.rs, fetch.rs). A fake fetch, node, no browser.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';

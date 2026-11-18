@@ -1,7 +1,7 @@
 //! The AUTOMATIC history cutover (#1143, operator 2026-11-14): a user who upgrades from the Python seat starts the new seat once and finds all the history in the one chat, doing nothing.
 //! `membrane/packs/legacy_cutover.c1f` finds the old store (the search order below), declares it as the read-only `SqlSource:legacy`, and imports every session in the BACKGROUND, newest
 //! first, in small batches that leave the imported entities out of memory; a ledger (`Legacy:cutover` and the per-session `Legacy:session:<sid>`) makes it done once and resumable.
-//! Host-level tests on small synthetic stores (native/tests/legacy_fixture); the real-store numbers are measured on a private seat (see the report), never here. No clock: counts and contents only.
+//! Host-level tests on small synthetic stores (seat-tests/tests/legacy_fixture); the real-store numbers are measured on a private seat (see the report), never here. No clock: counts and contents only.
 mod common;
 
 use membrane_vm::host::{Host, Options};

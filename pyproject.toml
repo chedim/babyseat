@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Dmitrii Chechetkin" }]
-# the seat is the `cliffvm` binary the wheel carries (native/, Rust); Python is only the launcher (membrane/launcher.py)
+# the seat is the `cliffvm` binary the wheel carries (the cliffvm repository, Rust; the release named by CLIFFVM_VERSION); Python is only the launcher (membrane/launcher.py)
 dependencies = []
 
 [project.urls]
