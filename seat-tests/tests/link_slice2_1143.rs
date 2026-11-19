@@ -411,3 +411,52 @@ fn a_page_subscribed_to_its_placed_packs_gets_their_names_and_text() {
     assert_eq!(names, Some(json!(["rtplaced"])), "the page is not told which packs are placed on it");
     assert!(text.as_ref().and_then(|t| t.as_str()).is_some_and(|t| t.contains("a view the model wrote")), "the page does not get the pack's text: {text:?}");
 }
+
+#[test]
+fn a_page_asks_for_the_log_by_its_own_cursor_and_reads_the_view_by_the_door() {
+    // the log view appears for anything connected that asks: a page asks by writing `<ns>::LogAsk:main` (`from`, the first line it wants, and `n`, its ask count) and reads `membrane::LogView:<ns>` (virtual: a link does
+    // not carry its values) with the door's `entity_read`, as a page's `Fetch` does
+    let run = start(&tmp("page-log"), &[]);
+    let ns = snap(run.port)["page"].as_str().unwrap().to_string();
+    tell(run.port, &ns);
+    let ask = format!("{ns}::LogAsk:main");
+    call(run.port, "entity_write", json!({"spec": ask, "prop": "from", "value": 0}));
+    call(run.port, "entity_write", json!({"spec": ask, "prop": "n", "value": 1}));
+    let view = format!("membrane::LogView:{ns}");
+    let end = std::time::Instant::now() + Duration::from_secs(30);
+    let mut rows = String::new();
+    while !rows.starts_with("[{") && std::time::Instant::now() < end { std::thread::sleep(Duration::from_millis(300)); rows = read(run.port, &view, "rows"); }
+    let rows: Vec<J> = serde_json::from_str(&rows).unwrap_or_else(|_| panic!("the page never got the log rows from the door: {rows}"));
+    let first = &rows[0];
+    assert!(first["n"].is_number() && first["eid"].is_string() && first["writer"].is_string(), "a row is a record with its number, entity and writer: {first}");
+    // asking again from where the page stopped is the next page, not the same one
+    let next = read(run.port, &view, "next").trim().parse::<u64>().expect("the view says where the next page starts");
+    call(run.port, "entity_write", json!({"spec": ask, "prop": "from", "value": next}));
+    call(run.port, "entity_write", json!({"spec": ask, "prop": "n", "value": 2}));
+    let end = std::time::Instant::now() + Duration::from_secs(30);
+    let mut later = vec![];
+    while later.first().is_none_or(|r: &J| r["n"].as_u64() != Some(next)) && std::time::Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(300));
+        later = serde_json::from_str::<Vec<J>>(&read(run.port, &view, "rows")).unwrap_or_default();
+    }
+    assert_eq!(later.first().map(|r| r["n"].as_u64()), Some(Some(next)), "the next page does not start where the first one ended");
+}
+
+#[test]
+fn the_page_can_follow_who_is_connected_by_its_link() {
+    // `Peers:seat.up` lists the namespaces of the connected peers (a `Vm` with a link that is up); the page follows it, so a tab can come and go with its peer
+    let run = start(&tmp("peers-up"), &[]);
+    let ns = snap(run.port)["page"].as_str().unwrap().to_string();
+    let (s, r) = frame(run.port, &ns, 1, 0, &[("membrane::Peers:seat", "up")], &[], false);
+    assert_eq!(s, 200, "{r}");
+    let end = std::time::Instant::now() + Duration::from_secs(30);
+    let (mut up, mut n) = (None, 1);
+    let mut r = r;
+    loop {
+        for v in vals(&r) { if v["id"] == "membrane::Peers:seat" && v["prop"] == "up" { up = Some(v["value"].clone()); } }
+        if up.is_some() || std::time::Instant::now() > end { break; }
+        n += 1; std::thread::sleep(Duration::from_millis(300));
+        let (_, rr) = frame(run.port, &ns, n, n - 1, &[], &[], false); r = rr;
+    }
+    assert_eq!(up, Some(json!([])), "the page is not told who is connected (nobody is: an empty list)");
+}

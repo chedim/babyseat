@@ -3,6 +3,7 @@ IMPORT boot 1
 RESIDENT Vm
 VIRTUAL Page
 RESIDENT LinkWrite
+RESIDENT Peers
 -- THE GRAPH LINK, SLICE 1: WHAT THE PAGE TELLS THE SEAT (#1143, docs/graph-link.md sections 2 and 8, "Slice 1: built"). The page is a second field engine; it cannot be asked, so it tells.
 -- Its own pack (apps/barest.c1f/link_view.c1f, run in the browser) writes through the ordinary door (`POST /mcp`, `entity_write`; whoever reaches the page may write, there are no per-person rights):
 --   Vm:<ns>.caps              what this page can do, ONE write at start: protocol, encodings, frames, the DOM allow-list, the packs it runs (`provides`, each with its `requires`), the classes it can evaluate, limits, device class
@@ -44,6 +45,12 @@ Vm.state getter:
   ELSE: 'connected'
 -- a Vm with a `link` (written by the seat's peer driver, cliffvm:src/peers.rs: `up` or `gone`) is a PEER (a program on this machine over shared memory); any other is a page
 Vm.kind getter: 'peer' if this.link != None else 'page'
+-- WHO IS CONNECTED: `Peers:seat.up` lists the namespaces of the peers whose link is up. A page follows it by its link (`LinkAllow:log`), so a tab can come and go with its peer.
+Peers.kind getter: 'peers'
+Peers.up getter: [replace(v.eid, 'Vm:', '') for v in instances('Vm') if v.kind == 'peer' and v.link == 'up']
+Boot.started on-setter peers-root:
+  WHEN len([p for p in instances('Peers')]) == 0:
+    ('Peers:seat').born = clock
 
 Vm.caps on-setter link-caps:
   WHEN this.caps != None:

@@ -20,8 +20,8 @@ Boot.started on-setter logview-root:
   WHEN len([v for v in instances('LogViews')]) == 0:
     ('LogViews:seat').born = clock
 
--- A view appears when a peer ASKS for one: a peer (a `Vm` with a `link`) that has written `<ns>::LogAsk:main.n`. No fact names the peers, and any connected program can ask.
-LogViews.asked getter: [replace(v.eid, 'Vm:', '') for v in instances('Vm') if v.kind == 'peer' and prop(replace(v.eid, 'Vm:', '') + '::LogAsk:main', 'n') != None]
+-- A view appears when a connected VM ASKS for one: a peer or a page that has written `<ns>::LogAsk:main.n` (a page writes it through the door). No fact names them, and any connected program can ask.
+LogViews.asked getter: [replace(v.eid, 'Vm:', '') for v in instances('Vm') if prop(replace(v.eid, 'Vm:', '') + '::LogAsk:main', 'n') != None]
 LogViews.asked on-setter logview-births:
   WHEN this.asked != None:
     FOR ns IN this.asked:

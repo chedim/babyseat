@@ -12,6 +12,8 @@ IMPORT fetch 1
 --   2. draws into its slot: the root DomNode of the view has `parent = 'DomNode:shell:slot:<name>'`; it draws when `Nav:<name>.active` first becomes true (a setter on `Nav.active`: lazy), and writes
 --      `('Nav:<name>').filled = True` so the shell's placeholder text goes away;
 --   3. stops its own periodic work while `prop('Nav:<name>', 'active') == False` (a view the person is not looking at does not tick).
+--   (a view pack names its root DomNode after the pack, `DomNode:<name>`, so everything under it goes with it when the pack is unloaded: the page's follower retires `Nav:<name>` and `DomNode:<name>` when a placed pack leaves,
+--   the shell then retires the button and the slot of a view that left and goes back to chat if that view was the one shown.)
 --   4. (optional) opens the shared SLIDE-OVER DETAIL PANEL: `Panel:detail` {owner, title, sub, note, rows, open}. The opener writes `owner` (its name), `title`, `sub`, `rows` (a list of
 --      {key, label, text, target?, head?}, shown in the order of the keys: a `head` row is a section heading, a row with `target` is a link, a long `text` is cut and expandable) and `open = True` in ONE setter; the shell draws it,
 --      sliding in from the right over the views, with a scrim over the rest of the page. A click on the scrim, on Close or Esc writes `open = False`; a click on a link row writes `picked = <target>`.
@@ -130,6 +132,16 @@ Shell.nav_rows on-setter shell-nav-draw:
       ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').class = 'empty'
       ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').text = prop(r, 'title')
       ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').hidden = prop('Nav:' + prop(r, 'name'), 'filled') == True
+
+-- a view that LEAVES (its `Nav:<name>` was retired: the pack was unloaded) loses its button and its slot, and the page goes back to chat if that view was the one shown
+Shell.nav_names getter: [prop(r, 'name') for r in this.nav_rows]
+Shell.nav_names on-setter shell-nav-clean:
+  WHEN this.open and this.nav_names != None:
+    FOR d IN [x.eid for x in instances('DomNode') if (startswith(x.eid, 'DomNode:shell:nav:') or startswith(x.eid, 'DomNode:shell:slot:')) and not (before(replace(replace(x.eid, 'DomNode:shell:nav:', ''), 'DomNode:shell:slot:', '') + ':', ':') in this.nav_names)]:
+      (d).retire = True
+Shell.nav_names on-setter shell-nav-home:
+  WHEN this.open and this.nav_names != None and len(this.nav_names) > 0 and not (this.view in this.nav_names):
+    ('Shell:main').view = 'chat'
 
 -- a view that registers is active or not at once (the slot is hidden by `active`, nothing else)
 Nav.title on-setter nav-registered:

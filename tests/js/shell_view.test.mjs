@@ -226,4 +226,25 @@ Panel.open on-setter opener-closed:
   assert.equal(w.get('Panel:detail').expanded.length, 0, 'what was expanded is forgotten with the close');
 });
 
+scenario('a view that leaves the list loses its button and slot, and the page goes back to chat if it was the one shown', () => {
+  // a view pack registers `Nav:<name>` and the shell draws a button and a slot; when the registration is retired (the pack was unloaded) the button and the slot go
+  const stub = `PACK logx_stub 1
+IMPORT dom 1
+IMPORT shell_view 1
+Shell.open on-setter logx-register:
+  WHEN this.open:
+    ('Nav:logx').title = 'Log'
+    ('Nav:logx').order = 70
+`;
+  const w = world({ logx_stub: stub }); w.boot();
+  assert.equal(w.get('DomNode:shell:nav:logx').text, 'Log', 'the new view has its button');
+  w.click('DomNode:shell:nav:logx');
+  assert.equal(w.get('Shell:main').view, 'logx');
+  w.f.remove('Nav:logx', w.t); w.flush();                          // the host's removal of an entity (`host.drop`): the page's follower does it when it unloads the pack
+  assert.equal(w.get('DomNode:shell:nav:logx'), null, 'the button is gone with the registration');
+  assert.equal(w.get('DomNode:shell:slot:logx'), null, 'and the slot');
+  assert.equal(w.get('Shell:main').view, 'chat', 'the page goes back to chat: nothing was left showing');
+  assert.equal(w.get('DomNode:shell:slot:chat').hidden, false, 'and chat is shown');
+});
+
 console.log(`shell_view: ${n} scenarios ok`);

@@ -1862,6 +1862,8 @@
       "LinkWrite.rules": "Any",
       "LinkWrite.verdict": "Text",
       "Page.ns": "Text",
+      "Peers.kind": "Text",
+      "Peers.up": "List(Text)",
       "Vm.hidden": "Any",
       "Vm.kind": "Text",
       "Vm.last": "Any",
@@ -1873,6 +1875,7 @@
     "writes": {
       "*.retire": "Bool",
       "Boot.lk_since": "Num",
+      "Peers.born": "Num",
       "Vm.connected_at": "Any",
       "Vm.page": "Entity(Page)",
       "Vm.seen": "Num"
@@ -1883,7 +1886,8 @@
     ],
     "resident": [
       "Vm",
-      "LinkWrite"
+      "LinkWrite",
+      "Peers"
     ]
   },
   "link_route": {

@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import { Link } from '../../membrane/apps/barest.c1f/ui/fieldvm.js';
 
 function world() {
-  const w = { posts: [], micro: [], timers: [], packs: [], loaded: new Set() };
+  const w = { posts: [], micro: [], timers: [], packs: [], loaded: new Set(), dropped: [] };
   const f = { link_reset() {}, feed_vals() {}, feed_refused() {}, feed_gone() {} };
   const host = {
-    f, now: () => 1000, flush() {}, feed() {},
+    f, now: () => 1000, flush() {}, feed() {}, drop(eid) { w.dropped.push(eid); },
     pack(name, src) {                                   // the page's own: a pack whose import is not loaded yet is an error, an empty text unloads
       w.packs.push([name, src]);
       if (src === '') { w.loaded.delete(name); return null; }
@@ -39,6 +39,7 @@ assert.deepEqual([...w.loaded].sort(), ['a', 'b'], 'a pack whose import arrives 
 await w.say(w.posts.length - 1, { v: 1, epoch: E, n: 3, vals: [{ id: IDX, prop: 'names', value: ['a'] }] });
 assert.ok(!w.loaded.has('b') && w.loaded.has('a'), 'b left the list: it is unloaded, a stays');
 assert.deepEqual(w.posts.at(-1).body.unsubs, [[P('b'), 'text']], 'and the page stops asking for it');
+assert.deepEqual(w.dropped, ['Nav:b', 'DomNode:b'], 'and what it registered is retired: its tab (`Nav:<name>`) and its root node (`DomNode:<name>`, with the colon-path children under it)');
 // a text that changes is loaded again (a replaced pack)
 await w.say(w.posts.length - 1, { v: 1, epoch: E, n: 4, vals: [{ id: P('a'), prop: 'text', value: 'PACK a 1\nIMPORT dom 1\n-- v2\n' }] });
 assert.equal(w.packs.at(-1)[1], 'PACK a 1\nIMPORT dom 1\n-- v2\n', 'a changed text replaces the pack');

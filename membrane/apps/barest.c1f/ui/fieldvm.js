@@ -167,6 +167,7 @@ export class Link {
         for (const n of names) if (!this.followed.has(n)) { this.followed.add(n); this.subs.push({ eid: pre + n, props: ['text'] }); }
         for (const n of [...this.followed]) if (!names.has(n)) {
           this.followed.delete(n); this.waiting_packs.delete(n); this.unsubs.push({ eid: pre + n, props: ['text'] }); host.pack(n, '');
+          if (typeof host.drop === 'function') { host.drop(`Nav:${n}`); host.drop(`DomNode:${n}`); }   // a view pack's tab and root node are named after it (the view-pack contract)
         }
         if (this.subs.length || this.unsubs.length) this.later();
       } else if (id.startsWith(pre) && typeof props.text === 'string') {
