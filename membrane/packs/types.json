@@ -239,6 +239,7 @@
       "MbRound.kind": "Text",
       "MbRound.mb_next": "Dict?",
       "MbRound.mb_out": "Dict?",
+      "MbRound.mid": "Text",
       "MbRound.msg_rows": "Any",
       "MbRound.names": "List(Any)",
       "MbRound.names_before": "Any",

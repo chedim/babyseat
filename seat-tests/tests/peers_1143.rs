@@ -529,3 +529,24 @@ fn a_reply_cell_the_peer_says_is_gone_ends_the_turn() {
     assert_eq!(v["state"], "error", "{v}");
     assert!(v["response"].as_str().unwrap_or("").contains("gone"), "the turn should say the reply is gone: {v}");
 }
+
+/// how many entities of a class the seat has
+fn nodes_of(port: u16, class: &str) -> usize {
+    let t = call(port, "entity_query", json!({"q": format!("kind:{class}"), "k": 200}));
+    if t.starts_with("0 entity") { 0 } else { t.lines().filter(|l| l.trim_end().ends_with(&format!("({class})"))).count() }
+}
+
+#[test]
+fn a_message_is_one_node_for_the_whole_turn_a_later_round_writes_only_its_new_messages() {
+    // round 1 sends two messages (the system one and the user's); the peer answers with a tool call; round 2 sends the same two and the assistant's and the tool's: four nodes in all, not six
+    let (run, _names, mut peer, mut mine) = membrama_turn("mb-turn-nodes");
+    let (_id, reply) = send_and_wait_for_the_reply_ask(&run, &mut peer);
+    assert_eq!(nodes_of(run.port, "LlmMsg"), 2, "round 1");
+    let chunk = reply.replace("membrama::Reply:", "membrama::Chunk:") + ":0";
+    for (k, v) in [("", json!(true)), ("text", json!(""))] { mine.put(&key(&chunk, k), 1.0, &v).unwrap(); }
+    for (k, v) in [("", json!(true)), ("state", json!("done")), ("finish", json!("tool_calls")), ("chunks", json!(1)),
+                   ("tool_calls", json!([{"name": "entity_read", "arguments": {"spec": "Lamp:x", "prop": "power"}}]))] { mine.put(&key(&reply, k), 1.0, &v).unwrap(); }
+    let second = |ev: &[Event]| ev.iter().find_map(|e| if let Event::Op(Op::Sub { target: Target::Id(i), .. }) = e { (i.starts_with("membrama::Reply:") && *i != reply).then(|| i.clone()) } else { None });
+    assert!(peer.until(60_000, |ev| second(ev).is_some()), "round 2 never asked for its reply: {:?}", peer.events);
+    assert_eq!(nodes_of(run.port, "LlmMsg"), 4, "round 2 wrote its whole list again as new nodes");
+}

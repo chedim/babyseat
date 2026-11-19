@@ -7,9 +7,9 @@ IMPORT fetch 1
 -- WHICH MODEL: an entry of the boot fact `cloud_models` whose `backend` is `membrama`: {name, backend: 'membrama', peer, ns, max_new, enable_thinking?}. `peer` is the peer's name in the fact `peers` and `ns` the namespace it owns (the `Vm:<ns>` node says whether its link is up);
 -- `max_new` is the most tokens an answer may take: the owner's number, no default.
 -- THE TURN is chat_oai's, with the transport swapped: the door's tool list is read the same way (`Fetch:oai:<cp>:tools`), each round (MbRound) writes its messages and a request as nodes
--- (`membrane::LlmMsg:<rid>:<i>`, `membrane::LlmRequest:<rid>`; the tools are shared nodes `membrane::LlmTool:door:<i>`), reads membrama's reply (`membrama::Reply:<rid>`, its chunks),
+-- (`membrane::LlmMsg:<mid>:<i>`, one node per message for the whole turn: a later round holds the same messages and more, so it writes only the new ones; `membrane::LlmRequest:<rid>`; the tools are shared nodes `membrane::LlmTool:door:<i>`), reads membrama's reply (`membrama::Reply:<rid>`, its chunks),
 -- and a round with tool calls runs them through chat_oai's own ChatCall (the door's `tools/call`) and opens the next round. An id has no colon (a colon makes a child path, and a retired node takes
--- its children): `rid` is the turn's id with `/` for `:`, then `-` and the round number. A round's request and message nodes are retired once its reply has been read, which frees their slots.
+-- its children): `mid` is the turn's id with `/` for `:`, and `rid` is `mid`, `-` and the round number. The turn's request and message nodes are retired when the turn ends, which frees their slots.
 
 -- the classes of the nodes a round writes: the pack must OWN a class (declare a getter on it) for a write of one of its entities to create it (docs/c1f-stdlib.md, Constructors)
 LlmMsg.kind getter: 'message'
@@ -47,21 +47,22 @@ Chat.oai_tools on-setter mb-first:
 MbRound.kind getter: 'round'
 MbRound.turn_e getter: 'membrane::Chat:' + this.cp + ':turn'
 MbRound.cfg getter: prop(this.turn_e, 'oai')
-MbRound.rid getter: replace(this.cp, ':', '/') + '-' + str(this.n)
+MbRound.mid getter: replace(this.cp, ':', '/')
+MbRound.rid getter: this.mid + '-' + str(this.n)
 MbRound.tool_specs getter: prop(this.turn_e, 'oai_tools')
 MbRound.msg_rows getter: fold([], [concat(acc, [{'i': len(acc), 'm': x}]) for x in (this.messages or [])])
 MbRound.tool_rows getter: fold([], [concat(acc, [len(acc)]) for x in (this.tool_specs or [])])
 MbRound.mb_out getter:
   WHEN this.go != True or this.messages == None or this.cfg == None or this.tool_specs == None: None
-  ELSE: {'rows': this.msg_rows, 'ids': ['membrane::LlmMsg:' + this.rid + ':' + str(r['i']) for r in this.msg_rows], 'tools': ['membrane::LlmTool:door:' + str(i) for i in this.tool_rows], 'settings': {'max_new': prop(this.cfg, 'max_new'), 'enable_thinking': prop(this.cfg, 'thinking')}, 'peer': prop(this.cfg, 'peer')}
+  ELSE: {'rows': this.msg_rows, 'ids': ['membrane::LlmMsg:' + this.mid + ':' + str(r['i']) for r in this.msg_rows], 'tools': ['membrane::LlmTool:door:' + str(i) for i in this.tool_rows], 'settings': {'max_new': prop(this.cfg, 'max_new'), 'enable_thinking': prop(this.cfg, 'thinking')}, 'peer': prop(this.cfg, 'peer')}
 Chat.mb_out on-setter mb-send:
   WHEN this.mb_out != None:
     FOR r IN prop(this.mb_out, 'rows'):
-      ('membrane::LlmMsg:' + this.rid + ':' + str(r['i'])).role = r['m']['role']
-      ('membrane::LlmMsg:' + this.rid + ':' + str(r['i'])).content = str(prop(r['m'], 'content') or '')
+      ('membrane::LlmMsg:' + this.mid + ':' + str(r['i'])).role = r['m']['role']
+      ('membrane::LlmMsg:' + this.mid + ':' + str(r['i'])).content = str(prop(r['m'], 'content') or '')
       FOR tc IN [x for x in [prop(r['m'], 'tool_calls')] if x != None]:
-        ('membrane::LlmMsg:' + this.rid + ':' + str(r['i'])).tool_calls = tc
-    membrane::Chat[this.cp]:turn.mb_nodes = concat(prop(this.turn_e, 'mb_nodes') or [], concat(prop(this.mb_out, 'ids'), ['membrane::LlmRequest:' + this.rid]))
+        ('membrane::LlmMsg:' + this.mid + ':' + str(r['i'])).tool_calls = tc
+    membrane::Chat[this.cp]:turn.mb_nodes = concat(prop(this.turn_e, 'mb_nodes') or [], concat([x for x in prop(this.mb_out, 'ids') if x not in (prop(this.turn_e, 'mb_nodes') or [])], ['membrane::LlmRequest:' + this.rid]))
     ('membrane::LlmRequest:' + this.rid).server = prop(this.mb_out, 'peer')
     ('membrane::LlmRequest:' + this.rid).messages = prop(this.mb_out, 'ids')
     ('membrane::LlmRequest:' + this.rid).tools = prop(this.mb_out, 'tools')
