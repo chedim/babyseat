@@ -37,8 +37,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: seat-tests
+      - uses: taiki-e/install-action@nextest
       - run: scripts/dist/fetch_cliffvm.sh "$(cat CLIFFVM_VERSION)" ${{ matrix.target }} "$RUNNER_TEMP/cliffvm"
-      - run: cargo test --release --no-fail-fast
+      - run: cargo nextest run --release --no-fail-fast
         working-directory: seat-tests
         env:
           CLIFFVM_DIST: ${{ runner.temp }}/cliffvm
