@@ -1070,11 +1070,13 @@
       "Boot",
       "LinkWrite",
       "Page",
+      "Peers",
       "Vm"
     ],
-    "members": 25,
+    "members": 27,
     "writes": [
       "*.retire",
+      "Peers:seat.born",
       "Vm:*.connected_at",
       "Vm:*.page",
       "Vm:*.seen"
@@ -1098,7 +1100,8 @@
     ],
     "resident": [
       "Vm",
-      "LinkWrite"
+      "LinkWrite",
+      "Peers"
     ]
   },
   "link_route": {
@@ -1125,6 +1128,7 @@
       "*.sprop",
       "*.wid",
       "LinkAllow:doorbell.prefixes",
+      "LinkAllow:log.prefixes",
       "LinkAllow:placed.prefixes",
       "LinkAllow:seed.done",
       "LinkAllow:setting.prefixes",

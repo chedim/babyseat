@@ -678,3 +678,18 @@ fn a_pack_is_placed_on_a_peer_that_says_it_provides_what_the_pack_imports() {
     let other = seen.get(&key("Placed:membrama:fornobody", "text"), 1_000_000, 32).unwrap();
     assert!(other.is_none_or(|c| c.state != CellState::Live), "a pack that imports what the peer does not provide was placed on it");
 }
+
+#[test]
+fn the_seat_lists_the_peers_that_are_connected_and_a_peer_that_goes_away_leaves_the_list() {
+    // `Peers:seat.up` (packs/link.c1f): the namespaces of the peers whose link is up; a log tab follows it, so a tab comes and goes with its peer
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("peers-up"), &[format!("peers={}", decl(&name))]);
+    assert!(!read(run.port, "Peers:seat", "up").contains("kitchen"), "nobody is connected yet");
+    let peer = PeerEnd::open(&name, "kitchen");
+    assert!(wait_for(run.port, "Peers:seat", "up", "kitchen", 30).contains("kitchen"), "a connected peer is not in the list");
+    drop(peer);
+    let end = Instant::now() + Duration::from_secs(30);
+    while read(run.port, "Peers:seat", "up").contains("kitchen") && Instant::now() < end { std::thread::sleep(Duration::from_millis(300)); }
+    assert!(!read(run.port, "Peers:seat", "up").contains("kitchen"), "a peer that went away is still in the list: {}", read(run.port, "Peers:seat", "up"));
+}

@@ -27,6 +27,10 @@ Boot.started on-setter link-allow-seed:
     ('LinkAllow:seed').done = True
     ('LinkAllow:setting').prefixes = ['Setting:']
     ('LinkAllow:doorbell').prefixes = ['Doorbell:']
+-- who is connected: a tab that comes and goes with its peer follows `Peers:seat` (packs/link.c1f). The log view's rows are read by the door (`entity_read`), a page's `Fetch`: the view is virtual, and a link does not carry a virtual entity's values
+Boot.started on-setter link-allow-log:
+  WHEN prop('LinkAllow:log', 'prefixes') == None:
+    ('LinkAllow:log').prefixes = ['Peers:']
 -- the packs placed on a page (`Placed:<ns>`: packs/placement.c1f): the page follows them by its link; a store seeded before this had no such row
 Boot.started on-setter link-allow-placed:
   WHEN prop('LinkAllow:placed', 'prefixes') == None:
