@@ -236,7 +236,7 @@ Request.mc_r_val getter: prop(this.mc_r_id, str(this.mc_r_prop)) if this.mc_tool
 Request.mc_r_text getter:
   WHEN this.mc_tool != 'entity_read' or this.mc_r_bad != None: None
   ELSE WHEN this.mc_r_prop != None and this.mc_r_val is Error: 'Error: ' + str(why(this.mc_r_val))
-  ELSE WHEN this.mc_r_prop != None and this.mc_r_val == None: this.mc_r_id + ' has no ' + str(this.mc_r_prop) + (': ' + str(why(this.mc_r_val)) if why(this.mc_r_val) != None and not startswith(str(why(this.mc_r_val)), 'absent:') else '')
+  ELSE WHEN this.mc_r_prop != None and this.mc_r_val == None: this.mc_r_id + ' has no ' + str(this.mc_r_prop) + (': ' + str(why(this.mc_r_val)) if why(this.mc_r_val) != None and why(this.mc_r_val).cls != 'Absent' else '')
   ELSE WHEN this.mc_r_prop != None: str(this.mc_r_val)
   ELSE WHEN this.mc_r_rows == None: None
   ELSE WHEN len(this.mc_r_rows) == 0: 'no such entity: ' + this.mc_r_spec

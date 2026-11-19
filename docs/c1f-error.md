@@ -5,6 +5,12 @@ Built (#1143). Tests: `cliffvm:tests/error_1143.rs`, `error_ops_1143.rs`, `error
 `null` means not initialised, absent or not applicable; it may carry a reason (`why(x)`). `Error` means something FAILED; it is a value kind that carries its reason (the remedy is part of the text).
 `x == None` is False for an Error. `or` stays the default operator and never hides an Error (there is no `??`). `x is Error` tests it, `x is not Error` is accepted, `why(x)` reads its text.
 
+## Reasons are values (cliffvm 0.3.0)
+A null's or an Error's reason is a text or an entity. `None('text')` and `Error('text')` make a text; `None(<entity>)` and `Error(<entity>)` keep the entity. `why(x)` returns the reason as it is.
+The engine's own reasons are entities of four classes, so a pack matches on the class, never on the text: `Pending` (a foreign read that has not arrived), `Absent` (no such entity or property, or a foreign node the peer says is gone), `Refused` (a peer refused it; its reason is the peer's) and `Collected` (a collected virtual entity).
+`why(x).cls == 'Refused'` (or `x is Refused`) tests it, `why(x).text` is the message (`refused: <detail>`). An engine reason has no row: only `cls`, `eid` and `text` read on it. Used as text (`str`, `+`, `==` against a text, `startswith`, `len` and the other text builtins) it is its `text`, and a getter that stores `why(x)` stores the text; `in` does not coerce, so write `str(why(x))` there.
+An Error's `failed` stores a text reason as text and an entity reason as `{"$ent": id}`. The reactions rows of the door carry `why_cls` beside `why`, and `why_chain` rows `reason_ent` beside `reason`. Tests: `cliffvm:tests/entity_reasons_1143.rs`; in this repo `peers_1143.rs` (`a_reply_cell_the_peer_refuses...`).
+
 ## Where an Error comes from
 - a failed cast (`Int('a')`: `not-a-type: ...`), `json(text)` of text that is not JSON (`not-json: ...`; a pack that means "not JSON is fine" reads `j = json(x)` then `{} if j is Error else j`);
 - a bad entity-literal key (`the key of <entity> is ...`; on the left of a write nothing is created);
