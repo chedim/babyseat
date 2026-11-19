@@ -475,3 +475,57 @@ fn entities_born_and_retired_round_after_round_pass_through_a_seat_table_too_sma
         rec.after(seen, &cells, &mut mine, 1_000_000, 32).unwrap();
     }
 }
+
+// ---- the chat turn over membrama: a reply cell the peer refuses, or says is gone, ends the turn with the reason (no model: the peer is played by the test) ----------------------------
+
+fn membrama_turn(tag: &str) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) {
+    let name = peer_name();
+    let names = Names(name.clone());
+    let peers = json!([{"name": name, "ns": "membrama", "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 1024, "spins": 1_000_000, "depth": 32}]);
+    let entry = json!([{"name": "local", "backend": "membrama", "peer": name, "ns": "membrama", "max_new": 50, "enable_thinking": false}]);
+    let facts = [format!("cloud_models={entry}"), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
+                 r#"minds={"loops":"local","cortex":"local","workers":"local","seat_default":"local"}"#.to_string(), format!("peers={peers}")];
+    let run = start(&tmp(tag), &facts);
+    let mine = peer_cells(&name);
+    let peer = PeerEnd::open(&name, "membrama");
+    (run, names, peer, mine)
+}
+/// send a message and wait until the seat asks the peer for the reply of its first round: that is the reply's node id
+fn send_and_wait_for_the_reply_ask(run: &Run, peer: &mut PeerEnd) -> (String, String) {
+    let (st, body) = http(run.port, "POST", "/membrane/chat/message", &json!({"text": "hello"}).to_string());
+    assert_eq!(st, 202, "{body}");
+    let id = serde_json::from_str::<J>(&body).unwrap()["id"].as_str().unwrap().to_string();
+    let reply = |ev: &[Event]| ev.iter().find_map(|e| if let Event::Op(Op::Sub { target: Target::Id(i), .. }) = e { i.starts_with("membrama::Reply:").then(|| i.clone()) } else { None });
+    assert!(peer.until(60_000, |ev| reply(ev).is_some()), "the seat never asked for a reply: {:?}", peer.events);
+    (id, reply(&peer.events).unwrap())
+}
+fn turn_ends(port: u16, id: &str) -> J {
+    let end = Instant::now() + Duration::from_secs(60);
+    loop {
+        let (_, body) = http(port, "GET", &format!("/membrane/chat/message/{id}"), "");
+        let v: J = serde_json::from_str(&body).unwrap_or(J::Null);
+        if v["state"] == "done" || v["state"] == "error" { return v; }
+        assert!(Instant::now() < end, "the turn never ended (it waits for a reply that will not come): {v}");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn a_reply_cell_the_peer_refuses_ends_the_turn_and_says_why() {
+    let (run, _names, mut peer, mut mine) = membrama_turn("mb-refused");
+    let (id, reply) = send_and_wait_for_the_reply_ask(&run, &mut peer);
+    mine.mark(&key(&reply, ""), 1.0, CellState::Refused, "the reply does not fit in a cell").unwrap();
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "error", "{v}");
+    assert!(v["response"].as_str().unwrap_or("").contains("the reply does not fit in a cell"), "the turn should say the peer's reason: {v}");
+}
+
+#[test]
+fn a_reply_cell_the_peer_says_is_gone_ends_the_turn() {
+    let (run, _names, mut peer, mut mine) = membrama_turn("mb-gone");
+    let (id, reply) = send_and_wait_for_the_reply_ask(&run, &mut peer);
+    mine.mark(&key(&reply, ""), 1.0, CellState::Gone, "").unwrap();
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "error", "{v}");
+    assert!(v["response"].as_str().unwrap_or("").contains("gone"), "the turn should say the reply is gone: {v}");
+}

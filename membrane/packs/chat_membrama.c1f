@@ -85,6 +85,8 @@ MbRound.stopped getter: prop('membrane::Chat:' + this.cp, 'aborted') == True
 MbRound.step getter:
   WHEN this.stopped and this.rstate not in ['done', 'error', 'aborted']: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' was stopped.'}
   ELSE WHEN this.peer_gone and this.rstate not in ['done', 'error', 'aborted']: {'fail': 'membrama is not up (the link of ' + str(prop(this.cfg, 'peer')) + ' is gone), so the model ' + str(prop(this.cfg, 'model')) + ' cannot answer.'}
+  ELSE WHEN startswith(str(why(this.rstate)), 'refused'): {'fail': 'membrama refused the reply of the model ' + str(prop(this.cfg, 'model')) + ': ' + str(why(this.rstate))}
+  ELSE WHEN startswith(str(why(this.rstate)), 'absent'): {'fail': 'The reply of the model ' + str(prop(this.cfg, 'model')) + ' is gone: membrama dropped it (' + str(why(this.rstate)) + ')'}
   ELSE WHEN this.rstate == None or this.rstate == 'running': None
   ELSE WHEN this.rstate == 'error': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' could not answer through membrama: ' + str(this.rerr)}
   ELSE WHEN this.rstate == 'aborted': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' was stopped.'}

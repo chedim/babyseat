@@ -25,6 +25,7 @@ Cells for a round with two messages and four tools: 6 for the request and 4 per 
 ## Errors, interruption, the link
 
 - A reply in state `error` fails the turn with membrama's cause.
+- **A reply cell the peer refuses, or says is gone**, fails the turn with the peer's reason (`why` of the null the read gives: `refused: ...`, `absent: ...`). Tested without a model, the peer played by the test (`peers_1143.rs`, `a_reply_cell_the_peer_refuses...`, `a_reply_cell_the_peer_says_is_gone...`).
 - **The peer's link gone** (`Vm:<ns>` says `link: gone`) while a round has no final reply fails the turn with "membrama is not up". A peer that never came up has no `Vm` node yet and is not detected: the turn waits (no timeout is invented here).
 - **Stopping** (the page's Stop, the abort route, which marks the message `aborted`): the round fails the turn as stopped, and `abort` is written on the open requests so membrama stops at its next piece of text. The test checks that the turn ends stopped; that membrama really stops mid-answer is not asserted over the real model.
 - Banks (entity parts) are not used by this rung: the prompt is one text, rendered with the model's own template. The prefix reuse across rounds still applies.
