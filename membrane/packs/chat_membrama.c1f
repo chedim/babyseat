@@ -3,6 +3,9 @@ IMPORT chat 1
 IMPORT chat_turn 1
 IMPORT chat_oai 1
 IMPORT fetch 1
+VIRTUAL LlmMsg
+VIRTUAL LlmRequest
+VIRTUAL LlmTool
 -- THE CHAT TURN OVER MEMBRAMA (#1143, docs/membrama-chat.md): a chat turn answered by the local model peer membrama (github.com/chedim/membrama), a rung beside packs/chat_oai.c1f.
 -- WHICH MODEL: an entry of the boot fact `cloud_models` whose `backend` is `membrama`: {name, backend: 'membrama', peer, ns, max_new, enable_thinking?}. `peer` is the peer's name in the fact `peers` and `ns` the namespace it owns (the `Vm:<ns>` node says whether its link is up);
 -- `max_new` is the most tokens an answer may take: the owner's number, no default.
@@ -55,8 +58,11 @@ MbRound.tool_rows getter: fold([], [concat(acc, [len(acc)]) for x in (this.tool_
 MbRound.mb_out getter:
   WHEN this.go != True or this.messages == None or this.cfg == None or this.tool_specs == None: None
   ELSE: {'rows': this.msg_rows, 'ids': ['membrane::LlmMsg:' + this.mid + ':' + str(r['i']) for r in this.msg_rows], 'tools': ['membrane::LlmTool:door:' + str(i) for i in this.tool_rows], 'settings': {'max_new': prop(this.cfg, 'max_new'), 'enable_thinking': prop(this.cfg, 'thinking')}, 'peer': prop(this.cfg, 'peer')}
+-- The nodes of a round are VIRTUAL (the transport's, never stored: a row would be published again at the next start), and a virtual entity lives while a live entity holds it BY REFERENCE
+-- (docs/cliffvm.md, Garbage collection of virtual entities; a plain read holds nothing): the round holds its messages, its request and the shared tools.
 Chat.mb_out on-setter mb-send:
   WHEN this.mb_out != None:
+    this.holds = concat([membrane::LlmMsg[this.mid + ':' + str(r['i'])] for r in prop(this.mb_out, 'rows')], concat([membrane::LlmRequest[this.rid]], [membrane::LlmTool:door[str(i)] for i in this.tool_rows]))
     FOR r IN prop(this.mb_out, 'rows'):
       ('membrane::LlmMsg:' + this.mid + ':' + str(r['i'])).role = r['m']['role']
       ('membrane::LlmMsg:' + this.mid + ':' + str(r['i'])).content = str(prop(r['m'], 'content') or '')

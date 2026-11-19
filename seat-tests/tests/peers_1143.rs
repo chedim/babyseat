@@ -478,14 +478,15 @@ fn entities_born_and_retired_round_after_round_pass_through_a_seat_table_too_sma
 
 // ---- the chat turn over membrama: a reply cell the peer refuses, or says is gone, ends the turn with the reason (no model: the peer is played by the test) ----------------------------
 
-fn membrama_turn(tag: &str) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) {
+fn membrama_turn(tag: &str) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) { membrama_turn_in(&tmp(tag)) }
+fn membrama_turn_in(dir: &std::path::Path) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) {
     let name = peer_name();
     let names = Names(name.clone());
     let peers = json!([{"name": name, "ns": "membrama", "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 1024, "spins": 1_000_000, "depth": 32}]);
     let entry = json!([{"name": "local", "backend": "membrama", "peer": name, "ns": "membrama", "max_new": 50, "enable_thinking": false}]);
     let facts = [format!("cloud_models={entry}"), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
                  r#"minds={"loops":"local","cortex":"local","workers":"local","seat_default":"local"}"#.to_string(), format!("peers={peers}")];
-    let run = start(&tmp(tag), &facts);
+    let run = start(dir, &facts);
     let mine = peer_cells(&name);
     let peer = PeerEnd::open(&name, "membrama");
     (run, names, peer, mine)
@@ -530,23 +531,75 @@ fn a_reply_cell_the_peer_says_is_gone_ends_the_turn() {
     assert!(v["response"].as_str().unwrap_or("").contains("gone"), "the turn should say the reply is gone: {v}");
 }
 
-/// how many entities of a class the seat has
-fn nodes_of(port: u16, class: &str) -> usize {
-    let t = call(port, "entity_query", json!({"q": format!("kind:{class}"), "k": 200}));
-    if t.starts_with("0 entity") { 0 } else { t.lines().filter(|l| l.trim_end().ends_with(&format!("({class})"))).count() }
+/// the message nodes of a turn that are on the seat (they are VIRTUAL: not rows, so `entity_query` does not list them; each is read by its id)
+fn messages_of(port: u16, turn: &str) -> usize {
+    (0..64).take_while(|i| read(port, &format!("membrane::LlmMsg:{}:{i}", turn.replace(':', "/")), "kind") == "message").count()
 }
+fn request_is_there(port: u16, turn: &str, round: u32) -> bool { read(port, &format!("membrane::LlmRequest:{}-{round}", turn.replace(':', "/")), "kind") == "request" }
 
 #[test]
 fn a_message_is_one_node_for_the_whole_turn_a_later_round_writes_only_its_new_messages() {
     // round 1 sends two messages (the system one and the user's); the peer answers with a tool call; round 2 sends the same two and the assistant's and the tool's: four nodes in all, not six
-    let (run, _names, mut peer, mut mine) = membrama_turn("mb-turn-nodes");
-    let (_id, reply) = send_and_wait_for_the_reply_ask(&run, &mut peer);
-    assert_eq!(nodes_of(run.port, "LlmMsg"), 2, "round 1");
+    let (run, names, mut peer, mut mine) = membrama_turn("mb-turn-nodes");
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);   // membrama reads the request through its nodes
+    let (id, reply) = send_and_wait_for_the_reply_ask(&run, &mut peer);
+    // the nodes are transient (never stored), and the peer still reads them: the request and its first message are live cells in the seat's table
+    let seen = seat_cells(&names.0);
+    let rid = reply.replace("membrama::Reply:", "membrane::LlmRequest:");
+    let live = |c: &Option<Cell>| matches!(c, Some(c) if c.state == CellState::Live);
+    assert!(cell_when(&seen, &key(&rid, "messages"), 30, live).is_some_and(|c| c.state == CellState::Live), "the peer never saw the request's messages");
+    let first = format!("membrane::LlmMsg:main/message/{id}:0");
+    assert!(cell_when(&seen, &key(&first, "role"), 30, live).is_some_and(|c| c.state == CellState::Live), "the peer never saw the first message");
+    let turn = format!("main:message:{id}");
+    let m0 = format!("membrane::LlmMsg:{}:0", turn.replace(':', "/"));
+    assert_eq!(messages_of(run.port, &turn), 2, "round 1: {:?} {:?}", read(run.port, &m0, "kind"), read(run.port, &m0, "role"));
     let chunk = reply.replace("membrama::Reply:", "membrama::Chunk:") + ":0";
     for (k, v) in [("", json!(true)), ("text", json!(""))] { mine.put(&key(&chunk, k), 1.0, &v).unwrap(); }
     for (k, v) in [("", json!(true)), ("state", json!("done")), ("finish", json!("tool_calls")), ("chunks", json!(1)),
                    ("tool_calls", json!([{"name": "entity_read", "arguments": {"spec": "Lamp:x", "prop": "power"}}]))] { mine.put(&key(&reply, k), 1.0, &v).unwrap(); }
     let second = |ev: &[Event]| ev.iter().find_map(|e| if let Event::Op(Op::Sub { target: Target::Id(i), .. }) = e { (i.starts_with("membrama::Reply:") && *i != reply).then(|| i.clone()) } else { None });
     assert!(peer.until(60_000, |ev| second(ev).is_some()), "round 2 never asked for its reply: {:?}", peer.events);
-    assert_eq!(nodes_of(run.port, "LlmMsg"), 4, "round 2 wrote its whole list again as new nodes");
+    assert_eq!(messages_of(run.port, &turn), 4, "round 2 wrote its whole list again as new nodes");
+}
+
+#[test]
+fn when_the_turn_ends_its_message_and_request_nodes_are_gone_from_the_seat() {
+    let dir = tmp("mb-retire");
+    let (run, _names, mut peer, mut mine) = membrama_turn_in(&dir);
+    // membrama reads the request through a subscription on the nodes of the rung
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);
+    let (id, reply) = send_and_wait_for_the_reply_ask(&run, &mut peer);
+    let turn = format!("main:message:{id}");
+    assert!(messages_of(run.port, &turn) > 0 && request_is_there(run.port, &turn, 1));
+    let chunk = reply.replace("membrama::Reply:", "membrama::Chunk:") + ":0";
+    for (k, v) in [("", json!(true)), ("text", json!("OK"))] { mine.put(&key(&chunk, k), 1.0, &v).unwrap(); }
+    for (k, v) in [("", json!(true)), ("state", json!("done")), ("finish", json!("stop")), ("chunks", json!(1))] { mine.put(&key(&reply, k), 1.0, &v).unwrap(); }
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "done", "{v}");
+    let end = Instant::now() + Duration::from_secs(30);
+    while (messages_of(run.port, &turn) > 0 || request_is_there(run.port, &turn, 1)) && Instant::now() < end { std::thread::sleep(Duration::from_millis(200)); }
+    assert_eq!((messages_of(run.port, &turn), request_is_there(run.port, &turn, 1)), (0, false), "the finished turn's nodes are still on the seat");
+    // and in the store, or the next start loads them again and publishes every one as a live cell
+    let rows = |c: &rusqlite::Connection| c.query_row("select count(*) from c_field where k like 'membrane::LlmMsg:%' or k like 'membrane::LlmRequest:%'", [], |r| r.get::<_, i64>(0)).unwrap();
+    let db = rusqlite::Connection::open_with_flags(dir.join("seat.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let end = Instant::now() + Duration::from_secs(30);
+    while rows(&db) > 0 && Instant::now() < end { std::thread::sleep(Duration::from_millis(200)); }
+    assert_eq!(rows(&db), 0, "the finished turn's nodes are retired on the seat but still in its store");
+}
+
+#[test]
+fn the_requests_and_messages_of_a_running_turn_are_never_stored() {
+    // they are the transport's, for the length of a round: a row would be loaded again at the next start and published as live cells, for a turn that is long over
+    let dir = tmp("mb-ephemeral");
+    let (run, _names, mut peer, _mine) = membrama_turn_in(&dir);
+    let (id, _reply) = send_and_wait_for_the_reply_ask(&run, &mut peer);
+    assert!(messages_of(run.port, &format!("main:message:{id}")) > 0, "the turn has no message nodes");
+    let db = rusqlite::Connection::open_with_flags(dir.join("seat.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let n = |like: &str| db.query_row("select count(*) from c_field where k like ?1", [like], |r| r.get::<_, i64>(0)).unwrap();
+    // the store is being written: the turn's own entity is a row soon, and then the transport's nodes would be too
+    let end = Instant::now() + Duration::from_secs(30);
+    while n("membrane::Chat:%") == 0 && Instant::now() < end { std::thread::sleep(Duration::from_millis(200)); }
+    assert!(n("membrane::Chat:%") > 0, "nothing is stored: the test proves nothing");
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!((n("membrane::LlmMsg:%"), n("membrane::LlmRequest:%"), n("membrane::LlmTool:%")), (0, 0, 0), "the transport's nodes are stored");
 }
