@@ -151,7 +151,7 @@ fn a_grant_of_a_prefix_lets_the_peer_write_the_nodes_under_it_and_only_those() {
 
 #[test]
 fn a_grant_of_star_is_every_prefix() {
-    let (run, _n, mut peer) = seat_with_grants("g-star", Some(json!("*")), &[]);
+    let (run, _n, mut peer) = seat_with_grants("g-star", Some(json!(["*"])), &[]);
     put(&run, "Door:front", "locked", json!(true));
     assert_eq!(ask(&mut peer, "Door:front", "locked", json!(false)), None);
     assert!(wait_for(&run, "Door:front", "locked", "false", 30).to_lowercase().contains("false"));
@@ -176,7 +176,33 @@ fn a_rule_of_the_fact_still_lets_a_peer_with_no_grants_write() {
 
 #[test]
 fn a_grant_never_reaches_a_node_of_another_namespace() {
-    let (_run, _n, mut peer) = seat_with_grants("g-ns", Some(json!("*")), &[]);
+    let (_run, _n, mut peer) = seat_with_grants("g-ns", Some(json!(["*"])), &[]);
     let why = ask(&mut peer, "garage::Lamp:1", "power", json!("on")).expect("refused");
     assert!(why.contains("not a node of this seat"), "{why}");
+}
+
+// ---- the privileged classes: a grant of `*` reaches them; what each gate of the seat does with a write of the writer `link:<ns>` -----------------------------------------------------------------
+
+fn pack_text() -> &'static str { "PACK peerpack 1\nLamp.glow getter: 'lit'\n" }
+
+#[test]
+fn a_star_grant_loads_a_pack_by_writing_its_text() {
+    let (run, _n, mut peer) = seat_with_grants("g-pack", Some(json!(["*"])), &[]);
+    assert_eq!(ask(&mut peer, "Pack:peerpack", "text", json!(pack_text())), None, "accepted");
+    assert!(wait_for(&run, "Pack:peerpack", "state", "loaded", 30).contains("loaded"), "the pack the peer wrote is loaded: {}", read(&run, "Pack:peerpack", "error"));
+}
+
+#[test]
+fn a_prefix_grant_that_does_not_name_pack_cannot_load_a_pack() {
+    let (run, _n, mut peer) = seat_with_grants("g-nopack", Some(json!(["Lamp:"])), &[]);
+    assert!(ask(&mut peer, "Pack:peerpack", "text", json!(pack_text())).is_some(), "refused");
+    assert!(!read(&run, "Pack:peerpack", "state").contains("loaded"));
+}
+
+#[test]
+fn a_star_grant_runs_a_command_the_gate_of_effects_is_the_engines() {
+    let (run, _n, mut peer) = seat_with_grants("g-cmd", Some(json!(["*"])), &[]);
+    assert_eq!(ask(&mut peer, "Command:hi", "run", json!({"id": "r1", "cmd": ["echo", "granted"]})), None, "accepted by the policy");
+    let out = wait_for(&run, "Command:hi", "output", "granted", 30);
+    assert!(out.contains("granted"), "the command ran for the granted peer: {out} / {}", read(&run, "Command:hi", "run_result"));
 }

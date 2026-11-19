@@ -3,7 +3,7 @@
  "facts": {
   "peer_writes": {
    "wired": false,
-   "why": "the policy of the writes a local peer (over shared memory) asks the seat to make: a list of rules {peer, prefix}; the peer whose namespace is `peer` may write the nodes whose id starts with `prefix`; none by default, so every forwarded write is refused (packs/link.c1f `LinkWrite.verdict`; docs/graph-link.md section 18)"
+   "why": "the policy of the writes a local peer (over shared memory) asks the seat to make: a list of rules {peer, prefix}; the peer whose namespace is `peer` may write the nodes whose id starts with `prefix`; none by default, so a forwarded write is refused unless the peer's token granted it (the claim `grants`, packs/link.c1f `LinkWrite.allowed`) (packs/link.c1f `LinkWrite.verdict`; docs/graph-link.md section 18)"
   },
   "link_hold_s": {
    "wired": false,

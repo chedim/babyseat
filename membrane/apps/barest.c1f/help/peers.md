@@ -6,7 +6,7 @@ A program or another seat that shares this graph is a PEER. It is declared by th
 - `entity_read {spec: "Vm:<name>"}` reads one.
 - A node a peer owns is `<name>::<Class>:<id>`: the peer's name, then two colons. A node of this seat has no prefix. Read a peer's node by its prefixed name: `entity_read {spec: "kitchen::Lamp:desk", prop: "power"}`.
 - The first read of a peer's node answers `pending`: the seat is asking the peer for exactly that prop. Read again after a moment and the value is there; a rule that reads it runs again by itself when it arrives, and again at every change.
-- A peer's nodes are read here and changed by their owner. A peer that asks to write a node of this seat is decided by the boot fact `peer_writes`, a list of `{peer, prefix}` rules: the peer may write the nodes whose id starts with `prefix`, and with no rule the write is refused with the reason.
+- A peer's nodes are read here and changed by their owner. A peer that asks to write a node of this seat is decided by the boot fact `peer_writes`, a list of `{peer, prefix}` rules: the peer may write the nodes whose id starts with `prefix`, and with no rule the write is refused with the reason. A peer whose token GRANTED it the right (the claim `grants`: a list of id prefixes; the entry `*` is every prefix) is also accepted; the refusal names both the fact `peer_writes` and the peer's grants. `*` includes the privileged classes (Pack, Command, File, ...).
 - A name is the peer's own namespace. Two seats are told apart by the name each gives the other (`rosie::Lamp:desk` here is `Lamp:desk` there).
 
 ## Example: is a peer connected?
