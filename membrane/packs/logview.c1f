@@ -1,0 +1,36 @@
+PACK logview 1
+IMPORT boot 1
+IMPORT link 1
+VIRTUAL LogView
+RESIDENT LogViews
+-- THE BOUNDARY LOG AS A VIEW (#1143, operator 2026-11-19): a peer reads what entered the VM from its own cursor. The journal (`c_journal`) holds every OUTSIDE write in order, each line with who wrote it; the
+-- interior (what the getters derived) is not in it, a replay makes it again. For each peer that asks there is a view `membrane::LogView:<ns>` (VIRTUAL: a window on the journal, never stored; the resident
+-- `LogViews:seat` holds it by reference). The peer's cursor is in ITS OWN namespace: `<ns>::LogAsk:main.from` is the number of the first line it wants (0 is the beginning), and the seat keeps nothing about the
+-- reader. The view answers with
+--   rows   the page: one record per line, `{n, eid, prop, op, writer, ts, size}`: which entity and property changed, by whom, and how big the new value is. NOT the value: the peer reads the entity itself.
+--          A retired node is `op: 'gone'`.
+--   next   where the following page starts (`from` plus the rows of this one)
+--   head   the number of the last line
+-- A page is at most `PAGE` rows (200, the owner's number: about 30 KB, inside the 65,536-byte cell).
+
+LogViews.kind getter: 'logviews'
+LogView.kind getter: 'logview'
+
+Boot.started on-setter logview-root:
+  WHEN len([v for v in instances('LogViews')]) == 0:
+    ('LogViews:seat').born = clock
+
+-- A view appears when a peer ASKS for one: a peer (a `Vm` with a `link`) that has written `<ns>::LogAsk:main.n`. No fact names the peers, and any connected program can ask.
+LogViews.asked getter: [replace(v.eid, 'Vm:', '') for v in instances('Vm') if v.kind == 'peer' and prop(replace(v.eid, 'Vm:', '') + '::LogAsk:main', 'n') != None]
+LogViews.asked on-setter logview-births:
+  WHEN this.asked != None:
+    FOR ns IN this.asked:
+      ('membrane::LogView:' + ns).ns = ns
+    this.views = [membrane::LogView[ns] for ns in this.asked]
+
+LogView.ask getter: this.ns + '::LogAsk:main'
+LogView.from getter: prop(this.ask, 'from') or 0
+LogView.asked getter: prop(this.ask, 'n') or 0
+LogView.rows getter: sql("SELECT CAST(k AS INTEGER) AS n, json_extract(body,'$.eid') AS eid, json_extract(body,'$.prop') AS prop, CASE WHEN json_extract(body,'$.prop') = 'retire' AND json_extract(body,'$.new') = 1 THEN 'gone' ELSE json_extract(body,'$.op') END AS op, json_extract(body,'$.writer') AS writer, json_extract(body,'$.ts') AS ts, length(json_extract(body,'$.new')) AS size FROM c_journal WHERE CAST(k AS INTEGER) >= ? AND ? >= 0 ORDER BY k LIMIT 200", this.from, this.asked)
+LogView.next getter: this.from + len(this.rows)
+LogView.head getter: (sql("SELECT max(CAST(k AS INTEGER)) AS h FROM c_journal WHERE ? >= 0", this.asked) or [{'h': None}])[0]['h']
