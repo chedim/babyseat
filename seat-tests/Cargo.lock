@@ -98,9 +98,9 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "cliffvm"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46e610479b6a0fe25093e93be889d8ddc059a3d63159bdb2a89902a7ca52dc15"
+checksum = "f87b674774ff4ab9a706ec70e65fc2ab37df4fac15341d11c63a6769a86ad9ff"
 dependencies = [
  "graphlink-auth",
  "graphlink-bridge",
