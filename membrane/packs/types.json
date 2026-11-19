@@ -271,6 +271,7 @@
       "*.role": "Any",
       "*.tool_calls": "Any",
       "Chat.go": "Bool",
+      "Chat.holds": "List((Entity(LlmMsg)|Entity(LlmRequest)|Entity(LlmTool)|Error)?)",
       "Chat.mb_nodes": "List(Any)",
       "Chat.oai": "Any",
       "Chat.oai_tools": "Any",
@@ -283,7 +284,12 @@
       "membrane.spec": "Any",
       "membrane.tools": "Any"
     },
-    "findings": []
+    "findings": [],
+    "virtual": [
+      "LlmMsg",
+      "LlmRequest",
+      "LlmTool"
+    ]
   },
   "chat_oai": {
     "getters": {

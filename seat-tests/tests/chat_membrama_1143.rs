@@ -110,10 +110,8 @@ fn a_plain_turn_is_answered_by_the_local_model_through_membrama() {
 }
 
 /// how many entities of a class the seat has (`entity_query` says `0 entity(ies)` for none and lists one entity a line otherwise)
-fn count(port: u16, class: &str) -> usize {
-    let t = call(port, "entity_query", json!({"q": format!("kind:{class}"), "k": 100}));
-    if t.starts_with("0 entity") { 0 } else { t.lines().filter(|l| l.trim_end().ends_with(&format!("({class})"))).count() }
-}
+/// the nodes of the rung are VIRTUAL (not rows: `entity_query` does not list them), so each is read by its id; a collected or retired one reads as no `kind`
+fn kind_of(port: u16, eid: &str) -> String { call(port, "entity_read", json!({"spec": eid, "prop": "kind"})) }
 fn wait_until(what: &str, mut f: impl FnMut() -> bool) { let t = Instant::now(); while !f() { assert!(t.elapsed() < Duration::from_secs(60), "timed out waiting for {what}"); std::thread::sleep(Duration::from_millis(200)); } }
 
 #[test]
@@ -124,9 +122,10 @@ fn when_the_turn_ends_the_requests_and_messages_of_its_rounds_are_retired_and_th
     let id = send(run.port, "Use the entity_read tool to read the property power of the entity Lamp:desk, then tell me its value exactly.");   // two rounds
     let v = ended(run.port, &id);
     assert_eq!(v["state"], "done", "{v}");
-    wait_until("the request nodes to be retired", || count(run.port, "LlmRequest") == 0);
-    wait_until("the message nodes to be retired", || count(run.port, "LlmMsg") == 0);
-    assert!(count(run.port, "LlmTool") > 0, "the shared tool nodes stay: they are the same for every turn");
+    let turn = format!("main/message/{id}");
+    wait_until("the request nodes to be retired", || kind_of(run.port, &format!("membrane::LlmRequest:{turn}-1")) != "request" && kind_of(run.port, &format!("membrane::LlmRequest:{turn}-2")) != "request");
+    wait_until("the message nodes to be retired", || kind_of(run.port, &format!("membrane::LlmMsg:{turn}:0")) != "message");
+    assert_eq!(kind_of(run.port, "membrane::LlmTool:door:0"), "tool", "the shared tool nodes stay: they are the same for every turn");
 }
 
 #[test]
@@ -164,7 +163,7 @@ fn stopping_a_turn_ends_it_as_an_error_that_says_it_was_stopped() {
     let run = seat_with("stop", &bin, &model, 5, 1500);   // a long answer, so the stop lands in the middle of it
     wait_until("the peer to come up", || read(run.port, "Vm:membrama", "link") == "up");
     let id = send(run.port, "Count from 1 to 1000, one number per line, and nothing else.");
-    wait_until("the request to be written", || count(run.port, "LlmRequest") > 0);
+    wait_until("the request to be written", || kind_of(run.port, &format!("membrane::LlmRequest:main/message/{id}-1")) == "request");
     let (st, body) = http(run.port, "POST", &format!("/membrane/chat/message/{id}/abort"), "");
     assert_eq!(st, 200, "{body}");
     let v = ended(run.port, &id);

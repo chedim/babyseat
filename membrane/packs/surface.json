@@ -179,6 +179,11 @@
     "claims": [],
     "boot_facts": [
       "cloud_models"
+    ],
+    "virtual": [
+      "LlmMsg",
+      "LlmRequest",
+      "LlmTool"
     ]
   },
   "chat_oai": {
