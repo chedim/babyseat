@@ -1,0 +1,42 @@
+PACK placement 1
+IMPORT boot 1
+IMPORT link 1
+IMPORT door_tools 1
+RESIDENT Placed
+RESIDENT Placements
+-- PLACEMENT BY IMPORTS (docs/graph-link.md, section 16; #1143): a pack the model wrote (`Pack:<name>.text`) runs on a VM that provides every pack it imports. The seat runs the packs it loads; a pack that imports what only
+-- another VM provides (`dom` is the page's) is placed on that VM: the seat makes `Placed:<vm>:<name>` (the pack's text) for each VM that fits, and the VM follows its own prefix `Placed:<vm>:` (the page by its link, a peer by a
+-- subscription) and loads what arrives. A pack whose imports no single VM provides is a placement error on the pack (`Pack.placement_error`), naming them: split the file. A pack that imports nothing stays on the seat.
+-- What a VM provides: a page writes `Vm:<ns>.caps` (`provides`, a list of {pack, major}); a peer writes `<ns>::Caps:main.provides` in its OWN namespace (the seat reads it, like `LogAsk`).
+
+Placements.kind getter: 'placements'
+Placed.kind getter: 'placed'
+Boot.started on-setter placements-root:
+  WHEN len([p for p in instances('Placements')]) == 0:
+    ('Placements:seat').born = clock
+
+Pack.imports getter: [{'pack': w[1], 'major': num(w[2])} for w in [words(l) for l in lines(str(this.text or ''))] if len(w) >= 3 and w[0] == 'IMPORT']
+Pack.seat_runs getter: this.loaded == True
+-- the VMs and what each provides: pages by the `caps` they wrote, peers by the node in their own namespace
+Placements.vms getter: concat([{'vm': replace(v.eid, 'Vm:', ''), 'provides': (prop(v.caps, 'provides') or [])} for v in instances('Vm') if v.kind == 'page' and v.caps != None], [{'vm': replace(v.eid, 'Vm:', ''), 'provides': (prop(replace(v.eid, 'Vm:', '') + '::Caps:main', 'provides') or [])} for v in instances('Vm') if v.kind == 'peer'])
+Pack.fits getter: [x['vm'] for x in prop('Placements:seat', 'vms') if len(this.imports) > 0 and len([i for i in this.imports if len([p for p in x['provides'] if prop(p, 'pack') == i['pack'] and prop(p, 'major') == i['major']]) == 0]) == 0] if prop('Placements:seat', 'vms') != None else []
+Pack.placement_error getter:
+  WHEN this.loaded == None or len(this.imports) == 0 or this.seat_runs: None
+  ELSE WHEN len(this.fits) > 0: None
+  ELSE: 'no single VM provides every import of this pack (' + join([i['pack'] for i in this.imports], ', ') + '): split this file'
+Placements.wanted getter: fold([], [concat(acc, [{'vm': v, 'name': replace(p.eid, 'Pack:', ''), 'text': p.text} for v in p.fits]) for p in instances('Pack') if p.text != None and str(p.text) != '' and not p.seat_runs])
+-- `Placed:<vm>` lists the names placed on that VM (the page follows it, then asks for each `Placed:<vm>:<name>`)
+Placements.vm_names getter: [{'vm': x['vm'], 'names': [w['name'] for w in (this.wanted or []) if w['vm'] == x['vm']]} for x in (this.vms or [])]
+Placements.ids getter: concat(['Placed:' + x['vm'] for x in (this.vms or [])], ['Placed:' + w['vm'] + ':' + w['name'] for w in (this.wanted or [])])
+Placements.wanted on-setter place:
+  WHEN this.wanted != None:
+    FOR w IN this.wanted:
+      ('Placed:' + w['vm'] + ':' + w['name']).text = w['text']
+Placements.vm_names on-setter index:
+  WHEN this.vm_names != None:
+    FOR x IN this.vm_names:
+      ('Placed:' + x['vm']).names = x['names']
+Placements.ids on-setter retire-stale:
+  WHEN this.ids != None:
+    FOR e IN [p.eid for p in instances('Placed') if p.eid not in this.ids]:
+      (e).retire = True

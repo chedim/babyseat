@@ -603,3 +603,19 @@ fn the_requests_and_messages_of_a_running_turn_are_never_stored() {
     std::thread::sleep(Duration::from_secs(3));
     assert_eq!((n("membrane::LlmMsg:%"), n("membrane::LlmRequest:%"), n("membrane::LlmTool:%")), (0, 0, 0), "the transport's nodes are stored");
 }
+
+#[test]
+fn a_pack_is_placed_on_a_peer_that_says_it_provides_what_the_pack_imports() {
+    // a peer announces what it provides in ITS OWN namespace (`<ns>::Caps:main.provides`, like the log cursor); the seat places a pack that imports it on that peer: `Placed:<ns>:<name>`, which the peer follows by the prefix
+    let (run, names, mut peer, mut mine) = membrama_turn("placed-peer");
+    peer.say(vec![Op::Sub { target: Target::Prefix("Placed:membrama:".into()), props: None, limit: None }]);
+    for (k, v) in [("", json!(true)), ("provides", json!([{"pack": "tooling", "major": 1}]))] { mine.put(&key("membrama::Caps:main", k), 1.0, &v).unwrap(); }
+    put(run.port, "Pack:forpeer", "text", json!("PACK forpeer 1\nIMPORT tooling 1\n-- for the peer\n"));
+    put(run.port, "Pack:fornobody", "text", json!("PACK fornobody 1\nIMPORT elsewhere 1\n"));
+    let seen = seat_cells(&names.0);
+    let live = |c: &Option<Cell>| matches!(c, Some(c) if c.state == CellState::Live && c.value.as_str().is_some_and(|t| t.contains("for the peer")));
+    let got = cell_when(&seen, &key("Placed:membrama:forpeer", "text"), 60, live);
+    assert!(live(&got), "the peer never received the pack that imports what it provides: {got:?}");
+    let other = seen.get(&key("Placed:membrama:fornobody", "text"), 1_000_000, 32).unwrap();
+    assert!(other.is_none_or(|c| c.state != CellState::Live), "a pack that imports what the peer does not provide was placed on it");
+}

@@ -384,3 +384,30 @@ fn a_reply_never_passes_the_frame_limit_the_rest_follows_in_the_next_replies() {
     }
     assert_eq!(got, 6, "all six values arrived, none twice");
 }
+
+#[test]
+fn a_page_subscribed_to_its_placed_packs_gets_their_names_and_text() {
+    // docs/graph-link.md, section 16: the seat places a pack on the page (`Placed:<ns>:<name>`, and `Placed:<ns>` lists the names); the page asks for them by its link and loads what arrives
+    let run = start(&tmp("placed-link"), &[]);
+    let ns = snap(run.port)["page"].as_str().unwrap().to_string();
+    tell(run.port, &ns);
+    call(run.port, "entity_write", json!({"spec": "Pack:rtplaced", "prop": "text", "value": "PACK rtplaced 1\nIMPORT dom 1\n-- a view the model wrote\n"}));
+    let index = format!("membrane::Placed:{ns}");
+    let text_id = format!("membrane::Placed:{ns}:rtplaced");
+    let (mut names, mut text) = (None, None);
+    let mut n = 1;
+    let end = std::time::Instant::now() + Duration::from_secs(30);
+    while (names.is_none() || text.is_none()) && std::time::Instant::now() < end {
+        let subs: Vec<(&str, &str)> = if n == 1 { vec![(index.as_str(), "names"), (text_id.as_str(), "text")] } else { vec![] };
+        let (s, r) = frame(run.port, &ns, n, n - 1, &subs, &[], false);
+        assert_eq!(s, 200, "{r}");
+        for v in vals(&r) {
+            if v["id"] == index.as_str() && v["prop"] == "names" { names = Some(v["value"].clone()); }
+            if v["id"] == text_id.as_str() && v["prop"] == "text" { text = Some(v["value"].clone()); }
+        }
+        n += 1;
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    assert_eq!(names, Some(json!(["rtplaced"])), "the page is not told which packs are placed on it");
+    assert!(text.as_ref().and_then(|t| t.as_str()).is_some_and(|t| t.contains("a view the model wrote")), "the page does not get the pack's text: {text:?}");
+}

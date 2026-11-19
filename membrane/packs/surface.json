@@ -456,7 +456,8 @@
   "door_fieldvm": {
     "imports": [
       "boot",
-      "door"
+      "door",
+      "door_tools"
     ],
     "classes": [
       "Boot",
@@ -465,7 +466,7 @@
       "FvFile",
       "Request"
     ],
-    "members": 42,
+    "members": 43,
     "writes": [
       "FieldVm:seat.born",
       "FvDir:*.path",
@@ -1124,6 +1125,7 @@
       "*.sprop",
       "*.wid",
       "LinkAllow:doorbell.prefixes",
+      "LinkAllow:placed.prefixes",
       "LinkAllow:seed.done",
       "LinkAllow:setting.prefixes",
       "LinkPeer:*.ack",
@@ -1300,6 +1302,32 @@
     "boot_facts": [],
     "resident": [
       "Peer"
+    ]
+  },
+  "placement": {
+    "imports": [
+      "boot",
+      "link",
+      "door_tools"
+    ],
+    "classes": [
+      "Boot",
+      "Pack",
+      "Placed",
+      "Placements"
+    ],
+    "members": 11,
+    "writes": [
+      "*.retire",
+      "Placed:*.names",
+      "Placed:*.text",
+      "Placements:seat.born"
+    ],
+    "claims": [],
+    "boot_facts": [],
+    "resident": [
+      "Placed",
+      "Placements"
     ]
   },
   "ported": {

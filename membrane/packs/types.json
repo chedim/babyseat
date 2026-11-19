@@ -820,6 +820,7 @@
       "FieldVm.done": "Bool",
       "FieldVm.files": "List(Entity(FvFile))",
       "FieldVm.listed": "Bool",
+      "FieldVm.model_pairs": "List(List(Any))",
       "FieldVm.pairs": "List(List(Any))",
       "FieldVm.rows": "Any",
       "FieldVm.snapshot": "Dict?",
@@ -2198,6 +2199,31 @@
     "findings": [],
     "resident": [
       "Peer"
+    ]
+  },
+  "placement": {
+    "getters": {
+      "Pack.fits": "List(Any)",
+      "Pack.imports": "List(Dict)",
+      "Pack.placement_error": "Text?",
+      "Pack.seat_runs": "Bool",
+      "Placed.kind": "Text",
+      "Placements.ids": "List(Text?)",
+      "Placements.kind": "Text",
+      "Placements.vm_names": "List(Dict)",
+      "Placements.vms": "List(Dict)",
+      "Placements.wanted": "Any"
+    },
+    "writes": {
+      "*.retire": "Bool",
+      "*.text": "Any",
+      "Placed.names": "Any",
+      "Placements.born": "Num"
+    },
+    "findings": [],
+    "resident": [
+      "Placed",
+      "Placements"
     ]
   },
   "ported": {

@@ -135,3 +135,37 @@ fn the_help_topic_tells_a_model_how_to_read_the_page() {
     let t = call(run.port, "entity_read", json!({"spec": "Help:page", "prop": "text"}));
     assert!(t.contains("entity_query") && t.contains("kind:Vm") && t.contains("caps"), "{t}");
 }
+
+#[test]
+fn a_pack_the_model_wrote_that_imports_dom_is_in_the_snapshot_and_one_that_does_not_is_not() {
+    // the snapshot's packs were the pack FILES of the app folders, read once at boot; a pack the model writes (`Pack:<name>.text`) that imports `dom` runs in the page too, so it is in the snapshot
+    let run = start(&tmp("runtime"), &[]);
+    call(run.port, "entity_write", json!({"spec": "Pack:rtview", "prop": "text", "value": "PACK rtview 1\nIMPORT dom 1\n-- a view the model wrote\n"}));
+    call(run.port, "entity_write", json!({"spec": "Pack:rtplain", "prop": "text", "value": "PACK rtplain 1\n-- the seat's own\n"}));
+    let end = std::time::Instant::now() + Duration::from_secs(30);
+    let mut packs = snap(run.port)["packs"].clone();
+    while packs.get("rtview").is_none() && std::time::Instant::now() < end { std::thread::sleep(Duration::from_millis(300)); packs = snap(run.port)["packs"].clone(); }
+    assert!(packs["rtview"].as_str().is_some_and(|t| t.contains("IMPORT dom")), "the model's pack with IMPORT dom is not in the snapshot: {:?}", packs.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    assert!(packs.get("rtplain").is_none(), "a pack that does not import dom is not for the page");
+    assert!(packs.get("shell_view").is_some(), "the packs of the app folders are still there");
+}
+
+#[test]
+fn a_pack_is_placed_on_the_vm_that_provides_what_it_imports_and_a_pack_no_single_vm_can_run_is_refused() {
+    // docs/graph-link.md, section 16: a pack runs on a VM whose `provides` holds every pack it imports. The seat makes `Placed:<ns>:<name>` (the pack's text) for each VM that fits, the VM follows its own prefix and loads what arrives;
+    // a pack whose imports no single VM provides is a placement error on the pack, naming what cannot meet.
+    let run = start(&tmp("placed"), &[]);
+    let ns = snap(run.port)["page"].as_str().unwrap().to_string();
+    tell(run.port, &ns);   // the page says it provides `dom` 1
+    let view = "PACK rtplaced 1\nIMPORT dom 1\n-- a view the model wrote\n";
+    call(run.port, "entity_write", json!({"spec": "Pack:rtplaced", "prop": "text", "value": view}));
+    call(run.port, "entity_write", json!({"spec": "Pack:rtboth", "prop": "text", "value": "PACK rtboth 1\nIMPORT dom 1\nIMPORT sql 1\n"}));
+    call(run.port, "entity_write", json!({"spec": "Pack:rtlib", "prop": "text", "value": "PACK rtlib 1\n-- imports nothing\n"}));
+    let wait = |spec: &str, prop: &str, ok: &dyn Fn(&str) -> bool| { let end = std::time::Instant::now() + Duration::from_secs(30); loop { let v = read(run.port, spec, prop); if ok(&v) || std::time::Instant::now() > end { return v; } std::thread::sleep(Duration::from_millis(300)); } };
+    let placed = wait(&format!("Placed:{ns}:rtplaced"), "text", &|v| v.contains("IMPORT dom"));
+    assert!(placed.contains("a view the model wrote"), "the pack is not placed on the page that provides dom: {placed}");
+    let refused = wait("Pack:rtboth", "placement_error", &|v| v.contains("split"));
+    assert!(refused.contains("dom") && refused.contains("sql") && refused.contains("split"), "a pack no single VM can run is not refused with the imports that cannot meet: {refused}");
+    assert!(!read(run.port, &format!("Placed:{ns}:rtboth"), "text").contains("IMPORT"), "a refused pack is placed anyway");
+    assert!(!read(run.port, &format!("Placed:{ns}:rtlib"), "text").contains("PACK"), "a pack that needs nothing of the page is placed on it");
+}

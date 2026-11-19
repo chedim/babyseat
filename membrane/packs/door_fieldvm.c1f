@@ -1,6 +1,7 @@
 PACK door_fieldvm 1
 IMPORT boot 1
 IMPORT door 1
+IMPORT door_tools 1
 RESIDENT FieldVm
 VIRTUAL FvDir
 VIRTUAL FvFile
@@ -11,10 +12,10 @@ VIRTUAL FvFile
 -- are the seat's, not the page's), by file name without `.c1f`, the text whole. They are read ONCE at boot (`FieldVm:seat`, from `Boot:seat.app_dirs`:
 -- each folder is listed, each pack file read), so a request waits only for the first read; a file pack changed afterwards is not re-read (a restart does).
 -- `entities` is one entity, `Boot:seat`, holding the views' settings (the snapshot getter below).
+-- ALSO BUILT: a Pack entity written by the model (`Pack:<name>.text`) that imports `dom` is in `packs` as of the page's load (a pack written after the page loaded is seen by a reload: the page does not load packs while it runs).
 -- MISSING, and why: (1) the released seat sent every entity of a class the view packs declare (About:seat, fed by about.py with the
 -- version, the git sha and the changelog); nothing here feeds those entities, and the engine's entities of those classes are not listed yet, so the About
--- window has nothing to draw; (2) there is no follow-up stream (the Wire feed is removed): the page's field changes only by its poll of `/ui/fieldvm/active`; (3) a Pack entity written by the model (`Pack:<name>.text`) is not in `packs`
--- (only files); (4) two folders holding the same pack name: either may win (the released seat had one folder).
+-- window has nothing to draw; (2) there is no follow-up stream (the Wire feed is removed): the page's field changes only by its poll of `/ui/fieldvm/active`; (3) two folders holding the same pack name: either may win (the released seat had one folder).
 -- (A VIRTUAL entity is collected when nothing holds it: `FieldVm:seat` is RESIDENT, a row of its own, and its `dirs` and `files` getters hold the folders and the files.)
 -- The `packs` dict has data keys, which c1f cannot write: it is built by one `sql()` over the pairs (`json_group_object`, the way the session status is).
 
@@ -44,7 +45,9 @@ FieldVm.listed getter: len(this.dirs) == this.want and len([d for d in this.dirs
 FieldVm.files getter: [f for f in instances('FvFile')]
 FieldVm.done getter: this.listed and len([f for f in this.files if f.text == None]) == 0
 -- (login_view.c1f is the sign-in screen: the page fetches it from /ui/www when this very route answers 401, so it is never in a signed-in page's packs)
-FieldVm.pairs getter: [[f.stem, f.text] for f in this.files if f.view and f.stem != 'login_view']
+-- the packs the MODEL wrote (`Pack:<name>.text`, door_tools) that import `dom` run in the page too: they are in the snapshot, by name, with their text as it is now
+FieldVm.model_pairs getter: [[replace(p.eid, 'Pack:', ''), p.text] for p in instances('Pack') if p.text != None and '\nIMPORT dom ' in ('\n' + str(p.text))]
+FieldVm.pairs getter: concat([[f.stem, f.text] for f in this.files if f.view and f.stem != 'login_view'], this.model_pairs)
 FieldVm.rows getter: sql("SELECT json_group_object(json_extract(value, '$[0]'), json_extract(value, '$[1]')) AS packs FROM json_each(?)", this.pairs) if this.done else None
 -- THE FIELD VIEW'S SETTINGS ride the same entity: `field_window` (how many of the most recently active entities the field view keeps, launch fact, none by default: the pack's tried value stands) and
 -- `field_poll_ms` (the period of its calls); the field view is the page's Field view (apps/field.c1f/field_view.c1f, drawn by the shell: shell_view.c1f).

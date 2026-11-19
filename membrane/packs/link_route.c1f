@@ -27,6 +27,10 @@ Boot.started on-setter link-allow-seed:
     ('LinkAllow:seed').done = True
     ('LinkAllow:setting').prefixes = ['Setting:']
     ('LinkAllow:doorbell').prefixes = ['Doorbell:']
+-- the packs placed on a page (`Placed:<ns>`: packs/placement.c1f): the page follows them by its link; a store seeded before this had no such row
+Boot.started on-setter link-allow-placed:
+  WHEN prop('LinkAllow:placed', 'prefixes') == None:
+    ('LinkAllow:placed').prefixes = ['Placed:']
 
 -- ---- the doorbell: the smallest value that tells the chat page "something happened" (decision 10) ---------------------------------------
 -- `Doorbell:chat.at` is the time of the last message posted or turn change (written by packs/chat.c1f), NOT under `Chat:`, so it may be subscribed while the chat itself never is. The page polls the history route only when it changes.

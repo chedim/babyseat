@@ -144,11 +144,40 @@ export class Link {
     this.n = 0; this.ack = 0; this.epoch = null; this.hidden = false; this.changed = false; this.resync = false;
     this.subs = []; this.unsubs = []; this.inflight = 0; this.fails = 0; this.waiting = false; this.soon = false;
     this.started = false; this.held = new Set(); this.upState = undefined;
+    this.follow_placed = !!o.follow_placed; this.followed = new Set(); this.waiting_packs = new Map();   // the packs placed on this page (docs/graph-link.md, section 16)
   }
 
   hooks() { const f = this.host.f; return ['feed_vals', 'feed_refused', 'link_reset'].every((k) => typeof f[k] === 'function'); }
 
-  start() { if (!this.hooks()) return false; this.started = true; this.later(); return true; }
+  start() {
+    if (!this.hooks()) return false;
+    this.started = true;
+    if (this.follow_placed) this.subs.push({ eid: `membrane::Placed:${this.ns}`, props: ['names'] });
+    this.later(); return true;
+  }
+
+  /** The packs placed on this page: `Placed:<ns>` lists the names, `Placed:<ns>:<name>` holds a pack's text. Ask for each name's text, load what arrives while the page runs (a pack whose import comes later is tried
+   *  again when another loads), and unload a name that leaves the list. */
+  placed(groups) {
+    const idx = `membrane::Placed:${this.ns}`, pre = idx + ':', host = this.host;
+    if (!this.follow_placed || typeof host.pack !== 'function') return;
+    for (const [id, props] of groups) {
+      if (id === idx && Array.isArray(props.names)) {
+        const names = new Set(props.names);
+        for (const n of names) if (!this.followed.has(n)) { this.followed.add(n); this.subs.push({ eid: pre + n, props: ['text'] }); }
+        for (const n of [...this.followed]) if (!names.has(n)) {
+          this.followed.delete(n); this.waiting_packs.delete(n); this.unsubs.push({ eid: pre + n, props: ['text'] }); host.pack(n, '');
+        }
+        if (this.subs.length || this.unsubs.length) this.later();
+      } else if (id.startsWith(pre) && typeof props.text === 'string') {
+        this.waiting_packs.set(id.slice(pre.length), props.text);
+      }
+    }
+    for (let more = true; more && this.waiting_packs.size;) {
+      more = false;
+      for (const [n, src] of [...this.waiting_packs]) if (host.pack(n, src) === null) { this.waiting_packs.delete(n); more = true; }
+    }
+  }
 
   /** The engine's notices of one drain: queued, sent with the next frame. */
   note(out) {
@@ -223,6 +252,7 @@ export class Link {
       groups.get(v.id)[v.prop] = v.value;
     }
     for (const [id, props] of groups) f.feed_vals(id, JSON.stringify(props), rev, now);
+    this.placed(groups);
     if (rev > this.ack) this.ack = rev;
     this.host.flush();
   }
@@ -266,7 +296,7 @@ class Host {
 
   /** Start the graph link (the `Link` above): returns false when the engine has no link hooks. The page's visibility is read now; `track_hidden` keeps it after. */
   start_link(opts = {}) {
-    this.graph = new Link(this, { ns: this.ns, ...opts });                // (`link(top)` below is the DOM link, an older name)
+    this.graph = new Link(this, { ns: this.ns, follow_placed: true, ...opts });                // (`link(top)` below is the DOM link, an older name)
     if ((this.get('Conn:page') || {}).hidden) this.graph.visibility(true);
     return this.graph.start();
   }
