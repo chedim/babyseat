@@ -12,7 +12,7 @@ RESIDENT SqlQuery
 -- again. Only the latest receipt stays on the entity (the journal keeps the history, and a replay reads the recorded receipt, it never asks the file again).
 -- The sources are written by hand (SqlSource:lex.path = '/data/wordnet.sqlite') or pre-declared at launch by the fact `sql_sources`
 -- ([{name, path, mode}, ...]); a path or mode rewritten later is opened again by the next run.
--- Entity scripts and peers never run an effect.
+-- Entity scripts never run an effect; a peer's write runs one only where the peer's token granted it (`grants`, packs/link.c1f).
 
 SqlSource.kind getter: 'sql_source'
 SqlSource.mode_eff getter: this.mode if this.mode != None else 'ro'
