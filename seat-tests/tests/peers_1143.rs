@@ -625,6 +625,8 @@ fn a_peer_reads_the_journal_as_records_from_its_own_cursor() {
     let seen = seat_cells(&names.0);
     let view = "membrane::LogView:membrama";
     let ask_key = |p: &str| key("membrama::LogAsk:main", p);
+    std::thread::sleep(Duration::from_secs(1));
+    assert_ne!(read(run.port, view, "kind"), "logview", "a view exists before the peer asked for one");
     mine.put(&ask_key(""), 1.0, &json!(true)).unwrap();
     let mut asks = 0.0;
     // the peer asks for the page that starts at `from` and waits for it (the page says where it starts: its first row)

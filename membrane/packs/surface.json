@@ -1162,22 +1162,21 @@
   },
   "logview": {
     "imports": [
-      "boot"
+      "boot",
+      "link"
     ],
     "classes": [
       "Boot",
       "LogView",
       "LogViews"
     ],
-    "members": 9,
+    "members": 10,
     "writes": [
-      "LogViews:seat.views",
+      "LogViews:seat.born",
       "membrane:*.ns"
     ],
     "claims": [],
-    "boot_facts": [
-      "peers"
-    ],
+    "boot_facts": [],
     "virtual": [
       "LogView"
     ],

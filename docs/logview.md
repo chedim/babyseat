@@ -2,7 +2,7 @@
 
 What entered the VM, read from a cursor by a peer (membrama, any program over shared memory). The journal (`c_journal`) holds every OUTSIDE write in order: a person's message, a driver's receipt, a write through the door; each line says who wrote it (`writer`). What the getters derived inside the VM is not in it (a replay makes it again), and nothing virtual is: the peer reads the interior itself, with the door's tools or a subscription.
 
-For each peer declared in the fact `peers` there is a view `membrane::LogView:<ns>` (`VIRTUAL`: a window on the journal, never stored; the resident `LogViews:seat` holds it by reference).
+A view `membrane::LogView:<ns>` appears for a peer when it ASKS for one, by writing `<ns>::LogAsk:main.n` (`VIRTUAL`: a window on the journal, never stored; the resident `LogViews:seat` holds it by reference). No fact names the peers: any connected program (a `Vm` with a `link`) can ask.
 
 **The cursor is the peer's, in its own namespace**, so the seat keeps nothing about the reader and no write rule is needed: the peer writes `<ns>::LogAsk:main` with `from` (the number of the first line it wants; 0 is the beginning) and `n` (a count of its asks). A `sql` answer is cached by its query and arguments, so `n` is the cache breaker: each ask is a new key and a fresh read of the journal.
 

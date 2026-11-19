@@ -1982,11 +1982,13 @@
       "LogView.kind": "Text",
       "LogView.next": "Num?",
       "LogView.rows": "Any",
+      "LogViews.asked": "List(Text)",
       "LogViews.kind": "Text"
     },
     "writes": {
-      "LogViews.views": "List((Entity(LogView)|Error)?)",
-      "membrane.ns": "Any"
+      "LogViews.born": "Num",
+      "LogViews.views": "List(Entity(LogView))",
+      "membrane.ns": "Text"
     },
     "findings": [],
     "virtual": [
