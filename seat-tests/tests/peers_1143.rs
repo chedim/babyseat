@@ -479,10 +479,12 @@ fn entities_born_and_retired_round_after_round_pass_through_a_seat_table_too_sma
 // ---- the chat turn over membrama: a reply cell the peer refuses, or says is gone, ends the turn with the reason (no model: the peer is played by the test) ----------------------------
 
 fn membrama_turn(tag: &str) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) { membrama_turn_in(&tmp(tag)) }
-fn membrama_turn_in(dir: &std::path::Path) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) {
+fn membrama_turn_in(dir: &std::path::Path) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) { membrama_turn_caps(dir, 1024) }
+/// the seat with the peer `membrama` and a value cap of `val_cap` bytes (a page of the log must fit one cell)
+fn membrama_turn_caps(dir: &std::path::Path, val_cap: u32) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) {
     let name = peer_name();
     let names = Names(name.clone());
-    let peers = json!([{"name": name, "ns": "membrama", "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 1024, "spins": 1_000_000, "depth": 32}]);
+    let peers = json!([{"name": name, "ns": "membrama", "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": val_cap, "spins": 1_000_000, "depth": 32}]);
     let entry = json!([{"name": "local", "backend": "membrama", "peer": name, "ns": "membrama", "max_new": 50, "enable_thinking": false}]);
     let facts = [format!("cloud_models={entry}"), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
                  r#"minds={"loops":"local","cortex":"local","workers":"local","seat_default":"local"}"#.to_string(), format!("peers={peers}")];
@@ -602,4 +604,59 @@ fn the_requests_and_messages_of_a_running_turn_are_never_stored() {
     assert!(n("membrane::Chat:%") > 0, "nothing is stored: the test proves nothing");
     std::thread::sleep(Duration::from_secs(3));
     assert_eq!((n("membrane::LlmMsg:%"), n("membrane::LlmRequest:%"), n("membrane::LlmTool:%")), (0, 0, 0), "the transport's nodes are stored");
+}
+
+// ---- the journal as a view: a peer reads the boundary log (what entered the VM) from its own cursor ---------------------------------------------------------------------------------------
+
+/// the rows of the view's page, when the cell is live and holds a list of records
+fn log_rows(c: &Option<Cell>) -> Option<Vec<J>> {
+    match c { Some(c) if c.state == CellState::Live => c.value.as_array().cloned(), _ => None }
+}
+
+#[test]
+fn a_peer_reads_the_journal_as_records_from_its_own_cursor() {
+    // membrama's cursor is in ITS namespace (`membrama::LogAsk:main`: `from` is the first line it wants and `n` counts its asks, the cache breaker); the seat's view `membrane::LogView:membrama` answers with
+    // `rows` (one small record per line: which entity and property changed, by whom, how big the new value is, NOT the value: the peer reads the entity itself), `next` and `head`. A node that goes
+    // away is a row too (`op: "gone"`).
+    let dir = tmp("logview");
+    let (run, names, mut peer, mut mine) = membrama_turn_caps(&dir, 65_536);   // the owner's value cap: a page of 200 rows is about 30 KB
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::LogView:".into()), props: None, limit: None }]);
+    put(run.port, "Lamp:desk", "power", json!("on"));
+    let seen = seat_cells(&names.0);
+    let view = "membrane::LogView:membrama";
+    let ask_key = |p: &str| key("membrama::LogAsk:main", p);
+    mine.put(&ask_key(""), 1.0, &json!(true)).unwrap();
+    let mut asks = 0.0;
+    // the peer asks for the page that starts at `from` and waits for it (the page says where it starts: its first row)
+    let mut page = |from: u64| -> Vec<J> {
+        asks += 1.0;
+        mine.put(&ask_key("from"), asks, &json!(from)).unwrap();
+        mine.put(&ask_key("n"), asks, &json!(asks as u64)).unwrap();
+        let got = cell_when(&seen, &key(view, "rows"), 60, |c| log_rows(c).is_some_and(|r| r.first().is_some_and(|f| f["n"].as_u64() == Some(from))));
+        log_rows(&got).unwrap_or_else(|| panic!("the page at {from} never came: {got:?}"))
+    };
+    let is_the_write = |r: &J| r["eid"] == "Lamp:desk" && r["prop"] == "power" && r["op"] != "gone";
+    // the peer reads from the beginning, a page at a time, until it has the write
+    let (mut from, mut found) = (0u64, None);
+    for _ in 0..20 {
+        let rows = page(from);
+        let ns: Vec<u64> = rows.iter().map(|r| r["n"].as_u64().expect("a row has its number n")).collect();
+        assert!(ns.windows(2).all(|w| w[0] < w[1]), "the rows are not in order: {ns:?}");
+        if let Some(r) = rows.iter().find(|r| is_the_write(r)) { found = Some(r.clone()); break; }
+        from = ns.last().unwrap() + 1;   // the page's own `next`
+    }
+    let row = found.expect("the write is not in the log the peer read");
+    assert!(row["writer"].as_str().unwrap_or("").contains("mcp-write"), "the row does not say who wrote it: {row}");
+    assert!(row.get("new").is_none() && row["size"].as_f64().is_some_and(|n| n > 0.0), "a row points at the change and says how big the value is, it does not carry it: {row}");
+    // the node goes away: a row of its own, in a page after the one the peer has read
+    let after = row["n"].as_u64().unwrap() + 1;
+    put(run.port, "Lamp:desk", "retire", json!(true));
+    let mut gone = None;
+    for _ in 0..20 {
+        let rows = page(after);
+        assert!(rows.iter().all(|r| r["n"].as_u64().unwrap() >= after), "a page repeats lines the peer has read: {rows:?}");
+        if let Some(r) = rows.iter().find(|r| r["eid"] == "Lamp:desk" && r["op"] == "gone") { gone = Some(r.clone()); break; }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    assert!(gone.is_some(), "the end of the node never came in the log");
 }

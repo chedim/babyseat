@@ -1160,6 +1160,31 @@
       "LinkAllow"
     ]
   },
+  "logview": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "LogView",
+      "LogViews"
+    ],
+    "members": 9,
+    "writes": [
+      "LogViews:seat.views",
+      "membrane:*.ns"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "peers"
+    ],
+    "virtual": [
+      "LogView"
+    ],
+    "resident": [
+      "LogViews"
+    ]
+  },
   "mcp": {
     "imports": [],
     "classes": [

@@ -5,6 +5,10 @@
    "wired": false,
    "why": "the policy of the writes a local peer (over shared memory) asks the seat to make: a list of rules {peer, prefix}; the peer whose namespace is `peer` may write the nodes whose id starts with `prefix`; none by default, so every forwarded write is refused (packs/link.c1f `LinkWrite.verdict`; docs/graph-link.md section 18)"
   },
+  "peers": {
+   "wired": false,
+   "why": "the local peers over shared memory, a list of {name, ns, ring_bytes, slots, key_cap, val_cap, spins, depth, run?}: the seat's driver makes their rings and tables (cliffvm:src/peers.rs) and packs/logview.c1f makes a LogView for each namespace (docs/logview.md); none by default"
+  },
   "link_hold_s": {
    "wired": false,
    "why": "seconds the seat holds an empty poll of POST /ui/link before it answers it empty (the keepalive); default 25 (graph link decision 18; a value tried, not decided)"

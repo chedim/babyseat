@@ -1973,6 +1973,29 @@
       "LinkAllow"
     ]
   },
+  "logview": {
+    "getters": {
+      "LogView.ask": "Text?",
+      "LogView.asked": "Any",
+      "LogView.from": "Any",
+      "LogView.head": "Any",
+      "LogView.kind": "Text",
+      "LogView.next": "Num?",
+      "LogView.rows": "Any",
+      "LogViews.kind": "Text"
+    },
+    "writes": {
+      "LogViews.views": "List((Entity(LogView)|Error)?)",
+      "membrane.ns": "Any"
+    },
+    "findings": [],
+    "virtual": [
+      "LogView"
+    ],
+    "resident": [
+      "LogViews"
+    ]
+  },
   "mcp": {
     "getters": {
       "McpPrompt.kind": "Text",
