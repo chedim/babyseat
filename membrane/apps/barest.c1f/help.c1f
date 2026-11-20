@@ -25,3 +25,4 @@ Boot.started on-setter seed-help:
     Help:page.file = dir + '/help/page.md'
     Help:edit.file = dir + '/help/edit.md'
     Help:peers.file = dir + '/help/peers.md'
+    Help:brain.file = dir + '/help/brain.md'
