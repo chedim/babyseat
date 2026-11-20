@@ -257,7 +257,7 @@
       "Chunk",
       "Request"
     ],
-    "members": 74,
+    "members": 76,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
@@ -1328,33 +1328,6 @@
     ],
     "claims": [],
     "boot_facts": []
-  },
-  "owed": {
-    "imports": [
-      "router",
-      "chat",
-      "chat_turn"
-    ],
-    "classes": [
-      "Chat",
-      "ChatMessage",
-      "ChatTurn",
-      "Minds",
-      "Owed"
-    ],
-    "members": 14,
-    "writes": [
-      "membrane:*.ended",
-      "membrane:*.index",
-      "membrane:*.ns",
-      "membrane:*.state",
-      "membrane:*.text"
-    ],
-    "claims": [],
-    "boot_facts": [],
-    "virtual": [
-      "Owed"
-    ]
   },
   "peer": {
     "imports": [

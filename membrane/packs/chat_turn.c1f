@@ -194,6 +194,13 @@ Chat.brain_said on-setter brain-answer:
     membrane::Chat[this.cp]:turn.ended = clock
     membrane::Chat[this.cp]:turn:response:body = SemText(text: str(this.brain_said))
     membrane::Chat[this.cp]:turn:response:body.mention = True
+-- the brain DECLINES: it resolves a turn without answering by writing `...:turn:response` property `declined` = the reason (a text): the turn finishes as done and the page shows `Declined: <reason>`
+ChatMessage.declined getter: prop(this.resp_eid, 'declined') if this.brain_turn else None
+Chat.declined on-setter brain-decline:
+  WHEN this.declined != None and strip(str(this.declined)) != '':
+    membrane::Chat[this.cp]:turn.state = 'done'
+    membrane::Chat[this.cp]:turn.ended = clock
+    membrane::Chat[this.cp]:turn:response.text = 'Declined: ' + str(this.declined)
 -- STOP of a turn the brain has: nobody else will end it
 Chat.aborted on-setter brain-abort:
   WHEN this.aborted == True and prop(this.turn_eid, 'brain') != None and prop(this.turn_eid, 'state') == 'running':

@@ -20,15 +20,17 @@ One write of the whole answer finishes the turn, and the page shows it as a fini
 - A change that is not a person speaking needs no answer. Do not write a response for it.
 - While you work, the turn shows that the brain has it. If you are not connected, the person is told so in plain words.
 
-## What you owe, and how to resolve it
+## Resolve a turn: answer or decline
 
-The seat keeps the list for you: `Owed:<your namespace>`, property `items`, read it with `entity_read {spec: "Owed:<ns>", prop: "items"}`. It holds, oldest first, one `{message, text, response}` for every turn you have taken and not finished (`message` is the ChatMessage, `text` the person's own words, whole, `response` its answer entity), and `[]` when you owe nothing. The same node has `banner`: the text a chat turn shows a model as its banner (the time, the conversation header, your own continuity notes), there also when you owe nothing. The banner is yours: keep what the next step needs there (`Help:banner`). Read it instead of working out your duties from the log, and again after any step that failed.
-
-A turn leaves the list when it is finished. Resolve each item with a write to its `response` entity, one of two:
+Every message turn the brain has taken stays `running` until you write to its answer entity, one of two:
 - Answer: write `text` (above).
-- Decline: write `declined` with the reason, `entity_write {spec: "<the response eid>", prop: "declined", value: "<why you do not answer>"}`. The turn finishes as done and the person sees `Declined: <reason>`.
+- Decline: write `declined` with the reason, `entity_write {spec: "Chat:main:message:<id>:turn:response", prop: "declined", value: "<why you do not answer>"}`. The turn finishes as done and the person sees `Declined: <reason>`.
 
-A turn the person stops, or one that errors, leaves the list too.
+A turn the person stops, or one that errors, ends by itself.
+
+## Your banner
+
+The banner is your own self-configurable notes: `Banner:admin:main` (its `text`) and the other `Banner:*` entities (their `words`). Keep what the next step needs there, and remove what is outdated: you read it again at the next change (`Help:banner`).
 
 ## Reaching outside the graph while you answer
 

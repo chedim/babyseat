@@ -413,6 +413,7 @@
       "ChatMessage.cmd_eid": "Text",
       "ChatMessage.cost": "Any",
       "ChatMessage.cut_text": "Text",
+      "ChatMessage.declined": "Any",
       "ChatMessage.evl": "List(Any)",
       "ChatMessage.evs": "List(Any)",
       "ChatMessage.fail_why": "Text?",
@@ -2265,34 +2266,6 @@
       "SemText.ml_linked": "Bool"
     },
     "findings": []
-  },
-  "owed": {
-    "getters": {
-      "ChatMessage.declined": "Any",
-      "ChatTurn.owed_msg": "Any",
-      "Minds.owed_ns": "Text?",
-      "Owed.banner": "Any",
-      "Owed.banner_main": "Any",
-      "Owed.banner_more": "List(Any)",
-      "Owed.banner_text": "Any",
-      "Owed.items": "List(Any)",
-      "Owed.kind": "Text",
-      "Owed.seed": "Any",
-      "Owed.seed_items": "List(Dict)?"
-    },
-    "writes": {
-      "Chat.ended": "Num",
-      "Chat.state": "Text",
-      "Chat.text": "Text",
-      "Minds.owed_hold": "List((Entity(Owed)|Error)?)",
-      "Owed.index": "List(Any)",
-      "membrane.index": "List(Any)",
-      "membrane.ns": "Text?"
-    },
-    "findings": [],
-    "virtual": [
-      "Owed"
-    ]
   },
   "peer": {
     "getters": {
