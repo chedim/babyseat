@@ -386,7 +386,7 @@ fn a_running_brain_turn_carries_the_results_and_the_brains_live_text_and_a_finis
     // the brain's live text: its own cell `<ns>::Loop:main.live` (the test stands in for the replica; see the report)
     put(&run, "kitchen::Loop:main", "live", json!("so far the model wrote this"));
     let end = Instant::now() + Duration::from_secs(30);
-    let row = loop { let r = page_row(&run, &id); if r["live"] == "so far the model wrote this" || Instant::now() > end { break r; } std::thread::sleep(Duration::from_millis(100)); };
+    let row = loop { let r = page_row(&run, &id); if (r["live"] == "so far the model wrote this" && r["tool_calls"][0]["result"] == "the whole result") || Instant::now() > end { break r; } std::thread::sleep(Duration::from_millis(100)); };
     assert_eq!(row["live"], "so far the model wrote this", "{row}");
     assert_eq!(row["tool_calls"][0]["result"], "the whole result", "a running brain turn's rows carry the result: {row}");
     assert_eq!(ask(&mut peer, &eid(&id, ":turn:response"), "text", json!("answer")), None);

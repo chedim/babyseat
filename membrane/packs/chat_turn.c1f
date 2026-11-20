@@ -239,9 +239,18 @@ ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.cp
 Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if e is not Error and prop(e, 'type') == 'stream_event']
 Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
 Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
-ChatMessage.oai_acc getter: 'Chunk:Fetch:oai:' + this.cp + ':' + str(prop(this.turn_eid, 'round') or 0) + ':acc'
-ChatMessage.partial_text getter: '' if this.over else (str(prop('Chunk:' + this.cmd_eid + ':acc', 'text') or '') or str(prop(this.oai_acc, 'text') or ''))
-ChatMessage.partial_tools getter: [] if this.over else (words(str(prop('Chunk:' + this.cmd_eid + ':acc', 'tools') or '')) or words(str(prop(this.oai_acc, 'tools') or '')))
+-- ONE SOURCE OF LIVE PROGRESS (#1143): what a running turn has said so far and the tools it has started come from ONE accumulator, the one of the backend the turn records
+-- (`turn.backend`, written by `turn-start`). Each backend that streams names its own, `<backend>_live`: `claude_live` (here, the CLI command's) and `oai_live` (packs/chat_oai.c1f, the
+-- current round's call). A peer sends its answer whole and a brain writes its answer itself, so they have none, and neither has a turn that records no backend. `live` is
+-- `{text, tools}` read from it; the page (`partial_text`, `partial_tools`), the door's session events (packs/door_session.c1f) and the words kept when a turn fails all read it.
+ChatMessage.claude_live getter: 'Chunk:' + this.cmd_eid + ':acc'
+ChatMessage.live_acc getter:
+  WHEN prop(this.turn_eid, 'backend') == 'claude': this.claude_live
+  ELSE WHEN prop(this.turn_eid, 'backend') == 'oai': this.oai_live
+  ELSE: None
+ChatMessage.live getter: {'text': str(prop(this.live_acc, 'text') or ''), 'tools': words(str(prop(this.live_acc, 'tools') or ''))}
+ChatMessage.partial_text getter: '' if this.over else prop(this.live, 'text')
+ChatMessage.partial_tools getter: [] if this.over else prop(this.live, 'tools')
 -- THE PARTIAL ANSWER IS ACCUMULATED, NOT RE-JOINED (w28): the message used to list every live chunk at every birth (a scan of all the chunks, a dict and a sort per chunk, a join of all
 -- their text), so a turn of N chunks cost N squared (the burst: 80% of the CPU). Now each chunk, when it has parsed its own lines, appends what it said and the tools it started to ONE
 -- accumulator, `Chunk:<command>:acc` (a chunk of the same command, so it lives and is collected with the others: the running effect holds it); a birth costs the same however many came before.
@@ -278,7 +287,7 @@ ChatMessage.fail_why getter:
 -- turn did not fail, when the person stopped it (`answer` keeps those words with its stopped line) or when nothing was said. The finish below keeps it as the response's body, marked interrupted.
 ChatMessage.cut_text getter:
   WHEN this.fail_why == None or this.aborted == True: ''
-  ELSE: strip(str(prop('Chunk:' + this.cmd_eid + ':acc', 'text') or '') or this.spoken)
+  ELSE: strip(prop(this.live, 'text') or this.spoken)
 ChatMessage.answer getter:
   WHEN this.rr == None: None
   -- a turn the person STOPPED (chat.c1f, the abort route): what was said so far (`kept`, the partial answer taken at the stop; else the finished messages' text) and a stopped line

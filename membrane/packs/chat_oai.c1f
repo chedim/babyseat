@@ -85,6 +85,8 @@ Chat.oai_req on-setter oai-send:
 -- (`lines`); it parses its own SSE `data:` lines and appends the words and the names of the tools started to ONE accumulator `Chunk:<fetch>:acc`: that is only what the page shows
 -- while the call runs (`ChatMessage.partial_text`). The ANSWER is not read from it (the accumulator is collected when the call's receipt lands): the call asks for `keep`, so its
 -- receipt carries the whole body, and the round reads the finished stream from there, as the claude turn reads its CLI's stdout.
+-- the turn's live source (packs/chat_turn.c1f, `live_acc`): the accumulator of the current round's call
+ChatMessage.oai_live getter: 'Chunk:Fetch:oai:' + this.cp + ':' + str(prop(this.turn_eid, 'round') or 0) + ':acc'
 Chunk.oevs getter: [e for e in [json(strip(after(l, 'data:'))) for l in lines(str(this.data or '')) if startswith(l, 'data:')] if e is not Error and e is Dict]
 Chunk.ochs getter: [(prop(e, 'choices') or [None])[0] for e in this.oevs]
 Chunk.oapart getter:
@@ -193,7 +195,7 @@ ChatMessage.oai_res getter:
 -- WHAT THE MODEL HAD SAID when the turn failed (operator 2026-11-15): the words of the rounds' finished streams, else the words the page showed from the current call (its accumulator)
 ChatMessage.oai_cut getter:
   WHEN prop(this.oai_res, 'fail') == None: ''
-  ELSE: strip(prop(this.oai_round, 'said_all') or str(prop(this.oai_acc, 'text') or ''))
+  ELSE: strip(prop(this.oai_round, 'said_all') or prop(this.live, 'text') or '')
 ChatMessage.oai_end getter:
   WHEN this.oai_res == None: None
   ELSE: {'cut': this.oai_cut, 'fail': prop(this.oai_res, 'fail'), 'text': str(prop(this.oai_res, 'fail') or prop(this.oai_res, 'text') or ''), 'body': (str(prop(this.oai_res, 'text') or '') if prop(this.oai_res, 'fail') == None else (this.oai_cut if this.oai_cut != '' else None)), 'usage': prop(this.oai_round, 'usage_out'), 'calls': prop(this.oai_round, 'n'), 'names': prop(this.oai_round, 'names_before'), 'ids': join(prop(this.oai_round, 'ids_before'), ' '), 'raw': prop(this.oai_round, 'raw')}

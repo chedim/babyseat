@@ -1,0 +1,732 @@
+[
+  {
+    "name": "one source of live progress: a claude turn shows the CLI's accumulator, and the live source is that accumulator",
+    "packs": [
+      "membrane/packs/boot.c1f",
+      "membrane/packs/fs.c1f",
+      "membrane/packs/proc.c1f",
+      "membrane/packs/banner.c1f",
+      "membrane/packs/door.c1f",
+      "membrane/packs/semtext.c1f",
+      "membrane/packs/chat.c1f",
+      "membrane/packs/model_chat.c1f",
+      "membrane/packs/chat_turn.c1f",
+      "membrane/packs/fetch.c1f",
+      "membrane/packs/chat_oai.c1f",
+      "membrane/packs/chat_membrama.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Boot:seat",
+        "class": "Boot",
+        "props": {
+          "ui_dir": "/x"
+        }
+      },
+      {
+        "eid": "Http:door",
+        "class": "Http",
+        "props": {
+          "listen_result": {
+            "port": 4321,
+            "rc": 0,
+            "host": "127.0.0.1"
+          }
+        }
+      },
+      {
+        "eid": "membrane::Banner:admin:main",
+        "class": "Banner",
+        "props": {
+          "chat": "main",
+          "admin": "admin"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatmessage"
+          ],
+          "text": "hello"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1:turn",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatturn"
+          ],
+          "message": "membrane::Chat:main:message:1-1",
+          "state": "running",
+          "backend": "claude",
+          "round": 2
+        }
+      },
+      {
+        "eid": "Chunk:membrane::Command:chat:main:message:1-1:acc",
+        "class": "Chunk",
+        "props": {
+          "cmd": "membrane::Command:chat:main:message:1-1",
+          "text": "the CLI's words",
+          "tools": " entity_read"
+        }
+      },
+      {
+        "eid": "Chunk:Fetch:oai:main:message:1-1:2:acc",
+        "class": "Chunk",
+        "props": {
+          "fetch": "Fetch:oai:main:message:1-1:2",
+          "text": "the endpoint's words",
+          "tools": " entity_query"
+        }
+      }
+    ],
+    "writes": [],
+    "expect": [
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_text",
+        "equals": "the CLI's words"
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_tools",
+        "equals": [
+          "entity_read"
+        ]
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "live_acc",
+        "equals": "Chunk:membrane::Command:chat:main:message:1-1:acc"
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "live.text",
+        "equals": "the CLI's words"
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "live.tools",
+        "equals": [
+          "entity_read"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "one source of live progress: an oai turn shows its current round's accumulator, not a CLI's",
+    "packs": [
+      "membrane/packs/boot.c1f",
+      "membrane/packs/fs.c1f",
+      "membrane/packs/proc.c1f",
+      "membrane/packs/banner.c1f",
+      "membrane/packs/door.c1f",
+      "membrane/packs/semtext.c1f",
+      "membrane/packs/chat.c1f",
+      "membrane/packs/model_chat.c1f",
+      "membrane/packs/chat_turn.c1f",
+      "membrane/packs/fetch.c1f",
+      "membrane/packs/chat_oai.c1f",
+      "membrane/packs/chat_membrama.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Boot:seat",
+        "class": "Boot",
+        "props": {
+          "ui_dir": "/x"
+        }
+      },
+      {
+        "eid": "Http:door",
+        "class": "Http",
+        "props": {
+          "listen_result": {
+            "port": 4321,
+            "rc": 0,
+            "host": "127.0.0.1"
+          }
+        }
+      },
+      {
+        "eid": "membrane::Banner:admin:main",
+        "class": "Banner",
+        "props": {
+          "chat": "main",
+          "admin": "admin"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatmessage"
+          ],
+          "text": "hello"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1:turn",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatturn"
+          ],
+          "message": "membrane::Chat:main:message:1-1",
+          "state": "running",
+          "backend": "oai",
+          "round": 2
+        }
+      },
+      {
+        "eid": "Chunk:membrane::Command:chat:main:message:1-1:acc",
+        "class": "Chunk",
+        "props": {
+          "cmd": "membrane::Command:chat:main:message:1-1",
+          "text": "the CLI's words",
+          "tools": " entity_read"
+        }
+      },
+      {
+        "eid": "Chunk:Fetch:oai:main:message:1-1:2:acc",
+        "class": "Chunk",
+        "props": {
+          "fetch": "Fetch:oai:main:message:1-1:2",
+          "text": "the endpoint's words",
+          "tools": " entity_query"
+        }
+      }
+    ],
+    "writes": [],
+    "expect": [
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_text",
+        "equals": "the endpoint's words"
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_tools",
+        "equals": [
+          "entity_query"
+        ]
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "live_acc",
+        "equals": "Chunk:Fetch:oai:main:message:1-1:2:acc"
+      }
+    ]
+  },
+  {
+    "name": "one source of live progress: a claude turn does not show an oai accumulator",
+    "packs": [
+      "membrane/packs/boot.c1f",
+      "membrane/packs/fs.c1f",
+      "membrane/packs/proc.c1f",
+      "membrane/packs/banner.c1f",
+      "membrane/packs/door.c1f",
+      "membrane/packs/semtext.c1f",
+      "membrane/packs/chat.c1f",
+      "membrane/packs/model_chat.c1f",
+      "membrane/packs/chat_turn.c1f",
+      "membrane/packs/fetch.c1f",
+      "membrane/packs/chat_oai.c1f",
+      "membrane/packs/chat_membrama.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Boot:seat",
+        "class": "Boot",
+        "props": {
+          "ui_dir": "/x"
+        }
+      },
+      {
+        "eid": "Http:door",
+        "class": "Http",
+        "props": {
+          "listen_result": {
+            "port": 4321,
+            "rc": 0,
+            "host": "127.0.0.1"
+          }
+        }
+      },
+      {
+        "eid": "membrane::Banner:admin:main",
+        "class": "Banner",
+        "props": {
+          "chat": "main",
+          "admin": "admin"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatmessage"
+          ],
+          "text": "hello"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1:turn",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatturn"
+          ],
+          "message": "membrane::Chat:main:message:1-1",
+          "state": "running",
+          "backend": "claude",
+          "round": 2
+        }
+      },
+      {
+        "eid": "Chunk:Fetch:oai:main:message:1-1:2:acc",
+        "class": "Chunk",
+        "props": {
+          "fetch": "Fetch:oai:main:message:1-1:2",
+          "text": "the endpoint's words",
+          "tools": " entity_query"
+        }
+      }
+    ],
+    "writes": [],
+    "expect": [
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_text",
+        "equals": ""
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_tools",
+        "equals": []
+      }
+    ]
+  },
+  {
+    "name": "one source of live progress: a peer turn has no live source (a peer sends its answer whole)",
+    "packs": [
+      "membrane/packs/boot.c1f",
+      "membrane/packs/fs.c1f",
+      "membrane/packs/proc.c1f",
+      "membrane/packs/banner.c1f",
+      "membrane/packs/door.c1f",
+      "membrane/packs/semtext.c1f",
+      "membrane/packs/chat.c1f",
+      "membrane/packs/model_chat.c1f",
+      "membrane/packs/chat_turn.c1f",
+      "membrane/packs/fetch.c1f",
+      "membrane/packs/chat_oai.c1f",
+      "membrane/packs/chat_membrama.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Boot:seat",
+        "class": "Boot",
+        "props": {
+          "ui_dir": "/x"
+        }
+      },
+      {
+        "eid": "Http:door",
+        "class": "Http",
+        "props": {
+          "listen_result": {
+            "port": 4321,
+            "rc": 0,
+            "host": "127.0.0.1"
+          }
+        }
+      },
+      {
+        "eid": "membrane::Banner:admin:main",
+        "class": "Banner",
+        "props": {
+          "chat": "main",
+          "admin": "admin"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatmessage"
+          ],
+          "text": "hello"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1:turn",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatturn"
+          ],
+          "message": "membrane::Chat:main:message:1-1",
+          "state": "running",
+          "backend": "peer",
+          "round": 2
+        }
+      },
+      {
+        "eid": "Chunk:membrane::Command:chat:main:message:1-1:acc",
+        "class": "Chunk",
+        "props": {
+          "cmd": "membrane::Command:chat:main:message:1-1",
+          "text": "the CLI's words",
+          "tools": " entity_read"
+        }
+      },
+      {
+        "eid": "Chunk:Fetch:oai:main:message:1-1:2:acc",
+        "class": "Chunk",
+        "props": {
+          "fetch": "Fetch:oai:main:message:1-1:2",
+          "text": "the endpoint's words",
+          "tools": " entity_query"
+        }
+      }
+    ],
+    "writes": [],
+    "expect": [
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_text",
+        "equals": ""
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_tools",
+        "equals": []
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "live_acc",
+        "none": true
+      }
+    ]
+  },
+  {
+    "name": "one source of live progress: a brain turn has no live source",
+    "packs": [
+      "membrane/packs/boot.c1f",
+      "membrane/packs/fs.c1f",
+      "membrane/packs/proc.c1f",
+      "membrane/packs/banner.c1f",
+      "membrane/packs/door.c1f",
+      "membrane/packs/semtext.c1f",
+      "membrane/packs/chat.c1f",
+      "membrane/packs/model_chat.c1f",
+      "membrane/packs/chat_turn.c1f",
+      "membrane/packs/fetch.c1f",
+      "membrane/packs/chat_oai.c1f",
+      "membrane/packs/chat_membrama.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Boot:seat",
+        "class": "Boot",
+        "props": {
+          "ui_dir": "/x"
+        }
+      },
+      {
+        "eid": "Http:door",
+        "class": "Http",
+        "props": {
+          "listen_result": {
+            "port": 4321,
+            "rc": 0,
+            "host": "127.0.0.1"
+          }
+        }
+      },
+      {
+        "eid": "membrane::Banner:admin:main",
+        "class": "Banner",
+        "props": {
+          "chat": "main",
+          "admin": "admin"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatmessage"
+          ],
+          "text": "hello"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1:turn",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatturn"
+          ],
+          "message": "membrane::Chat:main:message:1-1",
+          "state": "running",
+          "backend": "brain",
+          "brain": "b",
+          "round": 2
+        }
+      },
+      {
+        "eid": "Chunk:membrane::Command:chat:main:message:1-1:acc",
+        "class": "Chunk",
+        "props": {
+          "cmd": "membrane::Command:chat:main:message:1-1",
+          "text": "the CLI's words",
+          "tools": " entity_read"
+        }
+      },
+      {
+        "eid": "Chunk:Fetch:oai:main:message:1-1:2:acc",
+        "class": "Chunk",
+        "props": {
+          "fetch": "Fetch:oai:main:message:1-1:2",
+          "text": "the endpoint's words",
+          "tools": " entity_query"
+        }
+      }
+    ],
+    "writes": [],
+    "expect": [
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_text",
+        "equals": ""
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_tools",
+        "equals": []
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "live_acc",
+        "none": true
+      }
+    ]
+  },
+  {
+    "name": "one source of live progress: a turn that records no backend has no live source",
+    "packs": [
+      "membrane/packs/boot.c1f",
+      "membrane/packs/fs.c1f",
+      "membrane/packs/proc.c1f",
+      "membrane/packs/banner.c1f",
+      "membrane/packs/door.c1f",
+      "membrane/packs/semtext.c1f",
+      "membrane/packs/chat.c1f",
+      "membrane/packs/model_chat.c1f",
+      "membrane/packs/chat_turn.c1f",
+      "membrane/packs/fetch.c1f",
+      "membrane/packs/chat_oai.c1f",
+      "membrane/packs/chat_membrama.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Boot:seat",
+        "class": "Boot",
+        "props": {
+          "ui_dir": "/x"
+        }
+      },
+      {
+        "eid": "Http:door",
+        "class": "Http",
+        "props": {
+          "listen_result": {
+            "port": 4321,
+            "rc": 0,
+            "host": "127.0.0.1"
+          }
+        }
+      },
+      {
+        "eid": "membrane::Banner:admin:main",
+        "class": "Banner",
+        "props": {
+          "chat": "main",
+          "admin": "admin"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatmessage"
+          ],
+          "text": "hello"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1:turn",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatturn"
+          ],
+          "message": "membrane::Chat:main:message:1-1",
+          "state": "running",
+          "round": 2
+        }
+      },
+      {
+        "eid": "Chunk:membrane::Command:chat:main:message:1-1:acc",
+        "class": "Chunk",
+        "props": {
+          "cmd": "membrane::Command:chat:main:message:1-1",
+          "text": "the CLI's words",
+          "tools": " entity_read"
+        }
+      },
+      {
+        "eid": "Chunk:Fetch:oai:main:message:1-1:2:acc",
+        "class": "Chunk",
+        "props": {
+          "fetch": "Fetch:oai:main:message:1-1:2",
+          "text": "the endpoint's words",
+          "tools": " entity_query"
+        }
+      }
+    ],
+    "writes": [],
+    "expect": [
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_text",
+        "equals": ""
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_tools",
+        "equals": []
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "live_acc",
+        "none": true
+      }
+    ]
+  },
+  {
+    "name": "one source of live progress: a finished turn shows nothing live",
+    "packs": [
+      "membrane/packs/boot.c1f",
+      "membrane/packs/fs.c1f",
+      "membrane/packs/proc.c1f",
+      "membrane/packs/banner.c1f",
+      "membrane/packs/door.c1f",
+      "membrane/packs/semtext.c1f",
+      "membrane/packs/chat.c1f",
+      "membrane/packs/model_chat.c1f",
+      "membrane/packs/chat_turn.c1f",
+      "membrane/packs/fetch.c1f",
+      "membrane/packs/chat_oai.c1f",
+      "membrane/packs/chat_membrama.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Boot:seat",
+        "class": "Boot",
+        "props": {
+          "ui_dir": "/x"
+        }
+      },
+      {
+        "eid": "Http:door",
+        "class": "Http",
+        "props": {
+          "listen_result": {
+            "port": 4321,
+            "rc": 0,
+            "host": "127.0.0.1"
+          }
+        }
+      },
+      {
+        "eid": "membrane::Banner:admin:main",
+        "class": "Banner",
+        "props": {
+          "chat": "main",
+          "admin": "admin"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatmessage"
+          ],
+          "text": "hello"
+        }
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1:turn",
+        "class": "Chat",
+        "props": {
+          "parents": [
+            "cls:chat",
+            "cls:chatturn"
+          ],
+          "message": "membrane::Chat:main:message:1-1",
+          "state": "done",
+          "backend": "claude",
+          "round": 2
+        }
+      },
+      {
+        "eid": "Chunk:membrane::Command:chat:main:message:1-1:acc",
+        "class": "Chunk",
+        "props": {
+          "cmd": "membrane::Command:chat:main:message:1-1",
+          "text": "the CLI's words",
+          "tools": " entity_read"
+        }
+      }
+    ],
+    "writes": [],
+    "expect": [
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_text",
+        "equals": ""
+      },
+      {
+        "eid": "membrane::Chat:main:message:1-1",
+        "prop": "partial_tools",
+        "equals": []
+      }
+    ]
+  }
+]

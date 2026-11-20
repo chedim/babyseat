@@ -212,7 +212,7 @@
       "ChatRound",
       "Chunk"
     ],
-    "members": 67,
+    "members": 68,
     "writes": [
       "*.request",
       "*.text",
@@ -251,7 +251,7 @@
       "Chunk",
       "Request"
     ],
-    "members": 89,
+    "members": 91,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
