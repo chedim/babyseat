@@ -26,3 +26,4 @@ Boot.started on-setter seed-help:
     Help:edit.file = dir + '/help/edit.md'
     Help:peers.file = dir + '/help/peers.md'
     Help:brain.file = dir + '/help/brain.md'
+    Help:chat-backends.file = dir + '/help/chat-backends.md'
