@@ -191,32 +191,20 @@ ChatMessage.brain_turn getter: prop(this.turn_eid, 'brain') != None and this.tst
 ChatMessage.brain_said getter: prop(this.resp_eid, 'text') if this.brain_turn else None
 Chat.brain_said on-setter brain-answer:
   WHEN this.brain_said != None and strip(str(this.brain_said)) != '':
-    membrane::Chat[this.cp]:turn.state = 'done'
-    membrane::Chat[this.cp]:turn.ended = clock
-    membrane::Chat[this.cp]:turn:response:body = SemText(text: str(this.brain_said))
-    membrane::Chat[this.cp]:turn:response:body.mention = True
+    membrane::Chat[this.cp]:turn.outcome = {'text': str(this.brain_said), 'body': str(this.brain_said)}
 -- the brain DECLINES: it resolves a turn without answering by writing `...:turn:response` property `declined` = the reason (a text): the turn finishes as done and the page shows `Declined: <reason>`
 ChatMessage.declined getter: prop(this.resp_eid, 'declined') if this.brain_turn else None
 Chat.declined on-setter brain-decline:
   WHEN this.declined != None and strip(str(this.declined)) != '':
-    membrane::Chat[this.cp]:turn.state = 'done'
-    membrane::Chat[this.cp]:turn.ended = clock
-    membrane::Chat[this.cp]:turn:response.text = 'Declined: ' + str(this.declined)
+    membrane::Chat[this.cp]:turn.outcome = {'text': 'Declined: ' + str(this.declined)}
 -- STOP of a turn the brain has: nobody else will end it
 Chat.aborted on-setter brain-abort:
   WHEN this.aborted == True and prop(this.turn_eid, 'brain') != None and prop(this.turn_eid, 'state') == 'running':
-    membrane::Chat[this.cp]:turn.state = 'error'
-    membrane::Chat[this.cp]:turn.ended = clock
-    membrane::Chat[this.cp]:turn.error = 'stopped'
-    membrane::Chat[this.cp]:turn:response.text = 'The turn was stopped before the brain answered.'
-    membrane::Chat[this.cp]:turn:response.error = True
+    membrane::Chat[this.cp]:turn.outcome = {'text': 'The turn was stopped before the brain answered.', 'fail': 'stopped'}
 
 Chat.plan on-setter turn-start:
   WHEN prop(this.plan, 'refuse') != None:
-    membrane::Chat[this.cp]:turn.state = 'error'
-    membrane::Chat[this.cp]:turn.ended = clock
-    membrane::Chat[this.cp]:turn.error = prop(this.plan, 'refuse')
-    membrane::Chat[this.cp]:turn:response = ChatResponse(text: prop(this.plan, 'refuse'), error: True)
+    membrane::Chat[this.cp]:turn.outcome = {'text': prop(this.plan, 'refuse'), 'fail': prop(this.plan, 'refuse')}
   ELSE WHEN prop(this.plan, 'argv') != None:
     membrane::Chat[this.cp]:turn.state = 'running'
     membrane::Chat[this.cp]:turn.started = clock
@@ -296,30 +284,67 @@ ChatMessage.tools_idlist getter: join([join([str(prop(b, 'id')) for b in (prop(p
 -- the turn is over once its state is done or error. The finish below runs only while it is not: the answer is derived from the receipt, and the slimming
 -- below changes the receipt, so a finished turn keeps the response it wrote.
 ChatMessage.over getter: this.tstate == 'done' or this.tstate == 'error'
--- the run's text is its OWN getter, which is what the setter below listens to: the turn's finish runs on `answer`, and a sibling the trigger does not read would still be its old value then
-Chat.answer on-setter turn-finish:
-  WHEN this.answer != None and not this.over:
-    ('ModelChat:' + before(this.cp, ':message:')).add = this.raw_head + this.raw_events + this.raw_err
-    membrane::Chat[this.cp]:turn.state = 'error' if this.fail_why != None else 'done'
-    membrane::Chat[this.cp]:turn.ended = clock
-    membrane::Chat[this.cp]:turn.error = this.fail_why
-    membrane::Chat[this.cp]:turn.usage = this.tokens
-    membrane::Chat[this.cp]:turn.cost = this.cost
-    membrane::Chat[this.cp]:turn.calls = this.calls
-    membrane::Chat[this.cp]:turn.duration = this.took
-    this.tools_run = this.tools_names
-    this.tool_ids = this.tools_idlist
-    membrane::Chat[this.cp]:turn:response = ChatResponse(text: this.answer, error: this.fail_why != None, rc: this.rc, interrupted: (True if this.cut_text != '' else None), reason: (this.fail_why if this.cut_text != '' else None))
-    FOR t IN ([this.answer] if this.fail_why == None else ([this.cut_text] if this.cut_text != '' else [])):
-      membrane::Chat[this.cp]:turn:response:body = SemText(text: t)
-      membrane::Chat[this.cp]:turn:response:body.mention = True
-    FOR e IN [x for x in this.evl if prop(x, 'type') == 'assistant']:
-      FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_use']:
-        membrane::Chat[this.cp]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
-    FOR e IN [x for x in this.evl if prop(x, 'type') == 'user']:
-      FOR b IN [y for y in (prop(prop(e, 'message'), 'content') or []) if prop(y, 'type') == 'tool_result']:
-        body = prop(b, 'content')
-        membrane::Chat[this.cp]:turn:tool[prop(b, 'tool_use_id')].result = body if body is Text else join([prop(c, 'text') for c in (body if body is List else [])], '\n')
+-- the tools the model called and their results, in the stream's order: the ChatTool rows of the outcome (`tools`, `results`)
+ChatMessage.asst_evs getter: [e for e in this.evl if prop(e, 'type') == 'assistant']
+ChatMessage.user_evs getter: [e for e in this.evl if prop(e, 'type') == 'user']
+ChatMessage.tool_uses getter: fold([], [concat(acc, [{'id': prop(b, 'id'), 'name': prop(b, 'name'), 'input': prop(b, 'input')} for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use']) for e in this.asst_evs])
+ChatMessage.tool_results getter: fold([], [concat(acc, [{'id': prop(b, 'tool_use_id'), 'result': prop(b, 'content') if prop(b, 'content') is Text else join([prop(c, 'text') for c in (prop(b, 'content') if prop(b, 'content') is List else [])], '\n')} for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_result']) for e in this.user_evs])
+-- what the CLI's run ended with, as the turn's OUTCOME (below): the answer or the cause, the words said before a failure, the numbers of the result line, the raw exchange and the tools.
+-- It is its OWN getter, which is what the setter listens to (a sibling the trigger does not read would still be its old value then).
+ChatMessage.claude_outcome getter:
+  WHEN this.answer == None or this.over or prop(this.turn_eid, 'message') == None: None
+  ELSE: {'text': this.answer, 'fail': this.fail_why, 'cut': this.cut_text, 'body': (this.answer if this.fail_why == None else (this.cut_text if this.cut_text != '' else None)), 'rc': this.rc, 'usage': this.tokens, 'cost': this.cost, 'calls': this.calls, 'duration': this.took, 'raw': this.raw_head + this.raw_events + this.raw_err, 'names': this.tools_names, 'ids': this.tools_idlist, 'tools': this.tool_uses, 'results': this.tool_results}
+Chat.claude_outcome on-setter turn-finish:
+  WHEN this.claude_outcome != None and not this.over and prop(this.turn_eid, 'message') != None:
+    membrane::Chat[this.cp]:turn.outcome = this.claude_outcome
+
+-- ---- THE ONE FINISH (the outcome contract, #1143): every backend ends a turn by writing ONE value on the turn, `<message>:turn.outcome` ------------------------------------------
+-- {text, fail?, cut?, body?, rc?, usage?, cost?, calls?, duration?, raw?, names?, ids?, tools?, results?}
+--   text      what the response says: the answer, or the cause of a failure
+--   fail      the cause of a failure: set, the turn ends `error` with it as its `error`; none, the turn is `done`
+--   cut       the words the model had said before it failed: the response is marked `interrupted`, with the cause as its `reason`
+--   body      the words kept as the response's body (a SemText the mention rules read); none: no body
+--   rc        the exit code of a process, kept on the response
+--   usage, cost, calls, duration   the turn's numbers, kept on the turn
+--   raw       the raw exchange, appended to `ModelChat:<chat>` (packs/model_chat.c1f)
+--   names, ids    the message's `tools_run` (the names) and `tool_ids` (the ids in call order)
+--   tools, results    [{id, name, input}] and [{id, result}]: the ChatTool rows under the turn (a backend that wrote its rows while it ran leaves them out)
+-- The setter below is the only place a turn is finished: a refusal, the claude CLI's run (`claude_outcome` above), the OpenAI-compatible rung and the peer rung (membrama, claude-peer, openai-peer, anthropic-peer: packs/chat_oai.c1f `oai_end`), the brain's
+-- answer, decline and stop, and a turn the last run left running all write it; so can a backend outside the seat that may write the turn. An outcome on a turn that is over changes nothing.
+-- A response that exists already (the brain's, made at its start) gets the text and the error written on it (a constructor never overwrites a value); else it is made here.
+-- `state` is written LAST (`over` ends what the backends' getters say). Then the outcome is cut down to {fail, taken: True}: the raw text and the tools are in ModelChat and the ChatTool rows, not stored twice.
+ChatTurn.tcp getter: replace(head(this.eid, len(this.eid) - 5), 'membrane::Chat:', '')
+Chat.outcome on-setter turn-outcome:
+  WHEN this.kind == 'turn' and this.outcome is Dict and prop(this.outcome, 'taken') != True and this.state not in ['done', 'error']:
+    o = this.outcome
+    f = prop(o, 'fail')
+    cut = str(prop(o, 'cut') or '')
+    FOR r IN [x for x in [prop(o, 'raw')] if x != None and str(x) != '']:
+      ('ModelChat:' + before(this.tcp, ':message:')).add = r
+    this.ended = clock
+    this.error = f
+    this.usage = prop(o, 'usage')
+    this.cost = prop(o, 'cost')
+    this.calls = prop(o, 'calls')
+    this.duration = prop(o, 'duration')
+    FOR n IN [x for x in [prop(o, 'names')] if x != None]:
+      membrane::Chat[this.tcp].tools_run = n
+    FOR i IN [x for x in [prop(o, 'ids')] if x != None]:
+      membrane::Chat[this.tcp].tool_ids = i
+    FOR e IN [x for x in [prop(this.eid + ':response', 'error')] if x == None]:
+      membrane::Chat[this.tcp]:turn:response = ChatResponse(text: prop(o, 'text'), error: f != None, rc: prop(o, 'rc'), interrupted: (True if cut != '' else None), reason: (f if cut != '' else None))
+    FOR e IN [x for x in [prop(this.eid + ':response', 'error')] if x != None]:
+      membrane::Chat[this.tcp]:turn:response.text = prop(o, 'text')
+      membrane::Chat[this.tcp]:turn:response.error = f != None
+    FOR t IN [x for x in [prop(o, 'body')] if x != None and str(x) != '']:
+      membrane::Chat[this.tcp]:turn:response:body = SemText(text: str(t))
+      membrane::Chat[this.tcp]:turn:response:body.mention = True
+    FOR b IN (prop(o, 'tools') or []):
+      membrane::Chat[this.tcp]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
+    FOR r IN (prop(o, 'results') or []):
+      membrane::Chat[this.tcp]:turn:tool[prop(r, 'id')].result = prop(r, 'result')
+    this.state = 'error' if f != None else 'done'
+    this.outcome = {'fail': f, 'taken': True}
 
 
 -- ---- after the answer: the raw output is dropped ----------------------------------------------------------------------------------------------
@@ -347,10 +372,7 @@ Boot.interrupted getter: [head(replace(prop(r, 'k'), 'membrane::Chat:', ''), len
 Boot.interrupted on-setter turn-interrupted:
   WHEN len(this.interrupted) > 0:
     FOR i IN this.interrupted:
-      membrane::Chat[i]:turn.state = 'error'
-      membrane::Chat[i]:turn.ended = clock
-      membrane::Chat[i]:turn.error = 'interrupted: the seat stopped while this turn was running'
-      membrane::Chat[i]:turn:response = ChatResponse(text: 'interrupted: the seat stopped while this turn was running', error: True)
+      membrane::Chat[i]:turn.outcome = {'text': 'interrupted: the seat stopped while this turn was running', 'fail': 'interrupted: the seat stopped while this turn was running'}
 
 -- ---- STOP (the abort route of chat.c1f): the answer so far is kept on the message, it is marked aborted, and its CLI is killed (`Command.stop`: this pack imports `proc`, which owns the verb).
 -- The id is the request's own, so a second stop of the same turn is a new write (an equal value is no write); the turn's receipt then ends it (`answer` above).
