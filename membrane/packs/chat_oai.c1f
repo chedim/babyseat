@@ -197,19 +197,8 @@ ChatMessage.oai_cut getter:
   ELSE: strip(prop(this.oai_round, 'said_all') or str(prop(this.oai_acc, 'text') or ''))
 ChatMessage.oai_end getter:
   WHEN this.oai_res == None: None
-  ELSE: {'cut': this.oai_cut, 'fail': prop(this.oai_res, 'fail'), 'text': str(prop(this.oai_res, 'fail') or prop(this.oai_res, 'text') or ''), 'usage': prop(this.oai_round, 'usage_out'), 'calls': prop(this.oai_round, 'n'), 'names': prop(this.oai_round, 'names_before'), 'ids': join(prop(this.oai_round, 'ids_before'), ' ')}
--- (a write in a setter is seen by the lines after it: `state` is written LAST, because `over` ends what `oai_res` says)
+  ELSE: {'cut': this.oai_cut, 'fail': prop(this.oai_res, 'fail'), 'text': str(prop(this.oai_res, 'fail') or prop(this.oai_res, 'text') or ''), 'body': (str(prop(this.oai_res, 'text') or '') if prop(this.oai_res, 'fail') == None else (this.oai_cut if this.oai_cut != '' else None)), 'usage': prop(this.oai_round, 'usage_out'), 'calls': prop(this.oai_round, 'n'), 'names': prop(this.oai_round, 'names_before'), 'ids': join(prop(this.oai_round, 'ids_before'), ' '), 'raw': prop(this.oai_round, 'raw')}
+-- the end of the turn is its OUTCOME (packs/chat_turn.c1f, "THE ONE FINISH"): the shared finish there writes the state, the numbers, the response, its body and the ModelChat log
 Chat.oai_end on-setter oai-finish:
-  WHEN this.oai_end != None and not this.over:
-    ('ModelChat:' + before(this.cp, ':message:')).add = prop(this.oai_round, 'raw')
-    membrane::Chat[this.cp]:turn.ended = clock
-    membrane::Chat[this.cp]:turn.error = prop(this.oai_end, 'fail')
-    membrane::Chat[this.cp]:turn.usage = prop(this.oai_end, 'usage')
-    membrane::Chat[this.cp]:turn.calls = prop(this.oai_end, 'calls')
-    this.tools_run = prop(this.oai_end, 'names')
-    this.tool_ids = prop(this.oai_end, 'ids')
-    membrane::Chat[this.cp]:turn:response = ChatResponse(text: prop(this.oai_end, 'text'), error: prop(this.oai_end, 'fail') != None, interrupted: (True if prop(this.oai_end, 'cut') != '' else None), reason: (prop(this.oai_end, 'fail') if prop(this.oai_end, 'cut') != '' else None))
-    FOR t IN ([prop(this.oai_end, 'text')] if prop(this.oai_end, 'fail') == None else ([prop(this.oai_end, 'cut')] if prop(this.oai_end, 'cut') != '' else [])):
-      membrane::Chat[this.cp]:turn:response:body = SemText(text: t)
-      membrane::Chat[this.cp]:turn:response:body.mention = True
-    membrane::Chat[this.cp]:turn.state = 'error' if prop(this.oai_end, 'fail') != None else 'done'
+  WHEN this.oai_end != None and not this.over and prop(this.turn_eid, 'message') != None:
+    membrane::Chat[this.cp]:turn.outcome = this.oai_end

@@ -17,7 +17,7 @@ Each turn adds, in order:
 
 ## How a rung feeds it
 
-A rung writes ONE value, `ModelChat:<chat>.add` (the text of what just happened), and `model_chat.c1f` appends it. A round's text is its own getter `raw` (`ChatRound.raw`, `MbRound.raw`); the CLI's is `raw_head` + `raw_events` + `raw_err` written when the run ends. It is written when a round with tool calls has its results (`oai-next`, `mb-next`), and when the turn ends (`oai-finish`, the CLI's `turn-finish`), so a failed turn says why. Nothing about a transport (slots, rings, Fetch receipts) is in it; the key rides in a header the driver adds and is in no text. Each setter writes `add` ONCE (a second write of one property in one setter does not stand).
+A rung writes ONE value, `ModelChat:<chat>.add` (the text of what just happened), and `model_chat.c1f` appends it. A round's text is its own getter `raw` (`ChatRound.raw`, `MbRound.raw`); the CLI's is `raw_head` + `raw_events` + `raw_err` written when the run ends. It is written when a round with tool calls has its results (`oai-next`, `mb-next`), and when the turn ends: the backend's end (`oai-finish`, the CLI's `turn-finish`) puts it in the turn's `outcome.raw`, and the one finish (`turn-outcome`, `chat_turn.c1f`) adds it, so a failed turn says why. Nothing about a transport (slots, rings, Fetch receipts) is in it; the key rides in a header the driver adds and is in no text. Each setter writes `add` ONCE (a second write of one property in one setter does not stand).
 
 ## The bound
 

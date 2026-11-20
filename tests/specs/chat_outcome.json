@@ -1,0 +1,535 @@
+[
+ {
+  "name": "the outcome contract: a backend writes ONE value, turn.outcome, and the shared finish writes the state, the numbers, the response and its body, the tools, the message tool list and the ModelChat log",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1",
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome",
+    "value": {
+     "text": "All done.",
+     "body": "All done.",
+     "usage": {
+      "input_tokens": 3,
+      "output_tokens": 4
+     },
+     "cost": 0.01,
+     "calls": 2,
+     "duration": 50,
+     "raw": "[assistant]\nAll done.\n",
+     "names": [
+      "entity_read"
+     ],
+     "ids": "tu1",
+     "tools": [
+      {
+       "id": "tu1",
+       "name": "mcp__membrane__entity_read",
+       "input": {
+        "spec": "Goal:a"
+       }
+      }
+     ],
+     "results": [
+      {
+       "id": "tu1",
+       "result": "Goal:a (Goal) {}"
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "status",
+    "equals": "done"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "error",
+    "none": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "usage.input_tokens",
+    "equals": 3
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "cost",
+    "equals": 0.01
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "calls",
+    "equals": 2
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "duration",
+    "equals": 50
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "text",
+    "equals": "All done."
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "error",
+    "equals": false
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "interrupted",
+    "none": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response:body",
+    "prop": "text",
+    "equals": "All done."
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "tools_run",
+    "equals": [
+     "entity_read"
+    ]
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "tool_ids",
+    "equals": "tu1"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:tool:tu1",
+    "prop": "name",
+    "equals": "mcp__membrane__entity_read"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:tool:tu1",
+    "prop": "input.spec",
+    "equals": "Goal:a"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:tool:tu1",
+    "prop": "result",
+    "equals": "Goal:a (Goal) {}"
+   },
+   {
+    "eid": "ModelChat:main",
+    "prop": "text",
+    "contains": "[assistant]\nAll done."
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome.taken",
+    "equals": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome.raw",
+    "none": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome.tools",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "the outcome contract: a failure after words were said ends the turn in error, the response carries the cause and is marked interrupted, and its body keeps the words",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1",
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome",
+    "value": {
+     "text": "claude failed (rc 1): boom",
+     "fail": "claude failed (rc 1): boom",
+     "cut": "Half an answer",
+     "body": "Half an answer",
+     "rc": 1
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "status",
+    "equals": "error"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "error",
+    "equals": "claude failed (rc 1): boom"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "text",
+    "equals": "claude failed (rc 1): boom"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "error",
+    "equals": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "rc",
+    "equals": 1
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "interrupted",
+    "equals": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "reason",
+    "equals": "claude failed (rc 1): boom"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response:body",
+    "prop": "text",
+    "equals": "Half an answer"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome.fail",
+    "equals": "claude failed (rc 1): boom"
+   }
+  ]
+ },
+ {
+  "name": "the outcome contract: a failure with nothing said has no body and is not marked interrupted",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1",
+     "state": "running"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome",
+    "value": {
+     "text": "The model m could not be called",
+     "fail": "The model m could not be called"
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "status",
+    "equals": "error"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "error",
+    "equals": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "text",
+    "equals": "The model m could not be called"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "interrupted",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "the outcome contract: an outcome written on a turn that is already over changes nothing",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1",
+     "state": "done"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome",
+    "value": {
+     "text": "late",
+     "body": "late"
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "status",
+    "equals": "done"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome.taken",
+    "none": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "ended",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "the outcome contract: a turn whose response already exists (a peer one, made at its start) gets the outcome text and error on it",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hi"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1",
+     "state": "running"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatresponse"
+     ],
+     "error": false
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "outcome",
+    "value": {
+     "text": "The turn was stopped before the brain answered.",
+     "fail": "stopped"
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "status",
+    "equals": "error"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "error",
+    "equals": "stopped"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "text",
+    "equals": "The turn was stopped before the brain answered."
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "error",
+    "equals": true
+   }
+  ]
+ }
+]
