@@ -1316,6 +1316,33 @@
     "claims": [],
     "boot_facts": []
   },
+  "owed": {
+    "imports": [
+      "router",
+      "chat",
+      "chat_turn"
+    ],
+    "classes": [
+      "Chat",
+      "ChatMessage",
+      "ChatTurn",
+      "Minds",
+      "Owed"
+    ],
+    "members": 9,
+    "writes": [
+      "membrane:*.ended",
+      "membrane:*.items",
+      "membrane:*.ns",
+      "membrane:*.state",
+      "membrane:*.text"
+    ],
+    "claims": [],
+    "boot_facts": [],
+    "virtual": [
+      "Owed"
+    ]
+  },
   "peer": {
     "imports": [
       "boot"

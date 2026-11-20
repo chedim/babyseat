@@ -17,8 +17,18 @@ One write of the whole answer finishes the turn, and the page shows it as a fini
 
 - Write the answer once, complete. There is no streaming: the page shows nothing until this write.
 - The answer goes to the message it answers: use that message's own id, and for a session message the session's key.
-- A change that is not a person speaking needs no answer. Do not write a response for it. A message you decide not to answer stays as it is until the person stops it.
+- A change that is not a person speaking needs no answer. Do not write a response for it.
 - While you work, the turn shows that the brain has it. If you are not connected, the person is told so in plain words.
+
+## What you owe, and how to resolve it
+
+The seat keeps the list for you: `Owed:<your namespace>`, property `items`, read it with `entity_read {spec: "Owed:<ns>", prop: "items"}`. It holds, oldest first, one `{message, response}` for every turn you have taken and not finished (`message` is the ChatMessage, `response` its answer entity), and `[]` when you owe nothing. Read it instead of working out your duties from the log, and again after any step that failed.
+
+A turn leaves the list when it is finished. Resolve each item with a write to its `response` entity, one of two:
+- Answer: write `text` (above).
+- Decline: write `declined` with the reason, `entity_write {spec: "<the response eid>", prop: "declined", value: "<why you do not answer>"}`. The turn finishes as done and the person sees `Declined: <reason>`.
+
+A turn the person stops, or one that errors, leaves the list too.
 
 ## Reaching outside the graph while you answer
 
