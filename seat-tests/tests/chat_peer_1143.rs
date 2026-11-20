@@ -66,7 +66,6 @@ fn call(port: u16, tool: &str, args: J) -> String {
     let r: J = serde_json::from_str(&body).unwrap();
     r["result"]["content"][0]["text"].as_str().unwrap_or_else(|| panic!("{r}")).to_string()
 }
-fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})) }
 
 /// the peer's end of the control rings: attach (the seat makes them at start), and run a Link over them
 struct PeerEnd { ctl: Shm, link: Link, events: Vec<Event> }
