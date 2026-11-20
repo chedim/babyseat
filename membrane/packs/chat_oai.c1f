@@ -45,15 +45,14 @@ ChatMessage.oai_cfg getter:
   ELSE WHEN this.oai_entry == None and not this.oai_local: None
   ELSE WHEN this.oai_root == '': {'refuse': 'The model ' + this.model_eff + ' is not a claude rung, and its cloud_models entry names no base_url. Add "base_url": "<the endpoint, e.g. https://api.example.com>" (and "api_key_env": "<the NAME of the environment variable that holds its key>") to the entry in the cloud_models fact, restart the seat, then send the message again.'}
   ELSE: {'url': this.oai_root + str(prop(this.oai_entry, 'chat_path') or '/v1/chat/completions'), 'model': this.model_eff, 'bearer_env': prop(this.oai_entry, 'api_key_env'), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
-ChatMessage.oai_plan getter: {'refuse': prop(this.oai_cfg, 'refuse')} if prop(this.oai_cfg, 'refuse') != None else {'oai': this.oai_cfg}
+ChatMessage.oai_plan getter: {'refuse': prop(this.oai_cfg, 'refuse')} if prop(this.oai_cfg, 'refuse') != None else {'start': this.oai_cfg}
 
 -- ---- start: the door's tool list, then round 1 -------------------------------------------------------------------------------------------------------------
+-- (the peer rung, packs/chat_membrama.c1f, starts the same way: the door tool list first, read by the same Fetch; its own setter opens round 1)
 Chat.plan on-setter oai-start:
-  WHEN prop(this.plan, 'oai') != None:
-    membrane::Chat[this.cp]:turn.state = 'running'
-    membrane::Chat[this.cp]:turn.started = clock
-    membrane::Chat[this.cp]:turn.oai = prop(this.plan, 'oai')
-    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': prop(prop(this.plan, 'oai'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'oai'), 'admin_env'), 'timeout_s': prop(prop(this.plan, 'oai'), 'timeout_s')}
+  WHEN prop(this.plan, 'backend') in ['oai', 'peer'] and prop(this.plan, 'start') != None:
+    membrane::Chat[this.cp]:turn.oai = prop(this.plan, 'start')
+    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': prop(prop(this.plan, 'start'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'start'), 'admin_env'), 'timeout_s': prop(prop(this.plan, 'start'), 'timeout_s')}
 ChatMessage.oai_trr getter: prop('Fetch:oai:' + this.cp + ':tools', 'request_result')
 ChatMessage.oai_tj getter: ([j for j in [json(str(prop(this.oai_trr, 'body') or ''))] if j is not Error] or [{}])[0]
 ChatMessage.oai_tlist getter: prop(prop(this.oai_tj, 'result'), 'tools')

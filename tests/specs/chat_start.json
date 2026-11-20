@@ -1,0 +1,1382 @@
+[
+ {
+  "name": "one way to start a turn: the plan: the claude CLI: the backend is claude and its start is the argv and stdin of the CLI",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude",
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "claude"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.backend",
+    "equals": "claude"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.argv.0",
+    "equals": "env"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.stdin",
+    "contains": "hello"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the plan: a claude check that fails is the refuse of the claude backend, with no start",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.backend",
+    "equals": "claude"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "contains": "chat_claude_bin"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the plan: no model chosen is the backend none, which only refuses",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "none"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.backend",
+    "equals": "none"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "contains": "No model is chosen"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the plan: an OpenAI-compatible model: the backend is oai and its start is the endpoint settings",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "gpt-x",
+     "cloud_models": [
+      {
+       "name": "gpt-x",
+       "base_url": "https://api.example.com/",
+       "api_key_env": "K"
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "oai"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.backend",
+    "equals": "oai"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.url",
+    "equals": "https://api.example.com/v1/chat/completions"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.bearer_env",
+    "equals": "K"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the plan: an OpenAI-compatible model with no endpoint is the refuse of the oai backend",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "gpt-x",
+     "cloud_models": [
+      {
+       "name": "gpt-x"
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.backend",
+    "equals": "oai"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "contains": "base_url"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the plan: a peer model (membrama): the backend is peer and its start is the peer settings",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f",
+   "membrane/packs/chat_membrama.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "mb",
+     "cloud_models": [
+      {
+       "name": "mb",
+       "backend": "membrama",
+       "peer": "mbp",
+       "ns": "mbns",
+       "max_new": 64
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "peer"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.backend",
+    "equals": "peer"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.ns",
+    "equals": "mbns"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.peer",
+    "equals": "mbp"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the plan: a brain peer that has the chat and is up: the backend is brain and its start names the namespace",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude",
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   },
+   {
+    "eid": "Minds:seat",
+    "class": "Minds",
+    "props": {
+     "chat": "rosie"
+    }
+   },
+   {
+    "eid": "Vm:rosie",
+    "class": "Vm",
+    "props": {
+     "link": "up"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "brain"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.backend",
+    "equals": "brain"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.ns",
+    "equals": "rosie"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the plan: a brain peer that has the chat takes it whatever model is chosen (a peer model here)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f",
+   "membrane/packs/chat_membrama.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "mb",
+     "cloud_models": [
+      {
+       "name": "mb",
+       "backend": "membrama",
+       "peer": "mbp",
+       "ns": "mbns",
+       "max_new": 64
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   },
+   {
+    "eid": "Minds:seat",
+    "class": "Minds",
+    "props": {
+     "chat": "rosie"
+    }
+   },
+   {
+    "eid": "Vm:rosie",
+    "class": "Vm",
+    "props": {
+     "link": "up"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "brain"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.ns",
+    "equals": "rosie"
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the plan: a brain peer that is not up is the refuse of the brain backend",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude",
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   },
+   {
+    "eid": "Minds:seat",
+    "class": "Minds",
+    "props": {
+     "chat": "rosie"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.backend",
+    "equals": "brain"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "contains": "not up"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the start: the claude CLI: the turn records its backend and the claude start runs the CLI as a Command",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude",
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "queued",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "backend",
+    "equals": "claude"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "started",
+    "equals": 2.0
+   },
+   {
+    "eid": "membrane::Command:chat:main:message:1-1",
+    "prop": "cmd.0",
+    "equals": "env"
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the start: a refused plan ends the turn in error with the reason, records no backend and starts nothing",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude"
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "queued",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "status",
+    "equals": "error"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "backend",
+    "none": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "started",
+    "none": true
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "text",
+    "contains": "chat_claude_bin"
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the start: an OpenAI-compatible model: the turn records its backend and its endpoint settings, and the start reads the door tool list",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "gpt-x",
+     "cloud_models": [
+      {
+       "name": "gpt-x",
+       "base_url": "https://api.example.com/",
+       "api_key_env": "K"
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "queued",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "backend",
+    "equals": "oai"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "started",
+    "equals": 2.0
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "oai.model",
+    "equals": "gpt-x"
+   },
+   {
+    "eid": "Fetch:oai:main:message:1-1:tools",
+    "prop": "request_result.id.mid",
+    "equals": "main:message:1-1"
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the start: a peer model: the turn records its backend and the peer settings, and the same start as the oai rung reads the door tool list",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f",
+   "membrane/packs/chat_membrama.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "mb",
+     "cloud_models": [
+      {
+       "name": "mb",
+       "backend": "membrama",
+       "peer": "mbp",
+       "ns": "mbns",
+       "max_new": 64
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "queued",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "backend",
+    "equals": "peer"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "started",
+    "equals": 2.0
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "oai.ns",
+    "equals": "mbns"
+   },
+   {
+    "eid": "Fetch:oai:main:message:1-1:tools",
+    "prop": "request_result.id.mid",
+    "equals": "main:message:1-1"
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the start: a brain peer: the turn records its backend and the namespace, runs, and has the empty response the brain answers on; nothing else starts",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "claude",
+     "chat_claude_bin": "/opt/fake/claude",
+     "anthropic_key_set": true
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   },
+   {
+    "eid": "Minds:seat",
+    "class": "Minds",
+    "props": {
+     "chat": "rosie"
+    }
+   },
+   {
+    "eid": "Vm:rosie",
+    "class": "Vm",
+    "props": {
+     "link": "up"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "queued",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "status",
+    "equals": "running"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "backend",
+    "equals": "brain"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "brain",
+    "equals": "rosie"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "prop": "started",
+    "equals": 2.0
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn:response",
+    "prop": "error",
+    "equals": false
+   }
+  ]
+ }
+]
