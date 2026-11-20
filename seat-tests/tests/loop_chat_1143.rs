@@ -357,8 +357,30 @@ fn the_owed_pack_loads_on_a_running_seat_and_offers_the_turns_already_taken() {
     put(&run, "Pack:owed", "text", json!(text));
     assert!(wait_for(&run, "Pack:owed", "state", "loaded", 60).contains("loaded"), "{}", read(&run, "Pack:owed", "error"));
     assert!(owed_has(&run, &a, true, 60), "the turn taken before the load is owed: {}", owed(&run));
+    assert!(owed(&run).contains("taken before the pack"), "the seeded item carries the words: {}", owed(&run));
+    assert!(!read(&run, "membrane::Owed:kitchen", "banner").trim().is_empty(), "the banner is there after a live load");
     let b = send(&run, "after");
     assert!(owed_has(&run, &b, true, 30), "{}", owed(&run));
     assert_eq!(ask(&mut peer, &eid(&a, ":turn:response"), "text", json!("late")), None);
     assert!(owed_has(&run, &a, false, 30), "{}", owed(&run));
+}
+
+#[test]
+fn an_owed_item_carries_the_persons_words_and_the_node_carries_the_same_banner_a_turn_shows() {
+    let (run, _n, _peer) = seat_with_grants("lc-owed-banner", Some(json!(["*"])), &brain_facts("kitchen"));
+    link_up(&run);
+    let banner = wait_for(&run, "membrane::Owed:kitchen", "banner", "", 30);
+    assert!(!banner.trim().is_empty() && !banner.contains("has no"), "the banner is there with nothing owed: {banner}");
+    let a = send(&run, "the whole words of the person, with: punctuation");
+    assert!(owed_has(&run, &a, true, 30));
+    assert!(owed(&run).contains("the whole words of the person, with: punctuation"), "the item carries the text: {}", owed(&run));
+    // the same banner a turn shows the model: the message's own banner_slot (readable while its turn runs)
+    let slot = read(&run, &eid(&a, ""), "banner_slot");
+    assert_eq!(read(&run, "membrane::Owed:kitchen", "banner"), slot, "identical to ChatMessage.banner_slot");
+    // live: the model's banner edit shows up, and the other banners' words follow the main one
+    put(&run, "membrane::Banner:admin:main", "text", json!("MAIN NOTE"));
+    put(&run, "membrane::Banner:extra", "words", json!("EXTRA WORDS"));
+    let b2 = wait_for(&run, "membrane::Owed:kitchen", "banner", "EXTRA WORDS", 30);
+    assert!(b2.starts_with("MAIN NOTE") && b2.contains("EXTRA WORDS"), "{b2}");
+    assert_eq!(read(&run, &eid(&a, ""), "banner_slot"), b2, "still identical after the edit");
 }
