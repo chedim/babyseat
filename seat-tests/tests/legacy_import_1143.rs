@@ -26,7 +26,7 @@ fn ticking() -> Box<dyn Fn() -> f64 + Send + Sync> {
     let n = Arc::new(AtomicU64::new(0));
     Box::new(move || 1_800_000_000.0 + n.fetch_add(1, Ordering::SeqCst) as f64)
 }
-const PACKS: &[&str] = &["entity", "boot", "fs", "proc", "fetch", "sql", "store", "door", "semtext", "mentions", "chat", "chat_turn", "door_session", "door_auth", "legacy_import", "legacy_persons"];
+const PACKS: &[&str] = &["entity", "boot", "fs", "proc", "fetch", "sql", "store", "door", "semtext", "mentions", "chat", "model_chat", "chat_turn", "door_session", "door_auth", "legacy_import", "legacy_persons"];
 fn host_at(d: &std::path::Path) -> Host { host_facts(d, Map::new()) }
 fn host_facts(d: &std::path::Path, facts: Map<String, J>) -> Host {
     let h = Host::open({ let mut o = Options::new(Some(store_path(d))); o.clock = ticking(); o }).unwrap();
