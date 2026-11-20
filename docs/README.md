@@ -25,6 +25,7 @@ A path written `cliffvm:<path>` is a file of the engine's repository, github.com
 | page | what it is |
 |---|---|
 | [porting-brief.md](porting-brief.md) | the rules for c1f and Rust work (read first) |
+| [chat-backends.md](chat-backends.md) | one interface for every program that answers a message (the claude CLI, OpenAI-compatible, peers, the brain): choose, plan, start, live progress, finish; how to add a backend |
 | [membrama-chat.md](membrama-chat.md) | a chat turn answered by a peer over shared memory (the local model peer membrama, or a Claude peer), as a rung beside `chat_oai`: the entry, the peer, the nodes of a round, retirement, errors, what is tested and what is not built |
 | [model-chat.md](model-chat.md) | the raw exchange with the model, one entity per chat (`ModelChat:<chat>`), the same shape whichever rung answered: the prompt, the reply with its thinking, each call and result; how a rung feeds it, the bound, what the Log tab shows |
 | [logview.md](logview.md) | the boundary log as a view: what entered the VM (the journal's outside writes), read by a peer from its own cursor as small records, the cursor in the peer's namespace |
@@ -53,5 +54,5 @@ A path written `cliffvm:<path>` is a file of the engine's repository, github.com
 
 ## The model's own pages
 
-The topics the model reads with `entity_read Help:<topic>` are files in `membrane/apps/barest.c1f/help/` (`c1f`, `packs`, `upgrade`, `banner`, `cliff`, `semtext`, `sql`, `legacy`, `ha`, `settings`, `page`);
+The topics the model reads with `entity_read Help:<topic>` are files in `membrane/apps/barest.c1f/help/` (`start`, `c1f`, `packs`, `upgrade`, `banner`, `cliff`, `semtext`, `sql`, `legacy`, `ha`, `settings`, `environment`, `page`, `edit`, `peers`, `brain`, `chat-backends`);
 every code block in them is a test (`seat-tests/tests/help_1143.rs`).
