@@ -268,3 +268,30 @@ fn code_on_a_node_of_a_namespace_that_is_no_peer_up_is_not_run() {
     std::thread::sleep(Duration::from_secs(4));
     assert!(read(&run, "membrane::Cliff:nobody:one", "result").contains("has no"), "{}", read(&run, "membrane::Cliff:nobody:one", "result"));
 }
+
+// ---- a refused node ANSWERS (a peer must never wait on a silence) ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_bad_id_answers_error_in_plain_words() {
+    let (run, _n, mut peer) = seat_with_grants("lc-cliff-id", Some(json!(["*"])), &[]);
+    assert_eq!(ask(&mut peer, "membrane::Cliff:kitchen:call_2_2_0", "code", json!("1 + 1")), None);
+    let e = wait_for(&run, "membrane::Cliff:kitchen:call_2_2_0", "error", "refused", 60);
+    assert!(e.contains("refused") && e.contains("letters and digits"), "{e}");
+    assert!(read(&run, "membrane::Cliff:kitchen:call_2_2_0", "result").contains("has no"));
+}
+
+#[test]
+fn a_namespace_that_is_not_a_connected_peer_answers_error() {
+    let (run, _n, _peer) = seat_with_grants("lc-cliff-ns", Some(json!(["*"])), &[]);
+    put(&run, "membrane::Cliff:nobody:one", "code", json!("1 + 1"));
+    let e = wait_for(&run, "membrane::Cliff:nobody:one", "error", "refused", 60);
+    assert!(e.contains("refused") && e.contains("nobody") && e.contains("not a connected peer"), "{e}");
+}
+
+#[test]
+fn empty_code_answers_error() {
+    let (run, _n, mut peer) = seat_with_grants("lc-cliff-empty", Some(json!(["*"])), &[]);
+    assert_eq!(ask(&mut peer, "membrane::Cliff:kitchen:e1", "code", json!("  ")), None);
+    let e = wait_for(&run, "membrane::Cliff:kitchen:e1", "error", "refused", 60);
+    assert!(e.contains("code is empty"), "{e}");
+}
