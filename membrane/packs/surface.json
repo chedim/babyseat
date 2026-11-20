@@ -101,6 +101,19 @@
       "Step"
     ]
   },
+  "brain_tools": {
+    "imports": [
+      "chat",
+      "chat_turn"
+    ],
+    "classes": [
+      "ChatMessage"
+    ],
+    "members": 6,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
   "chat": {
     "imports": [
       "door",

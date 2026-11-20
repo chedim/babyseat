@@ -135,6 +135,18 @@
       "Step"
     ]
   },
+  "brain_tools": {
+    "getters": {
+      "ChatMessage.brain_has": "Bool",
+      "ChatMessage.history_view": "Dict?",
+      "ChatMessage.live_tools": "List(Any)?",
+      "ChatMessage.page_view": "Dict?",
+      "ChatMessage.stream_view": "Dict?",
+      "ChatMessage.view": "Dict?"
+    },
+    "writes": {},
+    "findings": []
+  },
   "chat": {
     "getters": {
       "Chat.seat_base": "Any",
@@ -143,20 +155,20 @@
       "ChatLine.kind": "Text",
       "ChatMessage.cp": "Text",
       "ChatMessage.cut": "Any",
-      "ChatMessage.history_view": "Dict",
+      "ChatMessage.history_view": "Dict?",
       "ChatMessage.kept_words": "Any",
       "ChatMessage.mid": "Text",
-      "ChatMessage.page_view": "Dict",
+      "ChatMessage.page_view": "Dict?",
       "ChatMessage.resp_eid": "Text?",
       "ChatMessage.said": "Any",
       "ChatMessage.sid": "Text?",
-      "ChatMessage.stream_view": "Dict",
+      "ChatMessage.stream_view": "Dict?",
       "ChatMessage.tool_keys": "List(Any)",
       "ChatMessage.tool_rows": "List(Dict)",
       "ChatMessage.tstate": "Any",
       "ChatMessage.turn_eid": "Text?",
       "ChatMessage.turn_view": "Dict",
-      "ChatMessage.view": "Dict",
+      "ChatMessage.view": "Dict?",
       "ChatResponse.kind": "Text",
       "ChatResponse.summary": "Text",
       "ChatTool.kind": "Text",

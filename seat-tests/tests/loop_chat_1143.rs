@@ -452,3 +452,19 @@ fn a_running_brain_turn_shows_its_tool_rows_on_the_page_routes_as_they_are_issue
     assert_eq!(tools_names(&row), vec!["entity_read", "entity_write"], "after the finish: {row}");
     assert_eq!(rows(&row).len(), 2, "{row}");
 }
+
+#[test]
+fn the_brain_tools_pack_loads_on_a_running_seat_and_the_rows_show() {
+    let (run, _n, mut peer) = seat_ex("lc-tools-live", Some(json!(["*"])), &brain_facts("kitchen"), &["brain_tools"]);
+    link_up(&run);
+    let id = send(&run, "tools, pack loaded later");
+    state_is(&run, &id, "running", 20);
+    let text = std::fs::read_to_string(repo().join("membrane/packs/brain_tools.c1f")).unwrap();
+    put(&run, "Pack:brain_tools", "text", json!(text));
+    assert!(wait_for(&run, "Pack:brain_tools", "state", "loaded", 60).contains("loaded"), "{}", read(&run, "Pack:brain_tools", "error"));
+    assert_eq!(ask(&mut peer, &eid(&id, ":turn:tool:c1"), "name", json!("entity_read")), None);
+    assert_eq!(ask(&mut peer, &eid(&id, ""), "tool_ids", json!("c1")), None);
+    let v = until_tools(&run, &id, 1, 30);
+    assert_eq!(tools_names(&v), vec!["entity_read"], "{v}");
+    assert_eq!(rows(&page_row(&run, &id)).len(), 1);
+}
