@@ -29,10 +29,11 @@ fn peer_name() -> String { format!("a{}x{}", std::process::id() % 100000, common
 struct Names(String);
 impl Drop for Names { fn drop(&mut self) { for part in ["ctl", "sc", "pc"] { let _ = graphlink_shm::remove_region(&format!("/gl-{}-{part}", self.0)); } } }
 
-fn command(dir: &std::path::Path, facts: &[String]) -> Command {
+fn command(dir: &std::path::Path, facts: &[String]) -> Command { command_ex(dir, facts, &[]) }
+fn command_ex(dir: &std::path::Path, facts: &[String], without: &[&str]) -> Command {
     let r = repo();
     let list = std::fs::read_to_string(r.join("membrane/apps/barest.packs")).unwrap();
-    let packs: Vec<String> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect();
+    let packs: Vec<String> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#') && !without.contains(l)).map(|n| r.join(format!("membrane/packs/{n}.c1f")).to_string_lossy().to_string()).collect();
     let mut cmd = Command::new(cliffvm_bin());
     cmd.current_dir(dir).arg("run").args(packs).arg(r.join("membrane/apps/barest.c1f")).args(["--store", dir.join("seat.sqlite").to_str().unwrap(), "--port", "0"]);
     cmd.arg("--fact").arg(format!("door_secret_file={}", dir.join("door.secret").display()));
@@ -40,8 +41,9 @@ fn command(dir: &std::path::Path, facts: &[String]) -> Command {
     for f in facts { cmd.arg("--fact").arg(f); }
     cmd
 }
-fn start(dir: &std::path::Path, facts: &[String]) -> Run {
-    let mut child = command(dir, facts).stdout(Stdio::piped()).stderr(std::fs::File::create(dir.join("err.log")).unwrap()).spawn().unwrap();
+fn start(dir: &std::path::Path, facts: &[String]) -> Run { start_ex(dir, facts, &[]) }
+fn start_ex(dir: &std::path::Path, facts: &[String], without: &[&str]) -> Run {
+    let mut child = command_ex(dir, facts, without).stdout(Stdio::piped()).stderr(std::fs::File::create(dir.join("err.log")).unwrap()).spawn().unwrap();
     let out = child.stdout.take().unwrap();
     let (tx, rx) = channel();
     std::thread::spawn(move || for l in BufReader::new(out).lines().map_while(Result::ok) { if tx.send(l).is_err() { break; } });
@@ -117,12 +119,13 @@ fn put(run: &Run, eid: &str, prop: &str, v: J) {
     let mut out = vec![]; let _ = s.read_to_end(&mut out);
 }
 /// a seat with one peer `kitchen` whose hello token carries `grants` (None: no claim) and `facts` more; the peer is open
-fn seat_with_grants(tag: &str, grants: Option<J>, facts: &[String]) -> (Run, Names, PeerEnd) {
+fn seat_with_grants(tag: &str, grants: Option<J>, facts: &[String]) -> (Run, Names, PeerEnd) { seat_ex(tag, grants, facts, &[]) }
+fn seat_ex(tag: &str, grants: Option<J>, facts: &[String], without: &[&str]) -> (Run, Names, PeerEnd) {
     let name = peer_name();
     let names = Names(name.clone());
     let mut all = vec![format!("peers={}", decl(&name, Some("kitchen")))];
     all.extend(facts.iter().cloned());
-    let run = start(&tmp(tag), &all);
+    let run = start_ex(&tmp(tag), &all, without);
     let mut claims = vec![("ns", json!("kitchen"))];
     if let Some(g) = grants { claims.push(("grants", g)); }
     let token = graphlink_auth::mint_with(&secret(&run.dir), "peer:kitchen", "P", &claims, 600.0, now()).unwrap();
@@ -294,4 +297,68 @@ fn empty_code_answers_error() {
     assert_eq!(ask(&mut peer, "membrane::Cliff:kitchen:e1", "code", json!("  ")), None);
     let e = wait_for(&run, "membrane::Cliff:kitchen:e1", "error", "refused", 60);
     assert!(e.contains("code is empty"), "{e}");
+}
+
+// ---- WHAT THE BRAIN OWES: `Owed:<ns>.items`, the seat's list of the turns the brain has taken and not finished --------------------------------------------------
+
+fn owed(run: &Run) -> String { read(run, "membrane::Owed:kitchen", "items") }
+fn owed_has(run: &Run, id: &str, want: bool, secs: u64) -> bool {
+    let end = Instant::now() + Duration::from_secs(secs);
+    loop { let has = owed(run).contains(&eid(id, "")); if has == want || Instant::now() > end { return has == want; } std::thread::sleep(Duration::from_millis(100)); }
+}
+
+#[test]
+fn a_message_the_brain_took_is_owed_with_its_answer_entity_and_answering_removes_it() {
+    let (run, _n, mut peer) = seat_with_grants("lc-owed", Some(json!(["*"])), &brain_facts("kitchen"));
+    link_up(&run);
+    assert!(wait_for(&run, "membrane::Owed:kitchen", "items", "[]", 30).contains("[]"), "nothing owed at first: {}", owed(&run));
+    let a = send(&run, "first");
+    let b = send(&run, "second");
+    assert!(owed_has(&run, &a, true, 30) && owed_has(&run, &b, true, 30), "both are owed: {}", owed(&run));
+    let o = owed(&run);
+    assert!(o.contains(&eid(&a, ":turn:response")), "the answer entity is named: {o}");
+    assert!(o.find(&a).unwrap() < o.find(&b).unwrap(), "oldest first: {o}");
+    assert_eq!(ask(&mut peer, &eid(&a, ":turn:response"), "text", json!("done")), None);
+    assert!(owed_has(&run, &a, false, 30), "an answered turn leaves the list: {}", owed(&run));
+    assert!(owed_has(&run, &b, true, 5), "the other stays: {}", owed(&run));
+}
+
+#[test]
+fn a_stopped_turn_leaves_the_owed_list() {
+    let (run, _n, _peer) = seat_with_grants("lc-owed-stop", Some(json!(["*"])), &brain_facts("kitchen"));
+    link_up(&run);
+    let a = send(&run, "stop me");
+    assert!(owed_has(&run, &a, true, 30));
+    authed(&run, "POST", &format!("/membrane/chat/message/{a}/abort"), "");
+    assert!(owed_has(&run, &a, false, 30), "{}", owed(&run));
+}
+
+#[test]
+fn a_decline_resolves_the_item_as_done_with_the_reason_shown() {
+    let (run, _n, mut peer) = seat_with_grants("lc-owed-decline", Some(json!(["*"])), &brain_facts("kitchen"));
+    link_up(&run);
+    let a = send(&run, "not for you");
+    assert!(owed_has(&run, &a, true, 30));
+    assert_eq!(ask(&mut peer, &eid(&a, ":turn:response"), "declined", json!("not a question")), None);
+    let v = state_is(&run, &a, "done", 30);
+    assert_eq!(v["state"], "done", "{v}");
+    assert!(v["response"].as_str().unwrap_or("").contains("not a question"), "the reason is shown: {v}");
+    assert!(owed_has(&run, &a, false, 30), "{}", owed(&run));
+}
+
+#[test]
+fn the_owed_pack_loads_on_a_running_seat_and_offers_the_turns_already_taken() {
+    // a seat started WITHOUT the pack; a turn is taken; then the pack text is written as `Pack:owed.text`
+    let (run, _n, mut peer) = seat_ex("lc-owed-live", Some(json!(["*"])), &brain_facts("kitchen"), &["owed"]);
+    link_up(&run);
+    let a = send(&run, "taken before the pack");
+    state_is(&run, &a, "running", 20);
+    let text = std::fs::read_to_string(repo().join("membrane/packs/owed.c1f")).unwrap();
+    put(&run, "Pack:owed", "text", json!(text));
+    assert!(wait_for(&run, "Pack:owed", "state", "loaded", 60).contains("loaded"), "{}", read(&run, "Pack:owed", "error"));
+    assert!(owed_has(&run, &a, true, 60), "the turn taken before the load is owed: {}", owed(&run));
+    let b = send(&run, "after");
+    assert!(owed_has(&run, &b, true, 30), "{}", owed(&run));
+    assert_eq!(ask(&mut peer, &eid(&a, ":turn:response"), "text", json!("late")), None);
+    assert!(owed_has(&run, &a, false, 30), "{}", owed(&run));
 }
