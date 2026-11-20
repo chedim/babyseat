@@ -17,7 +17,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKS = ["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f",
-         "chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f", "router.c1f", "door_models.c1f", "door_state.c1f", "ha.c1f"]
+         "chat.c1f", "model_chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f", "router.c1f", "door_models.c1f", "door_state.c1f", "ha.c1f"]
 
 # a fake claude: answers "Done: <the message>" (the message is the last text block of the one JSON line the seat hands it on stdin: the banner block, then the user's block);
 # a message with "this will fail" fails with the CLI's words

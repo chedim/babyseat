@@ -89,7 +89,7 @@ try {
   await b.until(Q('.nav button'), 'the page');
 
   // 1. Settings: groups in order, no Map, no Field tab, a restart row has no control
-  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.nav button')].map((e) => e.textContent)`), ['Chat', 'Settings'], 'no Field tab in this release');
+  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.nav button')].map((e) => e.textContent)`), ['Chat', 'Log', 'Settings'], 'no Field tab in this release');
   assert.equal(await b.ev(`!!${Q('.setview')}`), false, 'the view is drawn when the tab is first shown');
   await b.press('[data-key="DomNode:shell:nav:settings"]');
   await b.until(`document.querySelectorAll('.setrow').length >= 20`, 'the rows');
