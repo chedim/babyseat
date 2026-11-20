@@ -2260,6 +2260,7 @@
       "Owed.banner_main": "Any",
       "Owed.banner_more": "List(Any)",
       "Owed.banner_text": "Any",
+      "Owed.items": "List(Any)",
       "Owed.kind": "Text",
       "Owed.seed": "Any",
       "Owed.seed_items": "List(Dict)?"
@@ -2269,8 +2270,8 @@
       "Chat.state": "Text",
       "Chat.text": "Text",
       "Minds.owed_hold": "List((Entity(Owed)|Error)?)",
-      "Owed.items": "List(Any)",
-      "membrane.items": "List(Any)",
+      "Owed.index": "List(Any)",
+      "membrane.index": "List(Any)",
       "membrane.ns": "Text?"
     },
     "findings": [],

@@ -1329,10 +1329,10 @@
       "Minds",
       "Owed"
     ],
-    "members": 13,
+    "members": 14,
     "writes": [
       "membrane:*.ended",
-      "membrane:*.items",
+      "membrane:*.index",
       "membrane:*.ns",
       "membrane:*.state",
       "membrane:*.text"
