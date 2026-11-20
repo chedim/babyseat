@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "label": "🐣 Blurps alive (est.)",
- "message": "~128",
+ "message": "~85",
  "color": "f5a623",
- "note": "known-OS PyPI downloads in the 3 days from release 0.7.62 (2026-11-16)"
+ "note": "known-OS PyPI downloads in the 3 days from release 0.7.63 (2026-11-17)"
 }
