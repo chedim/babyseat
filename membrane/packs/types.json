@@ -2256,6 +2256,10 @@
       "ChatMessage.declined": "Any",
       "ChatTurn.owed_msg": "Any",
       "Minds.owed_ns": "Text?",
+      "Owed.banner": "Any",
+      "Owed.banner_main": "Any",
+      "Owed.banner_more": "List(Any)",
+      "Owed.banner_text": "Any",
       "Owed.kind": "Text",
       "Owed.seed": "Any",
       "Owed.seed_items": "List(Dict)?"
