@@ -18,6 +18,7 @@ door_tools
 semtext
 mentions
 chat
+model_chat
 chat_turn
 chat_oai
 chat_membrama

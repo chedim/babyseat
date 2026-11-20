@@ -156,7 +156,8 @@
       "chat",
       "chat_turn",
       "chat_oai",
-      "fetch"
+      "fetch",
+      "model_chat"
     ],
     "classes": [
       "Chat",
@@ -166,11 +167,12 @@
       "LlmTool",
       "MbRound"
     ],
-    "members": 49,
+    "members": 50,
     "writes": [
       "*.abort",
       "*.retire",
       "Fetch:*.request",
+      "ModelChat:*.add",
       "membrane:*.content",
       "membrane:*.go",
       "membrane:*.mb_nodes",
@@ -204,7 +206,8 @@
       "chat",
       "chat_turn",
       "fetch",
-      "semtext"
+      "semtext",
+      "model_chat"
     ],
     "classes": [
       "Chat",
@@ -213,12 +216,13 @@
       "ChatRound",
       "Chunk"
     ],
-    "members": 66,
+    "members": 67,
     "writes": [
       "*.request",
       "*.text",
       "*.tools",
       "Fetch:*.request",
+      "ModelChat:*.add",
       "membrane:*.calls",
       "membrane:*.ended",
       "membrane:*.error",
@@ -248,7 +252,8 @@
       "semtext",
       "proc",
       "boot",
-      "door"
+      "door",
+      "model_chat"
     ],
     "classes": [
       "Boot",
@@ -257,10 +262,11 @@
       "Chunk",
       "Request"
     ],
-    "members": 76,
+    "members": 79,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
+      "ModelChat:*.add",
       "membrane:*.aborted",
       "membrane:*.brain",
       "membrane:*.calls",
@@ -1304,6 +1310,21 @@
     "boot_facts": [],
     "resident": [
       "Tool"
+    ]
+  },
+  "model_chat": {
+    "imports": [
+      "boot"
+    ],
+    "classes": [
+      "Boot",
+      "ModelChat"
+    ],
+    "members": 3,
+    "writes": [],
+    "claims": [],
+    "boot_facts": [
+      "link_max_value"
     ]
   },
   "movelog": {

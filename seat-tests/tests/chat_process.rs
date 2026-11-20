@@ -184,7 +184,7 @@ if os.path.exists(errp):
 out({"type": "result", "subtype": "success", "is_error": False, "result": "Final answer to: " + prompt + ((" key=" + (_k or "")) if os.path.exists(os.path.join(here, "echo_key")) else ""), "num_turns": 3, "duration_ms": 4321, "total_cost_usd": 0.0123, "usage": {"input_tokens": 11, "cache_creation_input_tokens": 22, "cache_read_input_tokens": 33, "output_tokens": 44}, "session_id": "fake-1"})
 "#;
 
-const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f"];
+const CHAT_PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "model_chat.c1f", "chat_turn.c1f"];
 
 /// the seat's folder holds the fake; the binary is told its path as a fact
 fn fake_seat(tag: &str, extra: &[&str]) -> (Run, u16, std::path::PathBuf) { fake_seat_with(tag, extra, &[]) }
@@ -314,6 +314,30 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     let raw = std::fs::read_to_string(dir.join(format!("argv.{}.json", tag_of("second question")))).unwrap();
     assert!(!raw.contains("what is up") && !raw.contains("Final answer"), "history leaked into the second run: {raw}");
     assert_ne!(id, id2);
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_claude_cli_runs_raw_exchange_is_in_the_model_chat_entity_prompt_reply_calls_and_results_in_order() {
+    let (mut run, port, dir) = fake_seat("mchat", &["--fact", "chat_max_turns=5"]);
+    let id = send(port, "what is up");
+    wait("the message running", || { let v = view(port, &id); if v["state"] == "running" { Some(v) } else { None } });
+    wait("the fake's argv file", || if dir.join(format!("argv.{}.json", tag_of("what is up"))).exists() { Some(()) } else { None });
+    std::fs::write(dir.join(format!("go.{}", tag_of("what is up"))), "").unwrap();
+    let v = wait("the answer", || { let v = view(port, &id); if v["state"] == "done" || v["state"] == "error" { Some(v) } else { None } });
+    assert_eq!(v["state"], "done", "{v}");
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let t = loop {
+        let t = call(port, "entity_read", json!({"spec": "ModelChat:main", "prop": "text"})).0;
+        if t.contains("[tool]") && t.contains("[call] entity_read") { break t; }
+        assert!(std::time::Instant::now() < end, "the model chat never held the whole run: {t}");
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    };
+    let at = |s: &str| t.find(s).unwrap_or_else(|| panic!("{s:?} is not in the model chat:\n{t}"));
+    assert!(at("[system]") < at("<banner>") && at("<banner>") < at("what is up\n"), "the doctrine, then the banner and the message as the CLI got them: {t}");
+    assert!(at("what is up\n") < at("[assistant]\nListing ") && at("[assistant]\nListing ") < at("[call] entity_write"), "{t}");
+    assert!(at("[call] entity_write") < at("[tool]\n") && at("[tool]\n") < at("[call] entity_read"), "{t}");
+    assert!(t.contains(r#""spec":"Command:probe""#) || t.contains("Command:probe"), "the call's arguments: {t}");
     assert!(terminate(&mut run));
 }
 

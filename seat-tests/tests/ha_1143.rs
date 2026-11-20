@@ -13,7 +13,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
 fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
-const PACKS: &[&str] = &["boot.c1f", "entity.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f",
+const PACKS: &[&str] = &["boot.c1f", "entity.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "model_chat.c1f", "chat_turn.c1f",
     "door_session.c1f", "door_auth.c1f", "router.c1f", "door_models.c1f", "door_state.c1f", "ha.c1f"];
 const FACTS: [&str; 4] = [
     r#"cloud_models=[{"name":"claude","backend":"claude-agent"},{"name":"claude-agent:sonnet","backend":"claude-agent"}]"#,

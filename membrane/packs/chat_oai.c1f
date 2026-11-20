@@ -3,6 +3,7 @@ IMPORT chat 1
 IMPORT chat_turn 1
 IMPORT fetch 1
 IMPORT semtext 1
+IMPORT model_chat 1
 -- THE OPENAI-COMPATIBLE CHAT RUNG (#1143, step 1b of the release swap): a chat turn answered by a model that is NOT a claude rung. Same turn as the claude one (packs/chat_turn.c1f):
 -- the system message is the doctrine then the banner (the claude turn sends the doctrine alone as the system prompt and the banner as a block of the user message), the prompt is the message ALONE (no history), the model's tools are the door's own
 -- (`POST /mcp`, packs/door_tools.c1f), the answer becomes the turn's ChatResponse, the tools it ran are ChatTool entities under the turn. What differs is the transport:
@@ -155,14 +156,18 @@ ChatRound.results getter:
   WHEN prop(this.step, 'calls') != True: None
   ELSE: ([r for r in [[prop(e, 'out') for e in this.call_eids]] if len([x for x in r if x == None]) == 0] or [None])[0]
 ChatRound.assistant getter: {'role': 'assistant', 'content': (this.said or None), 'tool_calls': [{'id': c['id'], 'type': 'function', 'function': {'name': c['name'], 'arguments': c['args'] or '{}'}} for c in this.calls]}
-ChatRound.oai_next getter: {'messages': concat(concat(this.messages, [this.assistant]), [{'role': 'tool', 'tool_call_id': r['id'], 'content': r['text']} for r in this.results])} if this.results != None else None
+ChatRound.oai_next getter: {'raw': this.raw, 'messages': concat(concat(this.messages, [this.assistant]), [{'role': 'tool', 'tool_call_id': r['id'], 'content': r['text']} for r in this.results])} if this.results != None else None
 Chat.oai_next on-setter oai-next:
   WHEN this.oai_next != None:
+    ('ModelChat:' + before(this.cp, ':message:')).add = prop(this.oai_next, 'raw')
     FOR r IN this.results:
       membrane::Chat[this.cp]:turn:tool[r['id']] = ChatTool(name: r['name'], input: r['input'], result: r['text'])
     membrane::Chat[this.cp]:turn:round[str(this.n + 1)] = ChatRound(cp: this.cp, n: this.n + 1, messages: prop(this.oai_next, 'messages'))
     membrane::Chat[this.cp]:turn:round[str(this.n + 1)].go = True
     membrane::Chat[this.cp]:turn.round = this.n + 1
+
+-- ---- the raw exchange of the round, for `ModelChat:<chat>` (packs/model_chat.c1f): the prompt (round 1), the reply as the stream said it, each call, each result, the error ----------------------------------------
+ChatRound.raw getter: '── ' + str(this.cp) + ' round ' + str(this.n) + ' ──\n' + (join(['[' + str(m['role']) + ']\n' + str(prop(m, 'content') or '') + '\n' for m in this.messages], '') if this.n == 1 else '') + (('[assistant]\n' + this.said + '\n') if this.said != '' else '') + join(['[call] ' + str(c['name']) + ' ' + str(c['args'] or '{}') + '\n' for c in this.calls], '') + join(['[tool]\n' + str(r['text']) + '\n' for r in (this.results or [])], '') + (('[error]\n' + str(prop(this.step, 'fail')) + '\n') if prop(this.step, 'fail') != None else '')
 
 -- ---- what the turn has used, over its rounds (explicit, round by round) -----------------------------------------------------------------------------------------------
 ChatRound.prev getter: 'membrane::Chat:' + this.cp + ':turn:round:' + str(this.n - 1) if this.n > 1 else None
@@ -196,6 +201,7 @@ ChatMessage.oai_end getter:
 -- (a write in a setter is seen by the lines after it: `state` is written LAST, because `over` ends what `oai_res` says)
 Chat.oai_end on-setter oai-finish:
   WHEN this.oai_end != None and not this.over:
+    ('ModelChat:' + before(this.cp, ':message:')).add = prop(this.oai_round, 'raw')
     membrane::Chat[this.cp]:turn.ended = clock
     membrane::Chat[this.cp]:turn.error = prop(this.oai_end, 'fail')
     membrane::Chat[this.cp]:turn.usage = prop(this.oai_end, 'usage')

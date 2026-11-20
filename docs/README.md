@@ -26,6 +26,7 @@ A path written `cliffvm:<path>` is a file of the engine's repository, github.com
 |---|---|
 | [porting-brief.md](porting-brief.md) | the rules for c1f and Rust work (read first) |
 | [membrama-chat.md](membrama-chat.md) | a chat turn answered by a peer over shared memory (the local model peer membrama, or a Claude peer), as a rung beside `chat_oai`: the entry, the peer, the nodes of a round, retirement, errors, what is tested and what is not built |
+| [model-chat.md](model-chat.md) | the raw exchange with the model, one entity per chat (`ModelChat:<chat>`), the same shape whichever rung answered: the prompt, the reply with its thinking, each call and result; how a rung feeds it, the bound, what the Log tab shows |
 | [logview.md](logview.md) | the boundary log as a view: what entered the VM (the journal's outside writes), read by a peer from its own cursor as small records, the cursor in the peer's namespace |
 | [c1f-layers.md](c1f-layers.md) | apps and layers, trust by position, privilege, class ownership, storage-mode header lines |
 | [c1f-stdlib.md](c1f-stdlib.md) | the Request contract, boot facts, the builtins, locals, entity literals, constructors, the step budget, the contract tests |

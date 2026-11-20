@@ -1,0 +1,27 @@
+PACK model_chat 1
+IMPORT boot 1
+-- THE RAW CHAT WITH THE MODEL, ONE ENTITY PER CHAT (#1143, operator 2026-11-20: the Log tab shows the model's interactions whichever module answers). `ModelChat:<chat>` (`main`, or `session:<sid>`) holds `text`: for every turn,
+-- whichever rung answered it (the claude CLI, the OpenAI-compatible and ollama rung, a peer: membrama, claude-peer, the coming openai-peer and anthropic-peer), the exchange as the model had it, in order:
+--   `── <message id> round <n> ──`   a round's header (the claude CLI's turn is one `── <message id> ──`)
+--   `[system]` / `[user]`            the prompt as sent (round 1: what the model was told; a later round adds only the tool results, which are the previous round's `[tool]` lines)
+--   `[assistant]`                    the reply as the model wrote it (its thinking block included when the backend gives it)
+--   `[call] <tool> <arguments>`      each tool call with its whole arguments
+--   `[tool]`                         each tool's result, the very text the model got
+--   `[error]`                        why a round or the turn failed
+-- THE FEED: a rung writes ONE value, `ModelChat:<chat>.add` (the text of what just happened); this pack appends it. No rung keeps a second copy and none reads it back. Each rung's text is built by its own getter `raw` (packs/chat_oai.c1f
+-- `ChatRound.raw`, packs/chat_membrama.c1f `MbRound.raw`, packs/chat_turn.c1f `ChatMessage.raw_head` + `raw_events` + `raw_err`), because the three hold their rounds differently.
+-- THE BOUND: the text is never longer, as JSON (its newlines and quotes escaped), than `link_max_value` CHARACTERS (the boot fact of the page link and the peers: the value size of a cell, 65,536 unless the owner says otherwise; the
+-- engine counts characters, so text with non-ASCII letters can be longer in bytes); when it would be, the oldest text goes first and the text starts with a marker line. A secret is in no text: the key rides in a header the driver adds, and is in no prompt, reply or result.
+
+ModelChat.kind getter: 'modelchat'
+Boot.mc_cap getter: num(this.link_max_value) if this.link_max_value != None else 65536
+
+ModelChat.add on-setter model-chat-add:
+  WHEN this.add != None:
+    cap = ([b.mc_cap for b in instances('Boot')] or [65536])[0]
+    mark = '[…earlier text dropped]\n'
+    whole = str(this.text or '') + str(this.add)
+    bare = len(str({'t': ''}))
+    avail = cap - len(str({'t': mark}))
+    escapes = len(str({'t': tail(whole, avail)})) - bare - len(tail(whole, avail))
+    this.text = whole if len(str({'t': whole})) <= cap else mark + tail(whole, avail - escapes)

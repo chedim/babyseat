@@ -211,3 +211,26 @@ fn a_claude_peer_that_goes_away_fails_the_turn_and_names_its_namespace() {
     assert_eq!(v["state"], "error", "{v}");
     assert!(v["response"].as_str().unwrap_or("").contains("claude is not up"), "the turn should say the peer is not up: {v}");
 }
+
+#[test]
+fn a_peer_turns_raw_exchange_is_in_the_model_chat_entity_in_the_same_shape_as_every_other_rung() {
+    let (run, _names, mut peer, mut mine) = claude_turn("cp-mchat");
+    put(run.port, "Lamp:desk", "power", json!("zebra-42"));
+    let id = send(&run, "read the lamp");
+    let r1 = reply_ask(&mut peer, None);
+    answer(&mut mine, &r1, "<think>look at it</think>reading", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+    let r2 = reply_ask(&mut peer, Some(&r1));
+    answer(&mut mine, &r2, "The lamp says zebra-42", "stop", None);
+    assert_eq!(turn_ends(run.port, &id)["state"], "done");
+    let end = Instant::now() + Duration::from_secs(30);
+    let t = loop {
+        let t = call(run.port, "entity_read", json!({"spec": "ModelChat:main", "prop": "text"}));
+        if t.contains("[assistant]\nThe lamp says zebra-42") { break t; }
+        assert!(Instant::now() < end, "the model chat never held the answer: {t}");
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let at = |s: &str| t.find(s).unwrap_or_else(|| panic!("{s:?} is not in the model chat:\n{t}"));
+    assert!(at("[system]") < at("[user]\nread the lamp") && at("[user]\nread the lamp") < at("<think>look at it</think>reading"), "{t}");
+    assert!(at("<think>look at it</think>reading") < at("[call] entity_read") && at("[call] entity_read") < at("[tool]\n") && at("[tool]\n") < at("[assistant]\nThe lamp says zebra-42"), "{t}");
+    assert!(t.contains("zebra-42"), "the tool's result, as the model got it: {t}");
+}

@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
 const KEY: &str = "sk-oai-PLANTED-0123456789-abcdefghij";
-const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "router.c1f", "chat.c1f", "chat_turn.c1f", "chat_oai.c1f"];
+const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "router.c1f", "chat.c1f", "chat_turn.c1f", "chat_oai.c1f", "model_chat.c1f"];
 
 struct Run { child: Child, _lines: Receiver<String>, dir: std::path::PathBuf }
 impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_dir_all(&self.dir); } }
@@ -403,4 +403,53 @@ fn the_packs_this_rung_runs_on_are_all_in_the_shipped_pack_list() {
     let list = std::fs::read_to_string(format!("{}/../membrane/apps/barest.packs", env!("CARGO_MANIFEST_DIR"))).unwrap();
     let shipped: Vec<&str> = list.lines().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
     for n in PACKS { let stem = n.trim_end_matches(".c1f"); assert!(shipped.contains(&stem), "{stem} is not in apps/barest.packs, so the release has no openai-compatible rung"); }
+}
+
+// ---- the raw exchange of every turn is in ONE entity per chat, `ModelChat:<chat>` (packs/model_chat.c1f) -----------------------------------------------
+
+fn model_chat(port: u16) -> String { call(port, "entity_read", json!({"spec": "ModelChat:main", "prop": "text"})).0 }
+
+#[test]
+fn the_raw_exchange_of_a_turn_is_in_the_model_chat_entity_prompt_reply_with_its_thinking_call_and_result_in_order() {
+    let fake = Fake::start(|n, _| if n == 1 {
+        let mut ev = vec![delta(json!({"content": "<think>need to write</think>writing"}), J::Null)];
+        ev.extend(tool_round("call_m1", "entity_write", r#"{"spec":"Thing:probe","prop":"x","value":5}"#));
+        Reply::Sse(ev, 0)
+    } else { Reply::Sse(words(&["It is ", "written."]), 0) });
+    let (mut run, port, _dir) = seat_on("oai-mchat", &fake, &[]);
+    let id = send(port, "write it please");
+    assert_eq!(ended(port, &id)["state"], "done");
+    let t = wait("the model chat", || { let t = model_chat(port); t.contains("It is written.").then_some(t) });
+    let at = |s: &str| t.find(s).unwrap_or_else(|| panic!("{s:?} is not in the model chat:\n{t}"));
+    assert!(at("[system]") < at("[user]\nwrite it please") && at("[user]\nwrite it please") < at("<think>need to write</think>writing"), "{t}");
+    assert!(at("<think>need to write</think>writing") < at("[call] entity_write") && at("[call] entity_write") < at("[tool]\nwrote Thing:probe.x") && at("[tool]\nwrote Thing:probe.x") < at("[assistant]\nIt is written."), "{t}");
+    assert!(t.contains(r#"{"spec":"Thing:probe","prop":"x","value":5}"#), "the call's whole arguments: {t}");
+    assert!(!t.contains(KEY), "the key is in no text");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn a_second_turn_adds_to_the_model_chat_and_a_failed_turn_says_why_in_it() {
+    let fake = Fake::start(|n, _| match n { 1 => Reply::Sse(words(&["first answer"]), 0), _ => Reply::Status(500, "the endpoint is broken".into()) });
+    let (mut run, port, _dir) = seat_on("oai-mchat2", &fake, &[]);
+    let a = send(port, "one");
+    assert_eq!(ended(port, &a)["state"], "done");
+    let b = send(port, "two");
+    assert_eq!(ended(port, &b)["state"], "error");
+    let t = wait("the failure in the model chat", || { let t = model_chat(port); t.contains("the endpoint is broken").then_some(t) });
+    assert!(t.find("first answer").unwrap() < t.find("[user]\ntwo").unwrap() && t.find("[user]\ntwo").unwrap() < t.find("the endpoint is broken").unwrap(), "{t}");
+    assert!(t.contains("[error]"), "{t}");
+    assert!(terminate(&mut run));
+}
+
+#[test]
+fn the_model_chat_is_bounded_by_the_links_value_size_and_the_oldest_text_goes_first() {
+    let fake = Fake::start(|n, _| Reply::Sse(words(&[&format!("answer-{n}-{}", "z".repeat(300))]), 0));
+    let (mut run, port, _dir) = seat_on("oai-mchat3", &fake, &["--fact", "link_max_value=2000"]);
+    for k in 1..=6 { let id = send(port, &format!("q{k}")); assert_eq!(ended(port, &id)["state"], "done"); }
+    let t = wait("the last answer in the model chat", || { let t = model_chat(port); t.contains("answer-6-").then_some(t) });
+    assert!(serde_json::to_string(&t).unwrap().chars().count() <= 2000, "{} chars", t.chars().count());
+    assert!(t.starts_with("[\u{2026}earlier text dropped]\n"), "{}", &t[..60.min(t.len())]);
+    assert!(!t.contains("answer-1-"), "the oldest went first");
+    assert!(terminate(&mut run));
 }

@@ -4,7 +4,9 @@ What entered the VM, read from a cursor by a peer (membrama, any program over sh
 
 A view `membrane::LogView:<ns>` appears for a peer when it ASKS for one, by writing `<ns>::LogAsk:main.n` (`VIRTUAL`: a window on the journal, never stored; the resident `LogViews:seat` holds it by reference). No fact names the peers: any connected VM can ask, a peer or a page. A page asks the same way, with the door (`entity_write` of `<its ns>::LogAsk:main`), and reads the view with the door's `entity_read` (a page's `Fetch`): the view is virtual, and a link does not carry a virtual entity's values.
 
-**Who is connected** (`Peers:seat.up`, packs/link.c1f; the link allow-list `LinkAllow:log` lets a page follow it): the namespaces of the peers whose link is up. A tab for a peer, such as a log viewer that membrama writes when it connects, follows it, so the tab comes and goes with the peer.
+**Who is connected** (`Peers:seat.up`, packs/link.c1f; the link allow-list `LinkAllow:log` lets a page follow it): the namespaces of the peers whose link is up. A tab for a peer follows it, so the tab comes and goes with the peer.
+
+**The seat's own Log tab** (`membrane/apps/barest.c1f/log_view.c1f`, a page pack, `Nav:log`): the latest 200 lines of this log, asked by the page as above (older lines in pages of 200), and under them the raw chat with the model, `ModelChat:main` (docs/model-chat.md). It needs no peer. A peer that has more to show draws its own section into the tab (DomNodes parented to `DomNode:log:root` while `Nav:log` is active); it does not write the seat's nodes. Test: `tests/js/log_view.test.mjs`.
 
 **The cursor is the peer's, in its own namespace**, so the seat keeps nothing about the reader and no write rule is needed: the peer writes `<ns>::LogAsk:main` with `from` (the number of the first line it wants; 0 is the beginning) and `n` (a count of its asks). A `sql` answer is cached by its query and arguments, so `n` is the cache breaker: each ask is a new key and a fresh read of the journal.
 
