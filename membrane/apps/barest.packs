@@ -21,6 +21,7 @@ chat
 chat_turn
 chat_oai
 chat_membrama
+brain_tools
 vector
 embed
 field

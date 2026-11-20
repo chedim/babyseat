@@ -87,6 +87,9 @@ html, body { height: 100%; }
 .tools-run ul { margin: 2px 0 0; padding: 0; list-style: none; }
 .tools-run summary { cursor: pointer; }
 .tname { color: var(--ink); }
+.tin { white-space: pre-wrap; word-break: break-all; }
+.tres { margin: 0 0 2px 12px; white-space: pre-wrap; word-break: break-all; color: var(--mute); }
+.think { white-space: pre-wrap; }
 
 .composer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
 .composer textarea { flex: 1; resize: vertical; min-height: 44px; max-height: 200px; }

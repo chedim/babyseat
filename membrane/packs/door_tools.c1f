@@ -226,6 +226,77 @@ Request.cl_out on-setter cliff-finish:
     (this.cl_gp).retire = True
     (this.cl_sp).retire = True
 
+-- ---- THE CLIFFLET RUNNER FOR PEERS (#1143, operator 2026-11-19; docs/graph-link.md, "The clifflet runner"): the same scratch packs as `run_cliff` above, started by a peer's write instead of a door call -----
+-- A granted peer writes `membrane::Cliff:<ns>:<id>` property `code` (a clifflet text, `run_cliff`'s own semantics: a value, or a block whose last line is a write); the seat loads the two scratch packs, runs
+-- whichever loads, and writes back on the SAME node `result` (the value; `null` is the text `null`; a block of writes says it ran them) or `error` (text: the block did not load, or the value is an Error). The packs
+-- and the scratch entity are retired as `run_cliff`'s are; the node stays until the peer retires it. ONE RUN PER NODE: another run is another node. It runs ONLY for a node whose `<ns>` is a peer whose link is up
+-- (`Vm:<ns>`, kind peer): a setter does not see the writer of a write, so the peer's namespace in the key is the gate; the write itself was accepted by the link's policy (packs/link.c1f: a grant or a rule that
+-- reaches `Cliff:`), and a person with the door's token can write the node too (the door's `run_cliff` is theirs already). The id is letters and digits only (it names the scratch packs).
+Cliff.kind getter: 'cliff'
+Cliff.tail getter: after(this.eid, 'Cliff:')
+Cliff.ns getter: before(this.tail, ':')
+Cliff.cid getter: after(this.tail, ':')
+Cliff.slug getter: replace(replace(replace(replace(this.tail, ':', 'x'), '-', ''), '_', ''), '.', '')
+Cliff.id_bad getter: replace(replace(replace(replace(this.cid, ':', ''), '-', ''), '_', ''), '.', '') != this.cid
+Cliff.from_peer getter: prop('Vm:' + this.ns, 'kind') == 'peer' and prop('Vm:' + this.ns, 'link') == 'up'
+Cliff.gp getter: 'Pack:cliffpg' + this.slug
+Cliff.sp getter: 'Pack:cliffps' + this.slug
+Cliff.ge getter: 'Cliffpg' + this.slug + ':x'
+Cliff.se getter: 'Cliffps' + this.slug + ':x'
+Cliff.gtext getter: 'PACK cliffpg' + this.slug + ' 1\nCliffpg' + this.slug + '.val getter:\n' + join(['  ' + l for l in lines(str(this.code))], '\n') + '\nCliffpg' + this.slug + '.shown getter: {\'v\': this.val, \'why\': why(this.val), \'failed\': this.val is Error}\n'
+Cliff.stext getter: 'PACK cliffps' + this.slug + ' 1\nIMPORT door 1\nIMPORT fs 1\nIMPORT proc 1\nIMPORT fetch 1\nIMPORT store 1\nCliffps' + this.slug + '.go on-setter run:\n  ALWAYS:\n' + join(['    ' + l for l in lines(str(this.code))], '\n') + '\n'
+-- A REFUSED NODE ANSWERS (a peer must never wait on a silence): a node with `code` that cannot run says why in `error` and is finished; no pack is made.
+Cliff.refusal getter:
+  WHEN this.code == None or this.finished == True: None
+  ELSE WHEN strip(str(this.code)) == '': 'refused: the code is empty'
+  ELSE WHEN this.id_bad: 'refused: the id may hold letters and digits only (' + this.cid + ')'
+  ELSE WHEN not this.from_peer: 'refused: ' + this.ns + ' is not a connected peer (its link is not up)'
+  ELSE: None
+Cliff.refusal on-setter cliff-peer-refuse:
+  WHEN this.refusal != None:
+    this.finished = True
+    this.error = this.refusal
+Cliff.start getter: this.code if (this.code != None and strip(str(this.code)) != '' and this.from_peer and not this.id_bad and this.finished != True) else None
+Cliff.start on-setter cliff-peer-load:
+  WHEN this.start != None:
+    (this.gp).scratch = True
+    (this.sp).scratch = True
+    (this.sp).privileged = True
+    (this.gp).text = this.gtext
+    (this.sp).text = this.stext
+    this.loading = True
+Cliff.gstate getter: prop(this.gp, 'state') if this.loading == True else None
+Cliff.sstate getter: prop(this.sp, 'state') if this.loading == True else None
+Cliff.mode getter:
+  WHEN this.gstate == 'loaded': 'value'
+  ELSE WHEN this.gstate == 'error' and this.sstate == 'loaded': 'write'
+  ELSE WHEN this.gstate == 'error' and this.sstate == 'error': 'error'
+  ELSE: None
+Cliff.mode on-setter cliff-peer-run:
+  WHEN this.mode == 'value':
+    (this.ge).seed = True
+  ELSE WHEN this.mode == 'write':
+    (this.se).go = True
+Cliff.shown getter: prop(this.ge, 'shown') if this.mode == 'value' else None
+Cliff.said getter:
+  WHEN this.mode == 'error': {'error': 'the block did not load.\nas a value: ' + str(prop(this.gp, 'error')) + '\nas writes: ' + str(prop(this.sp, 'error'))}
+  ELSE WHEN this.mode == 'value' and this.shown != None and prop(this.shown, 'failed') == True: {'error': 'Error: ' + str(prop(this.shown, 'why'))}
+  ELSE WHEN this.mode == 'value' and this.shown != None and prop(this.shown, 'v') == None: {'result': 'null'}
+  ELSE WHEN this.mode == 'value' and this.shown != None: {'result': prop(this.shown, 'v')}
+  ELSE WHEN this.mode == 'write' and prop(this.se, 'go') == True: {'result': 'ran the writes of the block'}
+  ELSE: None
+Cliff.said on-setter cliff-peer-finish:
+  WHEN this.said != None and this.finished != True:
+    this.finished = True
+    this.result = prop(this.said, 'result')
+    this.error = prop(this.said, 'error')
+    (this.ge).retire = True
+    (this.se).retire = True
+    (this.gp).text = ''
+    (this.sp).text = ''
+    (this.gp).retire = True
+    (this.sp).retire = True
+
 -- ---- entity_read: the store's row (stored properties, a failed property shown as `Error: <reason>` through the entity's `failed`) or one property through the field ---------------------------------------------------
 Request.mc_r_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
 Request.mc_r_prop getter: prop(this.mc_args, 'prop')
