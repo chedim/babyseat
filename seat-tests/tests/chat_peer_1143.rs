@@ -133,18 +133,22 @@ fn turn_ends(port: u16, id: &str) -> J {
 
 
 fn start(dir: &std::path::Path, facts: &[String]) -> Run { start_with(dir, facts, &[]) }
-fn decl_peer(name: &str) -> String { json!([{"name": name, "ns": "claude", "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 4096, "spins": 1_000_000, "depth": 32}]).to_string() }
+fn decl_peer(name: &str, ns: &str) -> String { json!([{"name": name, "ns": ns, "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 4096, "spins": 1_000_000, "depth": 32}]).to_string() }
 
 /// the seat with a model `claude-via-peer` answered by the peer `name` in the namespace `claude`; the entry has no `max_new` and no `enable_thinking`: they do not apply to Claude
-fn claude_turn(tag: &str) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) {
+fn claude_turn(tag: &str) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) { peer_turn(tag, "claude-peer", "claude", json!({})) }
+/// the same for any backend the peer rung serves: `extra` is merged into the entry (`max_new`, for instance)
+fn peer_turn(tag: &str, backend: &str, ns: &str, extra: J) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) {
     let name = peer_name();
     let names = Names(name.clone());
-    let entry = json!([{"name": "claude-via-peer", "backend": "claude-peer", "peer": name, "ns": "claude"}]);
+    let mut e = json!({"name": "claude-via-peer", "backend": backend, "peer": name, "ns": ns});
+    for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); }
+    let entry = json!([e]);
     let facts = [format!("cloud_models={entry}"), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
-                 r#"minds={"loops":"claude-via-peer","cortex":"claude-via-peer","workers":"claude-via-peer","seat_default":"claude-via-peer"}"#.to_string(), format!("peers={}", decl_peer(&name))];
+                 r#"minds={"loops":"claude-via-peer","cortex":"claude-via-peer","workers":"claude-via-peer","seat_default":"claude-via-peer"}"#.to_string(), format!("peers={}", decl_peer(&name, ns))];
     let run = start(&tmp(tag), &facts);
     let mine = peer_cells(&name);
-    let peer = PeerEnd::open(&name, "claude");
+    let peer = PeerEnd::open(&name, ns);
     (run, names, peer, mine)
 }
 fn send(run: &Run, text: &str) -> String {
@@ -153,14 +157,16 @@ fn send(run: &Run, text: &str) -> String {
     serde_json::from_str::<J>(&body).unwrap()["id"].as_str().unwrap().to_string()
 }
 /// the node id of the reply the seat asks the peer for, and that it is in the peer's namespace; `not` skips an earlier round's
-fn reply_ask(peer: &mut PeerEnd, not: Option<&str>) -> String {
-    let find = |ev: &[Event]| ev.iter().find_map(|e| if let Event::Op(Op::Sub { target: Target::Id(i), .. }) = e { (i.starts_with("claude::Reply:") && Some(i.as_str()) != not).then(|| i.clone()) } else { None });
+fn reply_ask(peer: &mut PeerEnd, not: Option<&str>) -> String { reply_ask_in(peer, "claude", not) }
+fn reply_ask_in(peer: &mut PeerEnd, ns: &str, not: Option<&str>) -> String {
+    let want = format!("{ns}::Reply:");
+    let find = |ev: &[Event]| ev.iter().find_map(|e| if let Event::Op(Op::Sub { target: Target::Id(i), .. }) = e { (i.starts_with(&want) && Some(i.as_str()) != not).then(|| i.clone()) } else { None });
     assert!(peer.until(60_000, |ev| find(ev).is_some()), "the seat never asked the claude peer for a reply: {:?}", peer.events);
     find(&peer.events).unwrap()
 }
 /// the peer answers: the chunk, then the reply that says how many chunks and how it finished
 fn answer(mine: &mut graphlink_shm::cells::Cells, reply: &str, text: &str, finish: &str, calls: Option<J>) {
-    let chunk = reply.replace("claude::Reply:", "claude::Chunk:") + ":0";
+    let chunk = reply.replacen("::Reply:", "::Chunk:", 1) + ":0";
     for (k, v) in [("", json!(true)), ("text", json!(text))] { mine.put(&key(&chunk, k), 1.0, &v).unwrap(); }
     let mut cells = vec![("", json!(true)), ("state", json!("done")), ("finish", json!(finish)), ("chunks", json!(1)), ("usage", json!({"read": 10, "loaded": 0, "generated": 5}))];
     if let Some(c) = calls { cells.push(("tool_calls", c)); }
@@ -233,4 +239,101 @@ fn a_peer_turns_raw_exchange_is_in_the_model_chat_entity_in_the_same_shape_as_ev
     assert!(at("[system]") < at("[user]\nread the lamp") && at("[user]\nread the lamp") < at("<think>look at it</think>reading"), "{t}");
     assert!(at("<think>look at it</think>reading") < at("[call] entity_read") && at("[call] entity_read") < at("[tool]\n") && at("[tool]\n") < at("[assistant]\nThe lamp says zebra-42"), "{t}");
     assert!(t.contains("zebra-42"), "the tool's result, as the model got it: {t}");
+}
+
+// ---- the OpenAI-compatible and the Claude API peers (graphlink-openai, graphlink-anthropic): the same rung, their own backend names ------------------------------------------------------
+
+fn settings_of(names: &Names, reply: &str, ns: &str) -> J {
+    let rid = reply.replace(&format!("{ns}::Reply:"), "membrane::LlmRequest:");
+    let live = |c: &Option<Cell>| matches!(c, Some(c) if c.state == CellState::Live);
+    cell_when(&seat_cells(&names.0), &key(&rid, "settings"), 30, live).expect("the request's settings").value
+}
+
+#[test]
+fn an_openai_peer_answers_in_its_own_namespace_and_the_entrys_max_new_is_the_requests_max_tokens() {
+    let (run, names, mut peer, mut mine) = peer_turn("pb-oai", "openai-peer", "oai", json!({"max_new": 256}));
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);
+    let id = send(&run, "hello");
+    let reply = reply_ask_in(&mut peer, "oai", None);
+    assert_eq!(settings_of(&names, &reply, "oai"), json!({"max_new": 256}), "the owner's number goes to the peer as it is, nothing else");
+    answer(&mut mine, &reply, "Hello from the OpenAI peer", "stop", None);
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(v["response"], "Hello from the OpenAI peer", "{v}");
+}
+
+#[test]
+fn an_openai_peer_entry_with_no_max_new_sends_none_and_the_server_chooses() {
+    let (run, names, mut peer, mut mine) = peer_turn("pb-oai0", "openai-peer", "oai", json!({}));
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);
+    let id = send(&run, "hello");
+    let reply = reply_ask_in(&mut peer, "oai", None);
+    assert_eq!(settings_of(&names, &reply, "oai"), json!({}), "no number is invented");
+    answer(&mut mine, &reply, "ok", "stop", None);
+    assert_eq!(turn_ends(run.port, &id)["state"], "done");
+}
+
+#[test]
+fn an_anthropic_peer_gets_no_settings_its_max_tokens_is_the_owners_launch_option() {
+    let (run, names, mut peer, mut mine) = peer_turn("pb-ant", "anthropic-peer", "ant", json!({"max_new": 99}));
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);
+    let id = send(&run, "hello");
+    let reply = reply_ask_in(&mut peer, "ant", None);
+    assert_eq!(settings_of(&names, &reply, "ant"), json!({}), "the Claude API peer reads no settings");
+    answer(&mut mine, &reply, "Hello from the Claude API peer", "stop", None);
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(v["response"], "Hello from the Claude API peer", "{v}");
+}
+
+#[test]
+fn a_tool_call_of_an_openai_peer_and_of_an_anthropic_peer_is_run_by_the_seat_and_fed_back() {
+    for (backend, ns, tag) in [("openai-peer", "oai", "pb-oai-t"), ("anthropic-peer", "ant", "pb-ant-t")] {
+        let (run, _names, mut peer, mut mine) = peer_turn(tag, backend, ns, json!({}));
+        put(run.port, "Lamp:desk", "power", json!("zebra-42"));
+        let id = send(&run, "read the lamp");
+        let r1 = reply_ask_in(&mut peer, ns, None);
+        answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+        let r2 = reply_ask_in(&mut peer, ns, Some(&r1));
+        answer(&mut mine, &r2, "The lamp says zebra-42", "stop", None);
+        let v = turn_ends(run.port, &id);
+        assert_eq!(v["state"], "done", "{backend}: {v}");
+        assert!(v["response"].as_str().unwrap_or("").contains("zebra-42"), "{backend}: {v}");
+    }
+}
+
+#[test]
+fn an_answer_the_server_cut_says_so_and_a_complete_one_says_nothing_more() {
+    for (finish, said) in [("length", "reached its limit on tokens"), ("content_filter", "content filter")] {
+        let (run, _names, mut peer, mut mine) = peer_turn(&format!("pb-cut-{finish}"), "openai-peer", "oai", json!({}));
+        let id = send(&run, "write a long story");
+        let reply = reply_ask_in(&mut peer, "oai", None);
+        answer(&mut mine, &reply, "Once upon a", finish, None);
+        let v = turn_ends(run.port, &id);
+        assert_eq!(v["state"], "done", "{v}");
+        let r = v["response"].as_str().unwrap_or("");
+        assert!(r.starts_with("Once upon a"), "what the model wrote stays: {v}");
+        assert!(r.contains("cut") && r.contains(said), "the person is told the answer is cut ({finish}): {v}");
+    }
+    let (run, _names, mut peer, mut mine) = peer_turn("pb-whole", "anthropic-peer", "ant", json!({}));
+    let id = send(&run, "hi");
+    let reply = reply_ask_in(&mut peer, "ant", None);
+    answer(&mut mine, &reply, "Complete.", "stop", None);
+    assert_eq!(turn_ends(run.port, &id)["response"], "Complete.");
+}
+
+#[test]
+fn an_openai_or_anthropic_entry_without_peer_or_ns_refuses_the_turn_and_says_what_it_needs() {
+    for (backend, tag) in [("openai-peer", "pb-r1"), ("anthropic-peer", "pb-r2")] {
+        let entry = json!([{"name": "claude-via-peer", "backend": backend}]);
+        let facts = [format!("cloud_models={entry}"), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
+                     r#"minds={"loops":"claude-via-peer","cortex":"claude-via-peer","workers":"claude-via-peer","seat_default":"claude-via-peer"}"#.to_string()];
+        let run = start(&tmp(tag), &facts);
+        let id = send(&run, "hello");
+        let v = turn_ends(run.port, &id);
+        assert_eq!(v["state"], "error", "{backend}: {v}");
+        let r = v["response"].as_str().unwrap_or("");
+        assert!(r.contains("\"peer\"") && r.contains("\"ns\""), "{backend}: the refusal names peer and ns: {v}");
+        assert!(r.contains("claude-via-peer"), "{backend}: {v}");
+    }
 }
