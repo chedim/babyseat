@@ -408,3 +408,47 @@ fn a_turn_already_done_is_not_owed_after_a_live_load_and_rewriting_its_response_
     assert!(owed_has(&run, &b, false, 5), "rewriting a finished response does not list it again: {}", owed(&run));
     assert!(owed_has(&run, &a, false, 5));
 }
+
+// ---- the tool rows of a RUNNING brain turn are on the page as they are issued ------------------------------------------------------------------------------
+
+fn tools_names(v: &J) -> Vec<String> { v["tools"].as_array().map(|a| a.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect()).unwrap_or_default() }
+fn rows(v: &J) -> Vec<(String, String, J)> { v["tool_calls"].as_array().map(|a| a.iter().map(|r| (r["name"].as_str().unwrap_or("").to_string(), r["input"].to_string(), r["result"].clone())).collect()).unwrap_or_default() }
+fn until_tools(run: &Run, id: &str, n: usize, secs: u64) -> J {
+    let end = Instant::now() + Duration::from_secs(secs);
+    loop { let v = view(run, id); if tools_names(&v).len() >= n || Instant::now() > end { return v; } std::thread::sleep(Duration::from_millis(100)); }
+}
+
+#[test]
+fn a_running_brain_turn_shows_its_tool_rows_on_the_page_routes_as_they_are_issued() {
+    let (run, _n, mut peer) = seat_with_grants("lc-tools", Some(json!(["*"])), &brain_facts("kitchen"));
+    link_up(&run);
+    let id = send(&run, "use two tools");
+    state_is(&run, &id, "running", 20);
+    let t = |c: &str, p: &str| eid(&id, &format!(":turn:tool:{c}")) + "\u{0}" + p;
+    let _ = t;
+    for (c, name, input) in [("c1", "entity_read", json!("{\"spec\":\"a\"}")), ("c2", "entity_write", json!("{\"spec\":\"b\"}"))] {
+        assert_eq!(ask(&mut peer, &eid(&id, &format!(":turn:tool:{c}")), "name", json!(name)), None);
+        assert_eq!(ask(&mut peer, &eid(&id, &format!(":turn:tool:{c}")), "input", input), None);
+    }
+    assert_eq!(ask(&mut peer, &eid(&id, ""), "tool_ids", json!("c1 c2")), None);
+    let v = until_tools(&run, &id, 2, 30);
+    assert_eq!(v["state"], "running", "{v}");
+    assert_eq!(tools_names(&v), vec!["entity_read", "entity_write"], "the message route lists the rows so far: {v}");
+    let row = page_row(&run, &id);
+    assert_eq!(tools_names(&row), vec!["entity_read", "entity_write"], "{row}");
+    let r = rows(&row);
+    assert_eq!(r.len(), 2, "{row}");
+    assert_eq!((r[0].0.as_str(), r[1].0.as_str()), ("entity_read", "entity_write"));
+    assert!(r[1].2.is_null() || r[1].2 == json!(""), "no result yet: {row}");
+    assert!(read(&run, &eid(&id, ""), "stream_view").contains("entity_write"), "the event stream carries them: {}", read(&run, &eid(&id, ""), "stream_view"));
+    // the second gets its result: the page route shows it (the page row has no result; the history view has)
+    assert_eq!(ask(&mut peer, &eid(&id, ":turn:tool:c2"), "result", json!("ok done")), None);
+    assert!(wait_for(&run, &eid(&id, ""), "history_view", "ok done", 30).contains("ok done"));
+    // the answer finishes the turn; the rows stay in order
+    assert_eq!(ask(&mut peer, &eid(&id, ":turn:response"), "text", json!("answer")), None);
+    let v = state_is(&run, &id, "done", 30);
+    assert_eq!(v["state"], "done", "{v}");
+    let row = page_row(&run, &id);
+    assert_eq!(tools_names(&row), vec!["entity_read", "entity_write"], "after the finish: {row}");
+    assert_eq!(rows(&row).len(), 2, "{row}");
+}
