@@ -1198,6 +1198,7 @@
       "Cliff.kind": "Text",
       "Cliff.mode": "Text?",
       "Cliff.ns": "Text",
+      "Cliff.refusal": "Text?",
       "Cliff.said": "Dict?",
       "Cliff.se": "Text",
       "Cliff.shown": "Any",
