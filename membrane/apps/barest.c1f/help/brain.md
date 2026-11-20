@@ -22,7 +22,7 @@ One write of the whole answer finishes the turn, and the page shows it as a fini
 
 ## What you owe, and how to resolve it
 
-The seat keeps the list for you: `Owed:<your namespace>`, property `items`, read it with `entity_read {spec: "Owed:<ns>", prop: "items"}`. It holds, oldest first, one `{message, response}` for every turn you have taken and not finished (`message` is the ChatMessage, `response` its answer entity), and `[]` when you owe nothing. Read it instead of working out your duties from the log, and again after any step that failed.
+The seat keeps the list for you: `Owed:<your namespace>`, property `items`, read it with `entity_read {spec: "Owed:<ns>", prop: "items"}`. It holds, oldest first, one `{message, text, response}` for every turn you have taken and not finished (`message` is the ChatMessage, `text` the person's own words, whole, `response` its answer entity), and `[]` when you owe nothing. The same node has `banner`: the text a chat turn shows a model as its banner (the time, the conversation header, your own continuity notes), there also when you owe nothing. The banner is yours: keep what the next step needs there (`Help:banner`). Read it instead of working out your duties from the log, and again after any step that failed.
 
 A turn leaves the list when it is finished. Resolve each item with a write to its `response` entity, one of two:
 - Answer: write `text` (above).

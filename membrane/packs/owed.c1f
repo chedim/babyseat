@@ -5,10 +5,13 @@ IMPORT chat_turn 1
 VIRTUAL Owed
 -- WHAT THE BRAIN OWES (#1143, operator 2026-11-19; docs/graph-link.md, section 19): the seat tells the brain peer which chat turns it has taken and not finished, so the brain does not have to infer its duties from log rows
 -- (a step that fails loses its rows, and a pending message would never be offered again). ONE node `membrane::Owed:<ns>` for the namespace named by `Minds:seat.chat` (VIRTUAL, never stored; held by `Minds:seat.owed_hold`, a reference),
--- readable by a peer as a cell, the way the LogView is. Its `items` is a list, oldest first, of `{message, response}`: the eid of the ChatMessage and of its answer entity (`...:turn:response`), for every turn whose `turn.brain`
+-- readable by a peer as a cell, the way the LogView is. Its `items` is a list, oldest first, of `{message, text, response}`: the eid of the ChatMessage, its own `text` (the person's words, whole) and the eid of its answer entity (`...:turn:response`), for every turn whose `turn.brain`
 -- is `<ns>` and whose state is `running`; an empty list when none. A turn leaves the list when it is done or error (answered, declined, stopped, failed).
 -- HOW IT IS KEPT without loading a single turn (ChatTurn is a lazy class): an INDEX the turn's own writes maintain: `ChatTurn.brain` written (the turn start of packs/chat_turn.c1f) adds the turn, `ChatTurn.state` done or error removes it.
 -- At birth ONE store query (the same kind `Boot.interrupted` asks, the keys of the running turns of this brain) seeds the index with the turns taken before this pack was loaded (a pack written to a live seat at runtime).
+-- THE BANNER (`Owed:<ns>.banner`, there whenever the node is, also when nothing is owed): the text a chat turn shows the model as its banner (`ChatMessage.banner_slot`, packs/chat_turn.c1f): the main banner `Banner:admin:main`
+-- `text`, then every other banner's `words` (oldest update first), joined by a newline, or the banner error when the main one has no text. The turn's getters are per message and none once the message is over, so there is
+-- nothing to read when nobody is owed: the same expressions are written again here, IDENTICAL (a test compares the two on the same graph). It is live like any getter: the model's banner edits show up.
 -- DECLINE: the brain resolves an item without answering by writing `<turn>:response` property `declined` = the reason (a text): the turn finishes as done and the page shows `Declined: <reason>`.
 Owed.kind getter: 'owed'
 
@@ -20,7 +23,7 @@ Minds.owed_ns on-setter owed-born:
     this.owed_hold = [membrane::Owed[this.owed_ns]]
 
 Owed.seed getter: sql("SELECT k FROM c_field WHERE cls = 'Chat' AND k LIKE 'membrane::Chat:%:message:%:turn' AND json_extract(body, '$.props.state') = 'running' AND json_extract(body, '$.props.brain') = ? ORDER BY json_extract(body, '$.props.started'), k", this.ns) if this.ns != None else None
-Owed.seed_items getter: [{'message': head(prop(r, 'k'), len(prop(r, 'k')) - 5), 'response': prop(r, 'k') + ':response'} for r in this.seed] if this.seed != None else None
+Owed.seed_items getter: [{'message': head(prop(r, 'k'), len(prop(r, 'k')) - 5), 'text': prop(head(prop(r, 'k'), len(prop(r, 'k')) - 5), 'text'), 'response': prop(r, 'k') + ':response'} for r in this.seed] if this.seed != None else None
 Owed.seed_items on-setter owed-seed:
   WHEN this.seed_items != None:
     have = this.items or []
@@ -31,7 +34,7 @@ ChatTurn.brain on-setter owed-take:
   WHEN this.brain != None:
     have = prop('membrane::Owed:' + this.brain, 'items') or []
     FOR m IN ([this.owed_msg] if this.owed_msg not in [h['message'] for h in have] else []):
-      ('membrane::Owed:' + this.brain).items = concat(have, [{'message': m, 'response': this.eid + ':response'}])
+      ('membrane::Owed:' + this.brain).items = concat(have, [{'message': m, 'text': prop(m, 'text'), 'response': this.eid + ':response'}])
 ChatTurn.state on-setter owed-leave:
   WHEN this.brain != None and (this.state == 'done' or this.state == 'error'):
     have = prop('membrane::Owed:' + this.brain, 'items') or []
@@ -45,3 +48,10 @@ Chat.declined on-setter owed-decline:
     membrane::Chat[this.cp]:turn.state = 'done'
     membrane::Chat[this.cp]:turn.ended = clock
     membrane::Chat[this.cp]:turn:response.text = 'Declined: ' + str(this.declined)
+
+Owed.banner_main getter: prop('membrane::Banner:admin:main', 'text')
+Owed.banner_more getter: [prop(r, 'words') for r in sort_by([{'eid': b.eid, 'updated': b.updated or 0, 'words': b.words} for b in instances('Banner') if b.eid != 'membrane::Banner:admin:main' and strip(str(b.words or ''))], 'updated')]
+Owed.banner_text getter:
+  WHEN this.banner_main == None or this.banner_main is Error: this.banner_main
+  ELSE: join(concat([this.banner_main], this.banner_more), '\n')
+Owed.banner getter: this.banner_text if this.banner_text != None and not (this.banner_text is Error) else 'BANNER ERROR: your banner `Banner:admin:main` has no `text` (the reason: ' + (why(this.banner_text) or 'it has no text property') + '). Give `Banner.text` a value again, in a pack that defines it; Help:banner shows how.'
