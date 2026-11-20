@@ -299,114 +299,18 @@ fn empty_code_answers_error() {
     assert!(e.contains("code is empty"), "{e}");
 }
 
-// ---- WHAT THE BRAIN OWES: `Owed:<ns>.items`, the seat's list of the turns the brain has taken and not finished --------------------------------------------------
-
-fn owed(run: &Run) -> String { read(run, "membrane::Owed:kitchen", "items") }
-fn owed_has(run: &Run, id: &str, want: bool, secs: u64) -> bool {
-    let end = Instant::now() + Duration::from_secs(secs);
-    loop { let has = owed(run).contains(&eid(id, "")); if has == want || Instant::now() > end { return has == want; } std::thread::sleep(Duration::from_millis(100)); }
-}
+// ---- the brain resolves a turn without answering: an explicit write ---------------------------------------------------------------------------------------
 
 #[test]
-fn a_message_the_brain_took_is_owed_with_its_answer_entity_and_answering_removes_it() {
-    let (run, _n, mut peer) = seat_with_grants("lc-owed", Some(json!(["*"])), &brain_facts("kitchen"));
-    link_up(&run);
-    assert!(wait_for(&run, "membrane::Owed:kitchen", "items", "[]", 30).contains("[]"), "nothing owed at first: {}", owed(&run));
-    let a = send(&run, "first");
-    let b = send(&run, "second");
-    assert!(owed_has(&run, &a, true, 30) && owed_has(&run, &b, true, 30), "both are owed: {}", owed(&run));
-    let o = owed(&run);
-    assert!(o.contains(&eid(&a, ":turn:response")), "the answer entity is named: {o}");
-    assert!(o.find(&a).unwrap() < o.find(&b).unwrap(), "oldest first: {o}");
-    assert_eq!(ask(&mut peer, &eid(&a, ":turn:response"), "text", json!("done")), None);
-    assert!(owed_has(&run, &a, false, 30), "an answered turn leaves the list: {}", owed(&run));
-    assert!(owed_has(&run, &b, true, 5), "the other stays: {}", owed(&run));
-}
-
-#[test]
-fn a_stopped_turn_leaves_the_owed_list() {
-    let (run, _n, _peer) = seat_with_grants("lc-owed-stop", Some(json!(["*"])), &brain_facts("kitchen"));
-    link_up(&run);
-    let a = send(&run, "stop me");
-    assert!(owed_has(&run, &a, true, 30));
-    authed(&run, "POST", &format!("/membrane/chat/message/{a}/abort"), "");
-    assert!(owed_has(&run, &a, false, 30), "{}", owed(&run));
-}
-
-#[test]
-fn a_decline_resolves_the_item_as_done_with_the_reason_shown() {
-    let (run, _n, mut peer) = seat_with_grants("lc-owed-decline", Some(json!(["*"])), &brain_facts("kitchen"));
+fn a_decline_resolves_the_turn_as_done_with_the_reason_shown_and_no_list_is_needed() {
+    let (run, _n, mut peer) = seat_with_grants("lc-decline", Some(json!(["*"])), &brain_facts("kitchen"));
     link_up(&run);
     let a = send(&run, "not for you");
-    assert!(owed_has(&run, &a, true, 30));
+    state_is(&run, &a, "running", 20);
     assert_eq!(ask(&mut peer, &eid(&a, ":turn:response"), "declined", json!("not a question")), None);
     let v = state_is(&run, &a, "done", 30);
     assert_eq!(v["state"], "done", "{v}");
     assert!(v["response"].as_str().unwrap_or("").contains("not a question"), "the reason is shown: {v}");
-    assert!(owed_has(&run, &a, false, 30), "{}", owed(&run));
-}
-
-#[test]
-fn the_owed_pack_loads_on_a_running_seat_and_offers_the_turns_already_taken() {
-    // a seat started WITHOUT the pack; a turn is taken; then the pack text is written as `Pack:owed.text`
-    let (run, _n, mut peer) = seat_ex("lc-owed-live", Some(json!(["*"])), &brain_facts("kitchen"), &["owed"]);
-    link_up(&run);
-    let a = send(&run, "taken before the pack");
-    state_is(&run, &a, "running", 20);
-    let text = std::fs::read_to_string(repo().join("membrane/packs/owed.c1f")).unwrap();
-    put(&run, "Pack:owed", "text", json!(text));
-    assert!(wait_for(&run, "Pack:owed", "state", "loaded", 60).contains("loaded"), "{}", read(&run, "Pack:owed", "error"));
-    assert!(owed_has(&run, &a, true, 60), "the turn taken before the load is owed: {}", owed(&run));
-    assert!(owed(&run).contains("taken before the pack"), "the seeded item carries the words: {}", owed(&run));
-    assert!(!read(&run, "membrane::Owed:kitchen", "banner").trim().is_empty(), "the banner is there after a live load");
-    let b = send(&run, "after");
-    assert!(owed_has(&run, &b, true, 30), "{}", owed(&run));
-    assert_eq!(ask(&mut peer, &eid(&a, ":turn:response"), "text", json!("late")), None);
-    assert!(owed_has(&run, &a, false, 30), "{}", owed(&run));
-}
-
-#[test]
-fn an_owed_item_carries_the_persons_words_and_the_node_carries_the_same_banner_a_turn_shows() {
-    let (run, _n, _peer) = seat_with_grants("lc-owed-banner", Some(json!(["*"])), &brain_facts("kitchen"));
-    link_up(&run);
-    let banner = wait_for(&run, "membrane::Owed:kitchen", "banner", "", 30);
-    assert!(!banner.trim().is_empty() && !banner.contains("has no"), "the banner is there with nothing owed: {banner}");
-    let a = send(&run, "the whole words of the person, with: punctuation");
-    assert!(owed_has(&run, &a, true, 30));
-    assert!(owed(&run).contains("the whole words of the person, with: punctuation"), "the item carries the text: {}", owed(&run));
-    // the same banner a turn shows the model: the message's own banner_slot (readable while its turn runs)
-    let slot = read(&run, &eid(&a, ""), "banner_slot");
-    assert_eq!(read(&run, "membrane::Owed:kitchen", "banner"), slot, "identical to ChatMessage.banner_slot");
-    // live: the model's banner edit shows up, and the other banners' words follow the main one
-    put(&run, "membrane::Banner:admin:main", "text", json!("MAIN NOTE"));
-    put(&run, "membrane::Banner:extra", "words", json!("EXTRA WORDS"));
-    let b2 = wait_for(&run, "membrane::Owed:kitchen", "banner", "EXTRA WORDS", 30);
-    assert!(b2.starts_with("MAIN NOTE") && b2.contains("EXTRA WORDS"), "{b2}");
-    assert_eq!(read(&run, &eid(&a, ""), "banner_slot"), b2, "still identical after the edit");
-}
-
-#[test]
-fn a_turn_already_done_is_not_owed_after_a_live_load_and_rewriting_its_response_changes_nothing() {
-    let (run, _n, mut peer) = seat_ex("lc-owed-done", Some(json!(["*"])), &brain_facts("kitchen"), &["owed"]);
-    link_up(&run);
-    let a = send(&run, "answered before the pack");
-    state_is(&run, &a, "running", 20);
-    assert_eq!(ask(&mut peer, &eid(&a, ":turn:response"), "text", json!("first")), None);
-    state_is(&run, &a, "done", 30);
-    let text = std::fs::read_to_string(repo().join("membrane/packs/owed.c1f")).unwrap();
-    put(&run, "Pack:owed", "text", json!(text));
-    assert!(wait_for(&run, "Pack:owed", "state", "loaded", 60).contains("loaded"));
-    assert!(wait_for(&run, "membrane::Owed:kitchen", "items", "[]", 60).contains("[]"), "a done turn is not owed: {}", owed(&run));
-    // a second turn, answered, its response written twice more after the finish: still not owed
-    let b = send(&run, "second");
-    assert!(owed_has(&run, &b, true, 30));
-    assert_eq!(ask(&mut peer, &eid(&b, ":turn:response"), "text", json!("one")), None);
-    assert!(owed_has(&run, &b, false, 30));
-    put(&run, &eid(&b, ":turn:response"), "text", json!("two"));
-    put(&run, &eid(&b, ":turn:response"), "text", json!("three"));
-    std::thread::sleep(Duration::from_secs(2));
-    assert!(owed_has(&run, &b, false, 5), "rewriting a finished response does not list it again: {}", owed(&run));
-    assert!(owed_has(&run, &a, false, 5));
 }
 
 // ---- the tool rows of a RUNNING brain turn are on the page as they are issued ------------------------------------------------------------------------------
