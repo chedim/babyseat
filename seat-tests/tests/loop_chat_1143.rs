@@ -166,6 +166,8 @@ fn state_is(run: &Run, id: &str, want: &str, secs: u64) -> J {
     let end = Instant::now() + Duration::from_secs(secs);
     loop { let v = view(run, id); if v["state"] == want || Instant::now() > end { return v; } std::thread::sleep(Duration::from_millis(100)); }
 }
+/// the seat has seen the peer's link come up (the peer's Opened event is its own end of the handshake)
+fn link_up(run: &Run) { assert!(wait_for(run, "Vm:kitchen", "link", "up", 60).contains("up"), "the peer's link is up on the seat"); }
 fn brain_facts(chat: &str) -> Vec<String> {
     vec![format!("minds={}", json!({"loops": "", "cortex": "", "workers": "", "seat_default": "", "chat": chat})), "seat_backend=http://127.0.0.1:1".into(), "router_on=false".into()]
 }
@@ -174,6 +176,7 @@ fn eid(id: &str, tail: &str) -> String { format!("membrane::Chat:main:message:{i
 #[test]
 fn a_message_with_the_brain_taking_the_chat_starts_no_turn_and_waits_for_the_brain() {
     let (run, _n, _peer) = seat_with_grants("lc-wait", Some(json!(["*"])), &brain_facts("kitchen"));
+    link_up(&run);
     let id = send(&run, "hello brain");
     std::thread::sleep(Duration::from_secs(3));
     let v = view(&run, &id);
@@ -187,6 +190,7 @@ fn a_message_with_the_brain_taking_the_chat_starts_no_turn_and_waits_for_the_bra
 #[test]
 fn the_brain_writes_the_answer_and_the_page_route_shows_a_done_turn() {
     let (run, _n, mut peer) = seat_with_grants("lc-answer", Some(json!(["*"])), &brain_facts("kitchen"));
+    link_up(&run);
     let id = send(&run, "hello brain");
     state_is(&run, &id, "running", 20);
     assert_eq!(ask(&mut peer, &eid(&id, ":turn:response"), "text", json!("hello person")), None, "the write is accepted");
@@ -217,6 +221,7 @@ fn a_brain_that_is_not_up_is_said_in_plain_words_not_a_hung_turn() {
 #[test]
 fn stop_ends_a_turn_the_brain_has() {
     let (run, _n, _peer) = seat_with_grants("lc-stop", Some(json!(["*"])), &brain_facts("kitchen"));
+    link_up(&run);
     let id = send(&run, "think a long time");
     state_is(&run, &id, "running", 20);
     let (st, _) = authed(&run, "POST", &format!("/membrane/chat/message/{id}/abort"), "");

@@ -2,6 +2,8 @@
 
 membrama (github.com/chedim/membrama) is a GraphLink peer that runs a local model on llama.cpp for the seat. This page says how a chat turn is answered by it: a rung of the turn beside `chat_oai.c1f` (any OpenAI-compatible endpoint) and the claude rung, selected by the model's entry, with the same tool loop. membrama's own design is its `docs/design.md`; the protocol under both is [graph-link.md](graph-link.md).
 
+**The brain instead of a rung:** when `Minds:seat.chat` names a brain peer, no rung runs at all and the peer answers by writing (graph-link.md, section 19).
+
 ## Choosing the rung
 
 A model is a `cloud_models` entry (`chat_oai.c1f` header). An entry with `backend: "membrama"` selects this rung: `{name, backend: "membrama", peer, ns, max_new, enable_thinking?}`. `name` is the model name shown to the person; `peer` is the name of the peer in the fact `peers`; `ns` is the namespace it owns (the node `Vm:<ns>` says whether its link is up); **`max_new` is required and has no default** (it is the owner's number; an entry without it, or without `peer` or `ns`, refuses the turn and says what to add). `chat_oai.c1f` leaves `membrama` entries alone.
