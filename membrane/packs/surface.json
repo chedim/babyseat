@@ -167,7 +167,7 @@
       "LlmTool",
       "MbRound"
     ],
-    "members": 49,
+    "members": 51,
     "writes": [
       "*.abort",
       "*.retire",
@@ -176,6 +176,7 @@
       "membrane:*.go",
       "membrane:*.mb_nodes",
       "membrane:*.messages",
+      "membrane:*.model",
       "membrane:*.oai_tools",
       "membrane:*.role",
       "membrane:*.round",
@@ -508,7 +509,7 @@
       "Request",
       "Settings"
     ],
-    "members": 66,
+    "members": 68,
     "writes": [
       "Minds:seat.cortex",
       "Minds:seat.cortex_auth",

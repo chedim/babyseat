@@ -8,7 +8,7 @@ The seat picks the backend from the chosen model, first match wins. `entity_read
 
 - `brain`: the owner gave the chat to a brain program (the minds setting `chat` names it). It answers by writing the response itself, whatever model is chosen (`Help:brain`).
 - `none`: no model is chosen. Nothing starts, and the answer tells the person how to choose one.
-- `peer`: the model is answered by a peer program over shared memory (a `cloud_models` entry whose `backend` is `membrama`, `claude-peer`, `openai-peer` or `anthropic-peer`; `Help:peers`).
+- `peer`: the model is answered by a peer program over shared memory (a `cloud_models` entry whose `backend` is `membrama`, `claude-peer`, `openai-peer` or `anthropic-peer`, or a model a peer publishes while its link is up: the names on its node `<ns>::Models:main`; `Help:peers`).
 - `oai`: the model is answered over an OpenAI-compatible endpoint (a `cloud_models` entry with any other `backend`, or a model the local Ollama lists).
 - `claude`: every other model, answered by the claude CLI.
 

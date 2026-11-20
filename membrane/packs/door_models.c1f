@@ -29,7 +29,10 @@ Request.m_lanes getter: ['autoselect', 'autoselect-local'] if this.m_router else
 Request.d_tags getter: FOR m IN this.m_tags: {'id': m.name, 'object': 'model', 'owned_by': 'membrane->ollama'}
 Request.d_lanes getter: FOR l IN this.m_lanes: {'id': l, 'object': 'model', 'owned_by': 'membrane-router'}
 Request.d_rungs getter: FOR m IN this.m_rungs: {'id': m.name, 'object': 'model', 'owned_by': m.owner}
-Request.m_data getter: concat(concat(concat(this.d_tags, [{'id': '@explore', 'object': 'model', 'owned_by': 'membrane->ollama'}]), this.d_lanes), this.d_rungs)
+-- the models the live peers publish (`<ns>::Models:main` {names, backend}, packs/chat_membrama.c1f `mb_published`): listed while the peer's link is up, owned by its backend; a name a rung has is listed once
+Request.m_peers getter: [{'names': prop(after(v.eid, 'Vm:') + '::Models:main', 'names') or [], 'backend': prop(after(v.eid, 'Vm:') + '::Models:main', 'backend') or 'peer'} for v in instances('Vm') if v.kind == 'peer' and v.link == 'up']
+Request.d_peers getter: fold([], [concat(acc, [{'id': n, 'object': 'model', 'owned_by': 'membrane->' + str(r['backend'])} for n in r['names'] if not (n in [m.name for m in this.m_rungs])]) for r in this.m_peers])
+Request.m_data getter: concat(concat(concat(concat(this.d_tags, [{'id': '@explore', 'object': 'model', 'owned_by': 'membrane->ollama'}]), this.d_lanes), this.d_rungs), this.d_peers)
 Request.list_reply getter:
   WHEN this.models_ready != True: None
   ELSE: {'status': 200, 'body': {'object': 'list', 'data': this.m_data}}
@@ -38,7 +41,7 @@ Request.list_reply getter:
 Request.mind getter: [x for x in instances('Minds')]
 Request.mind_seat getter: this.mind[0] if len(this.mind) > 0 else None
 Request.mind_read getter: this.mind_seat.read if this.mind_seat != None else {}
-Request.pickable getter: concat([m.name for m in this.m_tags], [m.name for m in instances('Model') if m.rung == True and m.backend == 'claude-agent' and m.listed == True])
+Request.pickable getter: concat(concat([m.name for m in this.m_tags], [m.name for m in instances('Model') if m.rung == True and m.backend == 'claude-agent' and m.listed == True]), [d['id'] for d in this.d_peers])
 -- every field of the body, with its value, its python-style repr (for the messages) and whether it is a model name
 -- (a string of 1..120 characters from letters, digits and _.:/@~+-)
 Request.k_list getter: ['loops_auth', 'cortex_auth', 'workers_auth', 'loops', 'cortex', 'workers', 'think']
