@@ -139,7 +139,10 @@
     "getters": {
       "ChatMessage.brain_has": "Bool",
       "ChatMessage.history_view": "Dict?",
+      "ChatMessage.live_raw": "Any",
+      "ChatMessage.live_text": "Any",
       "ChatMessage.live_tools": "List(Any)?",
+      "ChatMessage.page_rows": "List(Dict)",
       "ChatMessage.page_view": "Dict?",
       "ChatMessage.stream_view": "Dict?",
       "ChatMessage.view": "Dict?"

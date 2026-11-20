@@ -7,11 +7,16 @@ IMPORT chat_turn 1
 -- and is the view's own dict with `tools` = the names of the rows so far; every other message keeps the view as chat.c1f writes it. A finished brain turn keeps the same rows and names. This pack changes no other pack: it can be loaded on a running seat.
 ChatMessage.brain_has getter: prop(this.turn_eid, 'brain') != None
 ChatMessage.live_tools getter: [t['name'] for t in this.tool_rows] if this.brain_has else None
+-- THE LIVE TEXT: the brain publishes `<ns>::Loop:main.live` (the text of its current model round so far, replaced as it grows, cleared when the round ends); the seat reads that cell as a foreign replica and the running brain
+-- turn's page row carries it as `live` (the page shows it muted under "Working on it", and drops it when the turn finishes). The RESULT of each tool row is added to the page row only while the turn runs (a result can be megabytes).
+ChatMessage.live_raw getter: prop(prop(this.turn_eid, 'brain') + '::Loop:main', 'live') if this.brain_turn else None
+ChatMessage.live_text getter: (this.live_raw if this.live_raw is Text else '') if this.brain_turn else None
+ChatMessage.page_rows getter: [{'id': t['id'], 'name': t['name'], 'input': t['input'], 'result': t['result']} for t in this.tool_rows] if this.brain_turn else [{'id': t['id'], 'name': t['name'], 'input': t['input']} for t in this.tool_rows]
 ChatMessage.view getter:
   WHEN this.brain_has: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.live_tools, 'turn': this.turn_view}
 ChatMessage.stream_view getter:
-  WHEN this.brain_has: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.live_tools, 'turn': this.turn_view}
+  WHEN this.brain_has: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.live_tools, 'turn': this.turn_view, 'live': this.live_text}
 ChatMessage.history_view getter:
   WHEN this.brain_has: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.live_tools, 'turn': this.turn_view, 'tool_calls': this.tool_rows, 'interrupted': this.cut, 'kept': this.kept_words}
 ChatMessage.page_view getter:
-  WHEN this.brain_has: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.live_tools, 'turn': this.turn_view, 'sent_by': this.sent_by, 'interrupted': this.cut, 'kept': this.kept_words, 'tool_calls': [{'id': t['id'], 'name': t['name'], 'input': t['input']} for t in this.tool_rows]}
+  WHEN this.brain_has: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.live_tools, 'turn': this.turn_view, 'sent_by': this.sent_by, 'interrupted': this.cut, 'kept': this.kept_words, 'tool_calls': this.page_rows, 'live': this.live_text}
