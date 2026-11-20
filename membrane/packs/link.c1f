@@ -74,5 +74,10 @@ Boot.old_vms on-setter link-sweep:
 -- refusal, and the peer's receipt says which fact decides. The driver applies an accepted write as an ordinary outside write (writer `link:<peer>`); it never writes a node of another namespace, whatever the rules say.
 Boot.pw_rules getter: this.peer_writes if this.peer_writes is List else []
 LinkWrite.rules getter: ([b.pw_rules for b in instances('Boot')] or [[]])[0]
-LinkWrite.allowed getter: len([r for r in this.rules if r['peer'] == this.peer and startswith(str(this.id), str(r['prefix']))]) > 0
-LinkWrite.verdict getter: 'accept' if this.allowed else 'refused: no rule of the fact peer_writes lets ' + str(this.peer) + ' write ' + str(this.id)
+-- A GRANT is the other way in: the peer's hello token carries the claim `grants` (a list of id prefixes, or the string "*" for every prefix; the engine reads it, cliffvm 0.3.2) and the engine puts it on the question as `grants` (a list; "*" is the list ["*"]).
+-- A grant is the owner's word too (the owner minted the token): `*` includes the privileged classes (Pack, Command, File, Dir, Fetch, SqlSource, SqlQuery, Store, Cron, Person, Environment), there is no list of exceptions.
+LinkWrite.grant_list getter: this.grants if this.grants is List else ([this.grants] if this.grants is Text else [])
+LinkWrite.by_rule getter: len([r for r in this.rules if r['peer'] == this.peer and startswith(str(this.id), str(r['prefix']))]) > 0
+LinkWrite.by_grant getter: len([g for g in this.grant_list if str(g) == '*' or startswith(str(this.id), str(g))]) > 0
+LinkWrite.allowed getter: this.by_rule or this.by_grant
+LinkWrite.verdict getter: 'accept' if this.allowed else 'refused: no rule of the fact peer_writes lets ' + str(this.peer) + ' write ' + str(this.id) + ' and its grants (' + str(this.grant_list) + ') do not reach it'

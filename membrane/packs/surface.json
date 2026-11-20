@@ -1073,7 +1073,7 @@
       "Peers",
       "Vm"
     ],
-    "members": 27,
+    "members": 30,
     "writes": [
       "*.retire",
       "Peers:seat.born",

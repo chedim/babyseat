@@ -8,7 +8,7 @@ RESIDENT Command
 --   Command.stop = {id}       -> the running child is killed; stop_result
 -- `output` is the whole stdout and `errors` the whole stderr of the last run (the reply of entity_write carries only the first and last 8 KB of each).
 -- Secrets are named in env_from (read when the command starts), never stored. A time limit (`timeout_s`, below), no output cap.
--- Entity scripts and peers never run an effect.
+-- Entity scripts never run an effect; a peer's write runs one only where the peer's token granted it (`grants`, packs/link.c1f).
 
 -- A command that outlives its `timeout_s` is killed (the whole process group: SIGTERM, then SIGKILL after 2 s) and its receipt says `status: timeout`, `rc: 124`,
 -- `killed: true`. `timeout_s` is the model's own estimate of the longest the command may run: in the run value (`run = {id, cmd, timeout_s: 600}`) or set on the entity

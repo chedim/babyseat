@@ -9,7 +9,7 @@ RESIDENT Dir
 -- `seen`).
 -- Effects (writes; the receipt lands as <verb>_result {id, status, rc, head} and <verb>_rc):
 --   File.write = {id, content, append}    File.move = {id, to}    File.delete = {id}
--- Reach: everything the seat's OS user can do. Entity scripts and peers never run an effect.
+-- Reach: everything the seat's OS user can do. Entity scripts never run an effect; a peer's write runs one only where the peer's token granted it (`grants`, packs/link.c1f).
 
 File.text getter: read(this.path) if this.path and (this.seen or True) else None
 File.info getter: stat(this.path) if this.path and (this.seen or True) else None
