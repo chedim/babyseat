@@ -468,3 +468,26 @@ fn the_brain_tools_pack_loads_on_a_running_seat_and_the_rows_show() {
     assert_eq!(tools_names(&v), vec!["entity_read"], "{v}");
     assert_eq!(rows(&page_row(&run, &id)).len(), 1);
 }
+
+#[test]
+fn a_running_brain_turn_carries_the_results_and_the_brains_live_text_and_a_finished_one_does_not() {
+    let (run, _n, mut peer) = seat_with_grants("lc-live", Some(json!(["*"])), &brain_facts("kitchen"));
+    link_up(&run);
+    let id = send(&run, "show me live");
+    state_is(&run, &id, "running", 20);
+    assert_eq!(ask(&mut peer, &eid(&id, ":turn:tool:c1"), "name", json!("entity_read")), None);
+    assert_eq!(ask(&mut peer, &eid(&id, ":turn:tool:c1"), "input", json!("{\"spec\":\"a\"}")), None);
+    assert_eq!(ask(&mut peer, &eid(&id, ":turn:tool:c1"), "result", json!("the whole result")), None);
+    assert_eq!(ask(&mut peer, &eid(&id, ""), "tool_ids", json!("c1")), None);
+    // the brain's live text: its own cell `<ns>::Loop:main.live` (the test stands in for the replica; see the report)
+    put(&run, "kitchen::Loop:main", "live", json!("so far the model wrote this"));
+    let end = Instant::now() + Duration::from_secs(30);
+    let row = loop { let r = page_row(&run, &id); if r["live"] == "so far the model wrote this" || Instant::now() > end { break r; } std::thread::sleep(Duration::from_millis(100)); };
+    assert_eq!(row["live"], "so far the model wrote this", "{row}");
+    assert_eq!(row["tool_calls"][0]["result"], "the whole result", "a running brain turn's rows carry the result: {row}");
+    assert_eq!(ask(&mut peer, &eid(&id, ":turn:response"), "text", json!("answer")), None);
+    state_is(&run, &id, "done", 30);
+    let row = page_row(&run, &id);
+    assert!(row["live"].is_null() || row["live"] == "", "the live text goes with the turn: {row}");
+    assert!(row["tool_calls"][0]["result"].is_null(), "a finished turn folds the rows as today (no result in the page row): {row}");
+}
