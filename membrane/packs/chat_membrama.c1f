@@ -3,6 +3,7 @@ IMPORT chat 1
 IMPORT chat_turn 1
 IMPORT chat_oai 1
 IMPORT fetch 1
+IMPORT model_chat 1
 VIRTUAL LlmMsg
 VIRTUAL LlmRequest
 VIRTUAL LlmTool
@@ -114,14 +115,18 @@ MbRound.results getter:
   WHEN prop(this.step, 'calls') != True: None
   ELSE: ([r for r in [[prop(e, 'out') for e in this.call_eids]] if len([x for x in r if x == None]) == 0] or [None])[0]
 MbRound.assistant getter: {'role': 'assistant', 'content': (this.said or ''), 'tool_calls': [{'type': 'function', 'function': {'name': c['name'], 'arguments': json(c['args'] or '{}')}} for c in this.calls]}
-MbRound.mb_next getter: {'messages': concat(concat(this.messages, [this.assistant]), [{'role': 'tool', 'content': r['text']} for r in this.results])} if this.results != None else None
+MbRound.mb_next getter: {'raw': this.raw, 'messages': concat(concat(this.messages, [this.assistant]), [{'role': 'tool', 'content': r['text']} for r in this.results])} if this.results != None else None
 Chat.mb_next on-setter mb-next:
   WHEN this.mb_next != None:
+    ('ModelChat:' + before(this.cp, ':message:')).add = prop(this.mb_next, 'raw')
     FOR r IN this.results:
       membrane::Chat[this.cp]:turn:tool[r['id']] = ChatTool(name: r['name'], input: r['input'], result: r['text'])
     membrane::Chat[this.cp]:turn:round[str(this.n + 1)] = MbRound(cp: this.cp, n: this.n + 1, messages: prop(this.mb_next, 'messages'))
     membrane::Chat[this.cp]:turn:round[str(this.n + 1)].go = True
     membrane::Chat[this.cp]:turn.round = this.n + 1
+
+-- ---- the raw exchange of the round, for `ModelChat:<chat>` (packs/model_chat.c1f; the same shape as chat_oai's `ChatRound.raw`) ---------------------------------------------------------------------------
+MbRound.raw getter: '── ' + str(this.cp) + ' round ' + str(this.n) + ' ──\n' + (join(['[' + str(m['role']) + ']\n' + str(prop(m, 'content') or '') + '\n' for m in this.messages], '') if this.n == 1 else '') + (('[assistant]\n' + this.said + '\n') if this.said != '' else '') + join(['[call] ' + str(c['name']) + ' ' + str(c['args'] or '{}') + '\n' for c in this.calls], '') + join(['[tool]\n' + str(r['text']) + '\n' for r in (this.results or [])], '') + (('[error]\n' + str(prop(this.step, 'fail')) + '\n') if prop(this.step, 'fail') != None else '')
 
 -- ---- what the turn has used, over its rounds (chat_oai's shape; membrama's usage is {read, loaded, generated}) ---------------------------------------------------------
 MbRound.prev getter: 'membrane::Chat:' + this.cp + ':turn:round:' + str(this.n - 1) if this.n > 1 else None

@@ -4,6 +4,7 @@ IMPORT semtext 1
 IMPORT proc 1
 IMPORT boot 1
 IMPORT door 1
+IMPORT model_chat 1
 VIRTUAL Chunk
 -- THE BARE CHAT'S TURN (#1143, operator 2026-11-12): a message is answered by ONE run of the model's CLI, in the mode the Python rung
 -- used (membrane/claude_agent.py): Claude's built-in tools OFF, no user MCP config, no settings files, the allowed tools exactly the
@@ -241,14 +242,20 @@ ChatMessage.tokens getter: prop(this.final, 'usage')
 ChatMessage.cost getter: prop(this.final, 'total_cost_usd')
 ChatMessage.calls getter: prop(this.final, 'num_turns')
 ChatMessage.took getter: prop(this.final, 'duration_ms')
+-- the raw exchange of the CLI's run, for `ModelChat:<chat>` (packs/model_chat.c1f): the prompt it was given, then the stream's finished messages in order (its thinking, its text, each call with its input, each result); written once, when the run is over
+ChatMessage.raw_events getter: join([join([('[thinking]\n' + str(prop(b, 'thinking')) + '\n') if prop(b, 'type') == 'thinking' else (('[assistant]\n' + str(prop(b, 'text')) + '\n') if prop(b, 'type') == 'text' else (('[call] ' + replace(str(prop(b, 'name')), 'mcp__membrane__', '') + ' ' + str(prop(b, 'input')) + '\n') if prop(b, 'type') == 'tool_use' else (('[tool]\n' + (join([str(prop(x, 'text')) for x in prop(b, 'content')], '') if prop(b, 'content') is List else str(prop(b, 'content'))) + '\n') if prop(b, 'type') == 'tool_result' else ''))) for b in (prop(prop(e, 'message'), 'content') if prop(prop(e, 'message'), 'content') is List else []) if b is Dict], '') for e in this.evl], '')
+ChatMessage.raw_head getter: '── ' + str(this.cp) + ' ──\n[system]\n' + str(this.sys or '') + '\n[user]\n' + str(this.banner_block or '') + '\n' + str(this.text or '') + '\n'
+ChatMessage.raw_err getter: ('[error]\n' + str(this.fail_why) + '\n') if this.fail_why != None else ''
 ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evl if prop(e, 'type') == 'assistant'], ' '))
 -- the ids of the tools in the order they were called (the stream's order): the page reads each tool entity by `...:turn:tool:<id>` in this order
 ChatMessage.tools_idlist getter: join([join([str(prop(b, 'id')) for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evl if prop(e, 'type') == 'assistant'], ' ')
 -- the turn is over once its state is done or error. The finish below runs only while it is not: the answer is derived from the receipt, and the slimming
 -- below changes the receipt, so a finished turn keeps the response it wrote.
 ChatMessage.over getter: this.tstate == 'done' or this.tstate == 'error'
+-- the run's text is its OWN getter, which is what the setter below listens to: the turn's finish runs on `answer`, and a sibling the trigger does not read would still be its old value then
 Chat.answer on-setter turn-finish:
   WHEN this.answer != None and not this.over:
+    ('ModelChat:' + before(this.cp, ':message:')).add = this.raw_head + this.raw_events + this.raw_err
     membrane::Chat[this.cp]:turn.state = 'error' if this.fail_why != None else 'done'
     membrane::Chat[this.cp]:turn.ended = clock
     membrane::Chat[this.cp]:turn.error = this.fail_why

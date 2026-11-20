@@ -1,0 +1,174 @@
+PACK log_view 1
+IMPORT dom 1
+IMPORT fetch 1
+IMPORT shell_view 1
+-- THE SEAT'S LOG TAB (#1143, operator 2026-11-20: the Log tab does not depend on a peer). A PAGE pack (it imports `dom`: the seat sends it with `GET /ui/fieldvm`), a tab in the shell (`Nav:log`, the view-pack contract of
+-- docs/ui-rebuild-plan.md) with two sections, and nothing in it names a peer:
+--   1. the LATEST lines of the seat's boundary log, one per change: `n eid.prop op by writer`, followed while the tab is the one in front;
+--   2. the raw chat with the model, `ModelChat:main` (packs/model_chat.c1f): every turn, whichever rung answered it (claude CLI, OpenAI-compatible, ollama, a peer such as membrama), as the model had it.
+-- THE TAB IS THE SEAT'S, A PEER ADDS A SECTION: this pack owns `Nav:log` and its root `DomNode:log:root` (a scrolling column); a peer that has more to show (membrama's loop) draws its own section as DomNodes parented
+-- to `DomNode:log:root` while `Nav:log` is active, and reads its own cells by the door. It never writes `Nav:log` or a node of this pack's. With no peer there is no extra section and nothing is missing.
+-- The page cannot read the view by its link (`membrane::LogView:<ns>` is virtual and a link does not carry a virtual entity's values), so it does what docs/logview.md says a page does, with the door
+-- (`POST /mcp`, as link_view.c1f does): it ASKS by writing `<its ns>::LogAsk:main` (`from`, then `n`, a count: the cache breaker) and READS `membrane::LogView:<its ns>` with `entity_read`.
+--   on open       one ask (`n` only, from 0), read `head`; then ask from max(0, head - (200 - 1)), so the page shows the last 200 lines
+--   on the tick   the shell's own (`Shell.tick`, at the shell's `status_ms`), only while the tab is active: ask from the line after the last one shown (a new `n`), read `rows`, append, keep the last 200
+-- 200 is the seat's own page size (packs/logview.c1f). The three calls of an ask are `Fetch:log:from`, `Fetch:log:n`, `Fetch:log:read`, one POST each, chained by their receipts. A call that fails is `LogTab:main.note`,
+-- shown on the tab. The tab scrolls (`panelrows`) and stays at the bottom unless the person scrolled up (`near`, by the chat's own `stick_px`); "Load older lines" puts the 200 lines before the first one above it. The guard pack removes this tab when membrama's link is not up.
+--   LogTab:main   `first` (the number of the first line shown), `pages` (loads the person asked for: the cap of lines is 200 x pages), `more`, `near`, `holding`, `older_out`, `phase` (None, 'head', 'follow'), `step` (from, n, read, headread), `last` (the number of the last line shown), `lines`, `seq`, `polling`, `last_poll`, `note`
+
+Shell.open on-setter log-view-register:
+  WHEN this.open:
+    ('Nav:log').title = 'Log'
+    ('Nav:log').order = 85
+
+Nav.active on-setter log-view-draw:
+  WHEN this.eid == 'Nav:log' and this.active == True:
+    ('DomNode:log:root').tag = 'div'
+    ('DomNode:log:root').class = 'panelrows'
+    ('DomNode:log:root').parent = 'DomNode:shell:slot:log'
+    ('DomNode:log:older').parent = 'DomNode:log:root'
+    ('DomNode:log:older').tag = 'div'
+    ('DomNode:log:older').hidden = True
+    ('DomNode:log:older:btn').parent = 'DomNode:log:older'
+    ('DomNode:log:older:btn').tag = 'button'
+    ('DomNode:log:older:btn').type = 'button'
+    ('DomNode:log:older:btn').text = 'Load older lines'
+    ('DomNode:log:text').parent = 'DomNode:log:root'
+    ('DomNode:log:text').tag = 'pre'
+    ('DomNode:log:chathead').parent = 'DomNode:log:root'
+    ('DomNode:log:chathead').tag = 'div'
+    ('DomNode:log:chathead').text = 'Chat with the model (raw: the prompt, the reply with its thinking, each call and its result; the oldest text drops first)'
+    ('DomNode:log:chat').parent = 'DomNode:log:root'
+    ('DomNode:log:chat').tag = 'pre'
+    ('Nav:log').filled = True
+    ('LogTab:main').on = True
+    ('LogChat:main').on = True
+
+LogTab.ns getter: prop('Link:page', 'ns')
+LogTab.text getter: join(this.lines or [], '\n') + (('\n' if this.lines else '') + str(this.note) if this.note else '')
+-- the button shows while there are older lines than the first one shown
+LogTab.more getter: this.first != None and this.first > 0
+LogTab.more on-setter log-view-more:
+  WHEN this.on == True:
+    ('DomNode:log:older').hidden = not this.more
+-- the lines are kept at the bottom after they are drawn, unless the person scrolled up (`near` false; no scroll seen yet counts as near) or older lines were just put above (`holding`)
+LogTab.text on-setter log-view-text:
+  WHEN this.on == True and this.near != False and not this.holding:
+    ('DomNode:log:text').text = this.text
+    ('DomNode:log:root').scroll = 'end'
+  ELSE WHEN this.on == True:
+    ('DomNode:log:text').text = this.text
+LogTab.on on-setter log-view-first:
+  WHEN this.on == True:
+    ('DomNode:log:text').text = this.text
+-- near the bottom within the chat's own `stick_px` (the owner's number); a pack write of `scroll` (the command 'end', no height) is not a measure; no chat view counts as near
+DomNode.scroll on-setter log-view-scroll:
+  WHEN this.eid == 'DomNode:log:root' and prop(this.scroll, 'height') != None:
+    ('LogTab:main').near = prop('View:chat', 'stick_px') == None or prop(this.scroll, 'height') - prop(this.scroll, 'top') - prop(this.scroll, 'client') < prop('View:chat', 'stick_px')
+-- "Load older lines": the page before the first one shown (200 lines, the seat's page size); the same chain of calls, asked from max(0, first - 200)
+DomNode.clicked on-setter log-view-older-click:
+  WHEN this.eid == 'DomNode:log:older:btn' and not prop('LogTab:main', 'polling') and prop('LogTab:main', 'more') == True:
+    n = (prop('LogTab:main', 'seq') or 0) + 1
+    ('LogTab:main').seq = n
+    ('LogTab:main').polling = True
+    ('LogTab:main').older_out = True
+    ('LogTab:main').holding = True
+    ('LogTab:main').step = 'from'
+    ('Fetch:log:from').request = {'timeout_s': 10, 'id': 'log-from-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': prop('LogTab:main', 'ns') + '::LogAsk:main', 'prop': 'from', 'value': max(0, prop('LogTab:main', 'first') - 200)}}})}
+
+-- the receipt of a call, read once: ok = the seat answered 2xx and the call has no error; `text` is what the door's tool answered
+Fetch.mq getter:
+  rq = this.request_result
+  bd = json(str(prop(rq, 'body') or ''))
+  jd = bd if bd is Dict else {}
+  hs = prop(rq, 'http_status')
+  cs = prop(prop(jd, 'result'), 'content') or []
+  er = prop(jd, 'error')
+  {'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not prop(prop(jd, 'result'), 'isError'), 'text': prop(cs[0], 'text') if len(cs) > 0 else None, 'why': (str(prop(er, 'message') if er is Dict else (er or prop(prop(jd, 'result'), 'content'))) if (er or prop(prop(jd, 'result'), 'isError')) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+
+-- an ask starts on the shell's tick, while the tab is in front and none is running; the first one finds the head
+Shell.tick on-setter log-view-poll:
+  WHEN this.open and prop('Nav:log', 'active') == True and prop('LogTab:main', 'ns') != None and not prop('LogTab:main', 'polling') and not prop('Conn:page', 'hidden') and this.tick - (prop('LogTab:main', 'last_poll') or 0) >= this.status_ms / 1000 and prop('LogTab:main', 'phase') == None:
+    n = (prop('LogTab:main', 'seq') or 0) + 1
+    ('LogTab:main').seq = n
+    ('LogTab:main').polling = True
+    ('LogTab:main').phase = 'head'
+    ('LogTab:main').step = 'n'
+    ('Fetch:log:n').request = {'timeout_s': 10, 'id': 'log-n-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': prop('LogTab:main', 'ns') + '::LogAsk:main', 'prop': 'n', 'value': n}}})}
+  ELSE WHEN this.open and prop('Nav:log', 'active') == True and prop('LogTab:main', 'ns') != None and not prop('LogTab:main', 'polling') and not prop('Conn:page', 'hidden') and this.tick - (prop('LogTab:main', 'last_poll') or 0) >= this.status_ms / 1000 and prop('LogTab:main', 'phase') == 'follow':
+    n = (prop('LogTab:main', 'seq') or 0) + 1
+    ('LogTab:main').seq = n
+    ('LogTab:main').polling = True
+    ('LogTab:main').step = 'from'
+    ('Fetch:log:from').request = {'timeout_s': 10, 'id': 'log-from-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': prop('LogTab:main', 'ns') + '::LogAsk:main', 'prop': 'from', 'value': prop('LogTab:main', 'last') + 1}}})}
+
+-- the calls of an ask, one after the other, by their receipts
+Fetch.mq on-setter log-view-step:
+  WHEN startswith(this.eid, 'Fetch:log:') and this.mq != None and not prop(this.mq, 'ok'):
+    ('LogTab:main').note = 'the seat did not answer the log tab (' + this.eid + '): ' + str(prop(this.mq, 'why'))
+    ('LogTab:main').polling = False
+    ('LogTab:main').last_poll = clock
+  ELSE WHEN this.eid == 'Fetch:log:from' and this.mq != None and prop('LogTab:main', 'step') == 'from':
+    ('LogTab:main').step = 'n'
+    ('Fetch:log:n').request = {'timeout_s': 10, 'id': 'log-n-' + str(prop('LogTab:main', 'seq')), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': prop('LogTab:main', 'seq'), 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': prop('LogTab:main', 'ns') + '::LogAsk:main', 'prop': 'n', 'value': prop('LogTab:main', 'seq')}}})}
+  ELSE WHEN this.eid == 'Fetch:log:n' and this.mq != None and prop('LogTab:main', 'step') == 'n':
+    ('LogTab:main').step = 'headread' if prop('LogTab:main', 'phase') == 'head' else 'read'
+    ('Fetch:log:read').request = {'timeout_s': 10, 'id': 'log-read-' + str(prop('LogTab:main', 'seq')), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': prop('LogTab:main', 'seq'), 'method': 'tools/call', 'params': {'name': 'entity_read', 'arguments': {'spec': 'membrane::LogView:' + prop('LogTab:main', 'ns'), 'prop': 'head' if prop('LogTab:main', 'phase') == 'head' else 'rows'}}})}
+  ELSE WHEN this.eid == 'Fetch:log:read' and this.mq != None and prop('LogTab:main', 'step') == 'headread':
+    hd = num(str(prop(this.mq, 'text') or ''))
+    ('LogTab:main').last = (max(0, hd - 199) - 1) if hd is Number else -1
+    ('LogTab:main').first = (max(0, hd - 199)) if hd is Number else 0
+    ('LogTab:main').phase = 'follow'
+    ('LogTab:main').note = None
+    ('LogTab:main').polling = False
+    ('LogTab:main').last_poll = 0
+  ELSE WHEN this.eid == 'Fetch:log:read' and this.mq != None and prop('LogTab:main', 'step') == 'read' and prop('LogTab:main', 'older_out') == True:
+    rs = json(str(prop(this.mq, 'text') or ''))
+    ow = [r for r in (rs if rs is List else []) if prop(r, 'n') < prop('LogTab:main', 'first')]
+    ('LogTab:main').older_out = False
+    ('LogTab:main').pages = (prop('LogTab:main', 'pages') or 1) + 1
+    ('LogTab:main').first = min([prop(r, 'n') for r in ow]) if len(ow) > 0 else prop('LogTab:main', 'first')
+    ('LogTab:main').lines = concat([str(prop(r, 'n')) + ' ' + str(prop(r, 'eid')) + '.' + str(prop(r, 'prop')) + ' ' + str(prop(r, 'op')) + ' by ' + str(prop(r, 'writer')) for r in ow], prop('LogTab:main', 'lines') or [])
+    ('LogTab:main').note = None
+    ('LogTab:main').polling = False
+    ('LogTab:main').last_poll = clock
+  ELSE WHEN this.eid == 'Fetch:log:read' and this.mq != None and prop('LogTab:main', 'step') == 'read':
+    rs = json(str(prop(this.mq, 'text') or ''))
+    rw = [r for r in (rs if rs is List else []) if prop(r, 'n') > (prop('LogTab:main', 'last') if prop('LogTab:main', 'last') != None else -1)]
+    ('LogTab:main').holding = False
+    nl = tail(concat(prop('LogTab:main', 'lines') or [], [str(prop(r, 'n')) + ' ' + str(prop(r, 'eid')) + '.' + str(prop(r, 'prop')) + ' ' + str(prop(r, 'op')) + ' by ' + str(prop(r, 'writer')) for r in rw]), 200 * (prop('LogTab:main', 'pages') or 1))
+    ('LogTab:main').last = max([prop(r, 'n') for r in rw]) if len(rw) > 0 else prop('LogTab:main', 'last')
+    ('LogTab:main').first = (max([prop(r, 'n') for r in rw]) - len(nl) + 1) if len(rw) > 0 else prop('LogTab:main', 'first')
+    ('LogTab:main').lines = nl
+    ('LogTab:main').note = None
+    ('LogTab:main').polling = False
+    ('LogTab:main').last_poll = clock
+
+-- THE RAW CHAT WITH THE MODEL, under the log lines: the seat's own `ModelChat:main`, read by the door (`entity_read`, one POST, `Fetch:logchat:read`) on the same tick while the tab is in front. Its own state `LogChat:main`
+-- (`text`, `polling`, `last_poll`, `seq`, `note`) so it never waits on the log's calls; a call that fails is said under the heading.
+Shell.tick on-setter log-view-chat-poll:
+  WHEN this.open and prop('Nav:log', 'active') == True and not prop('LogChat:main', 'polling') and not prop('Conn:page', 'hidden') and this.tick - (prop('LogChat:main', 'last_poll') or 0) >= this.status_ms / 1000:
+    n = (prop('LogChat:main', 'seq') or 0) + 1
+    ('LogChat:main').seq = n
+    ('LogChat:main').polling = True
+    ('Fetch:logchat:read').request = {'timeout_s': 10, 'id': 'log-chat-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_read', 'arguments': {'spec': 'ModelChat:main', 'prop': 'text'}}})}
+
+Fetch.mq on-setter log-view-chat-step:
+  WHEN this.eid == 'Fetch:logchat:read' and this.mq != None and not prop(this.mq, 'ok'):
+    ('LogChat:main').note = 'the seat did not answer the model chat: ' + str(prop(this.mq, 'why'))
+    ('LogChat:main').polling = False
+    ('LogChat:main').last_poll = clock
+  ELSE WHEN this.eid == 'Fetch:logchat:read' and this.mq != None:
+    ('LogChat:main').text = str(prop(this.mq, 'text') or '')
+    ('LogChat:main').note = None
+    ('LogChat:main').polling = False
+    ('LogChat:main').last_poll = clock
+
+LogChat.shown getter: ('' if (' has no text' in str(this.text or '')) or startswith(str(this.text or ''), 'no such entity') else str(this.text or '')) or '(nothing yet: no model has been asked anything)'
+LogChat.full getter: this.shown + (('\n' + str(this.note)) if this.note else '')
+LogChat.full on-setter log-view-chat-show:
+  WHEN prop('Nav:log', 'filled') == True:
+    ('DomNode:log:chat').text = this.full
+LogChat.on on-setter log-view-chat-first:
+  WHEN this.on == True:
+    ('DomNode:log:chat').text = this.full

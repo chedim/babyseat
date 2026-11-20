@@ -19,7 +19,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
     std::fs::create_dir_all(&d).unwrap();
     d
 }
-const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f", "router.c1f", "door_models.c1f"];
+const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "model_chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f", "router.c1f", "door_models.c1f"];
 /// `hang`: says "starting", then waits for ever (its pid in `pid.<prompt tag>`); any other prompt answers at once
 const FAKE: &str = r#"#!/usr/bin/env python3
 import json, os, sys, time

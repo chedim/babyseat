@@ -20,7 +20,7 @@ impl Drop for Run { fn drop(&mut self) { let _ = self.child.kill(); let _ = self
 struct Dir(std::path::PathBuf);
 impl Drop for Dir { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
 
-const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f", "router.c1f", "door_models.c1f"];
+const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "chat.c1f", "model_chat.c1f", "chat_turn.c1f", "door_session.c1f", "door_auth.c1f", "router.c1f", "door_models.c1f"];
 /// a launcher's seat that answers through the claude CLI only: three claude rungs, no router, a backend nobody listens on, `claude` picked everywhere
 const FACTS: [&str; 4] = [
     r#"cloud_models=[{"name":"claude","backend":"claude-agent"},{"name":"claude-agent:sonnet","backend":"claude-agent"},{"name":"claude-agent:opus","backend":"claude-agent"}]"#,

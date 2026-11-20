@@ -247,6 +247,7 @@
       "MbRound.ns": "Text",
       "MbRound.peer_gone": "Bool",
       "MbRound.prev": "Text?",
+      "MbRound.raw": "Text",
       "MbRound.rcalls": "Any",
       "MbRound.reply_e": "Text",
       "MbRound.rerr": "Any",
@@ -279,6 +280,7 @@
       "Chat.round": "Num?",
       "Chat.started": "Num",
       "Chat.state": "Text",
+      "ModelChat.add": "Any",
       "membrane.messages": "Any",
       "membrane.server": "Any",
       "membrane.settings": "Any",
@@ -336,6 +338,7 @@
       "ChatRound.oai_next": "Dict?",
       "ChatRound.oai_req": "Dict?",
       "ChatRound.prev": "Text?",
+      "ChatRound.raw": "Text",
       "ChatRound.rbody": "Text",
       "ChatRound.rchs": "List(Any)",
       "ChatRound.rcpt": "Any",
@@ -370,7 +373,8 @@
       "Chat.state": "Text",
       "Chat.tool_ids": "Any",
       "Chat.tools_run": "Any",
-      "Chat.usage": "Any"
+      "Chat.usage": "Any",
+      "ModelChat.add": "Any"
     },
     "findings": []
   },
@@ -418,6 +422,9 @@
       "ChatMessage.pick_ok": "Bool",
       "ChatMessage.plan": "Dict?",
       "ChatMessage.port": "Any",
+      "ChatMessage.raw_err": "Text",
+      "ChatMessage.raw_events": "Text",
+      "ChatMessage.raw_head": "Text",
       "ChatMessage.rc": "Any",
       "ChatMessage.recall_wait": "Bool",
       "ChatMessage.rlines": "List(Text)",
@@ -460,6 +467,7 @@
       "Command.run": "Dict",
       "Command.run_result": "Dict",
       "Command.stop": "Dict",
+      "ModelChat.add": "Any",
       "Request.ab1_done": "Bool"
     },
     "findings": [],
@@ -2197,6 +2205,16 @@
     "resident": [
       "Tool"
     ]
+  },
+  "model_chat": {
+    "getters": {
+      "Boot.mc_cap": "Num?",
+      "ModelChat.kind": "Text"
+    },
+    "writes": {
+      "ModelChat.text": "Text"
+    },
+    "findings": []
   },
   "movelog": {
     "getters": {
