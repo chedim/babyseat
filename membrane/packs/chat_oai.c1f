@@ -9,7 +9,7 @@ IMPORT model_chat 1
 -- (`POST /mcp`, packs/door_tools.c1f), the answer becomes the turn's ChatResponse, the tools it ran are ChatTool entities under the turn. What differs is the transport:
 -- ONE streamed `POST <base_url>/v1/chat/completions` per round (a `Fetch` with `stream`, `lines` and `bearer_env`, cliffvm:src/fetch.rs), no process.
 --
--- WHICH MODEL: the message's model (`model_eff`, packs/chat_turn.c1f) is an entry of the boot fact `cloud_models` whose `backend` is not `claude-agent`, `membrama` or `claude-peer`
+-- WHICH MODEL: the message's model (`model_eff`, packs/chat_turn.c1f) is an entry of the boot fact `cloud_models` whose `backend` is not `claude-agent`, `membrama`, `claude-peer`, `openai-peer` or `anthropic-peer`
 --   {name, backend, base_url, api_key_env, chat_path?}   name = the model id the endpoint is asked for; `base_url` = the endpoint's root (no trailing slash needed), the call goes to
 --                                                        `base_url + chat_path` (default `/v1/chat/completions`: gemini and groq-style bases name their own path); `api_key_env` =
 --                                                        the NAME of the environment variable that holds the key (no key: none is sent); `backend` is a label (the provider's name)
@@ -34,7 +34,7 @@ IMPORT model_chat 1
 -- ---- which model, which endpoint ---------------------------------------------------------------------------------------------------------------------
 ChatMessage.oai_entry getter:
   WHEN this.over: None
-  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') not in ['claude-agent', 'membrama', 'claude-peer']] or [None])[0]
+  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') not in ['claude-agent', 'membrama', 'claude-peer', 'openai-peer', 'anthropic-peer']] or [None])[0]
 ChatMessage.oai_local getter: prop('Model:' + this.model_eff, 'backend') == 'ollama'
 ChatMessage.oai_base getter:
   WHEN this.oai_entry != None: str(prop(this.oai_entry, 'base_url') or '')

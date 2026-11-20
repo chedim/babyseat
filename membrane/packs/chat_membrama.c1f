@@ -8,8 +8,8 @@ VIRTUAL LlmMsg
 VIRTUAL LlmRequest
 VIRTUAL LlmTool
 -- THE CHAT TURN OVER MEMBRAMA (#1143, docs/membrama-chat.md): a chat turn answered by the local model peer membrama (github.com/chedim/membrama), a rung beside packs/chat_oai.c1f.
--- THE PEER RUNG IS GENERIC: it serves any peer that speaks this contract (the seat writes the nodes, the peer answers `<ns>::Reply:<rid>` and `<ns>::Chunk:<rid>:<k>`): membrama, and a Claude Code connector (`claude-peer`).
--- WHICH MODEL: an entry of the boot fact `cloud_models` whose `backend` is `membrama`: {name, backend: 'membrama', peer, ns, max_new, enable_thinking?}, or `claude-peer`: {name, backend: 'claude-peer', peer, ns} (no `max_new`, no `enable_thinking`: they do not apply to Claude, and the request's `settings` is empty). `peer` is the peer's name in the fact `peers` and `ns` the namespace it owns (the `Vm:<ns>` node says whether its link is up);
+-- THE PEER RUNG IS GENERIC: it serves any peer that speaks this contract (the seat writes the nodes, the peer answers `<ns>::Reply:<rid>` and `<ns>::Chunk:<rid>:<k>`): membrama, a Claude Code connector (`claude-peer`), an OpenAI-compatible server (`openai-peer`, graphlink-openai) and the Claude API (`anthropic-peer`, graphlink-anthropic).
+-- WHICH MODEL: an entry of the boot fact `cloud_models` whose `backend` is `membrama`: {name, backend: 'membrama', peer, ns, max_new, enable_thinking?}, or `claude-peer` / `anthropic-peer`: {name, backend, peer, ns} (no `max_new`, no `enable_thinking`: they do not apply, and the request's `settings` is empty; the Claude API peer's `max_tokens` is the owner's launch option of that peer), or `openai-peer`: {name, backend: 'openai-peer', peer, ns, max_new?} (`max_new`, when the entry has it, is the request's `settings.max_new`, which the peer sends as `max_tokens`; with none, none is sent and the server chooses). `peer` is the peer's name in the fact `peers` and `ns` the namespace it owns (the `Vm:<ns>` node says whether its link is up);
 -- `max_new` is the most tokens an answer may take: the owner's number, no default.
 -- THE TURN is chat_oai's, with the transport swapped: the door's tool list is read the same way (`Fetch:oai:<cp>:tools`), each round (MbRound) writes its messages and a request as nodes
 -- (`membrane::LlmMsg:<mid>:<i>`, one node per message for the whole turn: a later round holds the same messages and more, so it writes only the new ones; `membrane::LlmRequest:<rid>`; the tools are shared nodes `membrane::LlmTool:door:<i>`), reads the peer's reply (`<ns>::Reply:<rid>`, its chunks; `membrama::` for membrama),
@@ -24,12 +24,12 @@ LlmTool.kind getter: 'tool'
 -- ---- which model, which peer -----------------------------------------------------------------------------------------------------------------------------
 ChatMessage.mb_entry getter:
   WHEN this.over: None
-  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') in ['membrama', 'claude-peer']] or [None])[0]
+  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') in ['membrama', 'claude-peer', 'openai-peer', 'anthropic-peer']] or [None])[0]
 ChatMessage.mb_cfg getter:
   WHEN this.mb_entry == None: None
-  ELSE WHEN prop(this.mb_entry, 'backend') == 'claude-peer' and (prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by a Claude peer, and its cloud_models entry must name "peer" (the peer in the fact peers) and "ns" (the namespace it owns).'}
+  ELSE WHEN prop(this.mb_entry, 'backend') != 'membrama' and (prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by ' + {'claude-peer': 'a Claude peer', 'openai-peer': 'an OpenAI-compatible peer', 'anthropic-peer': 'a Claude API peer'}[prop(this.mb_entry, 'backend')] + ', and its cloud_models entry must name "peer" (the peer in the fact peers) and "ns" (the namespace it owns).'}
   ELSE WHEN prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None or (prop(this.mb_entry, 'backend') == 'membrama' and prop(this.mb_entry, 'max_new') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by membrama, and its cloud_models entry must name "peer" (the peer in the fact peers), "ns" (the namespace it owns) and "max_new" (the most tokens an answer may take: your number, there is no default).'}
-  ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'settings': {'max_new': prop(this.mb_entry, 'max_new'), 'enable_thinking': prop(this.mb_entry, 'enable_thinking')} if prop(this.mb_entry, 'backend') == 'membrama' else {}, 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
+  ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'settings': {'max_new': prop(this.mb_entry, 'max_new'), 'enable_thinking': prop(this.mb_entry, 'enable_thinking')} if prop(this.mb_entry, 'backend') == 'membrama' else ({'max_new': prop(this.mb_entry, 'max_new')} if prop(this.mb_entry, 'backend') == 'openai-peer' and prop(this.mb_entry, 'max_new') != None else {}), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
 ChatMessage.mb_plan getter: {'refuse': prop(this.mb_cfg, 'refuse')} if prop(this.mb_cfg, 'refuse') != None else {'mb': this.mb_cfg}
 
 -- ---- start: the door's tool list (chat_oai's), then round 1 --------------------------------------------------------------------------------------------------
@@ -106,6 +106,8 @@ MbRound.step getter:
   ELSE WHEN len(this.calls) > 0 and this.n >= prop(this.cfg, 'max_turns'): {'capped': True}
   ELSE WHEN len(this.calls) > 0: {'calls': True}
   ELSE WHEN strip(this.said) == '': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' answered with no text and no tool call (finish: ' + str(this.rfinish) + ')'}
+  ELSE WHEN this.rfinish == 'length': {'final': this.said + '\n\n(the answer was cut: the model reached its limit on tokens)'}
+  ELSE WHEN this.rfinish == 'content_filter': {'final': this.said + '\n\n(the answer was cut: the content filter of the model server stopped it)'}
   ELSE: {'final': this.said}
 MbRound.said_all getter: join([x for x in [str(prop(this.prev, 'said_all') or ''), strip(this.said)] if x != ''], '\n\n')
 
