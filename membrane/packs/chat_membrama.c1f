@@ -30,15 +30,10 @@ ChatMessage.mb_cfg getter:
   ELSE WHEN prop(this.mb_entry, 'backend') != 'membrama' and (prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by ' + {'claude-peer': 'a Claude peer', 'openai-peer': 'an OpenAI-compatible peer', 'anthropic-peer': 'a Claude API peer'}[prop(this.mb_entry, 'backend')] + ', and its cloud_models entry must name "peer" (the peer in the fact peers) and "ns" (the namespace it owns).'}
   ELSE WHEN prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None or (prop(this.mb_entry, 'backend') == 'membrama' and prop(this.mb_entry, 'max_new') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by membrama, and its cloud_models entry must name "peer" (the peer in the fact peers), "ns" (the namespace it owns) and "max_new" (the most tokens an answer may take: your number, there is no default).'}
   ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'settings': {'max_new': prop(this.mb_entry, 'max_new'), 'enable_thinking': prop(this.mb_entry, 'enable_thinking')} if prop(this.mb_entry, 'backend') == 'membrama' else ({'max_new': prop(this.mb_entry, 'max_new')} if prop(this.mb_entry, 'backend') == 'openai-peer' and prop(this.mb_entry, 'max_new') != None else {}), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
-ChatMessage.mb_plan getter: {'refuse': prop(this.mb_cfg, 'refuse')} if prop(this.mb_cfg, 'refuse') != None else {'mb': this.mb_cfg}
+ChatMessage.mb_plan getter: {'refuse': prop(this.mb_cfg, 'refuse')} if prop(this.mb_cfg, 'refuse') != None else {'start': this.mb_cfg}
 
 -- ---- start: the door's tool list (chat_oai's), then round 1 --------------------------------------------------------------------------------------------------
-Chat.plan on-setter mb-start:
-  WHEN prop(this.plan, 'mb') != None:
-    membrane::Chat[this.cp]:turn.state = 'running'
-    membrane::Chat[this.cp]:turn.started = clock
-    membrane::Chat[this.cp]:turn.oai = prop(this.plan, 'mb')
-    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': prop(prop(this.plan, 'mb'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'mb'), 'admin_env'), 'timeout_s': prop(prop(this.plan, 'mb'), 'timeout_s')}
+-- the start is chat_oai's own (`oai-start`, for the backends `oai` and `peer`): the turn's settings (`turn.oai`), then the door's tool list
 -- the tools are shared nodes, written with the same values every turn (a cell is rewritten only when its value changes), and never retired
 Chat.oai_tools on-setter mb-first:
   WHEN prop(this.oai_tools, 'tools') != None and not this.over and this.mb_cfg != None:

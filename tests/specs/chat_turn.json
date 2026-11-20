@@ -1147,7 +1147,7 @@
    },
    {
     "eid": "membrane::Chat:main:message:1-1",
-    "prop": "plan.argv.0",
+    "prop": "plan.start.argv.0",
     "equals": "env"
    }
   ]
