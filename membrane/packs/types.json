@@ -259,6 +259,7 @@
       "MbRound.names": "List(Any)",
       "MbRound.names_before": "Any",
       "MbRound.nchunks": "Any",
+      "MbRound.ns": "Text",
       "MbRound.peer_gone": "Bool",
       "MbRound.prev": "Text?",
       "MbRound.rcalls": "Any",

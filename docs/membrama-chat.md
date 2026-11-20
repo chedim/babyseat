@@ -1,4 +1,6 @@
-# The chat turn over membrama (built in `packs/chat_membrama.c1f`; what is not built is listed at the end)
+# The chat turn over a peer: membrama or a Claude peer (built in `packs/chat_membrama.c1f`; what is not built is listed at the end)
+
+The rung is generic: it serves any peer that speaks the contract below and reads the peer's namespace from the model's entry (`ns`), never a fixed one. Two backends select it: `membrama` (the local model peer) and `claude-peer` (a Claude Code connector program, in the graphlink repo: the same contract, so the seat writes the nodes, the peer answers `<ns>::Reply:<rid>` and `<ns>::Chunk:<rid>:<k>`, the seat runs the tool calls and feeds them back in the next round). Wherever this page says `membrama::Reply` or `membrama::Chunk`, the rung reads `<ns>::Reply` and `<ns>::Chunk`; for a `membrama` entry `ns` is `membrama`. The errors the turn says name the entry's `ns` ("membrama is not up", "claude is not up").
 
 membrama (github.com/chedim/membrama) is a GraphLink peer that runs a local model on llama.cpp for the seat. This page says how a chat turn is answered by it: a rung of the turn beside `chat_oai.c1f` (any OpenAI-compatible endpoint) and the claude rung, selected by the model's entry, with the same tool loop. membrama's own design is its `docs/design.md`; the protocol under both is [graph-link.md](graph-link.md).
 
@@ -6,7 +8,9 @@ membrama (github.com/chedim/membrama) is a GraphLink peer that runs a local mode
 
 ## Choosing the rung
 
-A model is a `cloud_models` entry (`chat_oai.c1f` header). An entry with `backend: "membrama"` selects this rung: `{name, backend: "membrama", peer, ns, max_new, enable_thinking?}`. `name` is the model name shown to the person; `peer` is the name of the peer in the fact `peers`; `ns` is the namespace it owns (the node `Vm:<ns>` says whether its link is up); **`max_new` is required and has no default** (it is the owner's number; an entry without it, or without `peer` or `ns`, refuses the turn and says what to add). `chat_oai.c1f` leaves `membrama` entries alone.
+A model is a `cloud_models` entry (`chat_oai.c1f` header). An entry with `backend: "membrama"` selects this rung: `{name, backend: "membrama", peer, ns, max_new, enable_thinking?}`. `name` is the model name shown to the person; `peer` is the name of the peer in the fact `peers`; `ns` is the namespace it owns (the node `Vm:<ns>` says whether its link is up); **`max_new` is required and has no default** (it is the owner's number; an entry without it, or without `peer` or `ns`, refuses the turn and says what to add). `chat_oai.c1f` leaves `membrama` and `claude-peer` entries alone.
+
+An entry with `backend: "claude-peer"` is `{name, backend: "claude-peer", peer, ns}`: `peer` and `ns` are required (an entry without them refuses the turn and says so), and `max_new` and `enable_thinking` are not read: the request's `settings` is empty, so nothing is invented for Claude. The usage of the turn is what the peer's Reply says in `usage` (`{read, loaded, generated}`, read the same way for both backends); a Reply with no `usage` leaves the turn's usage unset.
 
 ## The peer (the owner declares it, in the fact `peers`)
 
@@ -35,6 +39,8 @@ Cells for a round with two messages and four tools: 6 for the request and 4 per 
 - Banks (entity parts) are not used by this rung: the prompt is one text, rendered with the model's own template. The prefix reuse across rounds still applies.
 
 ## What is tested
+
+Without a model (the peer played by the test, `seat-tests/tests/chat_peer_1143.rs`): a `claude-peer` entry in the namespace `claude` with no `max_new`: a plain turn (the request's `settings` is empty), a tool-call turn (finish `tool_calls`, the seat runs the door's `entity_read`, round 2 answers), and a peer that goes away fails the turn ("claude is not up"). No real Claude peer has been tested against this rung yet.
 
 Gated tests (`seat-tests/tests/chat_membrama_1143.rs`; `MEMBRAMA_BIN` and `MEMBRAMA_TEST_MODEL` name the membrama program and a Qwen3 file, and without them the tests say they were skipped): a plain turn (the model answers 4), a turn with a real tool call through the door and an answer from its result, the retirement of the requests and messages at the end of the turn with the shared tools staying, a turn whose peer is gone, and a stopped turn. Each runs on a scratch seat (its own port and folder). The comparison with `chat_oai` on the same model is not automated: the OpenAI-compatible endpoint (Ollama) does not decode greedily, so only a loose check ("the answer contains 4") can be shared.
 
