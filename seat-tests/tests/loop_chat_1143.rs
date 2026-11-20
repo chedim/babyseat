@@ -384,3 +384,27 @@ fn an_owed_item_carries_the_persons_words_and_the_node_carries_the_same_banner_a
     assert!(b2.starts_with("MAIN NOTE") && b2.contains("EXTRA WORDS"), "{b2}");
     assert_eq!(read(&run, &eid(&a, ""), "banner_slot"), b2, "still identical after the edit");
 }
+
+#[test]
+fn a_turn_already_done_is_not_owed_after_a_live_load_and_rewriting_its_response_changes_nothing() {
+    let (run, _n, mut peer) = seat_ex("lc-owed-done", Some(json!(["*"])), &brain_facts("kitchen"), &["owed"]);
+    link_up(&run);
+    let a = send(&run, "answered before the pack");
+    state_is(&run, &a, "running", 20);
+    assert_eq!(ask(&mut peer, &eid(&a, ":turn:response"), "text", json!("first")), None);
+    state_is(&run, &a, "done", 30);
+    let text = std::fs::read_to_string(repo().join("membrane/packs/owed.c1f")).unwrap();
+    put(&run, "Pack:owed", "text", json!(text));
+    assert!(wait_for(&run, "Pack:owed", "state", "loaded", 60).contains("loaded"));
+    assert!(wait_for(&run, "membrane::Owed:kitchen", "items", "[]", 60).contains("[]"), "a done turn is not owed: {}", owed(&run));
+    // a second turn, answered, its response written twice more after the finish: still not owed
+    let b = send(&run, "second");
+    assert!(owed_has(&run, &b, true, 30));
+    assert_eq!(ask(&mut peer, &eid(&b, ":turn:response"), "text", json!("one")), None);
+    assert!(owed_has(&run, &b, false, 30));
+    put(&run, &eid(&b, ":turn:response"), "text", json!("two"));
+    put(&run, &eid(&b, ":turn:response"), "text", json!("three"));
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(owed_has(&run, &b, false, 5), "rewriting a finished response does not list it again: {}", owed(&run));
+    assert!(owed_has(&run, &a, false, 5));
+}
