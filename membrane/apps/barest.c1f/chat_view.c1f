@@ -16,7 +16,7 @@ IMPORT markdown 1
 
 -- THE VIEW'S CONSTANTS are Boot facts (the page's Boot:seat is fed by the snapshot, door_fieldvm.c1f); the view reads them once, when it opens, each
 -- with its own default when no fact says otherwise (chat_page_size 20, chat_poll_size 10, chat_list_poll_ms 3000,
--- chat_active_poll_ms 700, chat_stick_px 80, chat_tool_chars 90).
+-- chat_active_poll_ms 700, chat_stick_px 80, chat_tool_chars 0: no cut).
 -- THE SHELL (shell_view.c1f) plugs this view in: it registers `Nav:chat` when the shell opens, the view opens when `Nav:chat` becomes active and draws into the slot
 -- `DomNode:shell:slot:chat`. There is ONE chat: it reads `GET /membrane/chat/messages` with no `sid` (every turn, newest page first, `before` pages older ones: the seat's imported history is the
 -- older part of the same thread) and sends `POST /membrane/chat/message {text}`.
@@ -100,7 +100,7 @@ View.open on-setter chat-draw:
     this.list_ms = ([b.chat_list_poll_ms for b in instances('Boot') if b.chat_list_poll_ms != None] or [3000])[0]
     this.active_ms = ([b.chat_active_poll_ms for b in instances('Boot') if b.chat_active_poll_ms != None] or [700])[0]
     this.stick_px = ([b.chat_stick_px for b in instances('Boot') if b.chat_stick_px != None] or [80])[0]
-    this.tool_chars = ([b.chat_tool_chars for b in instances('Boot') if b.chat_tool_chars != None] or [90])[0]
+    this.tool_chars = ([b.chat_tool_chars for b in instances('Boot') if b.chat_tool_chars != None] or [0])[0]
     this.timeout_s = ([b.chat_poll_timeout_s for b in instances('Boot') if b.chat_poll_timeout_s != None] or [10])[0]
     this.tick_ms = this.active_ms
     this.polling = True
@@ -129,15 +129,18 @@ ChatRow.ans_text getter:
   ELSE: ''
 -- the finished tools (a page row carries `tool_calls`, [] while the turn runs: as the legacy chat, that wins) else the names
 ChatRow.tool_list getter: prop(this.raw, 'tool_calls') if prop(this.raw, 'tool_calls') != None else [{'name': x} for x in (prop(this.raw, 'tools') or [])]
--- a tool's input is shortened to `tool_chars` with an ellipsis; a tool is keyed by its call id (the history route's `id`; a name-only list has none, so its key is the name)
-ChatRow.tool_rows getter: [{'k': str(prop(x, 'id') or ((prop(x, 'name') or prop(x, 'eid') or '') + '|' + ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else ''))), 'name': str(prop(x, 'name') or prop(x, 'eid') or ''), 'in': ((' ' + (head(str(prop(x, 'input')), prop('View:chat', 'tool_chars') - 1) + '…' if len(str(prop(x, 'input'))) > prop('View:chat', 'tool_chars') else str(prop(x, 'input')))) if prop(x, 'input') != None else '')} for x in this.tool_list]
+-- a tool's input is shown WHOLE (it wraps); only a seat that sets the fact `chat_tool_chars` (> 0) cuts it to that many characters with an ellipsis (the legacy chat cut at 90, `short(v, n = 90)`; no cut is the default).
+-- A tool is keyed by its call id (the history route's `id`; a name-only list has none, so its key is the name and its whole input). `res` is the tool's result when the row carries one (a brain turn's running rows do), else ''.
+ChatRow.tool_rows getter:
+  tc = prop('View:chat', 'tool_chars') or 0
+  [{'k': str(prop(x, 'id') or ((prop(x, 'name') or prop(x, 'eid') or '') + '|' + (str(prop(x, 'input')) if prop(x, 'input') != None else ''))), 'name': str(prop(x, 'name') or prop(x, 'eid') or ''), 'in': ((' ' + (head(str(prop(x, 'input')), tc - 1) + '…' if tc > 0 and len(str(prop(x, 'input'))) > tc else str(prop(x, 'input')))) if prop(x, 'input') != None else ''), 'res': str(prop(x, 'result')) if prop(x, 'result') != None else ''} for x in this.tool_list]
 -- what the answer bubble holds: the answer is MARKDOWN (markdown.c1f draws it into `ans:md`); the pending line is plain text (`ans:ph`) and is there only while there is no answer
 ChatRow.ans_src getter: str(prop(this.raw, 'kept')) if this.cut != None else str(prop(this.raw, 'response') or '')
 ChatRow.ph getter: '' if this.ans_src != '' else this.ans_text
 -- a turn the person stopped (the seat ends it with this line, packs/chat_turn.c1f) is a neutral note, not an error
 ChatRow.stopped getter: tail(this.ans_src, 23) == '(stopped from the page)'
 ChatRow.ans_class getter: ('bubble seat stopped' if this.stopped else ('bubble note' if this.state == 'error' else 'bubble seat')) if prop(this.raw, 'response') else 'bubble seat pending'
-ChatRow.view getter: {'id': this.rid, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_src': this.ans_src, 'ph': this.ph, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'by': 'sent by the seat' if prop(this.raw, 'sent_by') == 'seat' else '', 'cut': ('interrupted: ' + str(this.cut)) if this.cut != None else '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows} if this.raw != None else None
+ChatRow.view getter: {'id': this.rid, 'text': str(prop(this.raw, 'text') or ''), 'state': this.state, 'who': this.who, 'ans_text': this.ans_text, 'ans_src': this.ans_src, 'ph': this.ph, 'ans_class': this.ans_class, 'ans_hidden': this.ans_text == '', 'by': 'sent by the seat' if prop(this.raw, 'sent_by') == 'seat' else '', 'cut': ('interrupted: ' + str(this.cut)) if this.cut != None else '', 'tools_n': len(this.tool_list), 'tools': this.tool_rows, 'running': this.state == 'running', 'live': str(prop(this.raw, 'live') or '')} if this.raw != None else None
 
 ChatRow.view on-setter chat-draw-row:
   WHEN this.view != None:
@@ -178,6 +181,33 @@ ChatRow.view on-setter chat-draw-row:
     (base + ':ans:md').class = 'md'
     ('Md:' + prop(this.view, 'id') + ':ans').into = base + ':ans:md'
     ('Md:' + prop(this.view, 'id') + ':ans').src = prop(this.view, 'ans_src')
+    -- WHILE THE TURN RUNS (operator 2026-11-19): what the model is writing now (`live`, a brain turn: the seat reads the brain's `Loop:main.live`) and the tools so far, ALWAYS VISIBLE under the pending line (a `details`
+    -- cannot be opened by a pack: `open` is not in the DOM allow-list); each tool with its whole input and, once it has one, its result. A finished turn folds them (below).
+    (base + ':think').parent = base
+    (base + ':think').tag = 'div'
+    (base + ':think').class = 'who think'
+    (base + ':think').hidden = not (prop(this.view, 'running') and prop(this.view, 'live') != '')
+    (base + ':think').text = prop(this.view, 'live')
+    (base + ':live').parent = base
+    (base + ':live').tag = 'ul'
+    (base + ':live').class = 'tools-run'
+    (base + ':live').hidden = not (prop(this.view, 'running') and prop(this.view, 'tools_n') > 0)
+    FOR tl IN prop(this.view, 'tools'):
+      (base + ':live:t:' + prop(tl, 'k')).parent = base + ':live'
+      (base + ':live:t:' + prop(tl, 'k')).tag = 'li'
+      (base + ':live:t:' + prop(tl, 'k') + ':name').parent = base + ':live:t:' + prop(tl, 'k')
+      (base + ':live:t:' + prop(tl, 'k') + ':name').tag = 'code'
+      (base + ':live:t:' + prop(tl, 'k') + ':name').class = 'tname'
+      (base + ':live:t:' + prop(tl, 'k') + ':name').text = prop(tl, 'name')
+      (base + ':live:t:' + prop(tl, 'k') + ':in').parent = base + ':live:t:' + prop(tl, 'k')
+      (base + ':live:t:' + prop(tl, 'k') + ':in').tag = 'span'
+      (base + ':live:t:' + prop(tl, 'k') + ':in').class = 'tin'
+      (base + ':live:t:' + prop(tl, 'k') + ':in').text = prop(tl, 'in')
+      (base + ':live:t:' + prop(tl, 'k') + ':res').parent = base + ':live:t:' + prop(tl, 'k')
+      (base + ':live:t:' + prop(tl, 'k') + ':res').tag = 'div'
+      (base + ':live:t:' + prop(tl, 'k') + ':res').class = 'tres'
+      (base + ':live:t:' + prop(tl, 'k') + ':res').hidden = prop(tl, 'res') == ''
+      (base + ':live:t:' + prop(tl, 'k') + ':res').text = prop(tl, 'res')
     -- the interrupted mark, in the same muted line as `who` (hidden unless the turn was interrupted)
     (base + ':cut').parent = base
     (base + ':cut').tag = 'div'
@@ -187,7 +217,7 @@ ChatRow.view on-setter chat-draw-row:
     (base + ':tools').parent = base
     (base + ':tools').tag = 'details'
     (base + ':tools').class = 'tools-run'
-    (base + ':tools').hidden = prop(this.view, 'tools_n') == 0
+    (base + ':tools').hidden = prop(this.view, 'tools_n') == 0 or prop(this.view, 'running')
     (base + ':tools:sum').parent = base + ':tools'
     (base + ':tools:sum').tag = 'summary'
     (base + ':tools:sum').text = str(prop(this.view, 'tools_n')) + (' tool call' if prop(this.view, 'tools_n') == 1 else ' tool calls')

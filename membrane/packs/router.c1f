@@ -70,7 +70,7 @@ Model.chat_ok getter: this.is_cloud or ((not this.name_marked) and this.caps_ok 
 Model.owner getter: 'membrane->' + (this.backend or 'ollama')
 
 -- THE MINDS (the models of the background mechanisms: the watch loops, the idle cortex, the goal workers; and the think dial):
--- the entity `Minds:seat` {loops, cortex, workers, seat_default, loops_auth, cortex_auth, workers_auth, think}. The launcher's
+-- the entity `Minds:seat` {loops, cortex, workers, seat_default, chat (the namespace of the brain peer that has the chat, packs/chat_turn.c1f; '' = the rungs), loops_auth, cortex_auth, workers_auth, think}. The launcher's
 -- saved picks arrive as `Boot:seat.minds` (a dict of those names); /membrane/models reads and writes them (packs/door_models.c1f).
 Minds.kind getter: 'minds'
 Minds.read getter: {'loops': this.loops, 'cortex': this.cortex, 'seat_default': this.seat_default, 'workers': this.workers, 'loops_auth': this.loops_auth, 'cortex_auth': this.cortex_auth, 'workers_auth': this.workers_auth, 'think': this.think}
@@ -84,6 +84,7 @@ Boot.started on-setter router-minds:
     ('Minds:seat').cortex_auth = prop(this.minds, 'cortex_auth') or 'chat'
     ('Minds:seat').workers_auth = prop(this.minds, 'workers_auth') or 'chat'
     ('Minds:seat').think = prop(this.minds, 'think') or 'auto'
+    ('Minds:seat').chat = prop(this.minds, 'chat') or ''
 Boot.minds on-setter router-minds-told:
   WHEN this.minds != None and len(instances('Minds')) == 0:
     ('Minds:seat').loops = prop(this.minds, 'loops') or ''
@@ -94,3 +95,4 @@ Boot.minds on-setter router-minds-told:
     ('Minds:seat').cortex_auth = prop(this.minds, 'cortex_auth') or 'chat'
     ('Minds:seat').workers_auth = prop(this.minds, 'workers_auth') or 'chat'
     ('Minds:seat').think = prop(this.minds, 'think') or 'auto'
+    ('Minds:seat').chat = prop(this.minds, 'chat') or ''

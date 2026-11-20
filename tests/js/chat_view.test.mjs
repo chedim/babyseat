@@ -93,19 +93,39 @@ scenario('a page of turns is drawn as the legacy chat draws it', () => {
   assert.equal(row(w, b)['data-state'], 'running');
   assert.equal(row(w, c, ':ans').class, 'bubble note', 'an error answer is shown as what to do next'); assert.equal(w.text(`DomNode:chat:row:${c}:ans`), 'Name the CLI first');
   assert.equal(row(w, d, ':who').text, 'queued'); assert.equal(w.text(`DomNode:chat:row:${d}:ans`), 'Waiting for a turn…'); assert.equal(row(w, d, ':ans').class, 'bubble seat pending');
-  // the tools folded under the answer: a count, then each tool's name and its input shortened to 90
+  // the tools folded under the answer: a count, then each tool's name and its WHOLE input (no cut by default)
   assert.equal(row(w, a, ':tools').tag, 'details'); assert.equal(row(w, a, ':tools').class, 'tools-run');
   assert.equal(row(w, a, ':tools:sum').text, '2 tool calls');
   const names = w.log.filter((e) => e.prop === 'text' && /:tools:t:.*:name$/.test(e.eid)).map((e) => e.new);
   assert.deepEqual(names, ['mcp__membrane__entity_read', 'Bash']);
   const ins = w.log.filter((e) => e.prop === 'text' && /:tools:t:.*:in$/.test(e.eid)).map((e) => e.new);
-  assert.deepEqual(ins, [' ' + short({ spec: 'X', prop: 'y' }), ' ' + short('x'.repeat(120))]);
-  assert.equal(short('x'.repeat(120)).length, 90);
+  assert.deepEqual(ins, [' ' + short({ spec: 'X', prop: 'y' }), ' ' + 'x'.repeat(120)]);
   assert.equal(row(w, b, ':tools').hidden, true, 'a running turn lists no finished tools (tool_calls is [])');
   assert.equal(w.n('older').hidden, true, 'no more turns');
   // the order of the rows in the list is the order of the page (oldest first)
   const order = w.log.filter((e) => e.prop === 'parent' && e.new === 'DomNode:chat:list').map((e) => e.eid.split(':').pop());
   assert.deepEqual(order, ['1000-1', '1001-2', '1002-3', '1003-4']);
+});
+
+// 2b. A RUNNING turn: its tools are an always-visible list under the pending line (whole input, the result once there), the brain's live text is a muted block; a finished turn folds them
+scenario('a running turn shows its tools and the live text; finishing folds them', () => {
+  const w = world(); w.open();
+  const run = { id: '3000-1', text: 'go', state: 'running', response: null, live: 'thinking about it', turn: { state: 'running', started: 1 }, tools: ['entity_read', 'entity_write'],
+    tool_calls: [{ id: 'm:turn:tool:c1', name: 'entity_read', input: '{"spec":"' + 'y'.repeat(200) + '"}', result: 'the result' }, { id: 'm:turn:tool:c2', name: 'entity_write', input: '{"spec":"b"}' }] };
+  w.reply('history', 200, page([run]));
+  const r = '3000-1';
+  assert.equal(row(w, r, ':live').hidden, false, 'the live list is visible while running');
+  assert.equal(row(w, r, ':tools').hidden, true, 'the folded block waits for the finish');
+  assert.equal(row(w, r, ':think').hidden, false); assert.equal(row(w, r, ':think').text, 'thinking about it');
+  const ins = w.log.filter((e) => e.prop === 'text' && /:live:t:.*:in$/.test(e.eid)).map((e) => e.new);
+  assert.equal(ins[0], ' {"spec":"' + 'y'.repeat(200) + '"}', 'the whole input, no ellipsis');
+  const res = w.log.filter((e) => e.prop === 'text' && /:live:t:.*:res$/.test(e.eid)).map((e) => e.new);
+  assert.deepEqual(res, ['the result', ''], 'the result under its row once it exists');
+  // finished: the same rows fold, the live list and the text go
+  w.tick(1.1);
+  w.reply('history', 200, page([{ ...run, state: 'done', response: 'ok', live: '', turn: { state: 'done', started: 1, ended: 2 } }]));
+  assert.equal(row(w, r, ':live').hidden, true); assert.equal(row(w, r, ':think').hidden, true);
+  assert.equal(row(w, r, ':tools').hidden, false); assert.equal(row(w, r, ':tools:sum').text, '2 tool calls');
 });
 
 // 3. the composer: typing is a write, Enter or Send is one POST, the guard
@@ -303,14 +323,14 @@ scenario('Load older turns uses before and puts the older turns above', () => {
 scenario('the carried-over constants are Boot facts', () => {
   const d = world(); d.open();
   assert.deepEqual([d.get('View:chat').page_size, d.get('View:chat').poll_size, d.get('View:chat').list_ms, d.get('View:chat').active_ms, d.get('View:chat').stick_px, d.get('View:chat').tool_chars],
-    [20, 10, 3000, 700, 80, 90]);
+    [20, 10, 3000, 700, 80, 0]);
   const w = world();
   w.facts({ chat_page_size: 5, chat_poll_size: 2, chat_list_poll_ms: 1000, chat_active_poll_ms: 100, chat_stick_px: 40, chat_tool_chars: 10 });
   w.open();
   assert.equal(w.asked('history').url, '/membrane/chat/messages?limit=5');
   w.reply('history', 200, page([{ ...MSGS[0], tool_calls: [{ name: 'T', input: 'abcdefghijklmnop' }] }]));
   w.tick(1.1); assert.equal(w.asked('history').url, '/membrane/chat/messages?limit=2');
-  assert.equal(w.log.filter((e) => e.prop === 'text' && /:tools:t:.*:in$/.test(e.eid)).pop().new, ' abcdefghi…', 'tool_chars shortens');
+  assert.equal(w.log.filter((e) => e.prop === 'text' && /:tools:t:.*:in$/.test(e.eid)).pop().new, ' abcdefghi…', 'a seat that sets tool_chars shortens');
   assert.equal(w.get('View:chat').tick_ms, 100, 'the host ticks the clock at the active poll');
   assert.equal(d.get('View:chat').tick_ms, 700);
   // the scroll of the log: near the bottom within stick_px (the shell has no scroll write yet: the state is kept, nothing moves it)

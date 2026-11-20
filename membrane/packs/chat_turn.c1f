@@ -155,6 +155,8 @@ ChatMessage.listed_chat getter: [m.name for m in instances('Model') if m.listed 
 ChatMessage.no_model_text getter: 'No model is chosen, so nothing was started. Open the model picker (the window the page opens while a model is not chosen, or Settings, Model) and choose one of the models the local Ollama lists, then send the message again.' + ('' if len(this.listed_chat) > 0 else ' Ollama lists no chat model right now: start it (' + str(([bk.seat_backend for bk in instances('Boot') if bk.seat_backend != None] or [''])[0]) + ') and pull one with `ollama pull <name>`, then refresh the picker.')
 ChatMessage.plan getter:
   WHEN this.queued != True or this.tstate != 'queued' or this.text == None or this.recall_wait == True: None
+  -- A BRAIN PEER HAS THE CHAT (`Minds:seat.chat` names it, below): no rung runs, the peer answers by writing
+  ELSE WHEN this.brain != '': this.brain_plan
   -- NO MODEL IS CHOSEN (the default: the seat answers through the local Ollama, and the person picks which model): nothing starts, the answer says so and how to pick
   ELSE WHEN this.model_eff == '': {'refuse': this.no_model_text}
   -- a model that is not a claude rung is answered over an OpenAI-compatible endpoint (packs/chat_oai.c1f): its own plan, none of the claude CLI's checks apply
@@ -167,6 +169,48 @@ ChatMessage.plan getter:
   ELSE WHEN not this.pick_ok: {'refuse': 'This seat answers through the claude CLI only: ' + str(this.pick) + ' is not one of its claude models (GET /v1/models lists them). Pick one of those, or the seat default.'}
   ELSE WHEN this.argv != None and this.stdin != None: {'argv': this.argv, 'stdin': this.stdin}
   ELSE: None
+-- ---- THE BRAIN TAKES THE CHAT (#1143, operator 2026-11-19: the loop replaces the default chat routing; docs/graph-link.md, "The loop is the chat") -----------------------------------------
+-- THE SWITCH is the minds' own: `Minds:seat.chat` (the `chat` key of the fact `minds`; '' or none = the rungs above answer, as before) names the NAMESPACE of a graphlink peer, the brain (membrama's loop, a peer
+-- that holds the `wr` grants). While it is set, a new message starts NO turn on any rung (no claude Command, no LlmRequest): it is just another change of the boundary log, the brain wakes on it and answers by WRITING to the
+-- graph. Routing back is the same switch changed (`Minds:seat.chat = ''`; the next message goes to the rungs; a turn the brain already has stays its).
+-- The turn of such a message is `running` with `turn.brain` = the namespace (the page shows "Working on it"; pending, not an error). Its answer is the brain's write of the text of `...:turn:response` (a ChatResponse made
+-- empty at the start): the finish below is what a rung's finish writes (state done, ended, the body SemText). The brain not up (`Vm:<ns>.link` is not `up`, a peer that never came is the same) is an error turn that says so.
+ChatMessage.brain getter: str(prop('Minds:seat', 'chat') or '')
+ChatMessage.brain_up getter: prop('Vm:' + this.brain, 'link') == 'up'
+ChatMessage.brain_plan getter:
+  WHEN this.brain_up: {'brain': this.brain}
+  ELSE: {'refuse': 'The chat is taken by the brain peer ' + this.brain + ', and it is not up (its link is not up), so nothing can answer this message. Start it, then send the message again.'}
+Chat.plan on-setter brain-start:
+  WHEN prop(this.plan, 'brain') != None:
+    membrane::Chat[this.cp]:turn.state = 'running'
+    membrane::Chat[this.cp]:turn.started = clock
+    membrane::Chat[this.cp]:turn.brain = prop(this.plan, 'brain')
+    membrane::Chat[this.cp]:turn:response = ChatResponse(error: False)
+-- the brain's answer: its write of `...:turn:response.text` while the turn is the brain's and running (a text that is empty says nothing)
+ChatMessage.brain_turn getter: prop(this.turn_eid, 'brain') != None and this.tstate == 'running'
+ChatMessage.brain_said getter: prop(this.resp_eid, 'text') if this.brain_turn else None
+Chat.brain_said on-setter brain-answer:
+  WHEN this.brain_said != None and strip(str(this.brain_said)) != '':
+    membrane::Chat[this.cp]:turn.state = 'done'
+    membrane::Chat[this.cp]:turn.ended = clock
+    membrane::Chat[this.cp]:turn:response:body = SemText(text: str(this.brain_said))
+    membrane::Chat[this.cp]:turn:response:body.mention = True
+-- the brain DECLINES: it resolves a turn without answering by writing `...:turn:response` property `declined` = the reason (a text): the turn finishes as done and the page shows `Declined: <reason>`
+ChatMessage.declined getter: prop(this.resp_eid, 'declined') if this.brain_turn else None
+Chat.declined on-setter brain-decline:
+  WHEN this.declined != None and strip(str(this.declined)) != '':
+    membrane::Chat[this.cp]:turn.state = 'done'
+    membrane::Chat[this.cp]:turn.ended = clock
+    membrane::Chat[this.cp]:turn:response.text = 'Declined: ' + str(this.declined)
+-- STOP of a turn the brain has: nobody else will end it
+Chat.aborted on-setter brain-abort:
+  WHEN this.aborted == True and prop(this.turn_eid, 'brain') != None and prop(this.turn_eid, 'state') == 'running':
+    membrane::Chat[this.cp]:turn.state = 'error'
+    membrane::Chat[this.cp]:turn.ended = clock
+    membrane::Chat[this.cp]:turn.error = 'stopped'
+    membrane::Chat[this.cp]:turn:response.text = 'The turn was stopped before the brain answered.'
+    membrane::Chat[this.cp]:turn:response.error = True
+
 Chat.plan on-setter turn-start:
   WHEN prop(this.plan, 'refuse') != None:
     membrane::Chat[this.cp]:turn.state = 'error'

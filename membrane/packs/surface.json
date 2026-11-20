@@ -101,6 +101,19 @@
       "Step"
     ]
   },
+  "brain_tools": {
+    "imports": [
+      "chat",
+      "chat_turn"
+    ],
+    "classes": [
+      "ChatMessage"
+    ],
+    "members": 9,
+    "writes": [],
+    "claims": [],
+    "boot_facts": []
+  },
   "chat": {
     "imports": [
       "door",
@@ -249,12 +262,13 @@
       "Chunk",
       "Request"
     ],
-    "members": 70,
+    "members": 79,
     "writes": [
       "Chunk:*.text",
       "Chunk:*.tools",
       "ModelChat:*.add",
       "membrane:*.aborted",
+      "membrane:*.brain",
       "membrane:*.calls",
       "membrane:*.cost",
       "membrane:*.duration",
@@ -268,6 +282,7 @@
       "membrane:*.started",
       "membrane:*.state",
       "membrane:*.stop",
+      "membrane:*.text",
       "membrane:*.usage",
       "membrane:*=ChatResponse()",
       "membrane:*=ChatTool()",
@@ -660,11 +675,12 @@
       "store"
     ],
     "classes": [
+      "Cliff",
       "Pack",
       "Request",
       "Return"
     ],
-    "members": 99,
+    "members": 119,
     "writes": [
       "*.[]",
       "*.births_to",
@@ -1421,6 +1437,7 @@
     "writes": [
       "*.models_ready",
       "Fetch:tags.request",
+      "Minds:seat.chat",
       "Minds:seat.cortex",
       "Minds:seat.cortex_auth",
       "Minds:seat.loops",
