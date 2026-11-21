@@ -35,7 +35,12 @@ ChatMessage.mb_cfg getter:
   ELSE WHEN prop(this.mb_entry, 'backend') != 'membrama' and (prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by ' + {'claude-peer': 'a Claude peer', 'openai-peer': 'an OpenAI-compatible peer', 'anthropic-peer': 'a Claude API peer'}[prop(this.mb_entry, 'backend')] + ', and its cloud_models entry must name "peer" (the peer in the fact peers) and "ns" (the namespace it owns).'}
   ELSE WHEN prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None or (prop(this.mb_entry, 'backend') == 'membrama' and prop(this.mb_entry, 'max_new') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by membrama, and its cloud_models entry must name "peer" (the peer in the fact peers), "ns" (the namespace it owns) and "max_new" (the most tokens an answer may take: your number, there is no default).'}
   ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'peer_model': prop(this.mb_entry, 'model'), 'settings': {'max_new': prop(this.mb_entry, 'max_new'), 'enable_thinking': prop(this.mb_entry, 'enable_thinking')} if prop(this.mb_entry, 'backend') == 'membrama' else ({'max_new': prop(this.mb_entry, 'max_new')} if prop(this.mb_entry, 'backend') == 'openai-peer' and prop(this.mb_entry, 'max_new') != None else {}), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
-ChatMessage.mb_plan getter: {'refuse': prop(this.mb_cfg, 'refuse')} if prop(this.mb_cfg, 'refuse') != None else {'start': this.mb_cfg}
+-- a turn starts only on a peer that is up: its root `Vm:<ns>` says so (a peer that said hello a moment ago is up as soon as the seat has read the hello; the replies it publishes live under that root)
+ChatMessage.mb_up getter: prop('Vm:' + str(prop(this.mb_cfg, 'ns')), 'link') == 'up'
+ChatMessage.mb_plan getter:
+  WHEN prop(this.mb_cfg, 'refuse') != None: {'refuse': prop(this.mb_cfg, 'refuse')}
+  ELSE WHEN not this.mb_up: {'refuse': str(prop(this.mb_cfg, 'ns')) + ' is not up (the link of ' + str(prop(this.mb_cfg, 'peer')) + ' is not up), so the model ' + this.model_eff + ' cannot answer this message. Start it, then send the message again.'}
+  ELSE: {'start': this.mb_cfg}
 
 -- ---- start: the door's tool list (chat_oai's), then round 1 --------------------------------------------------------------------------------------------------
 -- the start is chat_oai's own (`oai-start`, for the backends `oai` and `peer`): the turn's settings (`turn.oai`), then the door's tool list
@@ -93,11 +98,12 @@ MbRound.chunks_here getter: len([x for x in this.chunks_in if x == None]) == 0
 MbRound.said getter: join([str(x) for x in this.chunks_in if x != None], '')
 MbRound.usage getter: prop(this.reply_e, 'usage')
 MbRound.calls getter: fold([], [concat(acc, [{'i': len(acc), 'id': 'call_' + str(this.n) + '_' + str(len(acc)), 'name': c['name'], 'args': str(prop(c, 'arguments') or {})}]) for c in (this.rcalls or [])])
-MbRound.peer_gone getter: prop('Vm:' + this.ns, 'link') == 'gone'
+-- the peer is not there when its root says `gone` or when it has no root at all (retired, or never made): the replies it publishes live under that root, so a round that waits for one would wait for ever
+MbRound.peer_gone getter: prop('Vm:' + this.ns, 'link') != 'up'
 MbRound.stopped getter: prop('membrane::Chat:' + this.cp, 'aborted') == True
 MbRound.step getter:
   WHEN this.stopped and this.rstate not in ['done', 'error', 'aborted']: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' was stopped.'}
-  ELSE WHEN this.peer_gone and this.rstate not in ['done', 'error', 'aborted']: {'fail': this.ns + ' is not up (the link of ' + str(prop(this.cfg, 'peer')) + ' is gone), so the model ' + str(prop(this.cfg, 'model')) + ' cannot answer.'}
+  ELSE WHEN this.peer_gone and this.rstate not in ['done', 'error', 'aborted']: {'fail': this.ns + ' is not up (the link of ' + str(prop(this.cfg, 'peer')) + ' is gone or there is none), so the model ' + str(prop(this.cfg, 'model')) + ' cannot answer.'}
   ELSE WHEN why(this.rstate) is Refused: {'fail': this.ns + ' refused the reply of the model ' + str(prop(this.cfg, 'model')) + ': ' + str(why(this.rstate))}
   ELSE WHEN why(this.rstate) is Absent: {'fail': 'The reply of the model ' + str(prop(this.cfg, 'model')) + ' is gone: ' + this.ns + ' dropped it (' + str(why(this.rstate)) + ')'}
   ELSE WHEN this.rstate == None or this.rstate == 'running': None

@@ -167,7 +167,7 @@
       "LlmTool",
       "MbRound"
     ],
-    "members": 51,
+    "members": 52,
     "writes": [
       "*.abort",
       "*.retire",
@@ -1084,7 +1084,7 @@
       "Peers",
       "Vm"
     ],
-    "members": 30,
+    "members": 31,
     "writes": [
       "*.retire",
       "Peers:seat.born",
@@ -1104,6 +1104,7 @@
       "link_window",
       "lk_since",
       "peer_writes",
+      "peers",
       "started"
     ],
     "virtual": [

@@ -241,6 +241,7 @@
       "ChatMessage.mb_listed": "Any",
       "ChatMessage.mb_plan": "Dict",
       "ChatMessage.mb_published": "Dict?",
+      "ChatMessage.mb_up": "Bool",
       "LlmMsg.kind": "Text",
       "LlmRequest.kind": "Text",
       "LlmTool.kind": "Text",
@@ -1910,6 +1911,7 @@
   },
   "link": {
     "getters": {
+      "Boot.declared_vms": "List(Text)",
       "Boot.lk_epoch": "Text?",
       "Boot.lk_hold": "Num?",
       "Boot.lk_lease": "Num?",

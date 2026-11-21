@@ -491,6 +491,9 @@ fn membrama_turn_caps(dir: &std::path::Path, val_cap: u32) -> (Run, Names, PeerE
     let run = start(dir, &facts);
     let mine = peer_cells(&name);
     let peer = PeerEnd::open(&name, "membrama");
+    // a turn starts only on a peer whose root the seat has made: the peer's own end opening is not that (the seat reads the hello a moment later)
+    let end = Instant::now() + Duration::from_secs(60);
+    while call(run.port, "entity_read", json!({"spec": "Vm:membrama", "prop": "link"})) != "up" { assert!(Instant::now() < end, "the root of the peer never came up"); std::thread::sleep(Duration::from_millis(50)); }
     (run, names, peer, mine)
 }
 /// send a message and wait until the seat asks the peer for the reply of its first round: that is the reply's node id
