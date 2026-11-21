@@ -15,6 +15,7 @@ VIRTUAL LlmTool
 -- (`membrane::LlmMsg:<mid>:<i>`, one node per message for the whole turn: a later round holds the same messages and more, so it writes only the new ones; `membrane::LlmRequest:<rid>`; the tools are shared nodes `membrane::LlmTool:door:<i>`), reads the peer's reply (`<ns>::Reply:<rid>`, its chunks; `membrama::` for membrama),
 -- and a round with tool calls runs them through chat_oai's own ChatCall (the door's `tools/call`) and opens the next round. An id has no colon (a colon makes a child path, and a retired node takes
 -- its children): `mid` is the turn's id with `/` for `:`, and `rid` is `mid`, `-` and the round number. The turn's request and message nodes are retired when the turn ends, which frees their slots.
+-- A STATEFUL peer (backend `claude-peer`: its child holds the turn's history, so a later round only hands it the tool results) is not sent the history again: round n > 1 carries only its own tool messages, and the request of round n-2 is retired when round n's is written (never the one the peer is on), so a turn of any number of rounds keeps about two requests in the table. A STATELESS peer (membrama, openai-peer, anthropic-peer) is sent the whole history each round, as before.
 
 -- the classes of the nodes a round writes: the pack must OWN a class (declare a getter on it) for a write of one of its entities to create it (docs/c1f-stdlib.md, Constructors)
 LlmMsg.kind getter: 'message'
@@ -34,7 +35,7 @@ ChatMessage.mb_cfg getter:
   WHEN this.mb_entry == None: None
   ELSE WHEN prop(this.mb_entry, 'backend') != 'membrama' and (prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by ' + {'claude-peer': 'a Claude peer', 'openai-peer': 'an OpenAI-compatible peer', 'anthropic-peer': 'a Claude API peer'}[prop(this.mb_entry, 'backend')] + ', and its cloud_models entry must name "peer" (the peer in the fact peers) and "ns" (the namespace it owns).'}
   ELSE WHEN prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None or (prop(this.mb_entry, 'backend') == 'membrama' and prop(this.mb_entry, 'max_new') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by membrama, and its cloud_models entry must name "peer" (the peer in the fact peers), "ns" (the namespace it owns) and "max_new" (the most tokens an answer may take: your number, there is no default).'}
-  ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'peer_model': prop(this.mb_entry, 'model'), 'settings': {'max_new': prop(this.mb_entry, 'max_new'), 'enable_thinking': prop(this.mb_entry, 'enable_thinking')} if prop(this.mb_entry, 'backend') == 'membrama' else ({'max_new': prop(this.mb_entry, 'max_new')} if prop(this.mb_entry, 'backend') == 'openai-peer' and prop(this.mb_entry, 'max_new') != None else {}), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
+  ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'peer_model': prop(this.mb_entry, 'model'), 'stateful': prop(this.mb_entry, 'backend') == 'claude-peer', 'settings': {'max_new': prop(this.mb_entry, 'max_new'), 'enable_thinking': prop(this.mb_entry, 'enable_thinking')} if prop(this.mb_entry, 'backend') == 'membrama' else ({'max_new': prop(this.mb_entry, 'max_new')} if prop(this.mb_entry, 'backend') == 'openai-peer' and prop(this.mb_entry, 'max_new') != None else {}), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
 -- a turn starts only on a peer that is up: its root `Vm:<ns>` says so (a peer that said hello a moment ago is up as soon as the seat has read the hello; the replies it publishes live under that root)
 ChatMessage.mb_up getter: prop('Vm:' + str(prop(this.mb_cfg, 'ns')), 'link') == 'up'
 ChatMessage.mb_plan getter:
@@ -77,6 +78,8 @@ Chat.mb_out on-setter mb-send:
       FOR tc IN [x for x in [prop(r['m'], 'tool_calls')] if x != None]:
         ('membrane::LlmMsg:' + this.mid + ':' + str(r['i'])).tool_calls = tc
     membrane::Chat[this.cp]:turn.mb_nodes = concat(prop(this.turn_e, 'mb_nodes') or [], concat([x for x in prop(this.mb_out, 'ids') if x not in (prop(this.turn_e, 'mb_nodes') or [])], ['membrane::LlmRequest:' + this.rid]))
+    FOR old IN [x for x in ['membrane::LlmRequest:' + this.mid + '-' + str(this.n - 2)] if prop(this.cfg, 'stateful') == True and this.n > 2]:
+      (old).retire = True
     ('membrane::LlmRequest:' + this.rid).server = prop(this.mb_out, 'peer')
     ('membrane::LlmRequest:' + this.rid).messages = prop(this.mb_out, 'ids')
     ('membrane::LlmRequest:' + this.rid).tools = prop(this.mb_out, 'tools')
@@ -125,7 +128,7 @@ MbRound.results getter:
   WHEN prop(this.step, 'calls') != True: None
   ELSE: ([r for r in [[prop(e, 'out') for e in this.call_eids]] if len([x for x in r if x == None]) == 0] or [None])[0]
 MbRound.assistant getter: {'role': 'assistant', 'content': (this.said or ''), 'tool_calls': [{'type': 'function', 'function': {'name': c['name'], 'arguments': json(c['args'] or '{}')}} for c in this.calls]}
-MbRound.mb_next getter: {'raw': this.raw, 'messages': concat(concat(this.messages, [this.assistant]), [{'role': 'tool', 'content': r['text']} for r in this.results])} if this.results != None else None
+MbRound.mb_next getter: {'raw': this.raw, 'messages': ([{'role': 'tool', 'content': r['text']} for r in this.results] if prop(this.cfg, 'stateful') == True else concat(concat(this.messages, [this.assistant]), [{'role': 'tool', 'content': r['text']} for r in this.results]))} if this.results != None else None
 Chat.mb_next on-setter mb-next:
   WHEN this.mb_next != None:
     ('ModelChat:' + before(this.cp, ':message:')).add = prop(this.mb_next, 'raw')
