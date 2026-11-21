@@ -119,7 +119,7 @@ fn cell_when(r: &CellsReader, k: &str, secs: u64, ok: impl Fn(&Option<Cell>) -> 
     }
 }
 
-fn peer_cells(name: &str) -> graphlink_shm::cells::Cells { graphlink_shm::cells::Cells::create(format!("/gl-{name}-pc"), 64, 128, 1024, 1).unwrap() }
+fn peer_cells(name: &str, slots: u64) -> graphlink_shm::cells::Cells { graphlink_shm::cells::Cells::create(format!("/gl-{name}-pc"), slots.max(64), 128, 1024, 1).unwrap() }   // the fake peer never retires its replies, so its own table is as big as the seat's
 fn turn_ends(port: u16, id: &str) -> J {
     let end = Instant::now() + Duration::from_secs(60);
     loop {
@@ -149,7 +149,7 @@ fn peer_turn_slots(tag: &str, backend: &str, ns: &str, extra: J, slots: u64) -> 
     let facts = [format!("cloud_models={entry}"), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
                  r#"minds={"loops":"claude-via-peer","cortex":"claude-via-peer","workers":"claude-via-peer","seat_default":"claude-via-peer"}"#.to_string(), format!("peers={}", decl_peer_slots(&name, ns, slots))];
     let run = start(&tmp(tag), &facts);
-    let mine = peer_cells(&name);
+    let mine = peer_cells(&name, slots * 2);
     let peer = PeerEnd::open(&name, ns);
     // a turn starts only on a peer whose root the seat has made: the peer's own end opening is not that (the seat reads the hello a moment later)
     wait_until("the root of the peer never came up", 60, || call(run.port, "entity_read", json!({"spec": format!("Vm:{ns}"), "prop": "link"})) == "up");
@@ -351,7 +351,7 @@ fn a_model_a_live_peer_publishes_is_listed_and_answered_by_that_peer_and_the_req
     let facts = ["cloud_models=[]".to_string(), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
                  r#"minds={"loops":"haiku","cortex":"haiku","workers":"haiku","seat_default":"haiku"}"#.to_string(), format!("peers={}", decl_peer(&name, "claude"))];
     let run = start(&tmp("cp-published"), &facts);
-    let mut mine = peer_cells(&name);
+    let mut mine = peer_cells(&name, 64);
     for (k, v) in [("", json!(true)), ("names", json!(["claude", "sonnet", "opus", "haiku"])), ("backend", json!("claude-peer"))] { mine.put(&key("claude::Models:main", k), 1.0, &v).unwrap(); }
     let mut peer = PeerEnd::open(&name, "claude");
     peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);
@@ -406,13 +406,13 @@ fn a_restart_does_not_retire_the_root_of_a_peer_that_connected_before_the_sweep_
     std::fs::write(&gate, SWEEP_GATE).unwrap();
     {   // the first run: the peer connects, its root `Vm:claude` is stored
         let run = start_with(&dir, &facts, &[gate.clone()]);
-        let _mine = peer_cells(&name);
+        let _mine = peer_cells(&name, 64);
         let _peer = PeerEnd::open(&name, "claude");
         wait_until("the root of the peer never came up", 30, || vm_link(run.port) == "up");
     }   // the seat is gone (killed, as every test's run is) and the next run finds the old root in the store
     for part in ["ctl", "sc", "pc"] { let _ = graphlink_shm::remove_region(&format!("/gl-{name}-{part}")); }
     let run = start_with(&dir, &facts, &[gate]);
-    let _mine = peer_cells(&name);
+    let _mine = peer_cells(&name, 64);
     let _peer = PeerEnd::open(&name, "claude");
     wait_until("the peer never connected in the second run", 30, || vm_link(run.port) == "up");
     // only now the sweep reads the store: it names the old root, which is the root of the peer that is connected
@@ -430,7 +430,7 @@ fn a_restart_still_retires_the_root_of_a_peer_the_seat_no_longer_declares() {
     let dir = tmp("cp-undeclared");
     {   // the first run declares the peer and its root is stored
         let run = start(&dir, &peer_facts(&name));
-        let _mine = peer_cells(&name);
+        let _mine = peer_cells(&name, 64);
         let _peer = PeerEnd::open(&name, "claude");
         wait_until("the root of the peer never came up", 30, || vm_link(run.port) == "up");
     }
@@ -490,4 +490,64 @@ fn a_tool_result_far_over_the_peer_tables_value_capacity_reaches_the_peer_whole_
     let v = turn_ends(run.port, &id);
     assert_eq!(v["state"], "done", "{v}");
     assert_eq!(v["response"], "Read all of it", "{v}");
+}
+
+// ---- a stateful peer (claude-peer) is not sent the history again: a round carries its own tool results, and an old round's request is retired --------------------
+
+
+/// the next reply the seat asks the peer for: one not asked before (`reply_ask` only skips one earlier id, and a turn of many rounds has asked for several)
+fn next_reply_ask(peer: &mut PeerEnd, ns: &str, seen: &[String]) -> String {
+    let want = format!("{ns}::Reply:");
+    let find = |ev: &[Event]| ev.iter().find_map(|e| if let Event::Op(Op::Sub { target: Target::Id(i), .. }) = e { (i.starts_with(&want) && !seen.contains(i)).then(|| i.clone()) } else { None });
+    assert!(peer.until(60_000, |ev| find(ev).is_some()), "the seat never asked for another reply: {:?}", peer.events);
+    find(&peer.events).unwrap()
+}
+
+fn messages_of(names: &Names, reply: &str) -> usize {
+    let rid = reply.replace("::Reply:", "").replace("claude", "membrane::LlmRequest").replace("oai", "membrane::LlmRequest");
+    let _ = rid;
+    let req = reply.splitn(2, "::Reply:").nth(1).map(|r| format!("membrane::LlmRequest:{r}")).unwrap();
+    let seen = seat_cells(&names.0);
+    let c = cell_when(&seen, &key(&req, "messages"), 30, |c| matches!(c, Some(c) if c.state == CellState::Live)).expect("the request's messages");
+    c.value.as_array().map_or(0, |a| a.len())
+}
+
+#[test]
+fn a_claude_peer_turn_of_many_rounds_fits_a_small_table_because_a_round_carries_only_its_own_tool_results() {
+    // the failure seen on a seat: a turn of 27 rounds kept every round's request and every message until its end, filled the 512 slots, and the next request waited for ever.
+    // here 12 rounds go through a table of 128 slots, which the whole history of the turn would not fit
+    let (run, names, mut peer, mut mine) = peer_turn_slots("cp-many", "claude-peer", "claude", json!({}), 128);
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);
+    put(run.port, "Lamp:desk", "power", json!("zebra-42"));
+    let id = send(&run, "read the lamp many times");
+    let mut seen: Vec<String> = Vec::new();
+    for round in 1..=12 {
+        let r = next_reply_ask(&mut peer, "claude", &seen);
+        assert!(r.ends_with(&format!("-{round}")), "round {round}: {r}");
+        if round >= 2 { assert_eq!(messages_of(&names, &r), 1, "round {round} lists only its own tool result, not the history"); }
+        answer(&mut mine, &r, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+        seen.push(r);
+    }
+    let r13 = next_reply_ask(&mut peer, "claude", &seen);
+    answer(&mut mine, &r13, "done after twelve reads", "stop", None);
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(v["response"], "done after twelve reads", "{v}");
+}
+
+#[test]
+fn a_stateless_peer_is_still_sent_the_whole_history_each_round() {
+    // an OpenAI-compatible or Claude API peer keeps nothing between calls: round 3 lists the system and user messages and both earlier rounds' assistant and tool messages
+    let (run, names, mut peer, mut mine) = peer_turn_slots("op-hist", "openai-peer", "oai", json!({}), 256);
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);
+    put(run.port, "Lamp:desk", "power", json!("zebra-42"));
+    let id = send(&run, "read the lamp twice");
+    let r1 = reply_ask_in(&mut peer, "oai", None);
+    answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+    let r2 = next_reply_ask(&mut peer, "oai", &[r1.clone()]);
+    answer(&mut mine, &r2, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+    let r3 = next_reply_ask(&mut peer, "oai", &[r1.clone(), r2.clone()]);
+    assert_eq!(messages_of(&names, &r3), 6, "system, user, then the assistant and tool messages of two rounds");
+    answer(&mut mine, &r3, "twice", "stop", None);
+    assert_eq!(turn_ends(run.port, &id)["state"], "done");
 }
