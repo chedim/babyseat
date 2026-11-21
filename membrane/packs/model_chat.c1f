@@ -8,6 +8,7 @@ IMPORT boot 1
 --   `[call] <tool> <arguments>`      each tool call with its whole arguments
 --   `[tool]`                         each tool's result, the very text the model got
 --   `[error]`                        why a round or the turn failed
+-- THE TIME: each entry starts with a stamp line `[at HH:MM]`, and from the second on `[at HH:MM, <n>s after the entry before]` (the seat's clock; `last_at` is the entry before), so a slow turn shows where the time went.
 -- THE FEED: a rung writes ONE value, `ModelChat:<chat>.add` (the text of what just happened); this pack appends it. No rung keeps a second copy and none reads it back. Each rung's text is built by its own getter `raw` (packs/chat_oai.c1f
 -- `ChatRound.raw`, packs/chat_membrama.c1f `MbRound.raw`, packs/chat_turn.c1f `ChatMessage.raw_head` + `raw_events` + `raw_err`), because the three hold their rounds differently.
 -- THE BOUND: the text is never longer, as JSON (its newlines and quotes escaped), than `link_max_value` CHARACTERS (the boot fact of the page link and the peers: the value size of a cell, 65,536 unless the owner says otherwise; the
@@ -20,7 +21,10 @@ ModelChat.add on-setter model-chat-add:
   WHEN this.add != None:
     cap = ([b.mc_cap for b in instances('Boot')] or [65536])[0]
     mark = '[…earlier text dropped]\n'
-    whole = str(this.text or '') + str(this.add)
+    now = clock
+    stamp = '[at ' + prop(localtime(now), 'clock') + (', ' + clip(str(now - this.last_at), 7) + 's after the entry before' if this.last_at != None else '') + ']\n'
+    this.last_at = now
+    whole = str(this.text or '') + stamp + str(this.add)
     bare = len(str({'t': ''}))
     avail = cap - len(str({'t': mark}))
     escapes = len(str({'t': tail(whole, avail)})) - bare - len(tail(whole, avail))

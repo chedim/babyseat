@@ -453,3 +453,23 @@ fn the_model_chat_is_bounded_by_the_links_value_size_and_the_oldest_text_goes_fi
     assert!(!t.contains("answer-1-"), "the oldest went first");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn every_entry_of_the_model_chat_has_its_time_and_the_seconds_since_the_entry_before_it() {
+    // a turn whose first round pauses between its events: the entry of the next round says how long it was since the one before
+    let fake = Fake::start(|n, _| if n == 1 {
+        let mut ev = vec![delta(json!({"content": "looking"}), J::Null)];
+        ev.extend(tool_round("call_t1", "entity_write", r#"{"spec":"Thing:probe","prop":"x","value":5}"#));
+        Reply::Sse(ev, 700)
+    } else { Reply::Sse(words(&["done."]), 0) });
+    let (mut run, port, _dir) = seat_on("oai-mctime", &fake, &[]);
+    let id = send(port, "write it");
+    assert_eq!(ended(port, &id)["state"], "done");
+    let t = wait("the model chat", || { let t = model_chat(port); t.contains("done.").then_some(t) });
+    let stamps: Vec<&str> = t.lines().filter(|l| l.starts_with("[at ")).collect();
+    assert!(stamps.len() >= 2, "each entry has a stamp line: {t}");
+    let shape = |l: &str| { let b = l.as_bytes(); l.ends_with(']') && b.len() >= 10 && b[5].is_ascii_digit() && b[6] == b':' && b[8].is_ascii_digit() };
+    assert!(shape(stamps[0]), "the first stamp is `[at HH:MM]`: {:?}", stamps[0]);
+    assert!(stamps[1..].iter().all(|l| l.contains("s after the entry before]")), "a later stamp says the seconds since the one before: {stamps:?}");
+    assert!(terminate(&mut run));
+}
