@@ -262,7 +262,7 @@ fn a_prefix_subscription_publishes_every_node_under_it_and_the_ones_born_later()
 }
 
 #[test]
-fn after_an_unsubscribe_the_cells_stop_following() {
+fn after_an_unsubscribe_the_cells_are_gone_and_stop_following_and_their_slots_are_free() {
     let name = peer_name();
     let _names = Names(name.clone());
     let run = start(&tmp("unsub"), &[format!("peers={}", decl(&name))]);
@@ -272,26 +272,31 @@ fn after_an_unsubscribe_the_cells_stop_following() {
     peer.say(vec![Op::Sub { target: Target::Id("Lamp:desk".into()), props: None, limit: None }]);
     assert!(cell_when(&cells, &key("Lamp:desk", "power"), 30, |c| c.is_some()).is_some());
     peer.say(vec![Op::Unsub { target: Target::Id("Lamp:desk".into()) }]);
-    std::thread::sleep(Duration::from_millis(400));
+    let gone = cell_when(&cells, &key("Lamp:desk", "power"), 30, |c| c.as_ref().map_or(false, |c| c.state == CellState::Gone)).expect("nobody is subscribed: the cell is Gone, its slot is free");
+    assert_eq!(gone.value, J::Null);
     put(run.port, "Lamp:desk", "power", json!("on"));
     std::thread::sleep(Duration::from_millis(600));
-    assert_eq!(cells.get(&key("Lamp:desk", "power"), 1_000_000, 32).unwrap().unwrap().value, json!("off"), "nobody is subscribed: the cell keeps its last value");
+    assert_eq!(cells.get(&key("Lamp:desk", "power"), 1_000_000, 32).unwrap().unwrap().state, CellState::Gone, "and a later write is not published");
 }
 
 #[test]
-fn a_node_that_does_not_exist_is_a_gone_cell_and_a_value_that_does_not_fit_is_a_refused_one() {
+fn a_node_that_does_not_exist_is_a_gone_cell_a_value_over_the_cell_is_carried_whole_and_a_value_the_table_cannot_hold_is_not_published() {
     let name = peer_name();
     let _names = Names(name.clone());
+    // 64 slots of 64 bytes: a 500-character value takes several slots, a 10,000-character one is more than the whole table
     let run = start(&tmp("edge"), &[format!("peers={}", decl_caps(&name, 64))]);
     put(run.port, "Lamp:desk", "note", json!("x".repeat(500)));
+    put(run.port, "Lamp:bed", "note", json!("y".repeat(10_000)));
     let mut peer = PeerEnd::open(&name, "kitchen");
     let cells = seat_cells(&name);
-    peer.say(vec![Op::Sub { target: Target::Id("Nope:1".into()), props: None, limit: None }, Op::Sub { target: Target::Id("Lamp:desk".into()), props: None, limit: None }]);
+    peer.say(vec![Op::Sub { target: Target::Id("Nope:1".into()), props: None, limit: None }, Op::Sub { target: Target::Id("Lamp:desk".into()), props: None, limit: None }, Op::Sub { target: Target::Id("Lamp:bed".into()), props: None, limit: None }]);
     let gone = cell_when(&cells, &key("Nope:1", ""), 30, |c| c.is_some()).expect("a cell for a node that is not there");
     assert_eq!(gone.state, CellState::Gone);
-    let big = cell_when(&cells, &key("Lamp:desk", "note"), 30, |c| c.is_some()).expect("a cell for the big value");
-    assert_eq!(big.state, CellState::Refused);
-    assert!(big.value.as_str().unwrap().contains("value"), "the reason says which limit: {:?}", big.value);
+    let carried = cell_when(&cells, &key("Lamp:desk", "note"), 30, |c| c.as_ref().map_or(false, |c| c.state == CellState::Live)).expect("the value over the cell size is carried whole");
+    assert_eq!(carried.value, json!("x".repeat(500)));
+    // a value more than the whole table can hold is not refused with a reason a pack would see: the driver keeps it and writes it when slots come back, so no cell stands for it (the log says it cannot publish it yet)
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(cells.get(&key("Lamp:bed", "note"), 1_000_000, 32).unwrap().is_none(), "nothing is published for a value the table cannot hold");
 }
 
 // ---- the inbound side: a seat rule reads a node a peer owns; the seat asks for it (`sub`) and follows the peer's cells ---------------------------------------------------------------
