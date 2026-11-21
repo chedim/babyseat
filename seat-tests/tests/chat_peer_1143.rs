@@ -373,3 +373,77 @@ fn a_model_a_live_peer_publishes_is_listed_and_answered_by_that_peer_and_the_req
     assert_eq!(v["state"], "done", "{v}");
     assert_eq!(v["response"], "Hello from haiku", "{v}");
 }
+
+// ---- the root of a peer: `Vm:<ns>` holds the replicas of everything the peer publishes, so a seat that loses it loses every reply ------------------------------------
+
+/// the seat's facts for a claude-peer model answered by the peer `name`
+fn peer_facts(name: &str) -> Vec<String> {
+    let entry = json!([{"name": "claude-via-peer", "backend": "claude-peer", "peer": name, "ns": "claude"}]);
+    vec![format!("cloud_models={entry}"), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
+         r#"minds={"loops":"claude-via-peer","cortex":"claude-via-peer","workers":"claude-via-peer","seat_default":"claude-via-peer"}"#.to_string(), format!("peers={}", decl_peer(name, "claude"))]
+}
+fn vm_link(port: u16) -> String { call(port, "entity_read", json!({"spec": "Vm:claude", "prop": "link"})) }
+fn wait_until(what: &str, secs: u64, f: impl Fn() -> bool) {
+    let end = Instant::now() + Duration::from_secs(secs);
+    while !f() { assert!(Instant::now() < end, "{what}"); std::thread::sleep(Duration::from_millis(100)); }
+}
+
+/// a test pack that holds the sweep of the last run's roots (`Boot.old_vms`) back until `Gate:sweep.open`: a peer is a program of its own and may say hello before or after the sweep reads the store
+/// (it did after, on the seat that lost its claude peer), so the test makes the late order the only one
+const SWEEP_GATE: &str = "PACK sweepgate 1\nIMPORT boot 1\nIMPORT link 1\nGate.kind getter: 'gate'\nBoot.old_vms getter:\n  WHEN prop('Gate:sweep', 'open') != True: None\n";
+
+#[test]
+fn a_restart_does_not_retire_the_root_of_a_peer_that_connected_before_the_sweep_of_the_last_runs_roots() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let facts = peer_facts(&name);
+    let dir = tmp("cp-restart");
+    let gate = dir.join("sweepgate.c1f");
+    std::fs::write(&gate, SWEEP_GATE).unwrap();
+    {   // the first run: the peer connects, its root `Vm:claude` is stored
+        let run = start_with(&dir, &facts, &[gate.clone()]);
+        let _mine = peer_cells(&name);
+        let _peer = PeerEnd::open(&name, "claude");
+        wait_until("the root of the peer never came up", 30, || vm_link(run.port) == "up");
+    }   // the seat is gone (killed, as every test's run is) and the next run finds the old root in the store
+    for part in ["ctl", "sc", "pc"] { let _ = graphlink_shm::remove_region(&format!("/gl-{name}-{part}")); }
+    let run = start_with(&dir, &facts, &[gate]);
+    let _mine = peer_cells(&name);
+    let _peer = PeerEnd::open(&name, "claude");
+    wait_until("the peer never connected in the second run", 30, || vm_link(run.port) == "up");
+    // only now the sweep reads the store: it names the old root, which is the root of the peer that is connected
+    put(run.port, "Gate:sweep", "open", json!(true));
+    wait_until("the sweep never read the old roots", 60, || call(run.port, "entity_read", json!({"spec": "Boot:seat", "prop": "old_vms"})).contains("Vm:claude"));
+    std::thread::sleep(Duration::from_millis(1500));   // and it has had its time to retire what it was given
+    let times = format!("started {} root {}", call(run.port, "entity_read", json!({"spec": "Boot:seat", "prop": "started"})), call(run.port, "entity_read", json!({"spec": "Vm:claude", "prop": "updated"})));
+    assert_eq!(vm_link(run.port), "up", "the sweep retired the root of a peer that is connected: its replies have no root to live under ({times})");
+}
+
+#[test]
+fn a_restart_still_retires_the_root_of_a_peer_the_seat_no_longer_declares() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let dir = tmp("cp-undeclared");
+    {   // the first run declares the peer and its root is stored
+        let run = start(&dir, &peer_facts(&name));
+        let _mine = peer_cells(&name);
+        let _peer = PeerEnd::open(&name, "claude");
+        wait_until("the root of the peer never came up", 30, || vm_link(run.port) == "up");
+    }
+    for part in ["ctl", "sc", "pc"] { let _ = graphlink_shm::remove_region(&format!("/gl-{name}-{part}")); }
+    // the second run declares no peer: the old root is the last run's and is swept
+    let run = start(&dir, &[]);
+    wait_until("the sweep never read the old roots", 60, || call(run.port, "entity_read", json!({"spec": "Boot:seat", "prop": "old_vms"})).contains("Vm:claude"));
+    wait_until("the root of an undeclared peer was not swept", 30, || call(run.port, "entity_read", json!({"spec": "Vm:claude", "prop": "link"})).contains("no such entity") || call(run.port, "entity_read", json!({"spec": "Vm:claude", "prop": "link"})).contains("no link"));
+}
+
+#[test]
+fn a_turn_whose_peer_root_is_gone_fails_and_does_not_wait_for_ever() {
+    let (run, _names, mut peer, _mine) = claude_turn("cp-noroot");
+    let id = send(&run, "hello");
+    let _ = reply_ask(&mut peer, None);
+    put(run.port, "Vm:claude", "retire", json!(true));   // no root: nothing holds the peer's replicas, and no reply can be read
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "error", "{v}");
+    assert!(v["response"].as_str().unwrap_or("").contains("claude is not up"), "the turn should say the peer is not up: {v}");
+}

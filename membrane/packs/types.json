@@ -1910,6 +1910,7 @@
   },
   "link": {
     "getters": {
+      "Boot.declared_vms": "List(Text)",
       "Boot.lk_epoch": "Text?",
       "Boot.lk_hold": "Num?",
       "Boot.lk_lease": "Num?",

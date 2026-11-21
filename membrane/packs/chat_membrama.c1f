@@ -93,11 +93,12 @@ MbRound.chunks_here getter: len([x for x in this.chunks_in if x == None]) == 0
 MbRound.said getter: join([str(x) for x in this.chunks_in if x != None], '')
 MbRound.usage getter: prop(this.reply_e, 'usage')
 MbRound.calls getter: fold([], [concat(acc, [{'i': len(acc), 'id': 'call_' + str(this.n) + '_' + str(len(acc)), 'name': c['name'], 'args': str(prop(c, 'arguments') or {})}]) for c in (this.rcalls or [])])
-MbRound.peer_gone getter: prop('Vm:' + this.ns, 'link') == 'gone'
+-- the peer is not there when its root says `gone` or when it has no root at all (retired, or never made): the replies it publishes live under that root, so a round that waits for one would wait for ever
+MbRound.peer_gone getter: prop('Vm:' + this.ns, 'link') != 'up'
 MbRound.stopped getter: prop('membrane::Chat:' + this.cp, 'aborted') == True
 MbRound.step getter:
   WHEN this.stopped and this.rstate not in ['done', 'error', 'aborted']: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' was stopped.'}
-  ELSE WHEN this.peer_gone and this.rstate not in ['done', 'error', 'aborted']: {'fail': this.ns + ' is not up (the link of ' + str(prop(this.cfg, 'peer')) + ' is gone), so the model ' + str(prop(this.cfg, 'model')) + ' cannot answer.'}
+  ELSE WHEN this.peer_gone and this.rstate not in ['done', 'error', 'aborted']: {'fail': this.ns + ' is not up (the link of ' + str(prop(this.cfg, 'peer')) + ' is gone or there is none), so the model ' + str(prop(this.cfg, 'model')) + ' cannot answer.'}
   ELSE WHEN why(this.rstate) is Refused: {'fail': this.ns + ' refused the reply of the model ' + str(prop(this.cfg, 'model')) + ': ' + str(why(this.rstate))}
   ELSE WHEN why(this.rstate) is Absent: {'fail': 'The reply of the model ' + str(prop(this.cfg, 'model')) + ' is gone: ' + this.ns + ' dropped it (' + str(why(this.rstate)) + ')'}
   ELSE WHEN this.rstate == None or this.rstate == 'running': None
