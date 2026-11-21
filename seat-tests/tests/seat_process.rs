@@ -630,3 +630,20 @@ fn the_boot_fact_eval_stats_false_turns_the_accounting_off() {
     assert!(!r.contains("top_total"), "no Stats:eval entity: {r}");
     assert!(terminate(&mut run));
 }
+
+// ---- a setter may rewrite the property a door write fired (cliffvm 0.3.4: only siblings compete) --------------------------------------------------------------------------
+#[test]
+fn a_pack_setter_may_rewrite_the_property_a_door_write_fired_and_the_door_is_not_its_rival() {
+    // found on a seat: the door's `entity_write` is itself a setter (`mcp-write` of the `door_tools` pack), so a pack setter that rewrote the property it was fired by was skipped quietly
+    // (first write wins) with no reaction and no trace. The door's write is an INPUT to the class; the class's own setter answers it.
+    let (mut run, port) = seat("door-self-rewrite", true);
+    let pack = "PACK selfw 1\nProbe4.kind getter: 'probe4'\nProbe4.a on-setter fix:\n  WHEN this.a == 'open':\n    this.a = 'owed'\n";
+    let (r, e) = call(port, "entity_write", json!({"spec": "Pack:selfw", "prop": "text", "value": pack}));
+    assert!(!e, "{r}");
+    wait("the pack", || { let (s, _) = call(port, "entity_read", json!({"spec": "Pack:selfw", "prop": "state"})); (s == "loaded").then_some(()) });
+    call(port, "entity_write", json!({"spec": "Probe4:y", "prop": "a", "value": "idle"}));
+    call(port, "entity_write", json!({"spec": "Probe4:y", "prop": "a", "value": "open"}));
+    let a = wait("the rewrite", || { let (a, _) = call(port, "entity_read", json!({"spec": "Probe4:y", "prop": "a"})); (a == "owed").then_some(a) });
+    assert_eq!(a, "owed");
+    assert!(terminate(&mut run));
+}
