@@ -133,19 +133,21 @@ fn turn_ends(port: u16, id: &str) -> J {
 
 
 fn start(dir: &std::path::Path, facts: &[String]) -> Run { start_with(dir, facts, &[]) }
-fn decl_peer(name: &str, ns: &str) -> String { json!([{"name": name, "ns": ns, "ring_bytes": 65536, "slots": 64, "key_cap": 128, "val_cap": 4096, "spins": 1_000_000, "depth": 32}]).to_string() }
+fn decl_peer(name: &str, ns: &str) -> String { decl_peer_slots(name, ns, 64) }
+fn decl_peer_slots(name: &str, ns: &str, slots: u64) -> String { json!([{"name": name, "ns": ns, "ring_bytes": 65536, "slots": slots, "key_cap": 128, "val_cap": 4096, "spins": 1_000_000, "depth": 32}]).to_string() }
 
 /// the seat with a model `claude-via-peer` answered by the peer `name` in the namespace `claude`; the entry has no `max_new` and no `enable_thinking`: they do not apply to Claude
 fn claude_turn(tag: &str) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) { peer_turn(tag, "claude-peer", "claude", json!({})) }
 /// the same for any backend the peer rung serves: `extra` is merged into the entry (`max_new`, for instance)
-fn peer_turn(tag: &str, backend: &str, ns: &str, extra: J) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) {
+fn peer_turn(tag: &str, backend: &str, ns: &str, extra: J) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) { peer_turn_slots(tag, backend, ns, extra, 64) }
+fn peer_turn_slots(tag: &str, backend: &str, ns: &str, extra: J, slots: u64) -> (Run, Names, PeerEnd, graphlink_shm::cells::Cells) {
     let name = peer_name();
     let names = Names(name.clone());
     let mut e = json!({"name": "claude-via-peer", "backend": backend, "peer": name, "ns": ns});
     for (k, v) in extra.as_object().unwrap() { e[k] = v.clone(); }
     let entry = json!([e]);
     let facts = [format!("cloud_models={entry}"), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
-                 r#"minds={"loops":"claude-via-peer","cortex":"claude-via-peer","workers":"claude-via-peer","seat_default":"claude-via-peer"}"#.to_string(), format!("peers={}", decl_peer(&name, ns))];
+                 r#"minds={"loops":"claude-via-peer","cortex":"claude-via-peer","workers":"claude-via-peer","seat_default":"claude-via-peer"}"#.to_string(), format!("peers={}", decl_peer_slots(&name, ns, slots))];
     let run = start(&tmp(tag), &facts);
     let mine = peer_cells(&name);
     let peer = PeerEnd::open(&name, ns);
@@ -459,4 +461,33 @@ fn a_message_for_a_peer_that_is_not_up_is_refused_at_once_and_says_so() {
     let v = turn_ends(run.port, &id);
     assert_eq!(v["state"], "error", "{v}");
     assert!(v["response"].as_str().unwrap_or("").contains("claude is not up"), "the turn should say the peer is not up: {v}");
+}
+
+#[test]
+fn a_tool_result_far_over_the_peer_tables_value_capacity_reaches_the_peer_whole_and_the_turn_is_not_refused() {
+    // the failure seen on a seat: `the seat's table could not store it (the value is 77978 bytes encoded, the capacity of a value is 65536)`. A value over a cell is graphlink's to carry (docs/shared-memory.md 4c):
+    // here a 200,000-byte result goes through a table of 4,096-byte cells
+    let (run, names, mut peer, mut mine) = peer_turn_slots("cp-big", "claude-peer", "claude", json!({}), 256);
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);
+    let blob: String = (0..200_000).map(|i| (b'a' + (i % 26) as u8) as char).collect();
+    put(run.port, "Blob:big", "text", json!(blob.clone()));
+    let id = send(&run, "read the blob");
+    let r1 = reply_ask(&mut peer, None);
+    answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Blob:big", "prop": "text"}}])));
+    let r2 = reply_ask(&mut peer, Some(&r1));
+    // the peer reads the seat's table: the tool message of round 2 is there whole
+    let seen = seat_cells(&names.0);
+    let end = Instant::now() + Duration::from_secs(60);
+    let whole = loop {
+        let rows = seen.scan("membrane::LlmMsg:", 1_000_000, 32).unwrap_or_default();
+        assert!(rows.iter().all(|(_, c)| c.state != CellState::Refused), "a message was refused: {:?}", rows.iter().filter(|(_, c)| c.state == CellState::Refused).map(|(k, c)| (k.clone(), c.value.clone())).collect::<Vec<_>>());
+        if let Some((_, c)) = rows.iter().find(|(k, c)| k.ends_with("content") && c.state == CellState::Live && c.value.as_str().map_or(false, |t| t.len() >= 200_000)) { break c.value.as_str().unwrap().to_string(); }
+        assert!(Instant::now() < end, "the 200,000-byte tool message never reached the peer's view of the seat's table");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(whole.contains(&blob), "the tool message holds the whole result");
+    answer(&mut mine, &r2, "Read all of it", "stop", None);
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(v["response"], "Read all of it", "{v}");
 }
