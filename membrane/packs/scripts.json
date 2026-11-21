@@ -1,0 +1,62 @@
+{
+ "name": "scripts",
+ "version": 1,
+ "entities": [
+  {
+   "eid": "tool:clock",
+   "cls": "Tool",
+   "properties": {
+    "name": "clock",
+    "tick_script": "import time as _t\nnow = _t.strftime('%H:%M:%S')\nresult = {'render': 'clock ' + now, 'patch': {'script_data': {'last_tick': now}}}",
+    "tick_every": 1,
+    "silent_birth": true
+   }
+  },
+  {
+   "eid": "tool:executor",
+   "cls": "Tool",
+   "properties": {
+    "name": "executor",
+    "summary": "the sh executor: code linked to it (root -execute-> executor) runs here, -executing-> while it runs, then -result-> a result entity per run; run code with exec(action='run', code=...)",
+    "lang": "sh",
+    "silent_birth": true
+   }
+  },
+  {
+   "eid": "tool:filetree",
+   "cls": "Tool",
+   "properties": {
+    "name": "filetree",
+    "watch_script": "import time as _t\nx = state.get('extra') or {}\npy = x.get('payload') or {}\nev = py.get('event') or x.get('kind') or '?'\npth = py.get('path') or py.get('topic') or py.get('name') or ''\nresult = {'render': 'filetree: ' + str(ev) + ' ' + str(pth),\n          'patch': {'script_data': {'last_change': {'event': str(ev),\n                                                  'path': str(pth),\n                                                  'ts': _t.time()}}}}",
+    "watch": {
+     "kind": "file"
+    },
+    "silent_birth": true
+   }
+  },
+  {
+   "eid": "remote_executor",
+   "cls": "Component",
+   "properties": {
+    "name": "remote_executor",
+    "summary": "INTERFACE: an environment that runs code (the operator, 2026-10-10). An entity that implements it is ISA remote_executor and brings its own exec(code, timeout): the command that carries {{code}} into THAT environment. Describe the environment on the entity: lang (sh, jinja, js...), env (what it is and what it can reach), trust (who must approve a run). members_of('remote_executor') = every place code can run."
+   }
+  },
+  {
+   "eid": "script:concept-drift",
+   "cls": "ScriptTemplate",
+   "properties": {
+    "name": "concept drift getter",
+    "getter_script": "props = state.get(\"properties\") or {}\ndefined_in = props.get(\"defined_in\") or {}\ndefinition = str(props.get(\"definition\") or \"\")\npath = str(defined_in.get(\"file\") or \"\")\nline = defined_in.get(\"line\")\nif not path:\n    result = {\"state\": {\"drift\": None, \"error\": \"no defined_in.file\",\n                        \"definition\": definition,\n                        \"checked_at\": state.get(\"now\")}}\nelse:\n    try:\n        with open(path, \"r\", encoding=\"utf-8\", errors=\"replace\") as _fh:\n            lines = _fh.read().splitlines()\n    except OSError as _e:\n        result = {\"state\": {\"drift\": None,\n                            \"error\": \"%s: %s\" % (type(_e).__name__, _e)[:200],\n                            \"definition\": definition,\n                            \"checked_at\": state.get(\"now\")}}\n    else:\n        start, end = 0, len(lines)\n        if line is not None:\n            try:\n                start = max(0, int(line) - 1)\n                end = min(len(lines), start + 8)\n            except (TypeError, ValueError):\n                pass\n        window = \" \".join(\" \".join(lines[start:end]).split())\n        norm = \" \".join(definition.split())\n        result = {\"state\": {\"drift\": bool(norm) and norm not in window,\n                            \"current\": window[:400],\n                            \"definition\": definition,\n                            \"checked_at\": state.get(\"now\")}}\n"
+   }
+  },
+  {
+   "eid": "script:chat-heard",
+   "cls": "ScriptTemplate",
+   "properties": {
+    "name": "chat getter",
+    "getter_script": "result = {'state': {'heard_n': int(membrane.me.properties.get('heard_n') or 0)}}"
+   }
+  }
+ ]
+}

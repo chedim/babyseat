@@ -287,7 +287,7 @@ finds the rest in the graph. It computes only while `recall_on` is true (the ban
   that (about 128) would exceed the budget (then `recall` is a reasoned null, `budget exceeded`, never a wrong list).
 - **No score cut-off**: every hit, best first, `{semtext, start, text, score, sim, overlap}` (`score` the vote's points); the readers cut the count.
 - The dials are the entity `recall:dials` (`banner_n`, `pool`, `entity_pool_max`, `rerank`, `rerank_top`, `fact_chars`, `header`, `weights`, `assoc_n`, `assoc_clip`, `dup_share`; loaded from
-  `cliffvm:packs/recall-policy.json`, guarded by the host).
+  `membrane/packs/recall-policy.json`, guarded by the host).
 
 ## Recall in the banner (#1143)
 `Banner:recall` (`membrane/apps/barest.c1f/recall.c1f`, a `RecallPart`) is a banner part: its `words` are the lines recalled for the message a turn is answering, shown after the main banner (the turn's banner is every non-empty `Banner:*`, `Banner:admin:main` first, then the others oldest update first; the banner block and the user's words are two text blocks of one stdin message, `chat_turn.c1f`).
