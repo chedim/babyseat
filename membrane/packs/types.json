@@ -2268,7 +2268,8 @@
       "ModelChat.kind": "Text"
     },
     "writes": {
-      "ModelChat.text": "Text"
+      "ModelChat.last_at": "Num",
+      "ModelChat.text": "Text?"
     },
     "findings": []
   },
