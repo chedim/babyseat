@@ -10,7 +10,7 @@ This page is the contract for someone who changes a backend or adds one. The mod
 |---|---|---|---|---|---|
 | `brain` | a graphlink peer named by `Minds:seat.chat` (the `chat` key of the fact `minds`), whatever model is chosen | `chat_turn.c1f` | `brain_plan` | `brain-start` | none (the brain writes its answer whole) |
 | `none` | nothing: no model is chosen | `chat_turn.c1f` | always `{refuse: no_model_text}` | none | none |
-| `peer` | a `cloud_models` entry with `backend` `membrama`, `claude-peer`, `openai-peer` or `anthropic-peer` | `chat_membrama.c1f` | `mb_plan` | `oai-start` (shared with `oai`) | none (a peer sends its answer whole) |
+| `peer` | a `cloud_models` entry with `backend` `membrama`, `claude-peer`, `openai-peer` or `anthropic-peer`, or a model a live peer publishes (`<ns>::Models:main.names`, see [membrama-chat.md](membrama-chat.md)) | `chat_membrama.c1f` | `mb_plan` | `oai-start` (shared with `oai`) | none (a peer sends its answer whole) |
 | `oai` | any other `cloud_models` entry that is not `claude-agent`, or a model the local Ollama lists | `chat_oai.c1f` | `oai_plan` | `oai-start` | `oai_live` (the current round's `Chunk:Fetch:oai:<cp>:<round>:acc`) |
 | `claude` | everything else: the claude CLI | `chat_turn.c1f` | `claude_plan` | `claude-start` | `claude_live` (the CLI command's `Chunk:<command>:acc`) |
 

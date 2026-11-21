@@ -1378,5 +1378,335 @@
     "equals": false
    }
   ]
+ },
+ {
+  "name": "one way to start a turn: a model a live peer publishes (<ns>::Models:main.names) is answered by that peer with no cloud_models entry, and the request names it",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f",
+   "membrane/packs/chat_membrama.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "haiku",
+     "cloud_models": []
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   },
+   {
+    "eid": "Vm:claude",
+    "class": "Vm",
+    "props": {
+     "kind": "peer",
+     "link": "up",
+     "peer_name": "clp"
+    }
+   },
+   {
+    "eid": "claude::Models:main",
+    "class": "Models",
+    "props": {
+     "names": [
+      "claude",
+      "sonnet",
+      "opus",
+      "haiku"
+     ],
+     "backend": "claude-peer"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "peer"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.ns",
+    "equals": "claude"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.peer",
+    "equals": "clp"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.peer_model",
+    "equals": "haiku"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.start.settings",
+    "equals": {}
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: a model published by a peer whose link is gone is not routed to it (the claude CLI answers, as before)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f",
+   "membrane/packs/chat_membrama.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "haiku",
+     "cloud_models": []
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   },
+   {
+    "eid": "Vm:claude",
+    "class": "Vm",
+    "props": {
+     "kind": "peer",
+     "link": "gone",
+     "peer_name": "clp"
+    }
+   },
+   {
+    "eid": "claude::Models:main",
+    "class": "Models",
+    "props": {
+     "names": [
+      "claude",
+      "sonnet",
+      "opus",
+      "haiku"
+     ],
+     "backend": "claude-peer"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "claude"
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: a cloud_models entry of that name wins over a name a peer publishes (the owner decides)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f",
+   "membrane/packs/chat_membrama.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "haiku",
+     "cloud_models": [
+      {
+       "name": "haiku",
+       "backend": "claude-agent"
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   },
+   {
+    "eid": "Vm:claude",
+    "class": "Vm",
+    "props": {
+     "kind": "peer",
+     "link": "up",
+     "peer_name": "clp"
+    }
+   },
+   {
+    "eid": "claude::Models:main",
+    "class": "Models",
+    "props": {
+     "names": [
+      "claude",
+      "sonnet",
+      "opus",
+      "haiku"
+     ],
+     "backend": "claude-peer"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "claude"
+   }
+  ]
  }
 ]

@@ -337,3 +337,39 @@ fn an_openai_or_anthropic_entry_without_peer_or_ns_refuses_the_turn_and_says_wha
         assert!(r.contains("claude-via-peer"), "{backend}: {v}");
     }
 }
+
+/// The models come from the peer (graphlink docs/claude-peer.md, "The models it serves"): a peer publishes `<ns>::Models:main` {names, backend}; with NO cloud_models entry the seat
+/// lists those names on /v1/models while the link is up, routes a turn on one of them to that peer, and the request names the model (`membrane::LlmRequest:<rid>.model`).
+#[test]
+fn a_model_a_live_peer_publishes_is_listed_and_answered_by_that_peer_and_the_request_names_it() {
+    let name = peer_name();
+    let names = Names(name.clone());
+    let facts = ["cloud_models=[]".to_string(), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
+                 r#"minds={"loops":"haiku","cortex":"haiku","workers":"haiku","seat_default":"haiku"}"#.to_string(), format!("peers={}", decl_peer(&name, "claude"))];
+    let run = start(&tmp("cp-published"), &facts);
+    let mut mine = peer_cells(&name);
+    for (k, v) in [("", json!(true)), ("names", json!(["claude", "sonnet", "opus", "haiku"])), ("backend", json!("claude-peer"))] { mine.put(&key("claude::Models:main", k), 1.0, &v).unwrap(); }
+    let mut peer = PeerEnd::open(&name, "claude");
+    peer.say(vec![Op::Sub { target: Target::Prefix("membrane::Llm".into()), props: None, limit: None }]);
+    // the picker's list has the peer's names, owned by its backend
+    let end = Instant::now() + Duration::from_secs(30);
+    let listed = loop {
+        let (_, body) = http(run.port, "GET", "/v1/models", "");
+        let v: J = serde_json::from_str(&body).unwrap_or(J::Null);
+        let ids: Vec<(String, String)> = v["data"].as_array().into_iter().flatten().map(|m| (m["id"].as_str().unwrap_or("").to_string(), m["owned_by"].as_str().unwrap_or("").to_string())).collect();
+        if ids.iter().any(|(i, _)| i == "haiku") || Instant::now() > end { break ids; }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    for n in ["claude", "sonnet", "opus", "haiku"] { assert!(listed.contains(&(n.to_string(), "membrane->claude-peer".to_string())), "{n} not listed: {listed:?}"); }
+    let id = send(&run, "hello");
+    let reply = reply_ask(&mut peer, None);
+    let seen = seat_cells(&names.0);
+    let rid = reply.replace("claude::Reply:", "membrane::LlmRequest:");
+    let live = |c: &Option<Cell>| matches!(c, Some(c) if c.state == CellState::Live);
+    assert_eq!(cell_when(&seen, &key(&rid, "model"), 30, live).expect("the request's model").value, json!("haiku"));
+    assert_eq!(cell_when(&seen, &key(&rid, "server"), 30, live).expect("the request's server").value, json!(name));
+    answer(&mut mine, &reply, "Hello from haiku", "stop", None);
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "done", "{v}");
+    assert_eq!(v["response"], "Hello from haiku", "{v}");
+}

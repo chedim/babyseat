@@ -22,14 +22,19 @@ LlmRequest.kind getter: 'request'
 LlmTool.kind getter: 'tool'
 
 -- ---- which model, which peer -----------------------------------------------------------------------------------------------------------------------------
+-- OR a model a peer PUBLISHES: a peer says what it serves on its own node `<ns>::Models:main` (`names`, `backend`; graphlink docs/claude-peer.md, "The models it serves"),
+-- and while its link is up (`Vm:<ns>`, kind peer) each of those names is routed to it with no cloud_models entry: {name, backend, peer: the Vm's peer_name, ns, model: the name}.
+-- The request then names the model (`LlmRequest.model`), the peer's own name for it. A cloud_models entry of the same name wins (the owner decides), whatever its backend.
+ChatMessage.mb_listed getter: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff] or [None])[0]
+ChatMessage.mb_published getter: ([{'name': this.model_eff, 'backend': prop(after(v.eid, 'Vm:') + '::Models:main', 'backend'), 'peer': v.peer_name, 'ns': after(v.eid, 'Vm:'), 'model': this.model_eff} for v in instances('Vm') if v.kind == 'peer' and v.link == 'up' and this.model_eff in (prop(after(v.eid, 'Vm:') + '::Models:main', 'names') or [])] or [None])[0]
 ChatMessage.mb_entry getter:
   WHEN this.over: None
-  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') in ['membrama', 'claude-peer', 'openai-peer', 'anthropic-peer']] or [None])[0]
+  ELSE: ([e for e in [this.mb_listed if this.mb_listed != None else this.mb_published] if e != None and prop(e, 'backend') in ['membrama', 'claude-peer', 'openai-peer', 'anthropic-peer']] or [None])[0]
 ChatMessage.mb_cfg getter:
   WHEN this.mb_entry == None: None
   ELSE WHEN prop(this.mb_entry, 'backend') != 'membrama' and (prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by ' + {'claude-peer': 'a Claude peer', 'openai-peer': 'an OpenAI-compatible peer', 'anthropic-peer': 'a Claude API peer'}[prop(this.mb_entry, 'backend')] + ', and its cloud_models entry must name "peer" (the peer in the fact peers) and "ns" (the namespace it owns).'}
   ELSE WHEN prop(this.mb_entry, 'peer') == None or prop(this.mb_entry, 'ns') == None or (prop(this.mb_entry, 'backend') == 'membrama' and prop(this.mb_entry, 'max_new') == None): {'refuse': 'The model ' + this.model_eff + ' is answered by membrama, and its cloud_models entry must name "peer" (the peer in the fact peers), "ns" (the namespace it owns) and "max_new" (the most tokens an answer may take: your number, there is no default).'}
-  ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'settings': {'max_new': prop(this.mb_entry, 'max_new'), 'enable_thinking': prop(this.mb_entry, 'enable_thinking')} if prop(this.mb_entry, 'backend') == 'membrama' else ({'max_new': prop(this.mb_entry, 'max_new')} if prop(this.mb_entry, 'backend') == 'openai-peer' and prop(this.mb_entry, 'max_new') != None else {}), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
+  ELSE: {'peer': prop(this.mb_entry, 'peer'), 'ns': prop(this.mb_entry, 'ns'), 'model': this.model_eff, 'peer_model': prop(this.mb_entry, 'model'), 'settings': {'max_new': prop(this.mb_entry, 'max_new'), 'enable_thinking': prop(this.mb_entry, 'enable_thinking')} if prop(this.mb_entry, 'backend') == 'membrama' else ({'max_new': prop(this.mb_entry, 'max_new')} if prop(this.mb_entry, 'backend') == 'openai-peer' and prop(this.mb_entry, 'max_new') != None else {}), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
 ChatMessage.mb_plan getter: {'refuse': prop(this.mb_cfg, 'refuse')} if prop(this.mb_cfg, 'refuse') != None else {'start': this.mb_cfg}
 
 -- ---- start: the door's tool list (chat_oai's), then round 1 --------------------------------------------------------------------------------------------------
@@ -55,7 +60,7 @@ MbRound.msg_rows getter: fold([], [concat(acc, [{'i': len(acc), 'm': x}]) for x 
 MbRound.tool_rows getter: fold([], [concat(acc, [len(acc)]) for x in (this.tool_specs or [])])
 MbRound.mb_out getter:
   WHEN this.go != True or this.messages == None or this.cfg == None or this.tool_specs == None: None
-  ELSE: {'rows': this.msg_rows, 'ids': ['membrane::LlmMsg:' + this.mid + ':' + str(r['i']) for r in this.msg_rows], 'tools': ['membrane::LlmTool:door:' + str(i) for i in this.tool_rows], 'settings': prop(this.cfg, 'settings'), 'peer': prop(this.cfg, 'peer')}
+  ELSE: {'rows': this.msg_rows, 'ids': ['membrane::LlmMsg:' + this.mid + ':' + str(r['i']) for r in this.msg_rows], 'tools': ['membrane::LlmTool:door:' + str(i) for i in this.tool_rows], 'settings': prop(this.cfg, 'settings'), 'peer': prop(this.cfg, 'peer'), 'model': prop(this.cfg, 'peer_model')}
 -- The nodes of a round are VIRTUAL (the transport's, never stored: a row would be published again at the next start), and a virtual entity lives while a live entity holds it BY REFERENCE
 -- (docs/cliffvm.md, Garbage collection of virtual entities; a plain read holds nothing): the round holds its messages, its request and the shared tools.
 Chat.mb_out on-setter mb-send:
@@ -71,6 +76,8 @@ Chat.mb_out on-setter mb-send:
     ('membrane::LlmRequest:' + this.rid).messages = prop(this.mb_out, 'ids')
     ('membrane::LlmRequest:' + this.rid).tools = prop(this.mb_out, 'tools')
     ('membrane::LlmRequest:' + this.rid).settings = prop(this.mb_out, 'settings')
+    FOR m IN [x for x in [prop(this.mb_out, 'model')] if x != None]:
+      ('membrane::LlmRequest:' + this.rid).model = m
 
 -- ---- what membrama said: the reply node and its chunks (a foreign read is `pending` until the value arrives, and the readers recompute then) ------------------------------
 MbRound.ns getter: str(prop(this.cfg, 'ns'))
