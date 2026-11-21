@@ -241,6 +241,7 @@
       "ChatMessage.mb_listed": "Any",
       "ChatMessage.mb_plan": "Dict",
       "ChatMessage.mb_published": "Dict?",
+      "ChatMessage.mb_up": "Bool",
       "LlmMsg.kind": "Text",
       "LlmRequest.kind": "Text",
       "LlmTool.kind": "Text",

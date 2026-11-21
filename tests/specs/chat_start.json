@@ -536,6 +536,13 @@
      ],
      "message": "membrane::Chat:main:message:1-1"
     }
+   },
+   {
+    "eid": "Vm:mbns",
+    "class": "Vm",
+    "props": {
+     "link": "up"
+    }
    }
   ],
   "writes": [],
@@ -564,6 +571,102 @@
     "eid": "membrane::Chat:main:message:1-1",
     "prop": "plan.refuse",
     "none": true
+   }
+  ]
+ },
+ {
+  "name": "one way to start a turn: the plan: a peer model whose peer is not up is a refuse that names it, not a wait",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/model_chat.c1f",
+   "membrane/packs/chat_turn.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/chat_oai.c1f",
+   "membrane/packs/chat_membrama.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Boot:seat",
+    "class": "Boot",
+    "props": {
+     "ui_dir": "/x",
+     "seat_default": "mb",
+     "cloud_models": [
+      {
+       "name": "mb",
+       "backend": "membrama",
+       "peer": "mbp",
+       "ns": "mbns",
+       "max_new": 64
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Http:door",
+    "class": "Http",
+    "props": {
+     "listen_result": {
+      "port": 4321,
+      "rc": 0,
+      "host": "127.0.0.1"
+     }
+    }
+   },
+   {
+    "eid": "membrane::Banner:admin:main",
+    "class": "Banner",
+    "props": {
+     "chat": "main",
+     "admin": "admin"
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatmessage"
+     ],
+     "text": "hello",
+     "queued": true
+    }
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1:turn",
+    "class": "Chat",
+    "props": {
+     "parents": [
+      "cls:chat",
+      "cls:chatturn"
+     ],
+     "message": "membrane::Chat:main:message:1-1"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "backend",
+    "equals": "peer"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.backend",
+    "equals": "peer"
+   },
+   {
+    "eid": "membrane::Chat:main:message:1-1",
+    "prop": "plan.refuse",
+    "equals": "mbns is not up (the link of mbp is not up), so the model mb cannot answer this message. Start it, then send the message again."
    }
   ]
  },
@@ -1231,6 +1334,13 @@
       "cls:chatturn"
      ],
      "message": "membrane::Chat:main:message:1-1"
+    }
+   },
+   {
+    "eid": "Vm:mbns",
+    "class": "Vm",
+    "props": {
+     "link": "up"
     }
    }
   ],

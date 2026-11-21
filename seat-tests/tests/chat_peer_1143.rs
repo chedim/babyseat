@@ -149,6 +149,8 @@ fn peer_turn(tag: &str, backend: &str, ns: &str, extra: J) -> (Run, Names, PeerE
     let run = start(&tmp(tag), &facts);
     let mine = peer_cells(&name);
     let peer = PeerEnd::open(&name, ns);
+    // a turn starts only on a peer whose root the seat has made: the peer's own end opening is not that (the seat reads the hello a moment later)
+    wait_until("the root of the peer never came up", 60, || call(run.port, "entity_read", json!({"spec": format!("Vm:{ns}"), "prop": "link"})) == "up");
     (run, names, peer, mine)
 }
 fn send(run: &Run, text: &str) -> String {
@@ -443,6 +445,17 @@ fn a_turn_whose_peer_root_is_gone_fails_and_does_not_wait_for_ever() {
     let id = send(&run, "hello");
     let _ = reply_ask(&mut peer, None);
     put(run.port, "Vm:claude", "retire", json!(true));   // no root: nothing holds the peer's replicas, and no reply can be read
+    let v = turn_ends(run.port, &id);
+    assert_eq!(v["state"], "error", "{v}");
+    assert!(v["response"].as_str().unwrap_or("").contains("claude is not up"), "the turn should say the peer is not up: {v}");
+}
+
+#[test]
+fn a_message_for_a_peer_that_is_not_up_is_refused_at_once_and_says_so() {
+    let name = peer_name();
+    let _names = Names(name.clone());
+    let run = start(&tmp("cp-notup"), &peer_facts(&name));   // declared, never started: no hello, no root
+    let id = send(&run, "hello");
     let v = turn_ends(run.port, &id);
     assert_eq!(v["state"], "error", "{v}");
     assert!(v["response"].as_str().unwrap_or("").contains("claude is not up"), "the turn should say the peer is not up: {v}");
