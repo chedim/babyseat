@@ -1666,10 +1666,16 @@
     },
     "writes": {
       "*.blocks": "List(Any)",
+      "*.receipt": "Text",
       "*.replan": "Text?",
       "*.status": "Text",
       "Goal.plan_result": "Dict",
-      "Task.status": "Text",
+      "Task.ended_ts": "Num",
+      "Task.receipt": "Text",
+      "Task.result": "Text",
+      "Task.runs": "Num?",
+      "Task.started_ts": "Num",
+      "Task.status": "Any",
       "Wait.armed_since": "Num",
       "Wait.check": "Text",
       "Wait.status": "Text"
@@ -1679,7 +1685,8 @@
       "Goal",
       "Task",
       "Wait",
-      "Decision"
+      "Decision",
+      "Result"
     ]
   },
   "ha": {

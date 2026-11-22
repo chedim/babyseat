@@ -891,11 +891,13 @@
       "Task",
       "Wait"
     ],
-    "members": 15,
+    "members": 18,
     "writes": [
       "Task:*.status",
       "membrane::llm.call",
-      "ref(goal).replan"
+      "ref(goal).replan",
+      "ref(parent).receipt",
+      "ref(parent).status"
     ],
     "claims": [],
     "boot_facts": [],
@@ -903,7 +905,8 @@
       "Goal",
       "Task",
       "Wait",
-      "Decision"
+      "Decision",
+      "Result"
     ]
   },
   "ha": {

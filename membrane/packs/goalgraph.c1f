@@ -3,6 +3,7 @@ RESIDENT Goal
 RESIDENT Task
 RESIDENT Wait
 RESIDENT Decision
+RESIDENT Result
 -- The goal graph (#773, #994) in cliffhanger's field syntax (native/src/syntax.rs).
 -- Migrated from packs/goalgraph.json by the translator; tests/syntax_994.rs holds the two equal.
 --
@@ -14,7 +15,7 @@ RESIDENT Decision
 
 -- a task or a card that ends asks its goal to replan
 Task.status on-setter replan-task:
-  WHEN (this.status == 'done' or this.status == 'failed' or this.status == 'stuck'):
+  WHEN (this.status == 'done' or this.status == 'failed' or this.status == 'stuck') or (this.status == 'split' and len(referencing(this, 'parent')) == 0):
     this.goal.replan = 'task ' + this.eid + ' ' + this.status
 Decision.status on-setter replan-card:
   WHEN (this.status == 'decided' or this.status == 'closed' or this.status == 'dropped'):
@@ -103,3 +104,38 @@ Wait.is_ready on-setter arm:
   WHEN this.is_ready:
     this.status = 'armed'
     this.armed_since = clock
+
+-- THE WORKER LIFECYCLE (#738): owed -> running -> done / failed / stuck / split, a result entity per run.
+-- `take` is a worker taking an owed task; `finish` is its verdict {verdict, detail, session}: anything but done, failed, stuck or split is stuck.
+Task.take on-setter take-task:
+  WHEN this.take and this.status == 'owed':
+    this.status = 'running'
+    this.started_ts = clock
+Task.finish on-setter finish-task:
+  WHEN this.finish != None:
+    f = this.finish
+    v = f['verdict'] if f['verdict'] in ('done', 'failed', 'stuck', 'split') else 'stuck'
+    n = (this.runs or 0) + 1
+    res = 'Result:' + replace(this.eid, 'Task:', '') + ':' + str(n)
+    FOR x IN [1]:
+      ('Result:' + replace(this.eid, 'Task:', '') + ':' + str(n)) = Result(name: v + ' ' + str(this.title or this.eid), task: this.eid, goal: this.goal, outcome: v, receipt: str(f['detail'] or ''), session: str(f['session'] or ''), ts: clock)
+    this.runs = n
+    this.result = res
+    this.receipt = str(f['detail'] or '')
+    this.ended_ts = clock
+    this.status = v
+
+-- a split task ends when every sub-task has ended done or dropped: done when one is done, dropped when all were; its own parent is checked next
+Task.status on-setter close-parent:
+  WHEN this.parent != None and this.status in ('done', 'dropped') and prop(this.parent, 'status') == 'split':
+    subs = referencing(this.parent, 'parent')
+    open_subs = [s for s in subs if s.eid != this.eid and not (s.status in ('done', 'dropped'))]
+    any_done = this.status == 'done' or len([s for s in subs if s.eid != this.eid and s.status == 'done']) > 0
+    FOR x IN [1] if len(open_subs) == 0 else []:
+      this.parent.status = 'done' if any_done else 'dropped'
+      this.parent.receipt = 'its sub-tasks are done' if any_done else 'all its sub-tasks were dropped'
+
+-- boot: a task owed or running when the seat stopped goes back to the pool
+Task.reowe on-setter reowe-task:
+  WHEN this.reowe and (this.status == 'owed' or this.status == 'running'):
+    this.status = 'owed'
