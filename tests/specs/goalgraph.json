@@ -2990,5 +2990,183 @@
         }
       }
     ]
+  },
+  {
+    "name": "goalgraph: reflex: an open goal nothing works on is planned by itself",
+    "packs": [
+      "membrane/packs/goalgraph.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Goal:ri",
+        "class": "Goal",
+        "props": {
+          "status": "open",
+          "text": "Ship",
+          "replan": "x",
+          "planned_replan": "w"
+        }
+      }
+    ],
+    "writes": [
+      {
+        "eid": "Goal:ri",
+        "prop": "planned_replan",
+        "value": "x"
+      }
+    ],
+    "expect": [
+      {
+        "eid": "Goal:ri",
+        "prop": "replan",
+        "equals": "idle "
+      },
+      {
+        "eid": "Goal:ri",
+        "prop": "plan_calls",
+        "equals": 1
+      }
+    ]
+  },
+  {
+    "name": "goalgraph: reflex: a parked goal is left alone",
+    "packs": [
+      "membrane/packs/goalgraph.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Goal:rp",
+        "class": "Goal",
+        "props": {
+          "status": "parked",
+          "text": "Ship",
+          "replan": "x",
+          "planned_replan": "w"
+        }
+      }
+    ],
+    "writes": [
+      {
+        "eid": "Goal:rp",
+        "prop": "planned_replan",
+        "value": "x"
+      }
+    ],
+    "expect": [
+      {
+        "eid": "Goal:rp",
+        "prop": "replan",
+        "equals": "x"
+      }
+    ]
+  },
+  {
+    "name": "goalgraph: reflex: a done goal is left alone",
+    "packs": [
+      "membrane/packs/goalgraph.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Goal:rd",
+        "class": "Goal",
+        "props": {
+          "status": "done",
+          "text": "Ship",
+          "replan": "x",
+          "planned_replan": "w"
+        }
+      }
+    ],
+    "writes": [
+      {
+        "eid": "Goal:rd",
+        "prop": "planned_replan",
+        "value": "x"
+      }
+    ],
+    "expect": [
+      {
+        "eid": "Goal:rd",
+        "prop": "replan",
+        "equals": "x"
+      }
+    ]
+  },
+  {
+    "name": "goalgraph: reflex: a goal with a task running is left alone",
+    "packs": [
+      "membrane/packs/goalgraph.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Goal:rm",
+        "class": "Goal",
+        "props": {
+          "status": "open",
+          "text": "Ship",
+          "replan": "x",
+          "planned_replan": "w"
+        }
+      },
+      {
+        "eid": "Task:rm1",
+        "class": "Task",
+        "props": {
+          "goal": "Goal:rm",
+          "status": "running"
+        }
+      }
+    ],
+    "writes": [
+      {
+        "eid": "Goal:rm",
+        "prop": "planned_replan",
+        "value": "x"
+      }
+    ],
+    "expect": [
+      {
+        "eid": "Goal:rm",
+        "prop": "replan",
+        "equals": "x"
+      }
+    ]
+  },
+  {
+    "name": "goalgraph: reflex: a plan that leaves the graph as it was is not asked again",
+    "packs": [
+      "membrane/packs/goalgraph.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Goal:rl",
+        "class": "Goal",
+        "props": {
+          "status": "open",
+          "text": "Ship",
+          "replan": "x",
+          "planned_replan": "w"
+        }
+      }
+    ],
+    "writes": [
+      {
+        "eid": "Goal:rl",
+        "prop": "planned_replan",
+        "value": "x"
+      },
+      {
+        "eid": "Goal:rl",
+        "prop": "planned_replan",
+        "value": "idle "
+      }
+    ],
+    "expect": [
+      {
+        "eid": "Goal:rl",
+        "prop": "plan_calls",
+        "equals": 1
+      }
+    ]
   }
 ]
