@@ -1810,5 +1810,512 @@
     "equals": "done"
    }
   ]
+ },
+ {
+  "name": "goalgraph: an armed wait whose condition holds is done, with what was seen as its receipt",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Probe:p",
+    "class": "Probe",
+    "props": {
+     "ready": true
+    }
+   },
+   {
+    "eid": "Wait:gx:w",
+    "class": "Wait",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "armed",
+     "armed_since": 0,
+     "every_s": 10,
+     "deadline_min": 5,
+     "condition": {
+      "field": "Probe:p",
+      "prop": "ready",
+      "equals": true
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "check",
+    "value": 100
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "status",
+    "equals": "done"
+   },
+   {
+    "eid": "Wait:gx:w",
+    "prop": "receipt",
+    "contains": "Probe:p.ready"
+   },
+   {
+    "eid": "Wait:gx:w",
+    "prop": "last_check_ts",
+    "equals": 100
+   },
+   {
+    "eid": "Wait:gx:w",
+    "prop": "ended_ts",
+    "equals": 100
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: an armed wait whose condition does not hold yet stays armed and says what it saw",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Probe:p",
+    "class": "Probe",
+    "props": {
+     "ready": false
+    }
+   },
+   {
+    "eid": "Wait:gx:w",
+    "class": "Wait",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "armed",
+     "armed_since": 0,
+     "every_s": 10,
+     "deadline_min": 5,
+     "condition": {
+      "field": "Probe:p",
+      "prop": "ready",
+      "equals": true
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "check",
+    "value": 100
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "status",
+    "equals": "armed"
+   },
+   {
+    "eid": "Wait:gx:w",
+    "prop": "last_check_result",
+    "contains": "Probe:p.ready"
+   },
+   {
+    "eid": "Wait:gx:w",
+    "prop": "last_check_ts",
+    "equals": 100
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: an armed wait past its deadline fails",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Probe:p",
+    "class": "Probe",
+    "props": {
+     "ready": false
+    }
+   },
+   {
+    "eid": "Wait:gx:w",
+    "class": "Wait",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "armed",
+     "armed_since": 0,
+     "every_s": 10,
+     "deadline_min": 5,
+     "condition": {
+      "field": "Probe:p",
+      "prop": "ready",
+      "equals": true
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "check",
+    "value": 400
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "status",
+    "equals": "failed"
+   },
+   {
+    "eid": "Wait:gx:w",
+    "prop": "receipt",
+    "contains": "unmet after 5 min: Probe:p.ready"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a wait is checked at its own pace, not every beat",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Probe:p",
+    "class": "Probe",
+    "props": {
+     "ready": true
+    }
+   },
+   {
+    "eid": "Wait:gx:w",
+    "class": "Wait",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "armed",
+     "armed_since": 0,
+     "every_s": 10,
+     "deadline_min": 5,
+     "condition": {
+      "field": "Probe:p",
+      "prop": "ready",
+      "equals": true
+     },
+     "last_check_ts": 95
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "check",
+    "value": 100
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "status",
+    "equals": "armed"
+   },
+   {
+    "eid": "Wait:gx:w",
+    "prop": "last_check_ts",
+    "equals": 95
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a wait that is not armed is not checked",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Probe:p",
+    "class": "Probe",
+    "props": {
+     "ready": true
+    }
+   },
+   {
+    "eid": "Wait:gx:w",
+    "class": "Wait",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "open",
+     "armed_since": 0,
+     "every_s": 10,
+     "deadline_min": 5,
+     "condition": {
+      "field": "Probe:p",
+      "prop": "ready",
+      "equals": true
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "check",
+    "value": 100
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "status",
+    "equals": "open"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a wait that is done frees the task it blocks",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Probe:p",
+    "class": "Probe",
+    "props": {
+     "ready": true
+    }
+   },
+   {
+    "eid": "Wait:gx:w",
+    "class": "Wait",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "armed",
+     "armed_since": 0,
+     "every_s": 10,
+     "deadline_min": 5,
+     "condition": {
+      "field": "Probe:p",
+      "prop": "ready",
+      "equals": true
+     },
+     "blocks": [
+      "Task:gx:t"
+     ]
+    }
+   },
+   {
+    "eid": "Task:gx:t",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "check",
+    "value": 100
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:t",
+    "prop": "status",
+    "equals": "owed"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a plan makes a wait with its condition, pace and deadline",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "waits": [
+      {
+       "key": "w1",
+       "title": "CI",
+       "condition": {
+        "field": "Probe:p",
+        "prop": "ready",
+        "equals": true
+       },
+       "every_s": 60,
+       "deadline_min": 30
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Wait:gx:w1",
+    "prop": "every_s",
+    "equals": 60
+   },
+   {
+    "eid": "Wait:gx:w1",
+    "prop": "deadline_min",
+    "equals": 30
+   },
+   {
+    "eid": "Wait:gx:w1",
+    "prop": "status",
+    "equals": "armed"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a plan whose wait has no pace is refused whole",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "tasks": [
+      {
+       "key": "a",
+       "title": "A"
+      }
+     ],
+     "waits": [
+      {
+       "key": "w1",
+       "title": "CI",
+       "condition": {
+        "field": "Probe:p",
+        "prop": "ready",
+        "equals": true
+       }
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_result",
+    "equals": {
+     "ok": false,
+     "error": "refused: wait w1 needs a condition {field, prop, equals} (a method condition is not supported yet), every_s (at least 10) and deadline_min (above 0)"
+    }
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a plan whose wait has no condition, or one with a method, is refused",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "waits": [
+      {
+       "key": "w1",
+       "title": "CI",
+       "condition": {
+        "method": "ci.green",
+        "args": {}
+       },
+       "every_s": 60,
+       "deadline_min": 30
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_result",
+    "equals": {
+     "ok": false,
+     "error": "refused: wait w1 needs a condition {field, prop, equals} (a method condition is not supported yet), every_s (at least 10) and deadline_min (above 0)"
+    }
+   }
+  ]
  }
 ]

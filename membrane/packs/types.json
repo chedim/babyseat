@@ -1694,7 +1694,12 @@
       "Task.started_ts": "Num",
       "Task.status": "Any",
       "Wait.armed_since": "Num",
-      "Wait.check": "Text",
+      "Wait.check": "Bool|Num",
+      "Wait.ended_ts": "Any",
+      "Wait.escalate": "Text",
+      "Wait.last_check_result": "Text",
+      "Wait.last_check_ts": "Any",
+      "Wait.receipt": "Text",
       "Wait.status": "Text"
     },
     "findings": [],

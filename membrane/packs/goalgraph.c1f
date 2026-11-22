@@ -25,7 +25,7 @@ Decision.status on-setter replan-card:
 -- a wait with nothing open in its way is armed; when it is due, its adapter checks
 Wait.due on-setter wait-check:
   WHEN this.due:
-    this.check = 'due'
+    this.check = this.due
 
 -- THE PLANNER (#773): a goal with a replan that no plan has answered is DUE, and its planner lane is called once for that reason.
 -- A plan answers it (planned_replan). planner_text is the prompt the lane gets; planner_reply is the lane's last text, whose FULFILLED line is the claim.
@@ -103,7 +103,8 @@ Goal.plan on-setter apply-plan:
     nodes = [r[1] for r in refs]
     unknown = [e for e in edges if not (e[0] in nodes) and prop(e[0], 'goal') == None]
     cycle = [e for e in edges if e[0] == e[1] or [f for f in edges if f[0] == e[1] and f[1] == e[0]] != []]
-    ok = len(unknown) == 0 and len(cycle) == 0
+    bad_waits = [w for w in waits if not (w['condition'] != None and w['condition']['field'] and w['condition']['prop'] and ('equals' in keys(w['condition'])) and (w['every_s'] or 0) >= 10 and (w['deadline_min'] or 0) > 0)]
+    ok = len(unknown) == 0 and len(cycle) == 0 and len(bad_waits) == 0
     fresh = [t for t in tasks if ok and prop('Task:' + g + ':' + str(t['key']), 'status') == None]
     again = [t for t in tasks if ok and (prop('Task:' + g + ':' + str(t['key']), 'status') in ('stuck', 'failed') or (prop('Task:' + g + ':' + str(t['key']), 'status') == 'done' and t['redo']))]
     fresh_w = [w for w in waits if ok and prop('Wait:' + g + ':' + str(w['key']), 'status') == None]
@@ -121,7 +122,7 @@ Goal.plan on-setter apply-plan:
       ('Task:' + g + ':' + str(k)).status = 'dropped'
     this.planned_replan = this.replan if ok else this.planned_replan
     this.planned_ts = clock
-    this.plan_result = {'ok': True, 'tasks': [('Task:' + g + ':' + str(t['key'])) for t in fresh], 'reopened': [('Task:' + g + ':' + str(t['key'])) for t in again]} if ok else {'ok': False, 'error': ('unknown after/blocks: ' + str(concat(unknown, [[""]])[0][0])) if len(unknown) > 0 else ('refused: these edges close a cycle: ' + str(concat(cycle, [["", ""]])[0][0]) + ' -> ' + str(concat(cycle, [["", ""]])[0][1]))}
+    this.plan_result = {'ok': True, 'tasks': [('Task:' + g + ':' + str(t['key'])) for t in fresh], 'reopened': [('Task:' + g + ':' + str(t['key'])) for t in again]} if ok else {'ok': False, 'error': ('refused: wait ' + str(bad_waits[0]['key']) + ' needs a condition {field, prop, equals} (a method condition is not supported yet), every_s (at least 10) and deadline_min (above 0)') if len(bad_waits) > 0 else ('unknown after/blocks: ' + str(concat(unknown, [[""]])[0][0])) if len(unknown) > 0 else ('refused: these edges close a cycle: ' + str(concat(cycle, [["", ""]])[0][0]) + ' -> ' + str(concat(cycle, [["", ""]])[0][1]))}
 
 -- readiness is a GETTER, so it is read after the round settled (a setter sees the counts as they were before its write):
 -- a task with nothing open in its way is owed, a wait with nothing open in its way is armed
@@ -219,3 +220,26 @@ Pool.beat getter: clock
 Pool.beat on-setter pool-beat:
   ALWAYS:
     this.pump = this.beat
+
+-- THE WAIT CHECK (#738): `check` is the beat's time (written by wait-check on every beat the wait is due). An armed wait whose own pace (every_s) has
+-- come looks at its condition {field, prop, equals}: done when it holds, failed when deadline_min has passed since it armed, else still armed.
+-- A failed wait asks to be told to the chat (`escalate`).
+Wait.check on-setter check-wait:
+  WHEN this.status == 'armed' and this.check != None and this.check - (this.last_check_ts or -1000000) >= (this.every_s or 10):
+    now = this.check
+    c = this.condition or {}
+    seen_v = prop(c['field'], c['prop'])
+    holds = seen_v == c['equals']
+    seen = str(c['field']) + '.' + str(c['prop']) + ' = ' + str(seen_v)
+    late = (now - (this.armed_ts if this.armed_ts != None else (this.armed_since if this.armed_since != None else now))) >= 60 * (this.deadline_min or 0)
+    this.last_check_ts = now
+    this.last_check_result = seen
+    FOR x IN [1] if holds else []:
+      this.receipt = seen
+      this.ended_ts = now
+      this.status = 'done'
+    FOR x IN [1] if (not holds and late) else []:
+      this.receipt = 'unmet after ' + str(this.deadline_min) + ' min: ' + seen
+      this.ended_ts = now
+      this.escalate = 'goal ' + str(this.goal) + ': the wait ' + str(this.title or this.eid) + ' failed -- unmet after ' + str(this.deadline_min) + ' min: ' + seen
+      this.status = 'failed'
