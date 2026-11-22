@@ -103,7 +103,7 @@ Goal.plan on-setter apply-plan:
     nodes = [r[1] for r in refs]
     unknown = [e for e in edges if not (e[0] in nodes) and prop(e[0], 'goal') == None]
     cycle = [e for e in edges if e[0] == e[1] or [f for f in edges if f[0] == e[1] and f[1] == e[0]] != []]
-    bad_waits = [w for w in waits if not (w['condition'] != None and w['condition']['field'] and w['condition']['prop'] and ('equals' in keys(w['condition'])) and (w['every_s'] or 0) >= 10 and (w['deadline_min'] or 0) > 0)]
+    bad_waits = [w for w in waits if not (w['condition'] != None and ((w['condition']['field'] and w['condition']['prop']) or w['condition']['method']) and ('equals' in keys(w['condition'])) and (w['every_s'] or 0) >= 10 and (w['deadline_min'] or 0) > 0)]
     ok = len(unknown) == 0 and len(cycle) == 0 and len(bad_waits) == 0
     fresh = [t for t in tasks if ok and prop('Task:' + g + ':' + str(t['key']), 'status') == None]
     again = [t for t in tasks if ok and (prop('Task:' + g + ':' + str(t['key']), 'status') in ('stuck', 'failed') or (prop('Task:' + g + ':' + str(t['key']), 'status') == 'done' and t['redo']))]
@@ -122,7 +122,7 @@ Goal.plan on-setter apply-plan:
       ('Task:' + g + ':' + str(k)).status = 'dropped'
     this.planned_replan = this.replan if ok else this.planned_replan
     this.planned_ts = clock
-    this.plan_result = {'ok': True, 'tasks': [('Task:' + g + ':' + str(t['key'])) for t in fresh], 'reopened': [('Task:' + g + ':' + str(t['key'])) for t in again]} if ok else {'ok': False, 'error': ('refused: wait ' + str(bad_waits[0]['key']) + ' needs a condition {field, prop, equals} (a method condition is not supported yet), every_s (at least 10) and deadline_min (above 0)') if len(bad_waits) > 0 else ('unknown after/blocks: ' + str(concat(unknown, [[""]])[0][0])) if len(unknown) > 0 else ('refused: these edges close a cycle: ' + str(concat(cycle, [["", ""]])[0][0]) + ' -> ' + str(concat(cycle, [["", ""]])[0][1]))}
+    this.plan_result = {'ok': True, 'tasks': [('Task:' + g + ':' + str(t['key'])) for t in fresh], 'reopened': [('Task:' + g + ':' + str(t['key'])) for t in again]} if ok else {'ok': False, 'error': ('refused: wait ' + str(bad_waits[0]['key']) + ' needs a condition {field, prop, equals} or {method, args, equals}, every_s (at least 10) and deadline_min (above 0)') if len(bad_waits) > 0 else ('unknown after/blocks: ' + str(concat(unknown, [[""]])[0][0])) if len(unknown) > 0 else ('refused: these edges close a cycle: ' + str(concat(cycle, [["", ""]])[0][0]) + ' -> ' + str(concat(cycle, [["", ""]])[0][1]))}
 
 -- readiness is a GETTER, so it is read after the round settled (a setter sees the counts as they were before its write):
 -- a task with nothing open in its way is owed, a wait with nothing open in its way is armed
@@ -159,6 +159,7 @@ Task.finish on-setter finish-task:
     FOR x IN [1]:
       ('Result:' + replace(this.eid, 'Task:', '') + ':' + str(n)) = Result(name: v + ' ' + str(this.title or this.eid), task: this.eid, goal: this.goal, outcome: v, receipt: str(f['detail'] or ''), session: str(f['session'] or ''), ts: clock)
     this.runs = n
+    this.continues = 0
     this.result = res
     this.receipt = str(f['detail'] or '')
     this.ended_ts = clock
@@ -173,6 +174,12 @@ Task.status on-setter close-parent:
     FOR x IN [1] if len(open_subs) == 0 else []:
       this.parent.status = 'done' if any_done else 'dropped'
       this.parent.receipt = 'its sub-tasks are done' if any_done else 'all its sub-tasks were dropped'
+
+-- a task that has not run yet and is given a sub-task is split: its sub-tasks do its work (and it is done when they are)
+Task.splits_parent getter: this.parent != None and prop(this.parent, 'status') in ('open', 'owed')
+Task.splits_parent on-setter split-parent:
+  WHEN this.splits_parent:
+    this.parent.status = 'split'
 
 -- boot: a task owed or running when the seat stopped goes back to the pool
 Task.reowe on-setter reowe-task:
@@ -200,7 +207,7 @@ Pool.pump on-setter dispatch:
 -- the prompt of the worker lane: the task, its goal, what it waited on
 Task.worker_text getter:
   done = [b.eid + ': ' + str(b.receipt or b.value or '') for b in referencing(this, 'blocks')]
-  'You are a WORKER on task ' + this.eid + ' of goal ' + str(this.goal) + '.\nTask: ' + str(this.title or this.eid) + '\n' + str(this.detail or '') + '\n\nWhat it waited on is done: ' + (join(done, '; ') if len(done) > 0 else 'nothing') + '\n\nDo this task now in ONE step: one batch of tool calls, then your verdict. Do not plan other work. A second batch of calls is refused and the task goes back to the planner to be split; if one step cannot finish it, do not start it: end with SPLIT.\nEnd with one line: DONE <the receipt that proves it> / FAILED <what went wrong> / STUCK <what you need: a decision or other work> / SPLIT <the parts it needs>.'
+  'You are a WORKER on task ' + this.eid + ' of goal ' + str(this.goal) + '.\nTask: ' + str(this.title or this.eid) + '\n' + str(this.detail or '') + '\n\nWhat it waited on is done: ' + (join(done, '; ') if len(done) > 0 else 'nothing') + ('\n\nYour last step ended without a verdict. It said: ' + str(this.carry) + '\nContinue from there.' if ((this.continues or 0) > 0 and this.carry) else '') + '\n\nDo this task now in ONE step: one batch of tool calls, then your verdict. Do not plan other work. A second batch of calls is refused and the task goes back to the planner to be split; if one step cannot finish it, do not start it: end with SPLIT.\nEnd with one line: DONE <the receipt that proves it> / FAILED <what went wrong> / STUCK <what you need: a decision or other work> / SPLIT <the parts it needs>.'
 
 -- the worker's last text: its last verdict line (DONE, FAILED, STUCK or SPLIT) ends the task; none is stuck
 Task.worker_reply on-setter worker-verdict:
@@ -213,7 +220,13 @@ Task.worker_reply on-setter worker-verdict:
     v = last[0][0][0] if len(last) > 0 else 'stuck'
     rest = strip(after(last[0][1], head(last[0][1], len(v)))) if len(last) > 0 else ''
     clean = strip(after(rest, head(rest, 1))) if (startswith(rest, ':') or startswith(rest, '-')) else rest
-    this.finish = {'verdict': v, 'detail': head(clean, 600) if len(last) > 0 else 'the worker ended without DONE / FAILED / STUCK: ' + head(str(this.worker_reply), 200), 'session': this.session}
+    step = len(last) == 0 and (this.continues or 0) < 2 and len(strip(str(this.worker_reply))) > 0
+    FOR x IN [1] if step else []:
+      this.continues = (this.continues or 0) + 1
+      this.carry = head(strip(str(this.worker_reply)), 600)
+      this.status = 'owed'
+    FOR x IN [1] if not step else []:
+      this.finish = {'verdict': v, 'detail': head(clean, 600) if len(last) > 0 else 'the worker ended without DONE / FAILED / STUCK: ' + head(str(this.worker_reply), 200), 'session': this.session}
 
 -- the pool beat: a getter on the clock changes every beat, so every beat pumps the pool (as an armed wait is checked every beat)
 Pool.beat getter: clock
@@ -228,12 +241,15 @@ Wait.check on-setter check-wait:
   WHEN this.status == 'armed' and this.check != None and this.check - (this.last_check_ts or -1000000) >= (this.every_s or 10):
     now = this.check
     c = this.condition or {}
-    seen_v = prop(c['field'], c['prop'])
+    by_method = c['method'] != None
+    seen_v = this.method_seen if by_method else prop(c['field'], c['prop'])
     holds = seen_v == c['equals']
-    seen = str(c['field']) + '.' + str(c['prop']) + ' = ' + str(seen_v)
+    seen = (str(c['method']) if by_method else str(c['field']) + '.' + str(c['prop'])) + ' = ' + str(seen_v)
     late = (now - (this.armed_ts if this.armed_ts != None else (this.armed_since if this.armed_since != None else now))) >= 60 * (this.deadline_min or 0)
     this.last_check_ts = now
     this.last_check_result = seen
+    FOR x IN [1] if by_method else []:
+      this.method_call = now
     FOR x IN [1] if holds else []:
       this.receipt = seen
       this.ended_ts = now

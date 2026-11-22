@@ -1671,6 +1671,7 @@
       "Task.is_blocked": "Bool",
       "Task.is_ready": "Bool",
       "Task.open_blockers": "Int",
+      "Task.splits_parent": "Bool",
       "Task.worker_text": "Text?",
       "Wait.due": "Bool|Num",
       "Wait.finished": "Bool",
@@ -1698,6 +1699,8 @@
       "Goal.reported_ts": "Num",
       "Goal.tell": "Text?",
       "Pool.pump": "Num",
+      "Task.carry": "Text",
+      "Task.continues": "Num?",
       "Task.ended_ts": "Num",
       "Task.finish": "Dict",
       "Task.pool": "Text",
@@ -1712,6 +1715,7 @@
       "Wait.escalate": "Text",
       "Wait.last_check_result": "Text",
       "Wait.last_check_ts": "Any",
+      "Wait.method_call": "Any",
       "Wait.receipt": "Text",
       "Wait.status": "Text"
     },
@@ -1730,6 +1734,29 @@
     "writes": {
       "Chat.queued": "Bool",
       "Goal.tell_n": "Num?"
+    },
+    "findings": []
+  },
+  "goalgraph_lanes": {
+    "getters": {},
+    "writes": {
+      "Chat.queued": "Bool",
+      "Goal.plan_msg": "Text?",
+      "Goal.planner_reply": "Any",
+      "Task.reowe": "Any",
+      "Task.worker_msg": "Text?",
+      "Task.worker_reply": "Any"
+    },
+    "findings": []
+  },
+  "goalgraph_methods": {
+    "getters": {
+      "Wait.method_cmd": "Text?",
+      "Wait.method_out": "Text?"
+    },
+    "writes": {
+      "*.run": "Dict",
+      "Wait.method_seen": "Text?"
     },
     "findings": []
   },

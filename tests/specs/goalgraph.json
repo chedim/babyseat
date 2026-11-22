@@ -1713,7 +1713,7 @@
     "class": "Task",
     "props": {
      "goal": "Goal:gx",
-     "status": "running"
+     "status": "running", "continues": 2
     }
    }
   ],
@@ -1755,7 +1755,7 @@
     "class": "Task",
     "props": {
      "goal": "Goal:gx",
-     "status": "running"
+     "status": "running", "continues": 2
     }
    }
   ],
@@ -2268,7 +2268,7 @@
     "prop": "plan_result",
     "equals": {
      "ok": false,
-     "error": "refused: wait w1 needs a condition {field, prop, equals} (a method condition is not supported yet), every_s (at least 10) and deadline_min (above 0)"
+     "error": "refused: wait w1 needs a condition {field, prop, equals} or {method, args, equals}, every_s (at least 10) and deadline_min (above 0)"
     }
    }
   ]
@@ -2313,7 +2313,7 @@
     "prop": "plan_result",
     "equals": {
      "ok": false,
-     "error": "refused: wait w1 needs a condition {field, prop, equals} (a method condition is not supported yet), every_s (at least 10) and deadline_min (above 0)"
+     "error": "refused: wait w1 needs a condition {field, prop, equals} or {method, args, equals}, every_s (at least 10) and deadline_min (above 0)"
     }
    }
   ]

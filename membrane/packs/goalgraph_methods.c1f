@@ -1,0 +1,17 @@
+PACK goalgraph_methods 1
+IMPORT proc 1
+IMPORT goalgraph 1
+-- THE METHOD WAIT (#738): a wait whose condition is {method, args, equals} (a method is a Tool the methods pack made a Command of: `ci.status` is
+-- Command:ci_status). goalgraph.c1f checks it on its own pace and writes method_call; this pack runs the Command then, with the args, and what the
+-- last run printed (stripped) is method_seen, which the next check compares with `equals`. A run that failed is seen as `(failed rc N)`.
+Wait.method_cmd getter: ('Command:' + replace(str(this.condition['method']), '.', '_')) if (this.condition != None and this.condition['method'] != None) else None
+Wait.method_call on-setter run-method:
+  WHEN this.method_call != None and this.method_cmd != None:
+    this.method_cmd.run = {'id': replace(this.eid, ':', '_') + '_' + str(this.method_call), 'args': this.condition['args'] or []}
+Wait.method_out getter:
+  WHEN this.method_cmd != None and prop(this.method_cmd, 'run_result') != None:
+    r = prop(this.method_cmd, 'run_result')
+    ('(failed rc ' + str(r['rc']) + ')') if r['rc'] != 0 else strip(str(r['stdout']))
+Wait.method_out on-setter method-seen:
+  WHEN this.method_out != None:
+    this.method_seen = this.method_out
