@@ -4,6 +4,7 @@ RESIDENT Task
 RESIDENT Wait
 RESIDENT Decision
 RESIDENT Result
+RESIDENT Pool
 -- The goal graph (#773, #994) in cliffhanger's field syntax (native/src/syntax.rs).
 -- Migrated from packs/goalgraph.json by the translator; tests/syntax_994.rs holds the two equal.
 --
@@ -176,3 +177,45 @@ Task.status on-setter close-parent:
 Task.reowe on-setter reowe-task:
   WHEN this.reowe and (this.status == 'owed' or this.status == 'running'):
     this.status = 'owed'
+
+-- THE WORKER POOL (#738): at most Pool:workers.size (3 unless it says otherwise) tasks run at once. The owed task first in id order is taken and its
+-- worker lane called; a task that ends frees its slot and the next owed one goes (next is a getter, so it is read after the round settled).
+-- a task that is owed joins the pool (the pool reads its tasks by that edge: a getter over instances() is not re-read when a status changes)
+Task.status on-setter join-pool:
+  WHEN this.status == 'owed':
+    this.pool = 'Pool:workers'
+Pool.busy getter: len([t for t in referencing(this, 'pool') if t.status == 'running'])
+-- pump: one owed task is taken per pump, when a slot is free (a task is taken in a round of its own: the write that made it owed
+-- is in the round that would take it, and a property written twice in a round is a loop). The beat pumps it.
+Pool.pump on-setter dispatch:
+  WHEN this.pump:
+    owed = [t.eid for t in referencing(this, 'pool') if t.status == 'owed']
+    free = (this.size or 3) - this.busy
+    FOR e IN head(owed, 1) if (free > 0 and len(owed) > 0) else []:
+      e.take = True
+      e.worker_prompt = prop(e, 'worker_text')
+      membrane::llm.call = {'about': e, 'prompt': prop(e, 'worker_text'), 'lane': 'worker'}
+
+-- the prompt of the worker lane: the task, its goal, what it waited on
+Task.worker_text getter:
+  done = [b.eid + ': ' + str(b.receipt or b.value or '') for b in referencing(this, 'blocks')]
+  'You are a WORKER on task ' + this.eid + ' of goal ' + str(this.goal) + '.\nTask: ' + str(this.title or this.eid) + '\n' + str(this.detail or '') + '\n\nWhat it waited on is done: ' + (join(done, '; ') if len(done) > 0 else 'nothing') + '\n\nDo this task now in ONE step: one batch of tool calls, then your verdict. Do not plan other work. A second batch of calls is refused and the task goes back to the planner to be split; if one step cannot finish it, do not start it: end with SPLIT.\nEnd with one line: DONE <the receipt that proves it> / FAILED <what went wrong> / STUCK <what you need: a decision or other work> / SPLIT <the parts it needs>.'
+
+-- the worker's last text: its last verdict line (DONE, FAILED, STUCK or SPLIT) ends the task; none is stuck
+Task.worker_reply on-setter worker-verdict:
+  WHEN this.worker_reply != None and this.status == 'running':
+    verds = ['done', 'failed', 'stuck', 'split']
+    rows = [[strip(l), lower(strip(l))] for l in lines(str(this.worker_reply))]
+    tagged = [[[x for x in verds if (r[1] == x or startswith(r[1], x + ' ') or startswith(r[1], x + ':') or startswith(r[1], x + '-'))], r[0]] for r in rows]
+    hits = [h for h in tagged if len(h[0]) > 0]
+    last = tail(hits, 1)
+    v = last[0][0][0] if len(last) > 0 else 'stuck'
+    rest = strip(after(last[0][1], head(last[0][1], len(v)))) if len(last) > 0 else ''
+    clean = strip(after(rest, head(rest, 1))) if (startswith(rest, ':') or startswith(rest, '-')) else rest
+    this.finish = {'verdict': v, 'detail': head(clean, 600) if len(last) > 0 else 'the worker ended without DONE / FAILED / STUCK: ' + head(str(this.worker_reply), 200), 'session': this.session}
+
+-- the pool beat: a getter on the clock changes every beat, so every beat pumps the pool (as an armed wait is checked every beat)
+Pool.beat getter: clock
+Pool.beat on-setter pool-beat:
+  ALWAYS:
+    this.pump = this.beat

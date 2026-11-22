@@ -1657,10 +1657,13 @@
       "Goal.plan_due": "Text?",
       "Goal.planner_graph": "Text",
       "Goal.planner_text": "Text",
+      "Pool.beat": "Num",
+      "Pool.busy": "Int",
       "Task.finished": "Bool",
       "Task.is_blocked": "Bool",
       "Task.is_ready": "Bool",
       "Task.open_blockers": "Int",
+      "Task.worker_text": "Text?",
       "Wait.due": "Bool|Num",
       "Wait.finished": "Bool",
       "Wait.is_blocked": "Bool",
@@ -1672,6 +1675,8 @@
       "*.receipt": "Text",
       "*.replan": "Text?",
       "*.status": "Text",
+      "*.take": "Bool",
+      "*.worker_prompt": "Any",
       "Goal.claim": "Text?",
       "Goal.plan_called": "Any",
       "Goal.plan_calls": "Num?",
@@ -1679,7 +1684,10 @@
       "Goal.plan_result": "Dict",
       "Goal.planned_replan": "Any",
       "Goal.planned_ts": "Num",
+      "Pool.pump": "Num",
       "Task.ended_ts": "Num",
+      "Task.finish": "Dict",
+      "Task.pool": "Text",
       "Task.receipt": "Text",
       "Task.result": "Text",
       "Task.runs": "Num?",
@@ -1695,7 +1703,8 @@
       "Task",
       "Wait",
       "Decision",
-      "Result"
+      "Result",
+      "Pool"
     ]
   },
   "ha": {

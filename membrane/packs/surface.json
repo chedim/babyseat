@@ -888,10 +888,11 @@
     "classes": [
       "Decision",
       "Goal",
+      "Pool",
       "Task",
       "Wait"
     ],
-    "members": 21,
+    "members": 26,
     "writes": [
       "Task:*.status",
       "membrane::llm.call",
@@ -906,7 +907,8 @@
       "Task",
       "Wait",
       "Decision",
-      "Result"
+      "Result",
+      "Pool"
     ]
   },
   "ha": {

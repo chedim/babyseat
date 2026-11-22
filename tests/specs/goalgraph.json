@@ -1173,5 +1173,642 @@
     "equals": null
    }
   ]
+ },
+ {
+  "name": "goalgraph: the worker is told its task, the goal and what it waited on",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build",
+     "status": "done",
+     "receipt": "built ok",
+     "blocks": [
+      "Task:gx:b"
+     ]
+    }
+   },
+   {
+    "eid": "Task:gx:b",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "test",
+     "detail": "run the suite",
+     "status": "owed"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Task:gx:b",
+    "prop": "worker_text",
+    "contains": "You are a WORKER on task Task:gx:b of goal Goal:gx."
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "worker_text",
+    "contains": "Task: test\nrun the suite"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "worker_text",
+    "contains": "Task:gx:a: built ok"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "worker_text",
+    "contains": "DONE <the receipt that proves it>"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: the pool runs as many owed tasks as it has slots, the rest wait",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Pool:workers",
+    "class": "Pool",
+    "props": {
+     "size": 2
+    }
+   },
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   },
+   {
+    "eid": "Task:gx:b",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   },
+   {
+    "eid": "Task:gx:c",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Task:gx:c",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 1
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 2
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 3
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "equals": "running"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "status",
+    "equals": "running"
+   },
+   {
+    "eid": "Task:gx:c",
+    "prop": "status",
+    "equals": "owed"
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "busy",
+    "equals": 2
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a slot freed by a finished task takes the next owed task",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Pool:workers",
+    "class": "Pool",
+    "props": {
+     "size": 2
+    }
+   },
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   },
+   {
+    "eid": "Task:gx:b",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   },
+   {
+    "eid": "Task:gx:c",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Task:gx:c",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 1
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 2
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 3
+   },
+   {
+    "eid": "Task:gx:a",
+    "prop": "finish",
+    "value": {
+     "verdict": "done",
+     "detail": "ok"
+    }
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 4
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "equals": "done"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "status",
+    "equals": "running"
+   },
+   {
+    "eid": "Task:gx:c",
+    "prop": "status",
+    "equals": "running"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a taken task keeps the prompt its worker was called with",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Pool:workers",
+    "class": "Pool",
+    "props": {
+     "size": 3
+    }
+   },
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 1
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "worker_prompt",
+    "contains": "You are a WORKER on task Task:gx:a of goal Goal:gx."
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: the pool size is 3 until it says otherwise",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Pool:workers",
+    "class": "Pool",
+    "props": {}
+   },
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   },
+   {
+    "eid": "Task:gx:b",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   },
+   {
+    "eid": "Task:gx:c",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   },
+   {
+    "eid": "Task:gx:d",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Task:gx:c",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Task:gx:d",
+    "prop": "status",
+    "value": "owed"
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 1
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 2
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 3
+   },
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 4
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:c",
+    "prop": "status",
+    "equals": "running"
+   },
+   {
+    "eid": "Task:gx:d",
+    "prop": "status",
+    "equals": "owed"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: the last verdict line of the worker reply ends its task",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "running"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "worker_reply",
+    "value": "calling tools\nDONE: built it, 12 tests pass\n"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "equals": "done"
+   },
+   {
+    "eid": "Task:gx:a",
+    "prop": "receipt",
+    "equals": "built it, 12 tests pass"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a worker reply that says FAILED fails its task, SPLIT splits it",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "running"
+    }
+   },
+   {
+    "eid": "Task:gx:b",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "running"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "worker_reply",
+    "value": "FAILED the build broke"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "worker_reply",
+    "value": "Split - two parts: code and docs"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "equals": "failed"
+   },
+   {
+    "eid": "Task:gx:a",
+    "prop": "receipt",
+    "equals": "the build broke"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "status",
+    "equals": "split"
+   },
+   {
+    "eid": "Task:gx:b",
+    "prop": "receipt",
+    "equals": "two parts: code and docs"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a worker reply with no verdict line leaves its task stuck",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "running"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "worker_reply",
+    "value": "I did some things"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "equals": "stuck"
+   },
+   {
+    "eid": "Task:gx:a",
+    "prop": "receipt",
+    "contains": "the worker ended without DONE / FAILED / STUCK"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a word that only starts like a verdict is not one",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "running"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "worker_reply",
+    "value": "Doneness is relative"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "equals": "stuck"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a reply to a task that is not running is ignored",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "done"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "worker_reply",
+    "value": "FAILED too late"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "status",
+    "equals": "done"
+   }
+  ]
  }
 ]
