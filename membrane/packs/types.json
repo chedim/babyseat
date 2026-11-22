@@ -1651,6 +1651,30 @@
       "Dir"
     ]
   },
+  "goalgraph": {
+    "getters": {
+      "Decision.finished": "Bool",
+      "Task.finished": "Bool",
+      "Task.open_blockers": "Int",
+      "Wait.due": "Bool|Num",
+      "Wait.finished": "Bool",
+      "Wait.open_blockers": "Int"
+    },
+    "writes": {
+      "*.replan": "Text?",
+      "Task.status": "Text",
+      "Wait.armed_since": "Num",
+      "Wait.check": "Text",
+      "Wait.status": "Text"
+    },
+    "findings": [],
+    "resident": [
+      "Goal",
+      "Task",
+      "Wait",
+      "Decision"
+    ]
+  },
   "ha": {
     "getters": {
       "HaAllow.kind": "Text",
@@ -2543,6 +2567,24 @@
     "resident": [
       "Ctx"
     ]
+  },
+  "uifeedback": {
+    "getters": {
+      "Decision.impact_shown": "Any",
+      "Prefs.tone_level": "Bool|Text",
+      "Reply.down": "Int",
+      "Reply.quality": "Bool|Text",
+      "Reply.reports": "Int",
+      "Reply.superseded": "Bool",
+      "Reply.uncertain_shown": "Any",
+      "Reply.up": "Int",
+      "Reply.verified": "Bool"
+    },
+    "writes": {
+      "*.flagged": "Bool",
+      "*.last_feedback": "Any"
+    },
+    "findings": []
   },
   "vector": {
     "getters": {

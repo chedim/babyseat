@@ -883,6 +883,28 @@
       "Dir"
     ]
   },
+  "goalgraph": {
+    "imports": [],
+    "classes": [
+      "Decision",
+      "Goal",
+      "Task",
+      "Wait"
+    ],
+    "members": 11,
+    "writes": [
+      "membrane::llm.call",
+      "ref(goal).replan"
+    ],
+    "claims": [],
+    "boot_facts": [],
+    "resident": [
+      "Goal",
+      "Task",
+      "Wait",
+      "Decision"
+    ]
+  },
   "ha": {
     "imports": [
       "door",
@@ -1563,6 +1585,25 @@
     "resident": [
       "Ctx"
     ]
+  },
+  "uifeedback": {
+    "imports": [
+      "goalgraph",
+      "door_self"
+    ],
+    "classes": [
+      "Decision",
+      "Feedback",
+      "Prefs",
+      "Reply"
+    ],
+    "members": 10,
+    "writes": [
+      "ref(reply).flagged",
+      "ref(reply).last_feedback"
+    ],
+    "claims": [],
+    "boot_facts": []
   },
   "vector": {
     "imports": [],
