@@ -270,3 +270,11 @@ Decision.wanted on-setter tell-card:
   WHEN this.wanted and not this.escalated_ts:
     this.escalated_ts = clock
     this.goal.tell = 'goal ' + str(this.goal) + ' waits on this decision: ' + str(this.name or this.eid)
+
+-- READING (#738): the goal's graph as one value: its tasks (what each waits on, its state, its receipt), waits and cards, what is running and what is ready to run
+Goal.view getter:
+  ns = this.graph_nodes
+  ts = [{'eid': t.eid, 'title': t.title, 'status': t.status, 'parent': t.parent, 'waits_on': [b.eid for b in referencing(t, 'blocks') if not b.finished], 'open_blockers': t.open_blockers, 'result': t.result, 'receipt': t.receipt} for t in ns if startswith(t.eid, 'Task:')]
+  ws = [{'eid': w.eid, 'title': w.title, 'status': w.status, 'condition': w.condition, 'blocks': w.blocks or [], 'waits_on': [b.eid for b in referencing(w, 'blocks') if not b.finished], 'last_check': w.last_check_result, 'receipt': w.receipt} for w in ns if startswith(w.eid, 'Wait:')]
+  cs = [{'eid': c.eid, 'name': c.name, 'status': c.status, 'blocks': c.blocks or [], 'value': c.value} for c in ns if startswith(c.eid, 'Decision:')]
+  {'tasks': ts, 'waits': ws, 'cards': cs, 'running': [t['eid'] for t in ts if t['status'] == 'running'], 'ready': [t['eid'] for t in ts if t['status'] == 'owed']}

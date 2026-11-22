@@ -2746,5 +2746,176 @@
     "equals": true
    }
   ]
+ },
+ {
+  "name": "goalgraph: the view of a goal lists its tasks, waits and cards, what is running and what is ready",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "A",
+     "status": "running"
+    }
+   },
+   {
+    "eid": "Task:gx:b",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "B",
+     "status": "owed",
+     "blocks": [
+      "Task:gx:c"
+     ]
+    }
+   },
+   {
+    "eid": "Task:gx:c",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "C",
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Wait:gx:w",
+    "class": "Wait",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "W",
+     "status": "armed",
+     "condition": {
+      "field": "Probe:p",
+      "prop": "ready",
+      "equals": true
+     }
+    }
+   },
+   {
+    "eid": "Decision:gx:d",
+    "class": "Decision",
+    "props": {
+     "goal": "Goal:gx",
+     "name": "Q",
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "view",
+    "equals": {
+     "tasks": [
+      {
+       "eid": "Task:gx:a",
+       "title": "A",
+       "status": "running",
+       "parent": null,
+       "waits_on": [],
+       "open_blockers": 0,
+       "result": null,
+       "receipt": null
+      },
+      {
+       "eid": "Task:gx:b",
+       "title": "B",
+       "status": "owed",
+       "parent": null,
+       "waits_on": [],
+       "open_blockers": 0,
+       "result": null,
+       "receipt": null
+      },
+      {
+       "eid": "Task:gx:c",
+       "title": "C",
+       "status": "open",
+       "parent": null,
+       "waits_on": [
+        "Task:gx:b"
+       ],
+       "open_blockers": 1,
+       "result": null,
+       "receipt": null
+      }
+     ],
+     "waits": [
+      {
+       "eid": "Wait:gx:w",
+       "title": "W",
+       "status": "armed",
+       "condition": {
+        "field": "Probe:p",
+        "prop": "ready",
+        "equals": true
+       },
+       "blocks": [],
+       "waits_on": [],
+       "last_check": null,
+       "receipt": null
+      }
+     ],
+     "cards": [
+      {
+       "eid": "Decision:gx:d",
+       "name": "Q",
+       "status": "open",
+       "blocks": [],
+       "value": null
+      }
+     ],
+     "running": [
+      "Task:gx:a"
+     ],
+     "ready": [
+      "Task:gx:b"
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: the view of a goal with nothing planned is empty",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "view",
+    "equals": {
+     "tasks": [],
+     "waits": [],
+     "cards": [],
+     "running": [],
+     "ready": []
+    }
+   }
+  ]
  }
 ]

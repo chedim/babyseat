@@ -1664,6 +1664,7 @@
       "Goal.report_sig": "Text",
       "Goal.report_text": "Text",
       "Goal.stalled": "List(Any)",
+      "Goal.view": "Dict",
       "Pool.beat": "Num",
       "Pool.busy": "Int",
       "Task.finished": "Bool",
