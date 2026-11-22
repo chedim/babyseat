@@ -3,49 +3,91 @@ RESIDENT Goal
 RESIDENT Task
 RESIDENT Wait
 RESIDENT Decision
--- The goal graph (#773, #994) in cliffhanger's field syntax (native/src/syntax.rs).
--- Migrated from packs/goalgraph.json by the translator; tests/syntax_994.rs holds the two equal.
+RESIDENT Result
+RESIDENT Pool
+-- The goal graph (#773, #994) in c1f (the engine is github.com/chedim/cliffvm). Its behaviour is held by tests/specs/goalgraph.json and goalgraph_lanes.json, and described in docs/goalgraph.md.
+-- It is NOT in apps/barest.packs: a seat loads it when asked (Pack:goalgraph written through the door), and it then replaces the engine's older built-in goal graph.
 --
 -- The getters live here too (below): `finished` per class, `open_blockers` and `due`. A task's or wait's open
 -- blockers are counted, never decremented, so a dropped or doubled write can't make them drift. The engine's
 -- built-in recount and due stand down because this pack declares them.
 
 -- a task with nothing open in its way is owed (on the count, and on its own status)
-Task.open_blockers on-setter ready:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'owed'
-Task.status on-setter ready-on-status:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'owed'
 
 -- a task or a card that ends asks its goal to replan
 Task.status on-setter replan-task:
-  WHEN (this.status == 'done' or this.status == 'failed' or this.status == 'stuck'):
+  WHEN (this.status == 'done' or this.status == 'failed' or this.status == 'stuck') or (this.status == 'split' and len(referencing(this, 'parent')) == 0):
     this.goal.replan = 'task ' + this.eid + ' ' + this.status
 Decision.status on-setter replan-card:
   WHEN (this.status == 'decided' or this.status == 'closed' or this.status == 'dropped'):
     this.goal.replan = 'card ' + this.eid + ' ' + this.status
 
 -- a wait with nothing open in its way is armed; when it is due, its adapter checks
-Wait.open_blockers on-setter wait-armed:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'armed'
-    this.armed_since = clock
-Wait.status on-setter wait-armed-on-status:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'armed'
-    this.armed_since = clock
 Wait.due on-setter wait-check:
   WHEN this.due:
-    this.check = 'due'
+    this.check = this.due
 
--- a goal asked to replan calls the planner (and again after a reopen with a new reason)
-Goal.replan on-setter plan:
-  WHEN (this.status or 'open') == 'open' and this.replan:
-    membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
-Goal.status on-setter plan-after-reopen:
-  WHEN this.status == 'open' and this.replan and this.planned_ts and this.replan != this.planned_replan:
-    membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
+-- a goal made with text and no reason yet asks for its first plan by itself: the reason is 'new goal' (no call needed, as in the python seat)
+Goal.text on-setter plan-new-goal:
+  WHEN this.text and not this.replan:
+    this.replan = 'new goal'
+
+-- THE CEILING: `max_plans` on a goal (the owner's number, no default: a goal without one is never held back) is the most planner passes the goal may use (`plan_calls`). A goal that has used them
+-- is planned no more, by a reason or by the reflex; the chat is still told when nothing moves, and the report says the limit is reached. Raise `max_plans`, or close the goal.
+Goal.capped getter: this.max_plans != None and (this.plan_calls or 0) >= this.max_plans
+
+-- THE REFLEX: the planner runs by itself for any goal that is open (not done, not parked), has no plan pending and is not being worked on (nothing moving).
+-- The reason is 'idle ' + the state of the graph, so each distinct quiet state is planned once: a plan that leaves the graph as it was does not loop, a changed graph asks again.
+Goal.graph_sig getter: join([x.eid + ':' + str(x.status) for x in this.graph_nodes], ',')
+Goal.plan_pending getter: (this.replan != None and this.replan != this.planned_replan)
+Goal.idle_reason getter: ('idle ' + this.graph_sig) if ((this.status or 'open') == 'open' and not this.parked and (this.text or this.summary) and not this.plan_pending and not this.moving and not this.capped) else None
+Goal.idle_reason on-setter reflex-plan:
+  WHEN this.idle_reason and this.idle_reason != this.idled:
+    this.idled = this.idle_reason
+    this.replan = this.idle_reason
+
+-- THE PLANNER (#773): a goal with a replan that no plan has answered is DUE, and its planner lane is called once for that reason.
+-- A plan answers it (planned_replan). planner_text is the prompt the lane gets; planner_reply is the lane's last text, whose FULFILLED line is the claim.
+Goal.plan_due getter: this.planner_text if ((this.status or 'open') == 'open' and this.replan and this.replan != this.planned_replan and not this.capped) else None
+Goal.plan_due on-setter call-planner:
+  WHEN this.plan_due and this.replan != this.plan_called:
+    this.plan_called = this.replan
+    this.plan_calls = (this.plan_calls or 0) + 1
+    this.plan_prompt = this.plan_due
+    membrane::llm.call = {'about': this.eid, 'prompt': this.plan_due, 'lane': 'planner'}
+-- boot: a goal whose last replan no planner pass finished (cut off by a restart, its call lost with the pool) is planned again
+Goal.replan_lost on-setter replan-lost:
+  WHEN this.replan_lost and this.plan_due:
+    this.plan_called = this.replan
+    this.plan_calls = (this.plan_calls or 0) + 1
+    this.plan_prompt = this.plan_due
+    membrane::llm.call = {'about': this.eid, 'prompt': this.plan_due, 'lane': 'planner'}
+
+-- the goal's graph as lines: tasks, waits, cards, each with its state, what it waits on and its receipt
+Goal.planner_graph getter:
+  mine = referencing(this, 'goal')
+  ts = [('- task ' + t.eid + ' [' + str(t.status) + '] ' + str(t.title) + (' (sub-task of ' + str(t.parent) + ')' if t.parent else '') + (' (waits on ' + join([b.eid for b in referencing(t, 'blocks') if not b.finished], ', ') + ')' if len([b for b in referencing(t, 'blocks') if not b.finished]) > 0 else '') + (' -- receipt: ' + head(str(t.receipt), 160) if t.receipt else '')) for t in mine if startswith(t.eid, 'Task:')]
+  ws = [('- wait ' + w.eid + ' [' + str(w.status) + '] ' + str(w.title) + (' (waits on ' + join([b.eid for b in referencing(w, 'blocks') if not b.finished], ', ') + ')' if len([b for b in referencing(w, 'blocks') if not b.finished]) > 0 else '') + (' -- ' + head(str(w.receipt or w.last_check_result), 160) if (w.receipt or w.last_check_result) else '')) for w in mine if startswith(w.eid, 'Wait:')]
+  cs = [('- card ' + c.eid + ' [' + str(c.status) + '] ' + str(c.name) + (' = ' + str(c.value) if c.value != None else '')) for c in mine if startswith(c.eid, 'Decision:')]
+  rows = concat(concat(ts, ws), cs)
+  join(rows, '\n') if len(rows) > 0 else '(empty: nothing planned yet)'
+
+-- the prompt of the planner lane
+Goal.planner_text getter:
+  goal = this.eid
+  p1 = 'Work the goal as a graph. Write ONE plan with entity_edit on the goal: entity_edit spec="GOAL" properties={"plan": {"tasks": [{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"], "parent": "<a split task key, for its sub-task>"}], "cards": [{"key": "c1", "name": "The question (no quotes)", "summary": "...", "blocks": ["k1"]}], "waits": [{"key": "w1", "title": "...", "condition": {"field": "<entity spec>", "prop": "<name>", "equals": "<value>"} or {"method": "<object>.<method>", "args": {}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}], "drop": ["<key no longer needed>"]}}'
+  p2 = 'A task is ONE worker step: one batch of tool calls, then its verdict. A task that ended split needed more: give it sub-tasks, tasks whose parent is its key (any depth); it is done when its sub-tasks are, and what waits on it waits until then. Listing a stuck or failed task key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it. Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least 10), releases the tasks it blocks when it holds, and fails after deadline_min minutes. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true, or write a new task under a new key. Read the goal back for plan_result.'
+  p3 = 'When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.'
+  p4 = 'End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>.'
+  join(['You are the PLANNER for goal ' + goal + ': ' + str(this.text or this.summary or this.name or goal), 'Why you were called: ' + head(str(this.replan or 'no reason given'), 400), '', 'The goal graph now:', this.planner_graph, '', replace(p1, 'GOAL', goal), p2, p3, p4], '\n')
+
+-- the planner's last text: its FULFILLED line (the last one) is the claim that the goal is done
+Goal.planner_reply on-setter planner-claim:
+  WHEN this.planner_reply != None:
+    hits = [strip(l) for l in lines(str(this.planner_reply)) if startswith(lower(strip(l)), 'fulfilled')]
+    rest = [strip(after(h, head(h, 9))) for h in hits]
+    clean = [strip(after(r, head(r, 1))) if (startswith(r, ':') or startswith(r, '-')) else r for r in rest]
+    this.claim = head(tail(clean, 1)[0], 600) if len(clean) > 0 else None
 
 -- getters (#994 rule 2): computed fields, recalculated when what they read changes
 -- a dropped blocker blocks nothing (Memo's live check, 2026-11-09: it used to block forever)
@@ -59,3 +101,220 @@ Wait.open_blockers getter: len([b for b in referencing(this, 'blocks') if not b.
 -- setter fires every beat (as the old every-beat trigger did); the adapter paces the real checks by every_s
 Wait.due getter:
   this.status == 'armed' and clock > (this.armed_since or this.armed_ts or clock) and clock
+
+-- THE PLAN (#773): the planner's one write, `Goal:x.plan = {tasks: [{key, title, detail, after, redo}], cards: [{key, name, summary, blocks}],
+-- waits: [{key, title, condition, every_s, deadline_min, after, blocks}], drop: [keys]}`. Nodes are Task:<goal>:<key>, Wait:<goal>:<key>, Decision:<goal>:<key>.
+-- `after` and `blocks` name a key of this plan, an earlier key of the goal, or an eid. The receipt lands in `plan_result`; a refused plan changes nothing.
+-- Everything is a local of the one setter: a setter sees the getters as they were before its write.
+Goal.plan on-setter apply-plan:
+  WHEN this.plan != None:
+    g = replace(this.eid, 'Goal:', '')
+    p = this.plan
+    tasks = p['tasks'] or []
+    waits = p['waits'] or []
+    cards = p['cards'] or []
+    refs = concat(concat([[str(t['key']), 'Task:' + g + ':' + str(t['key'])] for t in tasks], [[str(w['key']), 'Wait:' + g + ':' + str(w['key'])] for w in waits]), [[str(c['key']), 'Decision:' + g + ':' + str(c['key'])] for c in cards])
+    after_edges = fold([], [concat(acc, [[concat([r[1] for r in refs if r[0] == str(a)], ['Task:' + g + ':' + str(a) if not (':' in str(a)) else str(a)])[0], 'Task:' + g + ':' + str(t['key'])] for a in (t['after'] or [])]) for t in tasks])
+    wait_after = fold([], [concat(acc, [[concat([r[1] for r in refs if r[0] == str(a)], ['Task:' + g + ':' + str(a) if not (':' in str(a)) else str(a)])[0], 'Wait:' + g + ':' + str(w['key'])] for a in (w['after'] or [])]) for w in waits])
+    wait_blocks = fold([], [concat(acc, [['Wait:' + g + ':' + str(w['key']), concat([r[1] for r in refs if r[0] == str(k)], ['Task:' + g + ':' + str(k) if not (':' in str(k)) else str(k)])[0]] for k in (w['blocks'] or [])]) for w in waits])
+    card_blocks = fold([], [concat(acc, [['Decision:' + g + ':' + str(c['key']), concat([r[1] for r in refs if r[0] == str(k)], ['Task:' + g + ':' + str(k) if not (':' in str(k)) else str(k)])[0]] for k in (c['blocks'] or [])]) for c in cards])
+    edges = concat(concat(after_edges, wait_after), concat(wait_blocks, card_blocks))
+    nodes = [r[1] for r in refs]
+    unknown = [e for e in edges if not (e[0] in nodes) and prop(e[0], 'goal') == None]
+    -- a cycle is a new edge whose target reaches its source, over the new edges AND the `blocks` the goal's earlier nodes already have (a plan may close a loop through a task an earlier plan made):
+    -- the nodes reachable from the target are grown one step per node of the graph, which is as many steps as the longest path can have. The first such edge in plan order is named.
+    old_edges = fold([], [concat(acc, [[x.eid, b] for b in (x.blocks or [])]) for x in referencing(this, 'goal')])
+    all_edges = concat(edges, old_edges)
+    uni = distinct(fold([], [concat(acc, [e[0], e[1]]) for e in all_edges]))
+    cycle = [e for e in edges if e[0] in fold([e[1]], [distinct(concat(acc, [f[1] for f in all_edges if f[0] in acc])) for q in uni])]
+    bad_waits = [w for w in waits if not (w['condition'] != None and ((w['condition']['field'] and w['condition']['prop']) or w['condition']['method']) and ('equals' in keys(w['condition'])) and (w['every_s'] or 0) >= 10 and (w['deadline_min'] or 0) > 0)]
+    ok = len(unknown) == 0 and len(cycle) == 0 and len(bad_waits) == 0
+    fresh = [t for t in tasks if ok and prop('Task:' + g + ':' + str(t['key']), 'status') == None]
+    again = [t for t in tasks if ok and (prop('Task:' + g + ':' + str(t['key']), 'status') in ('stuck', 'failed') or (prop('Task:' + g + ':' + str(t['key']), 'status') == 'done' and t['redo']))]
+    fresh_w = [w for w in waits if ok and prop('Wait:' + g + ':' + str(w['key']), 'status') == None]
+    FOR t IN fresh:
+      ('Task:' + g + ':' + str(t['key'])) = Task(goal: this.eid, title: str(t['title'] or t['key']), name: str(t['title'] or t['key']), detail: t['detail'] or '', plan_key: str(t['key']), parent: ('Task:' + g + ':' + str(t['parent']) if t['parent'] else None))
+    FOR w IN fresh_w:
+      ('Wait:' + g + ':' + str(w['key'])) = Wait(goal: this.eid, title: str(w['title'] or w['key']), name: str(w['title'] or w['key']), condition: w['condition'], every_s: w['every_s'], deadline_min: w['deadline_min'], plan_key: str(w['key']))
+    FOR c IN [c for c in cards if ok and prop('Decision:' + g + ':' + str(c['key']), 'status') == None]:
+      ('Decision:' + g + ':' + str(c['key'])) = Decision(goal: this.eid, name: str(c['name'] or c['key']), summary: c['summary'] or '', plan_key: str(c['key']), status: 'open')
+    FOR e IN [e for e in edges if ok]:
+      e[0].blocks = concat(prop(e[0], 'blocks') or [], [x for x in [e[1]] if not (x in (prop(e[0], 'blocks') or []))])
+    FOR t IN again:
+      ('Task:' + g + ':' + str(t['key'])).status = 'owed' if ((prop('Task:' + g + ':' + str(t['key']), 'open_blockers') or 0) + len([e for e in edges if e[1] == ('Task:' + g + ':' + str(t['key'])) and not prop(e[0], 'finished')])) < 0.5 else 'open'
+    FOR k IN [k for k in (p['drop'] or []) if ok and prop('Task:' + g + ':' + str(k), 'status') != None]:
+      ('Task:' + g + ':' + str(k)).status = 'dropped'
+    this.planned_replan = this.replan if ok else this.planned_replan
+    this.planned_ts = clock
+    this.plan_result = {'ok': True, 'tasks': [('Task:' + g + ':' + str(t['key'])) for t in fresh], 'reopened': [('Task:' + g + ':' + str(t['key'])) for t in again]} if ok else {'ok': False, 'error': ('refused: wait ' + str(bad_waits[0]['key']) + ' needs a condition {field, prop, equals} or {method, args, equals}, every_s (at least 10) and deadline_min (above 0)') if len(bad_waits) > 0 else ('unknown after/blocks: ' + str(concat(unknown, [[""]])[0][0])) if len(unknown) > 0 else ('refused: these edges close a cycle: ' + str(concat(cycle, [["", ""]])[0][0]) + ' -> ' + str(concat(cycle, [["", ""]])[0][1]))}
+
+-- readiness is a GETTER, so it is read after the round settled (a setter sees the counts as they were before its write):
+-- a task with nothing open in its way is owed, a wait with nothing open in its way is armed
+Task.is_ready getter: (this.status == 'open' or (this.status == None and this.goal != None)) and this.open_blockers < 0.5
+Task.is_ready on-setter owe:
+  WHEN this.is_ready:
+    this.status = 'owed'
+Wait.is_ready getter: (this.status == 'open' or (this.status == None and this.goal != None)) and this.open_blockers < 0.5
+Task.is_blocked getter: this.status == None and this.goal != None and this.open_blockers > 0.5
+Task.is_blocked on-setter hold:
+  WHEN this.is_blocked:
+    this.status = 'open'
+Wait.is_blocked getter: this.status == None and this.goal != None and this.open_blockers > 0.5
+Wait.is_blocked on-setter wait-hold:
+  WHEN this.is_blocked:
+    this.status = 'open'
+Wait.is_ready on-setter arm:
+  WHEN this.is_ready:
+    this.status = 'armed'
+    this.armed_since = clock
+
+-- THE WORKER LIFECYCLE (#738): owed -> running -> done / failed / stuck / split, a result entity per run.
+-- `take` is a worker taking an owed task; `finish` is its verdict {verdict, detail, session}: anything but done, failed, stuck or split is stuck.
+Task.take on-setter take-task:
+  WHEN this.take and this.status == 'owed':
+    this.status = 'running'
+    this.started_ts = clock
+Task.finish on-setter finish-task:
+  WHEN this.finish != None:
+    f = this.finish
+    v = f['verdict'] if f['verdict'] in ('done', 'failed', 'stuck', 'split') else 'stuck'
+    n = (this.runs or 0) + 1
+    res = 'Result:' + replace(this.eid, 'Task:', '') + ':' + str(n)
+    FOR x IN [1]:
+      ('Result:' + replace(this.eid, 'Task:', '') + ':' + str(n)) = Result(name: v + ' ' + str(this.title or this.eid), task: this.eid, goal: this.goal, outcome: v, receipt: str(f['detail'] or ''), session: str(f['session'] or ''), ts: clock)
+    this.runs = n
+    this.continues = 0
+    this.result = res
+    this.receipt = str(f['detail'] or '')
+    this.ended_ts = clock
+    this.status = v
+
+-- a split task ends when every sub-task has ended done or dropped: done when one is done, dropped when all were; its own parent is checked next
+Task.status on-setter close-parent:
+  WHEN this.parent != None and this.status in ('done', 'dropped') and prop(this.parent, 'status') == 'split':
+    subs = referencing(this.parent, 'parent')
+    open_subs = [s for s in subs if s.eid != this.eid and not (s.status in ('done', 'dropped'))]
+    any_done = this.status == 'done' or len([s for s in subs if s.eid != this.eid and s.status == 'done']) > 0
+    FOR x IN [1] if len(open_subs) == 0 else []:
+      this.parent.status = 'done' if any_done else 'dropped'
+      this.parent.receipt = 'its sub-tasks are done' if any_done else 'all its sub-tasks were dropped'
+
+-- a task that has not run yet and is given a sub-task is split: its sub-tasks do its work (and it is done when they are)
+Task.splits_parent getter: this.parent != None and prop(this.parent, 'status') in ('open', 'owed')
+Task.splits_parent on-setter split-parent:
+  WHEN this.splits_parent:
+    this.parent.status = 'split'
+
+-- boot: a task owed or running when the seat stopped goes back to the pool
+Task.reowe on-setter reowe-task:
+  WHEN this.reowe and (this.status == 'owed' or this.status == 'running'):
+    this.status = 'owed'
+
+-- THE WORKER POOL (#738): at most Pool:workers.size (3 unless it says otherwise) tasks run at once. The owed task first in id order is taken and its
+-- worker lane called; a task that ends frees its slot and the next owed one goes (next is a getter, so it is read after the round settled).
+-- a task that is owed joins the pool (the pool reads its tasks by that edge: a getter over instances() is not re-read when a status changes)
+Task.status on-setter join-pool:
+  WHEN this.status == 'owed':
+    this.pool = 'Pool:workers'
+Pool.busy getter: len([t for t in referencing(this, 'pool') if t.status == 'running'])
+-- pump: one owed task is taken per pump, when a slot is free (a task is taken in a round of its own: the write that made it owed
+-- is in the round that would take it, and a property written twice in a round is a loop). The beat pumps it.
+Pool.pump on-setter dispatch:
+  WHEN this.pump:
+    owed = [t.eid for t in referencing(this, 'pool') if t.status == 'owed']
+    free = (this.size or 3) - this.busy
+    FOR e IN head(owed, 1) if (free > 0 and len(owed) > 0) else []:
+      e.take = True
+      e.worker_prompt = prop(e, 'worker_text')
+      membrane::llm.call = {'about': e, 'prompt': prop(e, 'worker_text'), 'lane': 'worker'}
+
+-- the prompt of the worker lane: the task, its goal, what it waited on
+Task.worker_text getter:
+  done = [b.eid + ': ' + str(b.receipt or b.value or '') for b in referencing(this, 'blocks')]
+  'You are a WORKER on task ' + this.eid + ' of goal ' + str(this.goal) + '.\nTask: ' + str(this.title or this.eid) + '\n' + str(this.detail or '') + '\n\nWhat it waited on is done: ' + (join(done, '; ') if len(done) > 0 else 'nothing') + ('\n\nYour last step ended without a verdict. It said: ' + str(this.carry) + '\nContinue from there.' if ((this.continues or 0) > 0 and this.carry) else '') + '\n\nDo this task now in ONE step: one batch of tool calls, then your verdict. Do not plan other work. A second batch of calls is refused and the task goes back to the planner to be split; if one step cannot finish it, do not start it: end with SPLIT.\nEnd with one line: DONE <the receipt that proves it> / FAILED <what went wrong> / STUCK <what you need: a decision or other work> / SPLIT <the parts it needs>.'
+
+-- the worker's last text: its last verdict line (DONE, FAILED, STUCK or SPLIT) ends the task; none is stuck
+Task.worker_reply on-setter worker-verdict:
+  WHEN this.worker_reply != None and this.status == 'running':
+    verds = ['done', 'failed', 'stuck', 'split']
+    rows = [[strip(l), lower(strip(l))] for l in lines(str(this.worker_reply))]
+    tagged = [[[x for x in verds if (r[1] == x or startswith(r[1], x + ' ') or startswith(r[1], x + ':') or startswith(r[1], x + '-'))], r[0]] for r in rows]
+    hits = [h for h in tagged if len(h[0]) > 0]
+    last = tail(hits, 1)
+    v = last[0][0][0] if len(last) > 0 else 'stuck'
+    rest = strip(after(last[0][1], head(last[0][1], len(v)))) if len(last) > 0 else ''
+    clean = strip(after(rest, head(rest, 1))) if (startswith(rest, ':') or startswith(rest, '-')) else rest
+    step = len(last) == 0 and (this.continues or 0) < 2 and len(strip(str(this.worker_reply))) > 0
+    FOR x IN [1] if step else []:
+      this.continues = (this.continues or 0) + 1
+      this.carry = head(strip(str(this.worker_reply)), 600)
+      this.status = 'owed'
+    FOR x IN [1] if not step else []:
+      this.finish = {'verdict': v, 'detail': head(clean, 600) if len(last) > 0 else 'the worker ended without DONE / FAILED / STUCK: ' + head(str(this.worker_reply), 200), 'session': this.session}
+
+-- the pool beat: a getter on the clock changes every beat, so every beat pumps the pool (as an armed wait is checked every beat)
+Pool.beat getter: clock
+Pool.beat on-setter pool-beat:
+  ALWAYS:
+    this.pump = this.beat
+
+-- THE WAIT CHECK (#738): `check` is the beat's time (written by wait-check on every beat the wait is due). An armed wait whose own pace (every_s) has
+-- come looks at its condition {field, prop, equals}: done when it holds, failed when deadline_min has passed since it armed, else still armed.
+-- A failed wait asks to be told to the chat (`escalate`).
+Wait.check on-setter check-wait:
+  WHEN this.status == 'armed' and this.check != None and this.check - (this.last_check_ts or -1000000) >= (this.every_s or 10):
+    now = this.check
+    c = this.condition or {}
+    by_method = c['method'] != None
+    seen_v = this.method_seen if by_method else prop(c['field'], c['prop'])
+    holds = seen_v == c['equals']
+    seen = (str(c['method']) if by_method else str(c['field']) + '.' + str(c['prop'])) + ' = ' + str(seen_v)
+    late = (now - (this.armed_ts if this.armed_ts != None else (this.armed_since if this.armed_since != None else now))) >= 60 * (this.deadline_min or 0)
+    this.last_check_ts = now
+    this.last_check_result = seen
+    FOR x IN [1] if by_method else []:
+      this.method_call = now
+    FOR x IN [1] if holds else []:
+      this.receipt = seen
+      this.ended_ts = now
+      this.status = 'done'
+    FOR x IN [1] if (not holds and late) else []:
+      this.receipt = 'unmet after ' + str(this.deadline_min) + ' min: ' + seen
+      this.ended_ts = now
+      this.escalate = 'goal ' + str(this.goal) + ': the wait ' + str(this.title or this.eid) + ' failed -- unmet after ' + str(this.deadline_min) + ' min: ' + seen
+      this.status = 'failed'
+
+-- THE REPORT (#729, #738): every plan ends in the chat. When nothing in the goal graph is moving any more and no planner pass is pending, the chat is told
+-- once per graph state, with the planner claim and the receipts; its turn closes the goal or sends it back (a send-back is a new replan: the planner answers it,
+-- and if the graph is quiet again the chat is told again). A task running over 15 minutes is stalled and no longer counts as moving.
+Goal.graph_nodes getter: [x for x in referencing(this, 'goal') if startswith(x.eid, 'Task:') or startswith(x.eid, 'Wait:') or startswith(x.eid, 'Decision:')]
+Goal.stalled getter: [x.eid for x in this.graph_nodes if startswith(x.eid, 'Task:') and x.status == 'running' and clock - (x.started_ts or clock) > 900]
+Goal.moving getter: len([x for x in this.graph_nodes if (startswith(x.eid, 'Task:') and (x.status or 'open') in ('open', 'owed')) or (startswith(x.eid, 'Task:') and x.status == 'running' and not (x.eid in this.stalled)) or (startswith(x.eid, 'Wait:') and (x.status or 'open') in ('open', 'armed')) or (startswith(x.eid, 'Decision:') and (x.status or 'open') == 'open')]) > 0
+Goal.report_sig getter: join([x.eid + ':' + str(x.status) for x in this.graph_nodes], ',') + '|' + str(this.replan)
+Goal.report_text getter:
+  rows = ['goal ' + this.eid + ' has nothing moving (replan: ' + str(this.replan) + ')', ('The planner says FULFILLED: ' + str(this.claim)) if this.claim else 'The planner has not claimed the goal done.', ('Stalled (running over 15 minutes): ' + join(this.stalled, ', ')) if len(this.stalled) > 0 else '', ('The planner limit is reached (max_plans ' + str(this.max_plans) + '): no more planner passes are made for this goal. Raise max_plans, or close the goal.') if this.capped else '', 'The goal graph now:', this.planner_graph, 'Close the goal if the receipts prove it, or send it back with what is missing.']
+  join([r for r in rows if r != ''], '\n')
+Goal.report_due getter: this.report_text if ((this.status or 'open') == 'open' and not this.plan_due and not this.moving and len(this.graph_nodes) > 0 and this.report_sig != this.reported_graph) else None
+Goal.report_due on-setter tell-graph:
+  WHEN this.report_due:
+    this.reported_graph = this.report_sig
+    this.reported_ts = clock
+    this.tell = this.report_due
+
+-- a failed wait and a card the graph waits on go to the chat at once
+Wait.escalate on-setter tell-wait-failed:
+  WHEN this.escalate != None and this.goal != None:
+    this.goal.tell = this.escalate
+Decision.wanted getter: (this.status or 'open') == 'open' and len(this.blocks or []) > 0 and this.goal != None
+Decision.wanted on-setter tell-card:
+  WHEN this.wanted and not this.escalated_ts:
+    this.escalated_ts = clock
+    this.goal.tell = 'goal ' + str(this.goal) + ' waits on this decision: ' + str(this.name or this.eid)
+
+-- READING (#738): the goal's graph as one value: its tasks (what each waits on, its state, its receipt), waits and cards, what is running and what is ready to run
+Goal.view getter:
+  ns = this.graph_nodes
+  ts = [{'eid': t.eid, 'title': t.title, 'status': t.status, 'parent': t.parent, 'waits_on': [b.eid for b in referencing(t, 'blocks') if not b.finished], 'open_blockers': t.open_blockers, 'result': t.result, 'receipt': t.receipt} for t in ns if startswith(t.eid, 'Task:')]
+  ws = [{'eid': w.eid, 'title': w.title, 'status': w.status, 'condition': w.condition, 'blocks': w.blocks or [], 'waits_on': [b.eid for b in referencing(w, 'blocks') if not b.finished], 'last_check': w.last_check_result, 'receipt': w.receipt} for w in ns if startswith(w.eid, 'Wait:')]
+  cs = [{'eid': c.eid, 'name': c.name, 'status': c.status, 'blocks': c.blocks or [], 'value': c.value} for c in ns if startswith(c.eid, 'Decision:')]
+  {'tasks': ts, 'waits': ws, 'cards': cs, 'running': [t['eid'] for t in ts if t['status'] == 'running'], 'ready': [t['eid'] for t in ts if t['status'] == 'owed']}

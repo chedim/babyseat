@@ -888,13 +888,18 @@
     "classes": [
       "Decision",
       "Goal",
+      "Pool",
       "Task",
       "Wait"
     ],
-    "members": 11,
+    "members": 42,
     "writes": [
+      "Task:*.status",
       "membrane::llm.call",
-      "ref(goal).replan"
+      "ref(goal).replan",
+      "ref(goal).tell",
+      "ref(parent).receipt",
+      "ref(parent).status"
     ],
     "claims": [],
     "boot_facts": [],
@@ -902,8 +907,71 @@
       "Goal",
       "Task",
       "Wait",
-      "Decision"
+      "Decision",
+      "Result",
+      "Pool"
     ]
+  },
+  "goalgraph_chat": {
+    "imports": [
+      "chat",
+      "goalgraph"
+    ],
+    "classes": [
+      "Goal"
+    ],
+    "members": 1,
+    "writes": [
+      "membrane:*.queued",
+      "membrane:*=ChatLine()",
+      "membrane:*=ChatMessage()",
+      "membrane:*=ChatTurn()",
+      "membrane:*=SemText()",
+      "membrane::Chat:main=Chat()"
+    ],
+    "claims": [],
+    "boot_facts": []
+  },
+  "goalgraph_lanes": {
+    "imports": [
+      "boot",
+      "chat",
+      "goalgraph"
+    ],
+    "classes": [
+      "Boot",
+      "Goal",
+      "Pool",
+      "Task"
+    ],
+    "members": 4,
+    "writes": [
+      "membrane:*.queued",
+      "membrane:*=ChatLine()",
+      "membrane:*=ChatMessage()",
+      "membrane:*=ChatTurn()",
+      "membrane:*=SemText()",
+      "membrane::Chat:gg=Chat()"
+    ],
+    "claims": [],
+    "boot_facts": [
+      "started"
+    ]
+  },
+  "goalgraph_methods": {
+    "imports": [
+      "proc",
+      "goalgraph"
+    ],
+    "classes": [
+      "Wait"
+    ],
+    "members": 3,
+    "writes": [
+      "ref(method_cmd).run"
+    ],
+    "claims": [],
+    "boot_facts": []
   },
   "ha": {
     "imports": [
