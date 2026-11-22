@@ -915,6 +915,7 @@
   "goalgraph_chat": {
     "imports": [
       "chat",
+      "semtext",
       "goalgraph"
     ],
     "classes": [
@@ -936,6 +937,7 @@
     "imports": [
       "boot",
       "chat",
+      "semtext",
       "goalgraph"
     ],
     "classes": [
