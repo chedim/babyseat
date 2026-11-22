@@ -1,5 +1,6 @@
 PACK goalgraph_chat 1
 IMPORT chat 1
+IMPORT semtext 1
 IMPORT goalgraph 1
 -- WHAT A GOAL TELLS (#729, #738): `Goal:x.tell = text` is a message in the main chat, as the door would post it (chat.c1f, Request.cm_at); the model's turn
 -- answers it. goalgraph.c1f does not need the chat and the chat does not need it, so the delivery is a pack of its own that imports both.

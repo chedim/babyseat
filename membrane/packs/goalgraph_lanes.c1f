@@ -1,6 +1,7 @@
 PACK goalgraph_lanes 1
 IMPORT boot 1
 IMPORT chat 1
+IMPORT semtext 1
 IMPORT goalgraph 1
 -- THE LANES OF THE GOAL GRAPH (#738, #773): goalgraph.c1f asks for a planner pass (Goal.plan_calls, with the prompt in plan_prompt) and a worker step
 -- (Task.started_ts, with the prompt in worker_prompt). The `membrane::llm.call` effect is the browser engine's; this seat refuses it, so a lane here is a
