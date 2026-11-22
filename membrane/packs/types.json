@@ -1695,6 +1695,7 @@
       "Goal.plan_result": "Dict",
       "Goal.planned_replan": "Any",
       "Goal.planned_ts": "Num",
+      "Goal.replan": "Text",
       "Goal.reported_graph": "Text",
       "Goal.reported_ts": "Num",
       "Goal.tell": "Text?",

@@ -2917,5 +2917,78 @@
     }
    }
   ]
- }
+ },
+  {
+    "name": "goalgraph: a new goal asks for its first plan by itself (no call needed)",
+    "writes": [
+      {
+        "eid": "Goal:gn",
+        "prop": "text",
+        "value": "Ship the thing"
+      }
+    ],
+    "expect": [
+      {
+        "eid": "Goal:gn",
+        "prop": "replan",
+        "equals": "new goal"
+      },
+      {
+        "eid": "Goal:gn",
+        "prop": "plan_due",
+        "contains": "Why you were called: new goal"
+      },
+      {
+        "eid": "Goal:gn",
+        "prop": "plan_calls",
+        "equals": 1
+      }
+    ],
+    "packs": [
+      "membrane/packs/goalgraph.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Goal:gn",
+        "class": "Goal",
+        "props": {
+          "status": "open"
+        }
+      }
+    ]
+  },
+  {
+    "name": "goalgraph: a goal that already has a replan reason keeps it when its text is set",
+    "writes": [
+      {
+        "eid": "Goal:gn",
+        "prop": "replan",
+        "value": "task X done"
+      },
+      {
+        "eid": "Goal:gn",
+        "prop": "text",
+        "value": "Ship the thing"
+      }
+    ],
+    "expect": [
+      {
+        "eid": "Goal:gn",
+        "prop": "replan",
+        "equals": "task X done"
+      }
+    ],
+    "packs": [
+      "membrane/packs/goalgraph.c1f"
+    ],
+    "given": [
+      {
+        "eid": "Goal:gn",
+        "class": "Goal",
+        "props": {
+          "status": "open"
+        }
+      }
+    ]
+  }
 ]

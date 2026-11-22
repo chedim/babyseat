@@ -27,6 +27,11 @@ Wait.due on-setter wait-check:
   WHEN this.due:
     this.check = this.due
 
+-- a goal made with text and no reason yet asks for its first plan by itself: the reason is 'new goal' (no call needed, as in the python seat)
+Goal.text on-setter plan-new-goal:
+  WHEN this.text and not this.replan:
+    this.replan = 'new goal'
+
 -- THE PLANNER (#773): a goal with a replan that no plan has answered is DUE, and its planner lane is called once for that reason.
 -- A plan answers it (planned_replan). planner_text is the prompt the lane gets; planner_reply is the lane's last text, whose FULFILLED line is the claim.
 Goal.plan_due getter: this.planner_text if ((this.status or 'open') == 'open' and this.replan and this.replan != this.planned_replan) else None
