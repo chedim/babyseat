@@ -892,11 +892,12 @@
       "Task",
       "Wait"
     ],
-    "members": 27,
+    "members": 35,
     "writes": [
       "Task:*.status",
       "membrane::llm.call",
       "ref(goal).replan",
+      "ref(goal).tell",
       "ref(parent).receipt",
       "ref(parent).status"
     ],
@@ -910,6 +911,26 @@
       "Result",
       "Pool"
     ]
+  },
+  "goalgraph_chat": {
+    "imports": [
+      "chat",
+      "goalgraph"
+    ],
+    "classes": [
+      "Goal"
+    ],
+    "members": 1,
+    "writes": [
+      "membrane:*.queued",
+      "membrane:*=ChatLine()",
+      "membrane:*=ChatMessage()",
+      "membrane:*=ChatTurn()",
+      "membrane:*=SemText()",
+      "membrane::Chat:main=Chat()"
+    ],
+    "claims": [],
+    "boot_facts": []
   },
   "ha": {
     "imports": [

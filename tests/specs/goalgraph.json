@@ -2317,5 +2317,434 @@
     }
    }
   ]
+ },
+ {
+  "name": "goalgraph: a graph that stopped moving is told to the chat once, with the planner claim and the receipts",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "replan": "x",
+     "planned_replan": "x"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build",
+     "status": "done",
+     "receipt": "built ok"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "claim",
+    "value": "all green"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "contains": "goal Goal:gx has nothing moving"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "contains": "The planner says FULFILLED: all green"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "contains": "- task Task:gx:a [done] build -- receipt: built ok"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a graph already told is not told again",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "replan": "x",
+     "planned_replan": "x"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build",
+     "status": "done",
+     "receipt": "built ok"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "claim",
+    "value": "one"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "claim",
+    "value": "two"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "contains": "The planner says FULFILLED: one"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "reported_graph",
+    "contains": "Task:gx:a:done"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a graph with a task still running is not told",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "replan": "x",
+     "planned_replan": "x"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build",
+     "status": "running",
+     "started_ts": 1
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "claim",
+    "value": "early"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "equals": null
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a task running past 15 minutes is stalled, and the chat is told so",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "replan": "x",
+     "planned_replan": "x"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build",
+     "status": "running",
+     "started_ts": -1000
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "claim",
+    "value": "stuck somewhere"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "contains": "Stalled (running over 15 minutes)"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "contains": "Task:gx:a"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a goal still waiting for its planner is not told",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "replan": "y",
+     "planned_replan": "x"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build",
+     "status": "done"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "claim",
+    "value": "early"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "equals": null
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a send-back the planner answers with nothing to run is told again",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "replan": "x",
+     "planned_replan": "x"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build",
+     "status": "done",
+     "receipt": "built ok"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "claim",
+    "value": "all green"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "replan",
+    "value": "send back: it is not done"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {}
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "contains": "send back: it is not done"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a failed wait is told to the chat",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "replan": "x",
+     "planned_replan": "x"
+    }
+   },
+   {
+    "eid": "Probe:p",
+    "class": "Probe",
+    "props": {
+     "ready": false
+    }
+   },
+   {
+    "eid": "Wait:gx:w",
+    "class": "Wait",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "CI",
+     "status": "armed",
+     "armed_since": 0,
+     "every_s": 10,
+     "deadline_min": 5,
+     "condition": {
+      "field": "Probe:p",
+      "prop": "ready",
+      "equals": true
+     }
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Wait:gx:w",
+    "prop": "check",
+    "value": 400
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "contains": "the wait CI failed"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a card the graph waits on is told to the chat",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "replan": null,
+     "planned_replan": null
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "tasks": [
+      {
+       "key": "k1",
+       "title": "deploy"
+      }
+     ],
+     "cards": [
+      {
+       "key": "c1",
+       "name": "Which region",
+       "blocks": [
+        "k1"
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "contains": "waits on this decision: Which region"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: what the goal tells is a queued message in the main chat",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/goalgraph.c1f",
+   "membrane/packs/goalgraph_chat.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell",
+    "value": "goal Goal:gx has nothing moving"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "tell_n",
+    "equals": 1
+   },
+   {
+    "eid": "membrane::Chat:main:message:2000-00000001",
+    "prop": "text",
+    "equals": "goal Goal:gx has nothing moving"
+   },
+   {
+    "eid": "membrane::Chat:main:message:2000-00000001",
+    "prop": "queued",
+    "equals": true
+   }
+  ]
  }
 ]

@@ -1,0 +1,16 @@
+PACK goalgraph_chat 1
+IMPORT chat 1
+IMPORT goalgraph 1
+-- WHAT A GOAL TELLS (#729, #738): `Goal:x.tell = text` is a message in the main chat, as the door would post it (chat.c1f, Request.cm_at); the model's turn
+-- answers it. goalgraph.c1f is built into every seat and the chat is not, so the delivery is a pack of its own that imports both.
+Goal.tell on-setter tell-chat:
+  WHEN this.tell != None:
+    n = (this.tell_n or 0) + 1
+    id = words(replace(str(clock * 1000), '.', ' '))[0] + '-' + tail('00000000' + str(n), 8)
+    this.tell_n = n
+    membrane::Chat:main = Chat(name: 'main')
+    membrane::Chat:main:message[id] = ChatMessage(text: this.tell, at: clock)
+    membrane::Chat:main:message[id]:body = SemText(text: this.tell)
+    membrane::Chat:main:message[id]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + id, queued_at: clock)
+    membrane::Chat:main:time[id]:main = ChatLine(chat: 'main')
+    membrane::Chat:main:message[id].queued = True

@@ -243,3 +243,30 @@ Wait.check on-setter check-wait:
       this.ended_ts = now
       this.escalate = 'goal ' + str(this.goal) + ': the wait ' + str(this.title or this.eid) + ' failed -- unmet after ' + str(this.deadline_min) + ' min: ' + seen
       this.status = 'failed'
+
+-- THE REPORT (#729, #738): every plan ends in the chat. When nothing in the goal graph is moving any more and no planner pass is pending, the chat is told
+-- once per graph state, with the planner claim and the receipts; its turn closes the goal or sends it back (a send-back is a new replan: the planner answers it,
+-- and if the graph is quiet again the chat is told again). A task running over 15 minutes is stalled and no longer counts as moving.
+Goal.graph_nodes getter: [x for x in referencing(this, 'goal') if startswith(x.eid, 'Task:') or startswith(x.eid, 'Wait:') or startswith(x.eid, 'Decision:')]
+Goal.stalled getter: [x.eid for x in this.graph_nodes if startswith(x.eid, 'Task:') and x.status == 'running' and clock - (x.started_ts or clock) > 900]
+Goal.moving getter: len([x for x in this.graph_nodes if (startswith(x.eid, 'Task:') and (x.status or 'open') in ('open', 'owed')) or (startswith(x.eid, 'Task:') and x.status == 'running' and not (x.eid in this.stalled)) or (startswith(x.eid, 'Wait:') and (x.status or 'open') in ('open', 'armed')) or (startswith(x.eid, 'Decision:') and (x.status or 'open') == 'open')]) > 0
+Goal.report_sig getter: join([x.eid + ':' + str(x.status) for x in this.graph_nodes], ',') + '|' + str(this.replan)
+Goal.report_text getter:
+  rows = ['goal ' + this.eid + ' has nothing moving (replan: ' + str(this.replan) + ')', ('The planner says FULFILLED: ' + str(this.claim)) if this.claim else 'The planner has not claimed the goal done.', ('Stalled (running over 15 minutes): ' + join(this.stalled, ', ')) if len(this.stalled) > 0 else '', 'The goal graph now:', this.planner_graph, 'Close the goal if the receipts prove it, or send it back with what is missing.']
+  join([r for r in rows if r != ''], '\n')
+Goal.report_due getter: this.report_text if ((this.status or 'open') == 'open' and not this.plan_due and not this.moving and len(this.graph_nodes) > 0 and this.report_sig != this.reported_graph) else None
+Goal.report_due on-setter tell-graph:
+  WHEN this.report_due:
+    this.reported_graph = this.report_sig
+    this.reported_ts = clock
+    this.tell = this.report_due
+
+-- a failed wait and a card the graph waits on go to the chat at once
+Wait.escalate on-setter tell-wait-failed:
+  WHEN this.escalate != None and this.goal != None:
+    this.goal.tell = this.escalate
+Decision.wanted getter: (this.status or 'open') == 'open' and len(this.blocks or []) > 0 and this.goal != None
+Decision.wanted on-setter tell-card:
+  WHEN this.wanted and not this.escalated_ts:
+    this.escalated_ts = clock
+    this.goal.tell = 'goal ' + str(this.goal) + ' waits on this decision: ' + str(this.name or this.eid)

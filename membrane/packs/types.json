@@ -1654,9 +1654,16 @@
   "goalgraph": {
     "getters": {
       "Decision.finished": "Bool",
+      "Decision.wanted": "Bool",
+      "Goal.graph_nodes": "List(Entity(*))",
+      "Goal.moving": "Bool",
       "Goal.plan_due": "Text?",
       "Goal.planner_graph": "Text",
       "Goal.planner_text": "Text",
+      "Goal.report_due": "Text?",
+      "Goal.report_sig": "Text",
+      "Goal.report_text": "Text",
+      "Goal.stalled": "List(Any)",
       "Pool.beat": "Num",
       "Pool.busy": "Int",
       "Task.finished": "Bool",
@@ -1676,7 +1683,9 @@
       "*.replan": "Text?",
       "*.status": "Text",
       "*.take": "Bool",
+      "*.tell": "Any",
       "*.worker_prompt": "Any",
+      "Decision.escalated_ts": "Num",
       "Goal.claim": "Text?",
       "Goal.plan_called": "Any",
       "Goal.plan_calls": "Num?",
@@ -1684,6 +1693,9 @@
       "Goal.plan_result": "Dict",
       "Goal.planned_replan": "Any",
       "Goal.planned_ts": "Num",
+      "Goal.reported_graph": "Text",
+      "Goal.reported_ts": "Num",
+      "Goal.tell": "Text?",
       "Pool.pump": "Num",
       "Task.ended_ts": "Num",
       "Task.finish": "Dict",
@@ -1711,6 +1723,14 @@
       "Result",
       "Pool"
     ]
+  },
+  "goalgraph_chat": {
+    "getters": {},
+    "writes": {
+      "Chat.queued": "Bool",
+      "Goal.tell_n": "Num?"
+    },
+    "findings": []
   },
   "ha": {
     "getters": {
