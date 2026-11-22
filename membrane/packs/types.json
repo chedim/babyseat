@@ -1655,13 +1655,20 @@
     "getters": {
       "Decision.finished": "Bool",
       "Task.finished": "Bool",
+      "Task.is_blocked": "Bool",
+      "Task.is_ready": "Bool",
       "Task.open_blockers": "Int",
       "Wait.due": "Bool|Num",
       "Wait.finished": "Bool",
+      "Wait.is_blocked": "Bool",
+      "Wait.is_ready": "Bool",
       "Wait.open_blockers": "Int"
     },
     "writes": {
+      "*.blocks": "List(Any)",
       "*.replan": "Text?",
+      "*.status": "Text",
+      "Goal.plan_result": "Dict",
       "Task.status": "Text",
       "Wait.armed_since": "Num",
       "Wait.check": "Text",

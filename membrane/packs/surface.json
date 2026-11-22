@@ -891,8 +891,9 @@
       "Task",
       "Wait"
     ],
-    "members": 11,
+    "members": 15,
     "writes": [
+      "Task:*.status",
       "membrane::llm.call",
       "ref(goal).replan"
     ],

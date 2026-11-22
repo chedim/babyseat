@@ -1,0 +1,71 @@
+[
+ {
+  "name": "goalgraph: a plan makes its tasks, the one with nothing in its way is owed, the next waits",
+  "packs": ["membrane/packs/goalgraph.c1f"],
+  "given": [{"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}}],
+  "writes": [
+   {"eid": "Goal:gx", "prop": "plan", "value": {"tasks": [{"key": "a", "title": "first"}, {"key": "b", "title": "second", "after": ["a"]}]}}
+  ],
+  "expect": [
+   {"eid": "Goal:gx", "prop": "plan_result", "equals": {"ok": true, "tasks": ["Task:gx:a", "Task:gx:b"], "reopened": []}},
+   {"eid": "Task:gx:a", "prop": "status", "equals": "owed"},
+   {"eid": "Task:gx:b", "prop": "status", "equals": "open"},
+   {"eid": "Task:gx:b", "prop": "open_blockers", "equals": 1},
+   {"eid": "Task:gx:a", "prop": "blocks", "equals": ["Task:gx:b"]}
+  ]
+ },
+ {
+  "name": "goalgraph: a task that ends frees what it blocks",
+  "packs": ["membrane/packs/goalgraph.c1f"],
+  "given": [{"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}}],
+  "writes": [
+   {"eid": "Goal:gx", "prop": "plan", "value": {"tasks": [{"key": "a", "title": "first"}, {"key": "b", "title": "second", "after": ["a"]}]}},
+   {"eid": "Task:gx:a", "prop": "status", "value": "done"}
+  ],
+  "expect": [
+   {"eid": "Task:gx:b", "prop": "status", "equals": "owed"}
+  ]
+ },
+ {
+  "name": "goalgraph: a plan whose edges close a cycle is refused whole",
+  "packs": ["membrane/packs/goalgraph.c1f"],
+  "given": [{"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}}],
+  "writes": [
+   {"eid": "Goal:gx", "prop": "plan", "value": {"tasks": [{"key": "a", "after": ["b"]}, {"key": "b", "after": ["a"]}]}}
+  ],
+  "expect": [
+   {"eid": "Goal:gx", "prop": "plan_result", "equals": {"ok": false, "error": "refused: these edges close a cycle: Task:gx:b -> Task:gx:a"}}
+  ]
+ },
+ {
+  "name": "goalgraph: a stuck task listed again is retried, a done one only with redo",
+  "packs": ["membrane/packs/goalgraph.c1f"],
+  "given": [
+   {"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}},
+   {"eid": "Task:gx:a", "class": "Task", "props": {"goal": "Goal:gx", "status": "stuck"}},
+   {"eid": "Task:gx:b", "class": "Task", "props": {"goal": "Goal:gx", "status": "done"}},
+   {"eid": "Task:gx:c", "class": "Task", "props": {"goal": "Goal:gx", "status": "done"}}
+  ],
+  "writes": [
+   {"eid": "Goal:gx", "prop": "plan", "value": {"tasks": [{"key": "a"}, {"key": "b"}, {"key": "c", "redo": true}]}}
+  ],
+  "expect": [
+   {"eid": "Goal:gx", "prop": "plan_result", "equals": {"ok": true, "tasks": [], "reopened": ["Task:gx:a", "Task:gx:c"]}},
+   {"eid": "Task:gx:b", "prop": "status", "equals": "done"},
+   {"eid": "Task:gx:a", "prop": "status", "equals": "owed"}
+  ]
+ },
+ {
+  "name": "goalgraph: a dropped task blocks nothing",
+  "packs": ["membrane/packs/goalgraph.c1f"],
+  "given": [{"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}}],
+  "writes": [
+   {"eid": "Goal:gx", "prop": "plan", "value": {"tasks": [{"key": "a"}, {"key": "b", "after": ["a"]}]}},
+   {"eid": "Goal:gx", "prop": "plan", "value": {"drop": ["a"]}}
+  ],
+  "expect": [
+   {"eid": "Task:gx:a", "prop": "status", "equals": "dropped"},
+   {"eid": "Task:gx:b", "prop": "status", "equals": "owed"}
+  ]
+ }
+]

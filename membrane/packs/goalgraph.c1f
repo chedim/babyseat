@@ -11,12 +11,6 @@ RESIDENT Decision
 -- built-in recount and due stand down because this pack declares them.
 
 -- a task with nothing open in its way is owed (on the count, and on its own status)
-Task.open_blockers on-setter ready:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'owed'
-Task.status on-setter ready-on-status:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'owed'
 
 -- a task or a card that ends asks its goal to replan
 Task.status on-setter replan-task:
@@ -27,14 +21,6 @@ Decision.status on-setter replan-card:
     this.goal.replan = 'card ' + this.eid + ' ' + this.status
 
 -- a wait with nothing open in its way is armed; when it is due, its adapter checks
-Wait.open_blockers on-setter wait-armed:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'armed'
-    this.armed_since = clock
-Wait.status on-setter wait-armed-on-status:
-  WHEN this.open_blockers < 0.5 and this.status == 'open':
-    this.status = 'armed'
-    this.armed_since = clock
 Wait.due on-setter wait-check:
   WHEN this.due:
     this.check = 'due'
@@ -59,3 +45,61 @@ Wait.open_blockers getter: len([b for b in referencing(this, 'blocks') if not b.
 -- setter fires every beat (as the old every-beat trigger did); the adapter paces the real checks by every_s
 Wait.due getter:
   this.status == 'armed' and clock > (this.armed_since or this.armed_ts or clock) and clock
+
+-- THE PLAN (#773): the planner's one write, `Goal:x.plan = {tasks: [{key, title, detail, after, redo}], cards: [{key, name, summary, blocks}],
+-- waits: [{key, title, condition, every_s, deadline_min, after, blocks}], drop: [keys]}`. Nodes are Task:<goal>:<key>, Wait:<goal>:<key>, Decision:<goal>:<key>.
+-- `after` and `blocks` name a key of this plan, an earlier key of the goal, or an eid. The receipt lands in `plan_result`; a refused plan changes nothing.
+-- Everything is a local of the one setter: a setter sees the getters as they were before its write.
+Goal.plan on-setter apply-plan:
+  WHEN this.plan != None:
+    g = replace(this.eid, 'Goal:', '')
+    p = this.plan
+    tasks = p['tasks'] or []
+    waits = p['waits'] or []
+    cards = p['cards'] or []
+    refs = concat(concat([[str(t['key']), 'Task:' + g + ':' + str(t['key'])] for t in tasks], [[str(w['key']), 'Wait:' + g + ':' + str(w['key'])] for w in waits]), [[str(c['key']), 'Decision:' + g + ':' + str(c['key'])] for c in cards])
+    after_edges = fold([], [concat(acc, [[concat([r[1] for r in refs if r[0] == str(a)], ['Task:' + g + ':' + str(a) if not (':' in str(a)) else str(a)])[0], 'Task:' + g + ':' + str(t['key'])] for a in (t['after'] or [])]) for t in tasks])
+    wait_after = fold([], [concat(acc, [[concat([r[1] for r in refs if r[0] == str(a)], ['Task:' + g + ':' + str(a) if not (':' in str(a)) else str(a)])[0], 'Wait:' + g + ':' + str(w['key'])] for a in (w['after'] or [])]) for w in waits])
+    wait_blocks = fold([], [concat(acc, [['Wait:' + g + ':' + str(w['key']), concat([r[1] for r in refs if r[0] == str(k)], ['Task:' + g + ':' + str(k) if not (':' in str(k)) else str(k)])[0]] for k in (w['blocks'] or [])]) for w in waits])
+    card_blocks = fold([], [concat(acc, [['Decision:' + g + ':' + str(c['key']), concat([r[1] for r in refs if r[0] == str(k)], ['Task:' + g + ':' + str(k) if not (':' in str(k)) else str(k)])[0]] for k in (c['blocks'] or [])]) for c in cards])
+    edges = concat(concat(after_edges, wait_after), concat(wait_blocks, card_blocks))
+    nodes = [r[1] for r in refs]
+    unknown = [e for e in edges if not (e[0] in nodes) and prop(e[0], 'goal') == None]
+    cycle = [e for e in edges if e[0] == e[1] or [f for f in edges if f[0] == e[1] and f[1] == e[0]] != []]
+    ok = len(unknown) == 0 and len(cycle) == 0
+    fresh = [t for t in tasks if ok and prop('Task:' + g + ':' + str(t['key']), 'status') == None]
+    again = [t for t in tasks if ok and (prop('Task:' + g + ':' + str(t['key']), 'status') in ('stuck', 'failed') or (prop('Task:' + g + ':' + str(t['key']), 'status') == 'done' and t['redo']))]
+    fresh_w = [w for w in waits if ok and prop('Wait:' + g + ':' + str(w['key']), 'status') == None]
+    FOR t IN fresh:
+      ('Task:' + g + ':' + str(t['key'])) = Task(goal: this.eid, title: str(t['title'] or t['key']), name: str(t['title'] or t['key']), detail: t['detail'] or '', plan_key: str(t['key']))
+    FOR w IN fresh_w:
+      ('Wait:' + g + ':' + str(w['key'])) = Wait(goal: this.eid, title: str(w['title'] or w['key']), name: str(w['title'] or w['key']), condition: w['condition'], every_s: w['every_s'], deadline_min: w['deadline_min'], plan_key: str(w['key']))
+    FOR c IN [c for c in cards if ok and prop('Decision:' + g + ':' + str(c['key']), 'status') == None]:
+      ('Decision:' + g + ':' + str(c['key'])) = Decision(goal: this.eid, name: str(c['name'] or c['key']), summary: c['summary'] or '', plan_key: str(c['key']), status: 'open')
+    FOR e IN [e for e in edges if ok]:
+      e[0].blocks = concat(prop(e[0], 'blocks') or [], [x for x in [e[1]] if not (x in (prop(e[0], 'blocks') or []))])
+    FOR t IN again:
+      ('Task:' + g + ':' + str(t['key'])).status = 'owed' if ((prop('Task:' + g + ':' + str(t['key']), 'open_blockers') or 0) + len([e for e in edges if e[1] == ('Task:' + g + ':' + str(t['key'])) and not prop(e[0], 'finished')])) < 0.5 else 'open'
+    FOR k IN [k for k in (p['drop'] or []) if ok and prop('Task:' + g + ':' + str(k), 'status') != None]:
+      ('Task:' + g + ':' + str(k)).status = 'dropped'
+    this.plan_result = {'ok': True, 'tasks': [('Task:' + g + ':' + str(t['key'])) for t in fresh], 'reopened': [('Task:' + g + ':' + str(t['key'])) for t in again]} if ok else {'ok': False, 'error': ('unknown after/blocks: ' + str(concat(unknown, [[""]])[0][0])) if len(unknown) > 0 else ('refused: these edges close a cycle: ' + str(concat(cycle, [["", ""]])[0][0]) + ' -> ' + str(concat(cycle, [["", ""]])[0][1]))}
+
+-- readiness is a GETTER, so it is read after the round settled (a setter sees the counts as they were before its write):
+-- a task with nothing open in its way is owed, a wait with nothing open in its way is armed
+Task.is_ready getter: (this.status == 'open' or (this.status == None and this.goal != None)) and this.open_blockers < 0.5
+Task.is_ready on-setter owe:
+  WHEN this.is_ready:
+    this.status = 'owed'
+Wait.is_ready getter: (this.status == 'open' or (this.status == None and this.goal != None)) and this.open_blockers < 0.5
+Task.is_blocked getter: this.status == None and this.goal != None and this.open_blockers > 0.5
+Task.is_blocked on-setter hold:
+  WHEN this.is_blocked:
+    this.status = 'open'
+Wait.is_blocked getter: this.status == None and this.goal != None and this.open_blockers > 0.5
+Wait.is_blocked on-setter wait-hold:
+  WHEN this.is_blocked:
+    this.status = 'open'
+Wait.is_ready on-setter arm:
+  WHEN this.is_ready:
+    this.status = 'armed'
+    this.armed_since = clock
