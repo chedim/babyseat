@@ -3519,5 +3519,20 @@
     "contains": "planner limit"
    }
   ]
+ },
+ {
+  "name": "goalgraph: a worker works its task to the end of its turn, with as many tool calls as it needs; it splits only a task too big for a turn",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}},
+   {"eid": "Task:gx:a", "class": "Task", "props": {"goal": "Goal:gx", "title": "read, write, check", "status": "owed"}}
+  ],
+  "writes": [],
+  "expect": [
+   {"eid": "Task:gx:a", "prop": "worker_text", "contains": "to the end of this turn"},
+   {"eid": "Task:gx:a", "prop": "worker_text", "contains": "too big for one turn"}
+  ]
  }
 ]
