@@ -3519,5 +3519,22 @@
     "contains": "planner limit"
    }
   ]
+ },
+ {
+  "name": "goalgraph: a sub-task whose parent is given as an eid attaches to that task, not to a made-up one",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}},
+   {"eid": "Task:gx:p", "class": "Task", "props": {"goal": "Goal:gx", "status": "split"}}
+  ],
+  "writes": [
+   {"eid": "Goal:gx", "prop": "plan", "value": {"tasks": [{"key": "s1", "title": "sub", "parent": "Task:gx:p"}, {"key": "s2", "title": "sub2", "parent": "s1"}]}}
+  ],
+  "expect": [
+   {"eid": "Task:gx:s1", "prop": "parent", "equals": "Task:gx:p"},
+   {"eid": "Task:gx:s2", "prop": "parent", "equals": "Task:gx:s1"}
+  ]
  }
 ]
