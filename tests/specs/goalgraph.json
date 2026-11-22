@@ -167,6 +167,198 @@
   ]
  },
  {
+  "name": "goalgraph: a plan whose edges close a longer cycle (three tasks) is refused whole",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "tasks": [
+      {
+       "key": "a",
+       "after": [
+        "c"
+       ]
+      },
+      {
+       "key": "b",
+       "after": [
+        "a"
+       ]
+      },
+      {
+       "key": "c",
+       "after": [
+        "b"
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_result",
+    "equals": {
+     "ok": false,
+     "error": "refused: these edges close a cycle: Task:gx:c -> Task:gx:a"
+    }
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "graph_sig",
+    "equals": ""
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a plan whose new edges close a cycle through a task an earlier plan made is refused whole",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   },
+   {
+    "eid": "Task:gx:x",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "open",
+     "blocks": [
+      "Task:gx:y"
+     ]
+    }
+   },
+   {
+    "eid": "Task:gx:y",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "tasks": [
+      {
+       "key": "n",
+       "after": [
+        "y"
+       ]
+      },
+      {
+       "key": "x",
+       "after": [
+        "n"
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_result",
+    "equals": {
+     "ok": false,
+     "error": "refused: these edges close a cycle: Task:gx:y -> Task:gx:n"
+    }
+   },
+   {
+    "eid": "Task:gx:x",
+    "prop": "blocks",
+    "equals": ["Task:gx:y"]
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a plan whose edges share a node but close no cycle is accepted",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "tasks": [
+      {
+       "key": "a"
+      },
+      {
+       "key": "b",
+       "after": [
+        "a"
+       ]
+      },
+      {
+       "key": "c",
+       "after": [
+        "a"
+       ]
+      },
+      {
+       "key": "d",
+       "after": [
+        "b",
+        "c"
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_result",
+    "equals": {
+     "ok": true,
+     "tasks": [
+      "Task:gx:a",
+      "Task:gx:b",
+      "Task:gx:c",
+      "Task:gx:d"
+     ],
+     "reopened": []
+    }
+   }
+  ]
+ },
+ {
   "name": "goalgraph: a stuck task listed again is retried, a done one only with redo",
   "packs": [
    "membrane/packs/goalgraph.c1f"
@@ -3168,5 +3360,164 @@
         "equals": 1
       }
     ]
-  }
+  },
+ {
+  "name": "goalgraph: ceiling: a goal that has used its max_plans is not planned by the reflex",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:rc",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "text": "Ship",
+     "replan": "x",
+     "planned_replan": "w",
+     "max_plans": 1,
+     "plan_calls": 1
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:rc",
+    "prop": "planned_replan",
+    "value": "x"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:rc",
+    "prop": "replan",
+    "equals": "x"
+   },
+   {
+    "eid": "Goal:rc",
+    "prop": "plan_calls",
+    "equals": 1
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: ceiling: a goal that has used its max_plans does not call the planner for a new reason",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:rd",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "text": "Ship",
+     "planned_replan": "w",
+     "max_plans": 1,
+     "plan_calls": 1
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:rd",
+    "prop": "replan",
+    "value": "task Task:rd:a done"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:rd",
+    "prop": "plan_calls",
+    "equals": 1
+   },
+   {
+    "eid": "Goal:rd",
+    "prop": "plan_due",
+    "none": true
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: ceiling: a goal under its max_plans is planned, and one with no max_plans is never held back",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:re",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "text": "Ship",
+     "replan": "x",
+     "planned_replan": "w",
+     "max_plans": 2,
+     "plan_calls": 1
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:re",
+    "prop": "planned_replan",
+    "value": "x"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:re",
+    "prop": "replan",
+    "equals": "idle "
+   },
+   {
+    "eid": "Goal:re",
+    "prop": "plan_calls",
+    "equals": 2
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: ceiling: the chat is told that the planner limit is reached when nothing moves",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:rf",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "text": "Ship",
+     "max_plans": 1,
+     "plan_calls": 1,
+     "replan": "x",
+     "planned_replan": "x"
+    }
+   },
+   {
+    "eid": "Task:rf:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:rf",
+     "status": "done",
+     "title": "a"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:rf:a",
+    "prop": "receipt",
+    "value": "ok"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:rf",
+    "prop": "report_text",
+    "contains": "planner limit"
+   }
+  ]
+ }
 ]

@@ -3,12 +3,12 @@
  "packs": ["membrane/packs/boot.c1f", "membrane/packs/fs.c1f", "membrane/packs/proc.c1f", "membrane/packs/banner.c1f", "membrane/packs/door.c1f", "membrane/packs/semtext.c1f", "membrane/packs/chat.c1f", "membrane/packs/goalgraph.c1f", "membrane/packs/goalgraph_lanes.c1f"],
  "given": [{"eid": "Pool:workers", "class": "Pool", "props": {"size": 3}}, {"eid": "Goal:gx", "class": "Goal", "props": {"status": "open", "text": "ship it"}}, {"eid": "membrane::Chat:gg:message:2000000-00000001:turn:response", "class": "Chat", "props": {"text": "PLANNED x\nFULFILLED all done"}}],
  "writes": [{"eid": "Goal:gx", "prop": "replan", "value": "first look"}, {"eid": "Pool:workers", "prop": "pump", "value": 1}],
- "expect": [{"eid": "Goal:gx", "prop": "plan_msg", "equals": "2000000-00000001"}, {"eid": "membrane::Chat:gg:message:2000000-00000001", "prop": "text", "contains": "You are the PLANNER for goal Goal:gx"}, {"eid": "membrane::Chat:gg:message:2000000-00000001", "prop": "queued", "equals": true}, {"eid": "Goal:gx", "prop": "planner_reply", "contains": "FULFILLED all done"}, {"eid": "Goal:gx", "prop": "claim", "equals": "all done"}]},
+ "expect": [{"eid": "Goal:gx", "prop": "plan_msg", "equals": null}, {"eid": "membrane::Chat:gg:message:2000000-00000001", "prop": "text", "contains": "You are the PLANNER for goal Goal:gx"}, {"eid": "membrane::Chat:gg:message:2000000-00000001", "prop": "queued", "equals": true}, {"eid": "Goal:gx", "prop": "planner_reply", "contains": "FULFILLED all done"}, {"eid": "Goal:gx", "prop": "claim", "equals": "all done"}]},
 {"name": "lanes: a taken task is a worker message in the chat gg, and the turn's last verdict line ends it",
  "packs": ["membrane/packs/boot.c1f", "membrane/packs/fs.c1f", "membrane/packs/proc.c1f", "membrane/packs/banner.c1f", "membrane/packs/door.c1f", "membrane/packs/semtext.c1f", "membrane/packs/chat.c1f", "membrane/packs/goalgraph.c1f", "membrane/packs/goalgraph_lanes.c1f"],
  "given": [{"eid": "Pool:workers", "class": "Pool", "props": {"size": 3}}, {"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}}, {"eid": "Task:gx:a", "class": "Task", "props": {"goal": "Goal:gx", "title": "build"}}, {"eid": "membrane::Chat:gg:message:2000000-00000001:turn:response", "class": "Chat", "props": {"text": "ran it\nDONE built it"}}],
  "writes": [{"eid": "Task:gx:a", "prop": "status", "value": "owed"}, {"eid": "Pool:workers", "prop": "pump", "value": 1}, {"eid": "Pool:workers", "prop": "pump", "value": 2}],
- "expect": [{"eid": "Task:gx:a", "prop": "worker_msg", "equals": "2000000-00000001"}, {"eid": "membrane::Chat:gg:message:2000000-00000001", "prop": "text", "contains": "You are a WORKER on task Task:gx:a of goal Goal:gx."}, {"eid": "membrane::Chat:gg:message:2000000-00000001", "prop": "queued", "equals": true}, {"eid": "Task:gx:a", "prop": "status", "equals": "done"}, {"eid": "Task:gx:a", "prop": "receipt", "equals": "built it"}]},
+ "expect": [{"eid": "Task:gx:a", "prop": "worker_msg", "equals": null}, {"eid": "membrane::Chat:gg:message:2000000-00000001", "prop": "text", "contains": "You are a WORKER on task Task:gx:a of goal Goal:gx."}, {"eid": "membrane::Chat:gg:message:2000000-00000001", "prop": "queued", "equals": true}, {"eid": "Task:gx:a", "prop": "status", "equals": "done"}, {"eid": "Task:gx:a", "prop": "receipt", "equals": "built it"}]},
 {"name": "lanes: at boot a task running or owed goes back to the pool, a done one stays",
  "packs": ["membrane/packs/boot.c1f", "membrane/packs/fs.c1f", "membrane/packs/proc.c1f", "membrane/packs/banner.c1f", "membrane/packs/door.c1f", "membrane/packs/semtext.c1f", "membrane/packs/chat.c1f", "membrane/packs/goalgraph.c1f", "membrane/packs/goalgraph_lanes.c1f"],
  "given": [{"eid": "Boot:seat", "class": "Boot", "props": {}}, {"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}}, {"eid": "Task:gx:a", "class": "Task", "props": {"goal": "Goal:gx", "status": "running"}}, {"eid": "Task:gx:b", "class": "Task", "props": {"goal": "Goal:gx", "status": "done"}}],
@@ -53,5 +53,69 @@
  "packs": ["membrane/packs/boot.c1f", "membrane/packs/proc.c1f", "membrane/packs/goalgraph.c1f", "membrane/packs/goalgraph_methods.c1f"],
  "given": [{"eid": "Goal:gx", "class": "Goal", "props": {"status": "open"}}, {"eid": "Command:ci_status", "class": "Command", "props": {"cmd": "true"}}, {"eid": "Command:ci_bad", "class": "Command", "props": {"cmd": "true"}}, {"eid": "Wait:gx:w", "class": "Wait", "props": {"goal": "Goal:gx", "status": "armed", "condition": {"method": "ci.status", "args": [], "equals": "green"}}}, {"eid": "Wait:gx:v", "class": "Wait", "props": {"goal": "Goal:gx", "status": "armed", "condition": {"method": "ci.bad", "args": [], "equals": "green"}}}],
  "writes": [{"eid": "Command:ci_status", "prop": "run_result", "value": {"rc": 0, "stdout": "green\n"}}, {"eid": "Command:ci_bad", "prop": "run_result", "value": {"rc": 2, "stdout": ""}}],
- "expect": [{"eid": "Wait:gx:w", "prop": "method_seen", "equals": "green"}, {"eid": "Wait:gx:v", "prop": "method_seen", "equals": "(failed rc 2)"}]}
+ "expect": [{"eid": "Wait:gx:w", "prop": "method_seen", "equals": "green"}, {"eid": "Wait:gx:v", "prop": "method_seen", "equals": "(failed rc 2)"}]},
+ {
+  "name": "lanes: a lane whose answer has not landed keeps its message id, and the pump does not look at goals with no lane waiting",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/goalgraph.c1f",
+   "membrane/packs/goalgraph_lanes.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Pool:workers",
+    "class": "Pool",
+    "props": {
+     "size": 3
+    }
+   },
+   {
+    "eid": "Goal:gw",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "text": "ship it",
+     "plan_msg": "2000000-00000009"
+    }
+   },
+   {
+    "eid": "Goal:gn",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "text": "idle one"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Pool:workers",
+    "prop": "pump",
+    "value": 1
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gw",
+    "prop": "plan_msg",
+    "equals": "2000000-00000009"
+   },
+   {
+    "eid": "Goal:gw",
+    "prop": "planner_reply",
+    "none": true
+   },
+   {
+    "eid": "Goal:gn",
+    "prop": "plan_msg",
+    "none": true
+   }
+  ]
+ }
 ]

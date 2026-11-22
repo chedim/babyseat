@@ -5,8 +5,8 @@ RESIDENT Wait
 RESIDENT Decision
 RESIDENT Result
 RESIDENT Pool
--- The goal graph (#773, #994) in cliffhanger's field syntax (native/src/syntax.rs).
--- Migrated from packs/goalgraph.json by the translator; tests/syntax_994.rs holds the two equal.
+-- The goal graph (#773, #994) in c1f (the engine is github.com/chedim/cliffvm). Its behaviour is held by tests/specs/goalgraph.json and goalgraph_lanes.json, and described in docs/goalgraph.md.
+-- It is NOT in apps/barest.packs: a seat loads it when asked (Pack:goalgraph written through the door), and it then replaces the engine's older built-in goal graph.
 --
 -- The getters live here too (below): `finished` per class, `open_blockers` and `due`. A task's or wait's open
 -- blockers are counted, never decremented, so a dropped or doubled write can't make them drift. The engine's
@@ -32,11 +32,15 @@ Goal.text on-setter plan-new-goal:
   WHEN this.text and not this.replan:
     this.replan = 'new goal'
 
+-- THE CEILING: `max_plans` on a goal (the owner's number, no default: a goal without one is never held back) is the most planner passes the goal may use (`plan_calls`). A goal that has used them
+-- is planned no more, by a reason or by the reflex; the chat is still told when nothing moves, and the report says the limit is reached. Raise `max_plans`, or close the goal.
+Goal.capped getter: this.max_plans != None and (this.plan_calls or 0) >= this.max_plans
+
 -- THE REFLEX: the planner runs by itself for any goal that is open (not done, not parked), has no plan pending and is not being worked on (nothing moving).
 -- The reason is 'idle ' + the state of the graph, so each distinct quiet state is planned once: a plan that leaves the graph as it was does not loop, a changed graph asks again.
 Goal.graph_sig getter: join([x.eid + ':' + str(x.status) for x in this.graph_nodes], ',')
 Goal.plan_pending getter: (this.replan != None and this.replan != this.planned_replan)
-Goal.idle_reason getter: ('idle ' + this.graph_sig) if ((this.status or 'open') == 'open' and not this.parked and (this.text or this.summary) and not this.plan_pending and not this.moving) else None
+Goal.idle_reason getter: ('idle ' + this.graph_sig) if ((this.status or 'open') == 'open' and not this.parked and (this.text or this.summary) and not this.plan_pending and not this.moving and not this.capped) else None
 Goal.idle_reason on-setter reflex-plan:
   WHEN this.idle_reason and this.idle_reason != this.idled:
     this.idled = this.idle_reason
@@ -44,7 +48,7 @@ Goal.idle_reason on-setter reflex-plan:
 
 -- THE PLANNER (#773): a goal with a replan that no plan has answered is DUE, and its planner lane is called once for that reason.
 -- A plan answers it (planned_replan). planner_text is the prompt the lane gets; planner_reply is the lane's last text, whose FULFILLED line is the claim.
-Goal.plan_due getter: this.planner_text if ((this.status or 'open') == 'open' and this.replan and this.replan != this.planned_replan) else None
+Goal.plan_due getter: this.planner_text if ((this.status or 'open') == 'open' and this.replan and this.replan != this.planned_replan and not this.capped) else None
 Goal.plan_due on-setter call-planner:
   WHEN this.plan_due and this.replan != this.plan_called:
     this.plan_called = this.replan
@@ -117,7 +121,12 @@ Goal.plan on-setter apply-plan:
     edges = concat(concat(after_edges, wait_after), concat(wait_blocks, card_blocks))
     nodes = [r[1] for r in refs]
     unknown = [e for e in edges if not (e[0] in nodes) and prop(e[0], 'goal') == None]
-    cycle = [e for e in edges if e[0] == e[1] or [f for f in edges if f[0] == e[1] and f[1] == e[0]] != []]
+    -- a cycle is a new edge whose target reaches its source, over the new edges AND the `blocks` the goal's earlier nodes already have (a plan may close a loop through a task an earlier plan made):
+    -- the nodes reachable from the target are grown one step per node of the graph, which is as many steps as the longest path can have. The first such edge in plan order is named.
+    old_edges = fold([], [concat(acc, [[x.eid, b] for b in (x.blocks or [])]) for x in referencing(this, 'goal')])
+    all_edges = concat(edges, old_edges)
+    uni = distinct(fold([], [concat(acc, [e[0], e[1]]) for e in all_edges]))
+    cycle = [e for e in edges if e[0] in fold([e[1]], [distinct(concat(acc, [f[1] for f in all_edges if f[0] in acc])) for q in uni])]
     bad_waits = [w for w in waits if not (w['condition'] != None and ((w['condition']['field'] and w['condition']['prop']) or w['condition']['method']) and ('equals' in keys(w['condition'])) and (w['every_s'] or 0) >= 10 and (w['deadline_min'] or 0) > 0)]
     ok = len(unknown) == 0 and len(cycle) == 0 and len(bad_waits) == 0
     fresh = [t for t in tasks if ok and prop('Task:' + g + ':' + str(t['key']), 'status') == None]
@@ -283,7 +292,7 @@ Goal.stalled getter: [x.eid for x in this.graph_nodes if startswith(x.eid, 'Task
 Goal.moving getter: len([x for x in this.graph_nodes if (startswith(x.eid, 'Task:') and (x.status or 'open') in ('open', 'owed')) or (startswith(x.eid, 'Task:') and x.status == 'running' and not (x.eid in this.stalled)) or (startswith(x.eid, 'Wait:') and (x.status or 'open') in ('open', 'armed')) or (startswith(x.eid, 'Decision:') and (x.status or 'open') == 'open')]) > 0
 Goal.report_sig getter: join([x.eid + ':' + str(x.status) for x in this.graph_nodes], ',') + '|' + str(this.replan)
 Goal.report_text getter:
-  rows = ['goal ' + this.eid + ' has nothing moving (replan: ' + str(this.replan) + ')', ('The planner says FULFILLED: ' + str(this.claim)) if this.claim else 'The planner has not claimed the goal done.', ('Stalled (running over 15 minutes): ' + join(this.stalled, ', ')) if len(this.stalled) > 0 else '', 'The goal graph now:', this.planner_graph, 'Close the goal if the receipts prove it, or send it back with what is missing.']
+  rows = ['goal ' + this.eid + ' has nothing moving (replan: ' + str(this.replan) + ')', ('The planner says FULFILLED: ' + str(this.claim)) if this.claim else 'The planner has not claimed the goal done.', ('Stalled (running over 15 minutes): ' + join(this.stalled, ', ')) if len(this.stalled) > 0 else '', ('The planner limit is reached (max_plans ' + str(this.max_plans) + '): no more planner passes are made for this goal. Raise max_plans, or close the goal.') if this.capped else '', 'The goal graph now:', this.planner_graph, 'Close the goal if the receipts prove it, or send it back with what is missing.']
   join([r for r in rows if r != ''], '\n')
 Goal.report_due getter: this.report_text if ((this.status or 'open') == 'open' and not this.plan_due and not this.moving and len(this.graph_nodes) > 0 and this.report_sig != this.reported_graph) else None
 Goal.report_due on-setter tell-graph:

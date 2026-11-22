@@ -892,7 +892,7 @@
       "Task",
       "Wait"
     ],
-    "members": 38,
+    "members": 42,
     "writes": [
       "Task:*.status",
       "membrane::llm.call",

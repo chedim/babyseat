@@ -30,6 +30,7 @@ A path written `cliffvm:<path>` is a file of the engine's repository, github.com
 | [model-chat.md](model-chat.md) | the raw exchange with the model, one entity per chat (`ModelChat:<chat>`), the same shape whichever rung answered: the prompt, the reply with its thinking, each call and result; how a rung feeds it, the bound, what the Log tab shows |
 | [logview.md](logview.md) | the boundary log as a view: what entered the VM (the journal's outside writes), read by a peer from its own cursor as small records, the cursor in the peer's namespace |
 | [c1f-layers.md](c1f-layers.md) | apps and layers, trust by position, privilege, class ownership, storage-mode header lines |
+| [goalgraph.md](goalgraph.md) | the goal graph: goals, tasks, waits and cards, the plan, the planner and worker lanes as chat messages, the reflex, the report to the chat, the planner ceiling (in progress: branch `goalgraph-auto`) |
 | [c1f-stdlib.md](c1f-stdlib.md) | the Request contract, boot facts, the builtins, locals, entity literals, constructors, the step budget, the contract tests |
 | [c1f-error.md](c1f-error.md) | the `Error` value kind: a failure that is not a null |
 | [cliffhanger-fields.md](cliffhanger-fields.md) | the field language's design: getters, setters, packs, the browser VM's host API (section 9) |
