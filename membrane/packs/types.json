@@ -1654,6 +1654,9 @@
   "goalgraph": {
     "getters": {
       "Decision.finished": "Bool",
+      "Goal.plan_due": "Text?",
+      "Goal.planner_graph": "Text",
+      "Goal.planner_text": "Text",
       "Task.finished": "Bool",
       "Task.is_blocked": "Bool",
       "Task.is_ready": "Bool",
@@ -1669,7 +1672,13 @@
       "*.receipt": "Text",
       "*.replan": "Text?",
       "*.status": "Text",
+      "Goal.claim": "Text?",
+      "Goal.plan_called": "Any",
+      "Goal.plan_calls": "Num?",
+      "Goal.plan_prompt": "Text?",
       "Goal.plan_result": "Dict",
+      "Goal.planned_replan": "Any",
+      "Goal.planned_ts": "Num",
       "Task.ended_ts": "Num",
       "Task.receipt": "Text",
       "Task.result": "Text",

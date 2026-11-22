@@ -753,5 +753,425 @@
     "equals": "done"
    }
   ]
+ },
+ {
+  "name": "goalgraph: the planner is told the goal, why it was called and every node of the graph",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "text": "ship it",
+     "replan": "task Task:gx:a done"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build",
+     "status": "done",
+     "receipt": "built ok"
+    }
+   },
+   {
+    "eid": "Task:gx:c",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "lint",
+     "status": "running",
+     "blocks": [
+      "Task:gx:b"
+     ]
+    }
+   },
+   {
+    "eid": "Task:gx:b",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "test",
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "planner_text",
+    "contains": "You are the PLANNER for goal Goal:gx: ship it"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "planner_text",
+    "contains": "- task Task:gx:a [done] build -- receipt: built ok"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "planner_text",
+    "contains": "- task Task:gx:b [open] test (waits on Task:gx:c)"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "planner_text",
+    "contains": "FULFILLED"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a replan is due until a plan answers it",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "replan",
+    "value": "first look"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_due",
+    "contains": "Why you were called: first look"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_calls",
+    "equals": 1
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a plan answers the replan it was called for",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "replan",
+    "value": "first look"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "tasks": [
+      {
+       "key": "a",
+       "title": "A"
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "planned_replan",
+    "equals": "first look"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_due",
+    "equals": null
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_calls",
+    "equals": 1
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a new reason after a plan calls the planner again",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "replan",
+    "value": "first look"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "tasks": [
+      {
+       "key": "a",
+       "title": "A"
+      }
+     ]
+    }
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "replan",
+    "value": "task Task:gx:a done"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_due",
+    "contains": "Why you were called: task Task:gx:a done"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_calls",
+    "equals": 2
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: the planner reply keeps its last FULFILLED line as the claim",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "planner_reply",
+    "value": "PLANNED two tasks\nFULFILLED all green\n"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "claim",
+    "equals": "all green"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a planner reply with no FULFILLED line claims nothing",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "planner_reply",
+    "value": "UNCHANGED nothing to add"
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "claim",
+    "equals": null
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: the prompt the planner is called with has the new reason and the settled graph",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "text": "ship it"
+    }
+   },
+   {
+    "eid": "Task:gx:a",
+    "class": "Task",
+    "props": {
+     "goal": "Goal:gx",
+     "title": "build",
+     "status": "running"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Task:gx:a",
+    "prop": "finish",
+    "value": {
+     "verdict": "done",
+     "detail": "built ok"
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_prompt",
+    "contains": "Why you were called: task Task:gx:a done"
+   },
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_prompt",
+    "contains": "- task Task:gx:a [done] build -- receipt: built ok"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: at boot a replan no planner finished is planned again",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "text": "ship it",
+     "replan": "first look"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "replan_lost",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_prompt",
+    "contains": "Why you were called: first look"
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: at boot a replan a plan answered is not planned again",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open",
+     "replan": "first look",
+     "planned_replan": "first look"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "replan_lost",
+    "value": true
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan_calls",
+    "equals": null
+   }
+  ]
+ },
+ {
+  "name": "goalgraph: a plan task with a parent is its sub-task",
+  "packs": [
+   "membrane/packs/goalgraph.c1f"
+  ],
+  "given": [
+   {
+    "eid": "Goal:gx",
+    "class": "Goal",
+    "props": {
+     "status": "open"
+    }
+   }
+  ],
+  "writes": [
+   {
+    "eid": "Goal:gx",
+    "prop": "plan",
+    "value": {
+     "tasks": [
+      {
+       "key": "a",
+       "title": "A"
+      },
+      {
+       "key": "a1",
+       "title": "A1",
+       "parent": "a"
+      }
+     ]
+    }
+   }
+  ],
+  "expect": [
+   {
+    "eid": "Task:gx:a1",
+    "prop": "parent",
+    "equals": "Task:gx:a"
+   },
+   {
+    "eid": "Task:gx:a",
+    "prop": "parent",
+    "equals": null
+   }
+  ]
  }
 ]

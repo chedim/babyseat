@@ -26,13 +26,48 @@ Wait.due on-setter wait-check:
   WHEN this.due:
     this.check = 'due'
 
--- a goal asked to replan calls the planner (and again after a reopen with a new reason)
-Goal.replan on-setter plan:
-  WHEN (this.status or 'open') == 'open' and this.replan:
-    membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
-Goal.status on-setter plan-after-reopen:
-  WHEN this.status == 'open' and this.replan and this.planned_ts and this.replan != this.planned_replan:
-    membrane::llm.call = {'about': this.eid, 'prompt': 'plan the goal: ' + this.replan, 'lane': 'planner'}
+-- THE PLANNER (#773): a goal with a replan that no plan has answered is DUE, and its planner lane is called once for that reason.
+-- A plan answers it (planned_replan). planner_text is the prompt the lane gets; planner_reply is the lane's last text, whose FULFILLED line is the claim.
+Goal.plan_due getter: this.planner_text if ((this.status or 'open') == 'open' and this.replan and this.replan != this.planned_replan) else None
+Goal.plan_due on-setter call-planner:
+  WHEN this.plan_due and this.replan != this.plan_called:
+    this.plan_called = this.replan
+    this.plan_calls = (this.plan_calls or 0) + 1
+    this.plan_prompt = this.plan_due
+    membrane::llm.call = {'about': this.eid, 'prompt': this.plan_due, 'lane': 'planner'}
+-- boot: a goal whose last replan no planner pass finished (cut off by a restart, its call lost with the pool) is planned again
+Goal.replan_lost on-setter replan-lost:
+  WHEN this.replan_lost and this.plan_due:
+    this.plan_called = this.replan
+    this.plan_calls = (this.plan_calls or 0) + 1
+    this.plan_prompt = this.plan_due
+    membrane::llm.call = {'about': this.eid, 'prompt': this.plan_due, 'lane': 'planner'}
+
+-- the goal's graph as lines: tasks, waits, cards, each with its state, what it waits on and its receipt
+Goal.planner_graph getter:
+  mine = referencing(this, 'goal')
+  ts = [('- task ' + t.eid + ' [' + str(t.status) + '] ' + str(t.title) + (' (sub-task of ' + str(t.parent) + ')' if t.parent else '') + (' (waits on ' + join([b.eid for b in referencing(t, 'blocks') if not b.finished], ', ') + ')' if len([b for b in referencing(t, 'blocks') if not b.finished]) > 0 else '') + (' -- receipt: ' + head(str(t.receipt), 160) if t.receipt else '')) for t in mine if startswith(t.eid, 'Task:')]
+  ws = [('- wait ' + w.eid + ' [' + str(w.status) + '] ' + str(w.title) + (' (waits on ' + join([b.eid for b in referencing(w, 'blocks') if not b.finished], ', ') + ')' if len([b for b in referencing(w, 'blocks') if not b.finished]) > 0 else '') + (' -- ' + head(str(w.receipt or w.last_check_result), 160) if (w.receipt or w.last_check_result) else '')) for w in mine if startswith(w.eid, 'Wait:')]
+  cs = [('- card ' + c.eid + ' [' + str(c.status) + '] ' + str(c.name) + (' = ' + str(c.value) if c.value != None else '')) for c in mine if startswith(c.eid, 'Decision:')]
+  rows = concat(concat(ts, ws), cs)
+  join(rows, '\n') if len(rows) > 0 else '(empty: nothing planned yet)'
+
+-- the prompt of the planner lane
+Goal.planner_text getter:
+  goal = this.eid
+  p1 = 'Work the goal as a graph. Write ONE plan with entity_edit on the goal: entity_edit spec="GOAL" properties={"plan": {"tasks": [{"key": "k1", "title": "...", "detail": "what to do and the receipt that proves it", "after": ["<key or eid it waits on>"], "parent": "<a split task key, for its sub-task>"}], "cards": [{"key": "c1", "name": "The question (no quotes)", "summary": "...", "blocks": ["k1"]}], "waits": [{"key": "w1", "title": "...", "condition": {"field": "<entity spec>", "prop": "<name>", "equals": "<value>"} or {"method": "<object>.<method>", "args": {}}, "every_s": 60, "deadline_min": 60, "after": ["k1"], "blocks": ["k2"]}], "drop": ["<key no longer needed>"]}}'
+  p2 = 'A task is ONE worker step: one batch of tool calls, then its verdict. A task that ended split needed more: give it sub-tasks, tasks whose parent is its key (any depth); it is done when its sub-tasks are, and what waits on it waits until then. Listing a stuck or failed task key again runs it again, and dropping it (drop: [key]) frees what it blocked. A choice only the operator can make is a card that blocks the tasks needing it. Something that takes time outside a turn (CI going green, a deploy, a reply) is a wait: it arms when what it follows is done, is checked every every_s seconds (at least 10), releases the tasks it blocks when it holds, and fails after deadline_min minutes. Never make a task wait inside its turn. Keep existing keys to update a task; a running or done task keeps its state, so to run a DONE task again list its key with redo: true, or write a new task under a new key. Read the goal back for plan_result.'
+  p3 = 'When every task is done and the receipts prove the goal, end with FULFILLED and the receipt. Every plan ends in the chat: when nothing in the graph is moving any more, the chat is told with the receipts, and its turn closes the goal or sends it back; you never close a goal. When the graph needs nothing new, write no plan.'
+  p4 = 'End with one line: PLANNED <what changed> / FULFILLED <receipt> / UNCHANGED <why>.'
+  join(['You are the PLANNER for goal ' + goal + ': ' + str(this.text or this.summary or this.name or goal), 'Why you were called: ' + head(str(this.replan or 'no reason given'), 400), '', 'The goal graph now:', this.planner_graph, '', replace(p1, 'GOAL', goal), p2, p3, p4], '\n')
+
+-- the planner's last text: its FULFILLED line (the last one) is the claim that the goal is done
+Goal.planner_reply on-setter planner-claim:
+  WHEN this.planner_reply != None:
+    hits = [strip(l) for l in lines(str(this.planner_reply)) if startswith(lower(strip(l)), 'fulfilled')]
+    rest = [strip(after(h, head(h, 9))) for h in hits]
+    clean = [strip(after(r, head(r, 1))) if (startswith(r, ':') or startswith(r, '-')) else r for r in rest]
+    this.claim = head(tail(clean, 1)[0], 600) if len(clean) > 0 else None
 
 -- getters (#994 rule 2): computed fields, recalculated when what they read changes
 -- a dropped blocker blocks nothing (Memo's live check, 2026-11-09: it used to block forever)
@@ -72,7 +107,7 @@ Goal.plan on-setter apply-plan:
     again = [t for t in tasks if ok and (prop('Task:' + g + ':' + str(t['key']), 'status') in ('stuck', 'failed') or (prop('Task:' + g + ':' + str(t['key']), 'status') == 'done' and t['redo']))]
     fresh_w = [w for w in waits if ok and prop('Wait:' + g + ':' + str(w['key']), 'status') == None]
     FOR t IN fresh:
-      ('Task:' + g + ':' + str(t['key'])) = Task(goal: this.eid, title: str(t['title'] or t['key']), name: str(t['title'] or t['key']), detail: t['detail'] or '', plan_key: str(t['key']))
+      ('Task:' + g + ':' + str(t['key'])) = Task(goal: this.eid, title: str(t['title'] or t['key']), name: str(t['title'] or t['key']), detail: t['detail'] or '', plan_key: str(t['key']), parent: ('Task:' + g + ':' + str(t['parent']) if t['parent'] else None))
     FOR w IN fresh_w:
       ('Wait:' + g + ':' + str(w['key'])) = Wait(goal: this.eid, title: str(w['title'] or w['key']), name: str(w['title'] or w['key']), condition: w['condition'], every_s: w['every_s'], deadline_min: w['deadline_min'], plan_key: str(w['key']))
     FOR c IN [c for c in cards if ok and prop('Decision:' + g + ':' + str(c['key']), 'status') == None]:
@@ -83,6 +118,8 @@ Goal.plan on-setter apply-plan:
       ('Task:' + g + ':' + str(t['key'])).status = 'owed' if ((prop('Task:' + g + ':' + str(t['key']), 'open_blockers') or 0) + len([e for e in edges if e[1] == ('Task:' + g + ':' + str(t['key'])) and not prop(e[0], 'finished')])) < 0.5 else 'open'
     FOR k IN [k for k in (p['drop'] or []) if ok and prop('Task:' + g + ':' + str(k), 'status') != None]:
       ('Task:' + g + ':' + str(k)).status = 'dropped'
+    this.planned_replan = this.replan if ok else this.planned_replan
+    this.planned_ts = clock
     this.plan_result = {'ok': True, 'tasks': [('Task:' + g + ':' + str(t['key'])) for t in fresh], 'reopened': [('Task:' + g + ':' + str(t['key'])) for t in again]} if ok else {'ok': False, 'error': ('unknown after/blocks: ' + str(concat(unknown, [[""]])[0][0])) if len(unknown) > 0 else ('refused: these edges close a cycle: ' + str(concat(cycle, [["", ""]])[0][0]) + ' -> ' + str(concat(cycle, [["", ""]])[0][1]))}
 
 -- readiness is a GETTER, so it is read after the round settled (a setter sees the counts as they were before its write):
