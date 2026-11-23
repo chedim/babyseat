@@ -16,7 +16,7 @@ A path written `cliffvm:<path>` is a file of the engine's repository, github.com
 |---|---|
 | [auth.md](auth.md) | who may talk to the seat: no users, every valid token is the admin, the secret and token files, the page cookie and its host check, the claude CLI's credential (developer mode) |
 | [cliffvm.md](cliffvm.md) | the reference: `cliffvm serve` and `run`, facts, the data folder, the dist folder, the door's routes, the chat turn, storage modes, packs the model loads, the history cutover |
-| [settings-groups.md](settings-groups.md) | the Settings window: every row, the one write door, what is launch-only |
+| [settings-groups.md](settings-groups.md) | the Settings window: every row, the one write door, what is launch-only; the read-only Components list (Phase 1a) |
 | [release-verification.md](release-verification.md) | the auth checklist: what was proved by which test |
 | [packaging-plan.md](packaging-plan.md) | packaging and the launcher: what is decided, built and in progress (wheels, installer, image) |
 

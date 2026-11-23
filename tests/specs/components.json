@@ -1,0 +1,70 @@
+[
+ {
+  "name": "a graphlink-* binary found by the scan is a Component; its state follows the matching Vm link (available, up, gone)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/link.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/components.c1f"
+  ],
+  "given": [
+   {"eid": "Boot:seat", "class": "Boot", "props": {}},
+   {"eid": "Command:components_scan", "class": "Command", "props": {}},
+   {"eid": "Vm:claude", "class": "Vm", "props": {"link": "up"}},
+   {"eid": "Vm:openai", "class": "Vm", "props": {"link": "gone"}}
+  ],
+  "writes": [
+   {"eid": "Command:components_scan", "prop": "run_result", "value": {"id": "scan", "status": "ok", "rc": 0, "stdout": "graphlink-claude\ngraphlink-openai\ngraphlink-bridge\ngraphlink-extra\n"}}
+  ],
+  "expect": [
+   {"eid": "Component:claude", "prop": "binary", "equals": "graphlink-claude"},
+   {"eid": "Component:claude", "prop": "ns", "equals": "claude"},
+   {"eid": "Component:claude", "prop": "state", "equals": "up"},
+   {"eid": "Component:openai", "prop": "state", "equals": "gone"},
+   {"eid": "Component:extra", "prop": "state", "equals": "available"},
+   {"eid": "Component:bridge", "prop": "state", "equals": "available"}
+  ]
+ },
+ {
+  "name": "autoload is kept on the graph and defaults to false; a re-scan keeps it",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/link.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/components.c1f"
+  ],
+  "given": [
+   {"eid": "Boot:seat", "class": "Boot", "props": {}},
+   {"eid": "Command:components_scan", "class": "Command", "props": {}},
+   {"eid": "Component:claude", "class": "Component", "props": {"autoload": true}}
+  ],
+  "writes": [
+   {"eid": "Command:components_scan", "prop": "run_result", "value": {"id": "scan", "status": "ok", "rc": 0, "stdout": "graphlink-claude\ngraphlink-openai\n"}}
+  ],
+  "expect": [
+   {"eid": "Component:claude", "prop": "autoload", "equals": true},
+   {"eid": "Component:openai", "prop": "autoload", "equals": false}
+  ]
+ },
+ {
+  "name": "Component.load and Component.unload are refused in Phase 1a with the reason (a peer is declared at start)",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/link.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/components.c1f"
+  ],
+  "given": [
+   {"eid": "Boot:seat", "class": "Boot", "props": {}},
+   {"eid": "Command:components_scan", "class": "Command", "props": {}},
+   {"eid": "Component:openai", "class": "Component", "props": {"binary": "graphlink-openai", "ns": "openai"}}
+  ],
+  "writes": [
+   {"eid": "Component:openai", "prop": "load", "value": true}
+  ],
+  "expect": [
+   {"eid": "Component:openai", "prop": "refused", "contains": "start"},
+   {"eid": "Component:openai", "prop": "state", "equals": "available"}
+  ]
+ }
+]

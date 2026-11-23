@@ -293,6 +293,31 @@
       "Chunk"
     ]
   },
+  "components": {
+    "imports": [
+      "boot",
+      "link",
+      "proc"
+    ],
+    "classes": [
+      "Boot",
+      "Command",
+      "Component"
+    ],
+    "members": 5,
+    "writes": [
+      "Command:components_scan.run",
+      "Command:components_scan=Command()",
+      "Component:*.autoload",
+      "Component:*.binary",
+      "Component:*.ns"
+    ],
+    "claims": [],
+    "boot_facts": [],
+    "resident": [
+      "Component"
+    ]
+  },
   "cron": {
     "imports": [
       "boot"

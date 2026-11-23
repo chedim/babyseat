@@ -504,6 +504,22 @@
       "Chunk"
     ]
   },
+  "components": {
+    "getters": {
+      "Component.state": "Text"
+    },
+    "writes": {
+      "Command.run": "Dict",
+      "Component.autoload": "Any",
+      "Component.binary": "Text",
+      "Component.ns": "Text",
+      "Component.refused": "Text"
+    },
+    "findings": [],
+    "resident": [
+      "Component"
+    ]
+  },
   "cron": {
     "getters": {
       "Cron.bad": "Any",
