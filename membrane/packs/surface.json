@@ -884,25 +884,39 @@
     ]
   },
   "goalgraph": {
-    "imports": [],
+    "imports": [
+      "boot",
+      "chat",
+      "semtext",
+      "proc"
+    ],
     "classes": [
+      "Boot",
       "Decision",
       "Goal",
       "Pool",
       "Task",
       "Wait"
     ],
-    "members": 42,
+    "members": 50,
     "writes": [
       "Task:*.status",
-      "membrane::llm.call",
+      "membrane:*.queued",
+      "membrane:*=ChatLine()",
+      "membrane:*=ChatMessage()",
+      "membrane:*=ChatTurn()",
+      "membrane:*=SemText()",
+      "membrane::Chat:gg=Chat()",
+      "membrane::Chat:main=Chat()",
       "ref(goal).replan",
       "ref(goal).tell",
-      "ref(parent).receipt",
+      "ref(method_cmd).run",
       "ref(parent).status"
     ],
     "claims": [],
-    "boot_facts": [],
+    "boot_facts": [
+      "started"
+    ],
     "resident": [
       "Goal",
       "Task",
@@ -911,69 +925,6 @@
       "Result",
       "Pool"
     ]
-  },
-  "goalgraph_chat": {
-    "imports": [
-      "chat",
-      "semtext",
-      "goalgraph"
-    ],
-    "classes": [
-      "Goal"
-    ],
-    "members": 1,
-    "writes": [
-      "membrane:*.queued",
-      "membrane:*=ChatLine()",
-      "membrane:*=ChatMessage()",
-      "membrane:*=ChatTurn()",
-      "membrane:*=SemText()",
-      "membrane::Chat:main=Chat()"
-    ],
-    "claims": [],
-    "boot_facts": []
-  },
-  "goalgraph_lanes": {
-    "imports": [
-      "boot",
-      "chat",
-      "semtext",
-      "goalgraph"
-    ],
-    "classes": [
-      "Boot",
-      "Goal",
-      "Pool",
-      "Task"
-    ],
-    "members": 4,
-    "writes": [
-      "membrane:*.queued",
-      "membrane:*=ChatLine()",
-      "membrane:*=ChatMessage()",
-      "membrane:*=ChatTurn()",
-      "membrane:*=SemText()",
-      "membrane::Chat:gg=Chat()"
-    ],
-    "claims": [],
-    "boot_facts": [
-      "started"
-    ]
-  },
-  "goalgraph_methods": {
-    "imports": [
-      "proc",
-      "goalgraph"
-    ],
-    "classes": [
-      "Wait"
-    ],
-    "members": 3,
-    "writes": [
-      "ref(method_cmd).run"
-    ],
-    "claims": [],
-    "boot_facts": []
   },
   "ha": {
     "imports": [

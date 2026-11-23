@@ -1,8 +1,8 @@
-# The goal graph (packs `goalgraph`, `goalgraph_chat`, `goalgraph_lanes`, `goalgraph_methods`)
+# The goal graph (the one pack `goalgraph`)
 
-A goal is worked as a graph of tasks, waits and cards. A planner pass writes the graph, a pool of workers runs its tasks, and the chat is told when nothing moves any more. Branch `goalgraph-auto` (babyseat #1227) until it is merged.
+A goal is worked as a graph of tasks, waits and cards. A planner pass writes the graph, a pool of workers runs its tasks, and the chat is told when nothing moves any more.
 
-**It is not loaded by default.** None of these packs is in `apps/barest.packs`. A seat loads it when asked (`entity_write` of `Pack:goalgraph` and the others), and `goalgraph` then replaces the engine's older built-in goal graph. Everything below happens by itself once a goal exists: see "What runs without being asked".
+**It is one pack, and a seat loads it by writing `Pack:goalgraph`** (the file is `membrane/packs/goalgraph.c1f`). It is not in `apps/barest.packs`: the engine registers its own built-in `goalgraph` before any pack loads, and the loader skips a shipped pack whose name is already loaded; a pack of any other name would fail against the built-in's classes. Shipping it, or calling the file `goalpack.c1f`, needs a cliffvm release without the built-in. The model is `Pool:workers.model` (the `pick` of every planner and worker message; empty = the seat's own pick). Everything below happens by itself once a goal exists: see "What runs without being asked".
 
 ## The entities
 
@@ -25,7 +25,13 @@ A goal is worked as a graph of tasks, waits and cards. A planner pass writes the
 
 ## The lanes
 
-The planner and the workers are model turns. `membrane::llm.call` does nothing on this seat, so `goalgraph_lanes` makes each pass a message in the chat `gg` and takes the turn's answer text as the reply (`planner_reply`, `worker_reply`): the last `FULFILLED` line of the planner's answer is the claim; the last `DONE` / `FAILED` / `STUCK` / `SPLIT` line of a worker's answer is its verdict, and an answer with no verdict but a trace is one more step (twice at most). The answer is collected on the pool's beat, and the lane's message id is cleared once it is collected. `goalgraph_chat` posts what a goal tells into the chat `main`. `goalgraph_methods` runs the Command of a method wait.
+The planner and the workers are model turns. This seat refuses `membrane::llm.call`, so each pass is a message in the chat `gg`, on the model `Pool:workers.model` names, and the turn's answer text is the reply (`planner_reply`, `worker_reply`): the last `FULFILLED` line of the planner's answer is the claim; the last `DONE` / `FAILED` / `STUCK` / `SPLIT` line of a worker's answer ends its task. A worker works its task to the end of its turn, with as many tool calls as it needs; `SPLIT` is only for a task too big for one turn. A worker answer with no verdict is one more step (twice at most), then the task is `stuck`.
+
+## What keeps it from getting stuck
+
+- A planner pass answers the reason it was called for when its reply lands, whether or not it wrote a plan (UNCHANGED, FULFILLED, an error, a refused plan). Without this a goal whose planner wrote no plan waited for ever. A refused plan is told to the next pass (`Your last plan was refused: ...`).
+- A split task whose sub-tasks all ended is closed (by the state it is in, on the beat, not only when the last sub-task ends).
+- A planner pass nobody answered for 15 minutes (its turn was lost), or one cut off by a restart, is asked again. A worker nobody answered for 15 minutes becomes `stuck`, which frees its pool slot and asks the planner. A task that was running or owed at boot goes back to the pool.
 
 ## The ceiling
 
@@ -37,4 +43,4 @@ Pool size 3, a task is stalled after 900 s, a wait's pace is at least 10 s, a wo
 
 ## Not verified
 
-The specs (`tests/specs/goalgraph.json`, `goalgraph_lanes.json`) run the packs in the engine with scripted replies. Nothing here shows a real model answering a planner or a worker lane, and the cost of the beat on a seat with many goals has not been measured. A running goal can spend model turns without anyone asking: set `max_plans` for any goal you leave alone.
+The specs (`tests/specs/goalgraph.json`, `goalgraph_lanes.json`) run the pack in the engine with scripted replies. Nothing here shows a real model answering a planner or a worker lane, and the cost of the beat on a seat with many goals has not been measured. A running goal can spend model turns without anyone asking: set `max_plans` for any goal you leave alone.

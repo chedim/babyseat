@@ -1,5 +1,5 @@
 //! A pack that writes a class it does not own must IMPORT the pack that owns it, or the engine refuses the write
-//! (`pack X can't write SemText: add IMPORT semtext`). goalgraph_chat and goalgraph_lanes missed `IMPORT semtext`.
+//! (`pack X can't write SemText: add IMPORT semtext`). goalgraph_chat and goalgraph_lanes (now part of goalgraph) missed `IMPORT semtext`.
 use std::path::Path;
 
 /// (constructor written, pack that owns the class)
