@@ -123,7 +123,7 @@ try {
   await b.open(`${seat.url}/`);
   await b.until(Q(K('DomNode:chat:input')), 'the chat composer (the c1f chat is the default)');
   assert.equal(await b.ev(`!!document.getElementById('boot')`), false, 'the boot text is gone');
-  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.nav button')].map((e) => e.textContent)`), ['Chat', 'Field', 'Log', 'Settings']);
+  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.nav button')].map((e) => e.textContent)`), ['Chat', 'Field', 'Goals', 'Log', 'Settings']);
   assert.equal(await b.ev(`document.querySelector('.nav [aria-current="page"]').textContent`), 'Chat');
   await b.until(`/^connected · idle$/.test(${status})`, 'the status line says connected and idle');
   assert.equal(await b.ev(`window.MEMBRANE_PAGE.clockId !== null`), true, 'the page runs the clock');
