@@ -16,10 +16,27 @@ const IDLE_WINDOW_S: u64 = 5;
 
 fn repo() -> std::path::PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 
-/// the CPU time of a process in seconds (`ps -o time=`: [h:]m:ss.cc)
+/// the CPU time of a process in seconds. Linux: utime+stime of /proc/<pid>/stat, in clock ticks of 10 ms. `ps -o time=` there is WHOLE seconds, so a few ms of work
+/// across a second boundary read as 1.00 s and failed the bound (the flake in #1143). macOS: `ps -o time=` is [h:]m:ss.cc, already 10 ms.
 fn cpu_s(pid: u32) -> f64 {
+    if let Ok(s) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        // the command name (field 2) may hold spaces and parens: the fields after the LAST ')' start at field 3, so utime and stime (fields 14, 15) are 11 and 12
+        let f: Vec<&str> = s.rsplit_once(')').map(|x| x.1).unwrap_or("").split_whitespace().collect();
+        let t = |i: usize| f.get(i).and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
+        return (t(11) + t(12)) / 100.0;
+    }
     let o = Command::new("ps").args(["-o", "time=", "-p", &pid.to_string()]).output().unwrap();
     String::from_utf8_lossy(&o.stdout).trim().split(':').fold(0.0, |a, p| a * 60.0 + p.parse::<f64>().unwrap_or(0.0))
+}
+
+/// the reader has the resolution the bound needs: after ~0.1 s of CPU it reads about 0.1, not a jump to a whole second
+#[test]
+fn the_cpu_reader_has_a_resolution_finer_than_a_second() {
+    let pid = std::process::id();
+    let a = cpu_s(pid);
+    while cpu_s(pid) - a < 0.1 { std::hint::black_box(0u64); }
+    let d = cpu_s(pid) - a;
+    assert!(d < 0.5, "after 0.1 s of CPU the reader moved by {d:.2} s: it reads whole seconds");
 }
 
 #[test]
