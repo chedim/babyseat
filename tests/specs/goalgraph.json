@@ -2,6 +2,13 @@
  {
   "name": "goalgraph: a plan makes its tasks, the one with nothing in its way is owed, the next waits",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -74,6 +81,13 @@
  {
   "name": "goalgraph: a task that ends frees what it blocks",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -122,6 +136,13 @@
  {
   "name": "goalgraph: a plan whose edges close a cycle is refused whole",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -169,6 +190,13 @@
  {
   "name": "goalgraph: a plan whose edges close a longer cycle (three tasks) is refused whole",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -227,6 +255,13 @@
  {
   "name": "goalgraph: a plan whose new edges close a cycle through a task an earlier plan made is refused whole",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -298,6 +333,13 @@
  {
   "name": "goalgraph: a plan whose edges share a node but close no cycle is accepted",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -361,6 +403,13 @@
  {
   "name": "goalgraph: a stuck task listed again is retried, a done one only with redo",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -444,6 +493,13 @@
  {
   "name": "goalgraph: a dropped task blocks nothing",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -499,6 +555,13 @@
  {
   "name": "goalgraph: a worker takes an owed task, it runs",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -536,6 +599,13 @@
  {
   "name": "goalgraph: a task not owed is not taken",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -573,6 +643,13 @@
  {
   "name": "goalgraph: a finished task keeps a result entity and its receipt",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -639,6 +716,13 @@
  {
   "name": "goalgraph: a verdict that is none of the four is stuck",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -679,6 +763,13 @@
  {
   "name": "goalgraph: a split task with no sub-tasks asks its goal to replan",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -724,6 +815,13 @@
  {
   "name": "goalgraph: a split task is done when its sub-tasks are",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -779,6 +877,13 @@
  {
   "name": "goalgraph: a split task waits while a sub-task is still going",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -834,6 +939,13 @@
  {
   "name": "goalgraph: a split task whose sub-tasks were all dropped is dropped, and so up the tree",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -894,6 +1006,13 @@
  {
   "name": "goalgraph: a task running or owed when the seat stopped goes back to owed",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -949,6 +1068,13 @@
  {
   "name": "goalgraph: the planner is told the goal, why it was called and every node of the graph",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1020,6 +1146,13 @@
  {
   "name": "goalgraph: a replan is due until a plan answers it",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1054,6 +1187,13 @@
  {
   "name": "goalgraph: a plan answers the replan it was called for",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1105,6 +1245,13 @@
  {
   "name": "goalgraph: a new reason after a plan calls the planner again",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1156,6 +1303,13 @@
  {
   "name": "goalgraph: the planner reply keeps its last FULFILLED line as the claim",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1185,6 +1339,13 @@
  {
   "name": "goalgraph: a planner reply with no FULFILLED line claims nothing",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1214,6 +1375,13 @@
  {
   "name": "goalgraph: the prompt the planner is called with has the new reason and the settled graph",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1261,6 +1429,13 @@
  {
   "name": "goalgraph: at boot a replan no planner finished is planned again",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1292,6 +1467,13 @@
  {
   "name": "goalgraph: at boot a replan a plan answered is not planned again",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1323,6 +1505,13 @@
  {
   "name": "goalgraph: a plan task with a parent is its sub-task",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1369,6 +1558,13 @@
  {
   "name": "goalgraph: the worker is told its task, the goal and what it waited on",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1430,6 +1626,13 @@
  {
   "name": "goalgraph: the pool runs as many owed tasks as it has slots, the rest wait",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1527,6 +1730,13 @@
  {
   "name": "goalgraph: a slot freed by a finished task takes the next owed task",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1632,6 +1842,13 @@
  {
   "name": "goalgraph: a taken task keeps the prompt its worker was called with",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1681,6 +1898,13 @@
  {
   "name": "goalgraph: the pool size is 3 until it says otherwise",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1783,6 +2007,13 @@
  {
   "name": "goalgraph: the last verdict line of the worker reply ends its task",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1825,6 +2056,13 @@
  {
   "name": "goalgraph: a worker reply that says FAILED fails its task, SPLIT splits it",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1890,6 +2128,13 @@
  {
   "name": "goalgraph: a worker reply with no verdict line leaves its task stuck",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1932,6 +2177,13 @@
  {
   "name": "goalgraph: a word that only starts like a verdict is not one",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -1969,6 +2221,13 @@
  {
   "name": "goalgraph: a reply to a task that is not running is ignored",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2006,6 +2265,13 @@
  {
   "name": "goalgraph: an armed wait whose condition holds is done, with what was seen as its receipt",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2073,6 +2339,13 @@
  {
   "name": "goalgraph: an armed wait whose condition does not hold yet stays armed and says what it saw",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2135,6 +2408,13 @@
  {
   "name": "goalgraph: an armed wait past its deadline fails",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2192,6 +2472,13 @@
  {
   "name": "goalgraph: a wait is checked at its own pace, not every beat",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2250,6 +2537,13 @@
  {
   "name": "goalgraph: a wait that is not armed is not checked",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2302,6 +2596,13 @@
  {
   "name": "goalgraph: a wait that is done frees the task it blocks",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2365,6 +2666,13 @@
  {
   "name": "goalgraph: a plan makes a wait with its condition, pace and deadline",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2418,6 +2726,13 @@
  {
   "name": "goalgraph: a plan whose wait has no pace is refused whole",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2468,6 +2783,13 @@
  {
   "name": "goalgraph: a plan whose wait has no condition, or one with a method, is refused",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2513,6 +2835,13 @@
  {
   "name": "goalgraph: a graph that stopped moving is told to the chat once, with the planner claim and the receipts",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2564,6 +2893,13 @@
  {
   "name": "goalgraph: a graph already told is not told again",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2615,6 +2951,13 @@
  {
   "name": "goalgraph: a graph with a task still running is not told",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2656,6 +2999,13 @@
  {
   "name": "goalgraph: a task running past 15 minutes is stalled, and the chat is told so",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2702,6 +3052,13 @@
  {
   "name": "goalgraph: a goal still waiting for its planner is not told",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2742,6 +3099,13 @@
  {
   "name": "goalgraph: a send-back the planner answers with nothing to run is told again",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2793,6 +3157,13 @@
  {
   "name": "goalgraph: a failed wait is told to the chat",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2848,6 +3219,13 @@
  {
   "name": "goalgraph: a card the graph waits on is told to the chat",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -2902,8 +3280,7 @@
    "membrane/packs/door.c1f",
    "membrane/packs/semtext.c1f",
    "membrane/packs/chat.c1f",
-   "membrane/packs/goalgraph.c1f",
-   "membrane/packs/goalgraph_chat.c1f"
+   "membrane/packs/goalgraph.c1f"
   ],
   "given": [
    {
@@ -2942,6 +3319,13 @@
  {
   "name": "goalgraph: the view of a goal lists its tasks, waits and cards, what is running and what is ready",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -3084,6 +3468,13 @@
  {
   "name": "goalgraph: the view of a goal with nothing planned is empty",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -3137,8 +3528,15 @@
       }
     ],
     "packs": [
-      "membrane/packs/goalgraph.c1f"
-    ],
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/goalgraph.c1f"
+  ],
     "given": [
       {
         "eid": "Goal:gn",
@@ -3171,8 +3569,15 @@
       }
     ],
     "packs": [
-      "membrane/packs/goalgraph.c1f"
-    ],
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/goalgraph.c1f"
+  ],
     "given": [
       {
         "eid": "Goal:gn",
@@ -3186,8 +3591,15 @@
   {
     "name": "goalgraph: reflex: an open goal nothing works on is planned by itself",
     "packs": [
-      "membrane/packs/goalgraph.c1f"
-    ],
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/goalgraph.c1f"
+  ],
     "given": [
       {
         "eid": "Goal:ri",
@@ -3223,8 +3635,15 @@
   {
     "name": "goalgraph: reflex: a parked goal is left alone",
     "packs": [
-      "membrane/packs/goalgraph.c1f"
-    ],
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/goalgraph.c1f"
+  ],
     "given": [
       {
         "eid": "Goal:rp",
@@ -3255,8 +3674,15 @@
   {
     "name": "goalgraph: reflex: a done goal is left alone",
     "packs": [
-      "membrane/packs/goalgraph.c1f"
-    ],
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/goalgraph.c1f"
+  ],
     "given": [
       {
         "eid": "Goal:rd",
@@ -3287,8 +3713,15 @@
   {
     "name": "goalgraph: reflex: a goal with a task running is left alone",
     "packs": [
-      "membrane/packs/goalgraph.c1f"
-    ],
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/goalgraph.c1f"
+  ],
     "given": [
       {
         "eid": "Goal:rm",
@@ -3327,8 +3760,15 @@
   {
     "name": "goalgraph: reflex: a plan that leaves the graph as it was is not asked again",
     "packs": [
-      "membrane/packs/goalgraph.c1f"
-    ],
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
+   "membrane/packs/goalgraph.c1f"
+  ],
     "given": [
       {
         "eid": "Goal:rl",
@@ -3364,6 +3804,13 @@
  {
   "name": "goalgraph: ceiling: a goal that has used its max_plans is not planned by the reflex",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -3403,6 +3850,13 @@
  {
   "name": "goalgraph: ceiling: a goal that has used its max_plans does not call the planner for a new reason",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -3441,6 +3895,13 @@
  {
   "name": "goalgraph: ceiling: a goal under its max_plans is planned, and one with no max_plans is never held back",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -3480,6 +3941,13 @@
  {
   "name": "goalgraph: ceiling: the chat is told that the planner limit is reached when nothing moves",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -3523,6 +3991,13 @@
  {
   "name": "goalgraph: a sub-task whose parent is given as an eid attaches to that task, not to a made-up one",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
@@ -3540,6 +4015,13 @@
  {
   "name": "goalgraph: a worker works its task to the end of its turn, with as many tool calls as it needs; it splits only a task too big for a turn",
   "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/fs.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/banner.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/semtext.c1f",
+   "membrane/packs/chat.c1f",
    "membrane/packs/goalgraph.c1f"
   ],
   "given": [
