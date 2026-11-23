@@ -104,7 +104,7 @@ Wait.due getter:
 
 -- THE PLAN (#773): the planner's one write, `Goal:x.plan = {tasks: [{key, title, detail, after, redo}], cards: [{key, name, summary, blocks}],
 -- waits: [{key, title, condition, every_s, deadline_min, after, blocks}], drop: [keys]}`. Nodes are Task:<goal>:<key>, Wait:<goal>:<key>, Decision:<goal>:<key>.
--- `after` and `blocks` name a key of this plan, an earlier key of the goal, or an eid. The receipt lands in `plan_result`; a refused plan changes nothing.
+-- `after`, `blocks` and a task's `parent` name a key of this plan, an earlier key of the goal, or an eid. The receipt lands in `plan_result`; a refused plan changes nothing.
 -- Everything is a local of the one setter: a setter sees the getters as they were before its write.
 Goal.plan on-setter apply-plan:
   WHEN this.plan != None:
@@ -133,7 +133,7 @@ Goal.plan on-setter apply-plan:
     again = [t for t in tasks if ok and (prop('Task:' + g + ':' + str(t['key']), 'status') in ('stuck', 'failed') or (prop('Task:' + g + ':' + str(t['key']), 'status') == 'done' and t['redo']))]
     fresh_w = [w for w in waits if ok and prop('Wait:' + g + ':' + str(w['key']), 'status') == None]
     FOR t IN fresh:
-      ('Task:' + g + ':' + str(t['key'])) = Task(goal: this.eid, title: str(t['title'] or t['key']), name: str(t['title'] or t['key']), detail: t['detail'] or '', plan_key: str(t['key']), parent: ('Task:' + g + ':' + str(t['parent']) if t['parent'] else None))
+      ('Task:' + g + ':' + str(t['key'])) = Task(goal: this.eid, title: str(t['title'] or t['key']), name: str(t['title'] or t['key']), detail: t['detail'] or '', plan_key: str(t['key']), parent: (('Task:' + g + ':' + str(t['parent']) if not (':' in str(t['parent'])) else str(t['parent'])) if t['parent'] else None))
     FOR w IN fresh_w:
       ('Wait:' + g + ':' + str(w['key'])) = Wait(goal: this.eid, title: str(w['title'] or w['key']), name: str(w['title'] or w['key']), condition: w['condition'], every_s: w['every_s'], deadline_min: w['deadline_min'], plan_key: str(w['key']))
     FOR c IN [c for c in cards if ok and prop('Decision:' + g + ':' + str(c['key']), 'status') == None]:
