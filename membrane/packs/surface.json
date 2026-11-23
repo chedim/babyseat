@@ -946,7 +946,7 @@
       "Pool",
       "Task"
     ],
-    "members": 4,
+    "members": 6,
     "writes": [
       "membrane:*.queued",
       "membrane:*=ChatLine()",

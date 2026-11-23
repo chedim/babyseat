@@ -1746,8 +1746,13 @@
   "goalgraph_lanes": {
     "getters": {},
     "writes": {
+      "*.take": "Bool",
+      "*.worker_prompt": "Any",
       "Chat.queued": "Bool",
+      "Goal.plan_called": "Any",
+      "Goal.plan_calls": "Num?",
       "Goal.plan_msg": "Text?",
+      "Goal.plan_prompt": "Text?",
       "Goal.planner_reply": "Any",
       "Task.reowe": "Any",
       "Task.worker_msg": "Text?",
