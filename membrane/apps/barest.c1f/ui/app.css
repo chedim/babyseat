@@ -242,3 +242,27 @@ code.md-code { font: .92em var(--mono); background: rgb(127 127 127 / .18); padd
 .frrefresh { align-self: flex-start; }
 .frerror { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--note); color: var(--note-ink); font-size: 12px; }
 .frgo { align-self: flex-start; background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); padding: 6px 16px; border-radius: 6px; }
+
+/* the goals view (goals_view.c1f): the goals as a tidy list, then the selected goal: its state, the conversation of its own chat, its steps */
+.goalsview { display: flex; flex-direction: column; gap: 10px; font-family: var(--sans); }
+.goalshead { font: 600 12px var(--sans); color: var(--mute); }
+.goalslist { display: flex; flex-direction: column; gap: 6px; }
+.goalrow { display: block; width: 100%; text-align: left; padding: 9px 12px; font: 500 13px var(--sans); border: 1px solid var(--line); border-left-width: 4px; border-radius: 8px; background: var(--panel); color: inherit; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.goalrow.working { border-left-color: var(--accent); }
+.goalrow.finished { color: var(--mute); }
+.goalrow.on { border-color: var(--accent); background: var(--me); }
+.goalsdetail { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.gv-title { font: 650 18px/1.3 var(--sans); word-break: break-word; }
+.gv-state { font: 600 12px var(--sans); color: var(--mute); }
+.gv-state.working { color: var(--accent); }
+.gv-sum { color: var(--mute); font-size: 13px; word-break: break-word; }
+.gv-h { margin-top: 12px; font-weight: 650; color: var(--mute); text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+.gv-msg { max-width: 88%; padding: 8px 12px; border-radius: 12px; font: 13px/1.45 var(--sans); white-space: pre-wrap; word-break: break-word; }
+.gv-msg.me { align-self: flex-end; background: var(--me); }
+.gv-msg.seat { align-self: flex-start; background: var(--seat); }
+.gv-task, .gv-wait, .gv-card { font: 13px/1.4 var(--sans); word-break: break-word; }
+.gv-task.running { color: var(--accent); }
+.gv-task.done, .gv-task.split { color: var(--mute); }
+.gv-task.stuck, .gv-task.failed { color: var(--bad); }
+.gv-card { font-weight: 650; padding: 8px 12px; border-radius: 8px; background: var(--note); color: var(--note-ink); }
+.gv-receipt { margin: 0 0 2px 16px; font: 11px/1.4 var(--mono); color: var(--mute); white-space: pre-wrap; word-break: break-word; }

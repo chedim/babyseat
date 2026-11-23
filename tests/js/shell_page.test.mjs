@@ -123,7 +123,7 @@ try {
   await b.open(`${seat.url}/`);
   await b.until(Q(K('DomNode:chat:input')), 'the chat composer (the c1f chat is the default)');
   assert.equal(await b.ev(`!!document.getElementById('boot')`), false, 'the boot text is gone');
-  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.nav button')].map((e) => e.textContent)`), ['Chat', 'Field', 'Log', 'Settings']);
+  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.nav button')].map((e) => e.textContent)`), ['Chat', 'Field', 'Goals', 'Log', 'Settings']);
   assert.equal(await b.ev(`document.querySelector('.nav [aria-current="page"]').textContent`), 'Chat');
   await b.until(`/^connected · idle$/.test(${status})`, 'the status line says connected and idle');
   assert.equal(await b.ev(`window.MEMBRANE_PAGE.clockId !== null`), true, 'the page runs the clock');
@@ -276,8 +276,8 @@ try {
   await b.size(1100, 680);
   await b.open(`${bare.url}/`);
   await b.until(Q(K('DomNode:chat:input')), 'the bare seat chat');
-  //   the default launch has NO field view (operator 2026-11-14): the nav is Chat and Settings, no Field button, no slot of it, no request of its feed, no script error
-  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.nav button')].map((e) => e.textContent)`), ['Chat', 'Log', 'Settings'], 'no Field tab');
+  //   the default launch has NO field view (operator 2026-11-14): the nav is Chat, Goals, Log and Settings, no Field button, no slot of it, no request of its feed, no script error
+  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.nav button')].map((e) => e.textContent)`), ['Chat', 'Goals', 'Log', 'Settings'], 'no Field tab');
   assert.equal(await b.ev(`!!${Q(K('DomNode:shell:nav:field'))} || !!${Q(K('DomNode:shell:slot:field'))} || !!${Q(K('DomNode:f:root'))}`), false, 'no Field node, no empty slot');
   assert.equal(await b.ev(`performance.getEntriesByType('resource').filter((r) => /fieldvm\\/(active|events|edges|entity)/.test(r.name)).length`), 0, 'no request of the field feed');
   await b.type('anyone there'); await b.enter();
