@@ -7,7 +7,7 @@ A goal is worked as a graph of tasks, waits and cards. A planner pass writes the
 ## The entities
 
 - `Goal:<g>`: `text`, `status` (open until closed; `parked` stops the reflex), `replan` (why a planner pass is wanted), `plan` (the planner's one write), `plan_result`, `max_plans` (see the ceiling).
-- `Task:<g>:<key>`: one worker step. `open` (something it waits on is not done), `owed` (ready), `running`, then `done`, `failed`, `stuck`, `split` or `dropped`. A task given a sub-task before it ran is `split` and is done when its sub-tasks are.
+- `Task:<g>:<key>`: one worker turn. `open` (something it waits on is not done), `owed` (ready), `running`, then `done`, `failed`, `stuck`, `split` or `dropped`. A task given a sub-task before it ran is `split` and is done when its sub-tasks are.
 - `Wait:<g>:<key>`: something that takes time outside a turn. It arms when what it follows is done, is checked every `every_s` seconds (at least 10), is `done` when its condition holds ({field, prop, equals} or {method, args, equals}), and `failed` after `deadline_min` minutes.
 - `Decision:<g>:<key>` (a card): a choice only the operator can make; it blocks the tasks that need it. `Pool:workers`: `size` tasks run at once (3 unless it says otherwise).
 - Readiness is a getter (`is_ready`, `open_blockers`), counted, never decremented, so a dropped or doubled write cannot make it drift.
