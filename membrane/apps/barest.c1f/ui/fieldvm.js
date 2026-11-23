@@ -176,7 +176,7 @@ export class Link {
     }
     for (let more = true; more && this.waiting_packs.size;) {
       more = false;
-      for (const [n, src] of [...this.waiting_packs]) if (host.pack(n, src) === null) { this.waiting_packs.delete(n); more = true; }
+      for (const [n, src] of [...this.waiting_packs]) if (host.pack(n, src) === null) { this.waiting_packs.delete(n); more = true; if (typeof host.rerun === 'function') host.rerun(src); }
     }
   }
 
@@ -263,6 +263,7 @@ class Host {
   constructor(f, root, errors) {
     this.f = f; this.root = root; this.nodes = new Map(); this.pending = []; this.frame = 0;
     this.errors = errors;
+    this.held = new Map();                // the entities the page was fed (eid -> class): a pack that loads later is shown them again (`rerun`)
     this.out = new Map();                 // W2: the Fetch in flight (or last made) per entity: {key, ctl, why}
     this.els = new WeakMap();             // element -> its entity (the page's and the packs')
     this.page = new Map();                // the page's own elements: entity -> element
@@ -305,6 +306,7 @@ class Host {
   /** An entity arrives: made empty, then each field written, so the views' setters see it. */
   feed(eid, cls, props = {}, mirror = false) {
     if (this.f.get(eid) === 'null') this.f.load(eid, cls, '{}');
+    this.held.set(eid, cls);
     for (const [k, v] of Object.entries(props)) this.f.write(eid, k, JSON.stringify(v ?? null), this.now());
     if (!mirror) this.fetches(Object.entries(props).map(([prop, v]) => ({ eid, prop, new: v })));   // W2: what the seat did is not asked again here
     this.flush();
@@ -327,6 +329,21 @@ class Host {
   pack(name, src) {
     try { this.f.set_pack(name, src); this.sources.set(name, src); delete this.errors[name]; return null; }
     catch (e) { this.errors[name] = String(e); return this.errors[name]; }
+  }
+
+  /** A pack loaded or changed while the page runs: its setters have not seen what the page already holds (a setter runs when its property is written, and a pack that loads later missed the writes of the boot),
+   *  so a view pack would not register or draw until something else wrote. Each entity the page was fed, of a class the pack has a setter on, is written its own current value of that property: a same-value write
+   *  runs the setters, as it did when the page started. No contract of the view packs changes. */
+  rerun(src) {
+    const pairs = [...String(src).matchAll(/^(\w+)\.(\w+) on-setter\b/gm)].map((m) => [m[1], m[2]]);
+    for (const [cls, prop] of pairs) {
+      for (const [eid, c] of this.held) {
+        if (c !== cls) continue;
+        const cur = this.get(eid);
+        if (cur && prop in cur) this.f.write(eid, prop, JSON.stringify(cur[prop] ?? null), this.now());
+      }
+    }
+    this.flush();
   }
 
   get(eid) { return JSON.parse(this.f.get(eid)); }

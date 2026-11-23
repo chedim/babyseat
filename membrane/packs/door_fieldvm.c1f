@@ -12,7 +12,7 @@ VIRTUAL FvFile
 -- are the seat's, not the page's), by file name without `.c1f`, the text whole. They are read ONCE at boot (`FieldVm:seat`, from `Boot:seat.app_dirs`:
 -- each folder is listed, each pack file read), so a request waits only for the first read; a file pack changed afterwards is not re-read (a restart does).
 -- `entities` is one entity, `Boot:seat`, holding the views' settings (the snapshot getter below).
--- ALSO BUILT: a Pack entity written by the model (`Pack:<name>.text`) that imports `dom` is in `packs` as of the page's load (a pack written after the page loaded is seen by a reload: the page does not load packs while it runs).
+-- ALSO BUILT: a Pack entity written by the model (`Pack:<name>.text`) that imports `dom` is in `packs` as of the page's load (a pack written after the page loaded reaches the page by its link as `Placed:<ns>:<name>` (packs/placement.c1f): the page loads or replaces it while it runs and shows it what it already holds, docs/graph-link.md section 16).
 -- MISSING, and why: (1) the released seat sent every entity of a class the view packs declare (About:seat, fed by about.py with the
 -- version, the git sha and the changelog); nothing here feeds those entities, and the engine's entities of those classes are not listed yet, so the About
 -- window has nothing to draw; (2) there is no follow-up stream (the Wire feed is removed): the page's field changes only by its poll of `/ui/fieldvm/active`; (3) two folders holding the same pack name: either may win (the released seat had one folder).
