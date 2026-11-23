@@ -106,7 +106,7 @@ fn person_token(dir: &Dir, sub: &str) -> String {
 }
 
 /// (id, kind, live): the rows of the design after the operator's answers
-const ROWS: [(&str, &str, &str); 31] = [
+const ROWS: [(&str, &str, &str); 34] = [
     ("model.chat", "model", "live"), ("model.default", "readonly", "restart"), ("model.list", "readonly", "restart"), ("model.cloud", "readonly", "restart"),
     ("model.signin", "readonly", "restart"), ("model.cli", "readonly", "restart"),
     ("chat.name", "text", "live"), ("chat.max_steps", "number", "live"), ("chat.timeout", "number", "live"),
@@ -119,6 +119,7 @@ const ROWS: [(&str, &str, &str); 31] = [
     ("limits.command_timeout_s", "readonly", "restart"), ("limits.effect_workers", "readonly", "restart"), ("limits.warm_rows", "readonly", "restart"),
     ("limits.memory_budget_mb", "readonly", "restart"), ("limits.unload_soft", "readonly", "restart"), ("limits.unload_hard", "readonly", "restart"), ("limits.unload_batch", "readonly", "restart"),
     ("limits.eval_stats", "readonly", "restart"), ("limits.eval_stats_window_s", "readonly", "restart"),
+    ("components.list", "readonly", "restart"), ("components.add", "readonly", "restart"), ("components.remove", "readonly", "restart"),
 ];
 
 #[test]
@@ -135,8 +136,8 @@ fn every_row_has_its_descriptor_as_data_in_the_designed_group_and_order() {
         assert_eq!(get(run.port, &eid, "live"), json!(live), "{id}");
         for p in ["label", "help"] { assert!(get(run.port, &eid, p).as_str().map_or(false, |t| t.len() > 3), "{id} has a {p}"); }
         let order = get(run.port, &eid, "order").as_f64().unwrap_or_else(|| panic!("{id} has an order"));
-        let gi = ["model", "chat", "map", "home", "import", "access", "limits"].iter().position(|x| *x == g).unwrap();
-        assert!((gi, order) >= last, "{id}: groups run Model, Chat, Map, Home, Import, Access, Limits and rows keep their order");
+        let gi = ["model", "chat", "map", "home", "import", "access", "limits", "components"].iter().position(|x| *x == g).unwrap();
+        assert!((gi, order) >= last, "{id}: groups run Model, Chat, Map, Home, Import, Access, Limits, Components and rows keep their order");
         last = (gi, order);
     }
     // the Map group is hidden from the window while the field view is disabled (operator 2026-11-14); every other row is listed

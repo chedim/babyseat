@@ -57,3 +57,13 @@ The feed `GET /ui/settings` says per row whether it is `chosen` (`Setting.chosen
 while the model or the name is not chosen (a function of those two values, no "first run" flag): a dropdown of the listed models and a name field (prefilled when a name is chosen already; an empty name keeps the window open). One submit writes both
 through the rows' own door (`entity_write` of `Setting:model.chat.set` and `Setting:chat.name.set`); the seat's reason for a refusal is shown in the window. With no model listed it says how to pull one (`ollama pull <name>`) and has *Refresh*.
 Tests: `tests/js/firstrun_view.test.mjs` (the page side), `seat-tests/tests/ollama_default_1143.rs` (the seat side).
+
+## Components (Phase 1a, read-only; `membrane/packs/components.c1f`)
+
+The seat starts with the chat and the configurator; the programs that add abilities (`graphlink-claude`, ...) live next to the seat's binary. At start the pack lists that folder and keeps one `Component:<name>` entity per executable `graphlink-*` file.
+
+- `Component:<name>`: `binary` (`graphlink-<name>`), `ns` (the name, the namespace of the peer's `Vm:<ns>`), `autoload` (a flag kept on the graph, false until set).
+- `state` is a getter over one source, `Vm:<ns>.link`: `up` (the peer said hello), `gone` (it closed), `available` (no such Vm: the program exists, nothing is attached).
+- Settings: the group `components` has three READ-ONLY rows: `components.list` (name, state, autoload of each Component), `components.add` and `components.remove` (shown disabled).
+- Out of scope (Phase 1b): loading and unloading at run time. A peer is declared when the seat starts (boot fact `peers`); writing `Component.load` or `.unload` only sets `refused` with that reason. 1b adds the native `Peer.declare` verb for them.
+- Tests: `tests/specs/components.json`, `tests/specs/components_settings.json`.

@@ -1,0 +1,38 @@
+PACK components 1
+IMPORT boot 1
+IMPORT link 1
+IMPORT proc 1
+RESIDENT Component
+-- THE COMPONENTS (Phase 1a, read-only): one entity per `graphlink-*` program found next to the seat's binary, `Component:<name>` (name = the binary without `graphlink-`).
+-- A row is: binary, ns (= name, the namespace of its `Vm:<ns>`), autoload (kept on the graph; false until set), and `state` (a GETTER over the one source, the peer's `Vm:<ns>.link`):
+--   available  no Vm with that namespace: the program exists, nothing is attached to it
+--   up         the peer said hello (Vm.link = up)
+--   gone       the peer closed (Vm.link = gone; the Vm stays, stale)
+-- LOAD AND UNLOAD ARE NOT HERE YET: the seat's peer driver (cliffvm:src/peers.rs) reads the boot fact `peers` once, at start, and makes the rings and the token then. Writing `load` or
+-- `unload` leaves `refused` with that reason and changes nothing. Phase 1b is the native `Peer:<name>.declare` verb that these two will use.
+
+Component.state getter:
+  WHEN prop('Vm:' + str(this.ns), 'link') == 'up': 'up'
+  ELSE WHEN prop('Vm:' + str(this.ns), 'link') == 'gone': 'gone'
+  ELSE: 'available'
+
+-- the scan: a listing of the folder of the seat's binary, kept to the `graphlink-*` names (one Command, written at start, read when it finishes)
+Boot.started on-setter components-scan-start:
+  ALWAYS:
+    Command:components_scan = Command(cmd: 'cd "$(dirname "$(command -v cliffvm)")" && find . -maxdepth 1 -type f -perm -u+x -name "graphlink-*" | sed "s|^./||"', read_only: True)
+    Command:components_scan.run = {'id': 'components_scan'}
+
+Command.run_result on-setter components-scan-done:
+  WHEN 'components_scan' in this.eid:
+    FOR n IN [after(l, 'graphlink-') for l in lines(prop(this.run_result, 'stdout') or '') if startswith(l, 'graphlink-') and len(l) > 10]:
+      ('Component:' + n).binary = 'graphlink-' + n
+      ('Component:' + n).ns = n
+      ('Component:' + n).autoload = prop('Component:' + n, 'autoload') or False
+
+-- load / unload: refused with the reason until the native declare verb exists (Phase 1b)
+Component.load on-setter component-load:
+  WHEN this.load != None:
+    this.refused = 'cannot load ' + str(this.binary) + ' while the seat runs: a peer is declared when the seat starts (boot fact peers); a runtime load needs the native Peer.declare verb'
+Component.unload on-setter component-unload:
+  WHEN this.unload != None:
+    this.refused = 'cannot unload ' + str(this.binary) + ' while the seat runs: a peer is declared when the seat starts (boot fact peers); a runtime unload needs the native Peer.declare verb'

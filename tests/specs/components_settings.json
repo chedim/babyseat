@@ -1,0 +1,61 @@
+[
+ {
+  "name": "the settings window has a Components section: one read-only row listing the Component:* entries",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/link.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/components.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/router.c1f",
+   "membrane/packs/settings.c1f"
+  ],
+  "given": [
+   {"eid": "Boot:seat", "class": "Boot", "props": {}},
+   {"eid": "Component:claude", "class": "Component", "props": {"binary": "graphlink-claude", "ns": "claude"}},
+   {"eid": "Component:openai", "class": "Component", "props": {"binary": "graphlink-openai", "ns": "openai"}},
+   {"eid": "Vm:claude", "class": "Vm", "props": {"link": "up"}}
+  ],
+  "writes": [
+   {"eid": "Boot:seat", "prop": "started", "value": true}
+  ],
+  "expect": [
+   {"eid": "Setting:components.list", "prop": "group", "equals": "components"},
+   {"eid": "Setting:components.list", "prop": "kind", "equals": "readonly"},
+   {"eid": "Setting:components.list", "prop": "current.0.name", "equals": "claude"},
+   {"eid": "Setting:components.list", "prop": "current.0.state", "equals": "up"},
+   {"eid": "Setting:components.list", "prop": "current.1.name", "equals": "openai"},
+   {"eid": "Setting:components.list", "prop": "current.1.state", "equals": "available"}
+  ]
+ },
+ {
+  "name": "Add and Remove are disabled rows with a note, and a write to either is refused",
+  "packs": [
+   "membrane/packs/boot.c1f",
+   "membrane/packs/link.c1f",
+   "membrane/packs/proc.c1f",
+   "membrane/packs/components.c1f",
+   "membrane/packs/door.c1f",
+   "membrane/packs/fetch.c1f",
+   "membrane/packs/router.c1f",
+   "membrane/packs/settings.c1f"
+  ],
+  "given": [
+   {"eid": "Boot:seat", "class": "Boot", "props": {}}
+  ],
+  "writes": [
+   {"eid": "Boot:seat", "prop": "started", "value": true},
+   {"eid": "Setting:components.add", "prop": "set", "value": "graphlink-extra"},
+   {"eid": "Setting:components.remove", "prop": "set", "value": "claude"}
+  ],
+  "expect": [
+   {"eid": "Setting:components.add", "prop": "kind", "equals": "readonly"},
+   {"eid": "Setting:components.add", "prop": "how", "contains": "Peer.declare"},
+   {"eid": "Setting:components.add", "prop": "refused", "contains": "read-only"},
+   {"eid": "Setting:components.remove", "prop": "kind", "equals": "readonly"},
+   {"eid": "Setting:components.remove", "prop": "how", "contains": "Peer.declare"},
+   {"eid": "Setting:components.remove", "prop": "refused", "contains": "read-only"}
+  ]
+ }
+]

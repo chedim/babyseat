@@ -35,8 +35,9 @@ door_fieldvm
 door_state
 door_models
 ha
-settings
 link
+components
+settings
 link_route
 logview
 placement

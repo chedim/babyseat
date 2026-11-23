@@ -35,6 +35,7 @@ Setting.current getter:
   ELSE WHEN this.eid == 'Setting:import.embeddings': prop('membrane::Embed:queue', 'line')
   ELSE WHEN this.eid == 'Setting:access.mode': 'tokens required' if this.boot_val != None else 'open'
   ELSE WHEN this.eid == 'Setting:access.port': ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [this.boot_val])[0]
+  ELSE WHEN this.eid == 'Setting:components.list': sort_by([{'name': c.ns, 'state': c.state, 'autoload': c.autoload == True} for c in instances('Component')], 'name')
   ELSE WHEN this.value != None: this.value
   ELSE WHEN this.fact_val != None: this.fact_val
   ELSE: this.default
@@ -130,7 +131,10 @@ Boot.setting_rows getter:
    {'id': 'limits.unload_hard', 'order': 29, 'label': 'Hard unload mark', 'help': 'The share of the budget at which the seat unloads at once.', 'kind': 'readonly', 'live': 'restart', 'fact': 'unload_hard', 'how': 'start the seat with --fact unload_hard=<fraction>'},
    {'id': 'limits.unload_batch', 'order': 30, 'label': 'Unload batch', 'help': 'How many rows one unload takes. Unless set, 200.', 'kind': 'readonly', 'live': 'restart', 'fact': 'unload_batch', 'how': 'start the seat with --fact unload_batch=<number>'},
    {'id': 'limits.eval_stats', 'order': 31, 'label': 'Evaluation accounting', 'help': 'Whether the seat counts what its code costs.', 'kind': 'readonly', 'live': 'restart', 'fact': 'eval_stats', 'default': True, 'how': 'start the seat with --fact eval_stats=false'},
-   {'id': 'limits.eval_stats_window_s', 'order': 32, 'label': 'Accounting window', 'help': 'How often the accounting is told.', 'kind': 'readonly', 'live': 'restart', 'fact': 'eval_stats_window_s', 'default': 10, 'unit': 'seconds', 'how': 'start the seat with --fact eval_stats_window_s=<seconds>'}]
+   {'id': 'limits.eval_stats_window_s', 'order': 32, 'label': 'Accounting window', 'help': 'How often the accounting is told.', 'kind': 'readonly', 'live': 'restart', 'fact': 'eval_stats_window_s', 'default': 10, 'unit': 'seconds', 'how': 'start the seat with --fact eval_stats_window_s=<seconds>'},
+   {'id': 'components.list', 'order': 33, 'label': 'Components', 'help': 'The graphlink-* programs found next to the seat: name, state (up, gone, available) and autoload.', 'kind': 'readonly', 'live': 'restart', 'how': 'read-only list; runtime Add/Remove comes in Phase 1b with the native Peer.declare verb; until then a peer is declared when the seat starts (boot fact peers)'},
+   {'id': 'components.add', 'order': 34, 'label': 'Add component', 'help': 'Disabled: runtime Add/Remove comes in Phase 1b with the native Peer.declare verb; until then a peer is declared when the seat starts (boot fact peers).', 'kind': 'readonly', 'live': 'restart', 'how': 'runtime Add/Remove comes in Phase 1b with the native Peer.declare verb; until then a peer is declared when the seat starts (boot fact peers)'},
+   {'id': 'components.remove', 'order': 35, 'label': 'Remove component', 'help': 'Disabled: runtime Add/Remove comes in Phase 1b with the native Peer.declare verb; until then a peer is declared when the seat starts (boot fact peers).', 'kind': 'readonly', 'live': 'restart', 'how': 'runtime Add/Remove comes in Phase 1b with the native Peer.declare verb; until then a peer is declared when the seat starts (boot fact peers)'}]
 -- the rows are written when the seat starts, and only what differs (a restart on the same store writes nothing; a changed row of this pack is refreshed)
 Boot.started on-setter settings-seed:
   ALWAYS:
