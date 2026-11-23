@@ -29,7 +29,7 @@ Nav.active on-setter settings-activate:
     ('SettingsView:main').want = (prop('SettingsView:main', 'want') or 0) + 1
 
 -- the group titles, as the operator named them; a group the seat adds shows under its own id
-SettingsView.titles getter: {'model': 'Model', 'chat': 'Chat', 'home': 'Home', 'import': 'Import', 'access': 'Access', 'limits': 'Limits'}
+SettingsView.titles getter: {'model': 'Model', 'chat': 'Chat', 'home': 'Home', 'import': 'Import', 'access': 'Access', 'limits': 'Limits', 'components': 'Components'}
 SettingsView.subs getter: {'model': 'Which model answers your messages.', 'chat': 'How far and how long one answer may go.', 'home': 'What the model may do in the house.', 'import': 'Other data the seat can read.', 'access': 'Read-only. Everyone with access is the admin.', 'limits': 'Read-only. These are set when the seat starts; a change needs a restart.'}
 -- what the line at the top says: a failed read (text, with the seat's reason), or that the first read is on its way
 SettingsView.msg getter: this.note if this.note else ('' if this.loaded == True else 'Loading the settings…')

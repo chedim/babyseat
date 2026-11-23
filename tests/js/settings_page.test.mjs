@@ -94,7 +94,7 @@ try {
   await b.press('[data-key="DomNode:shell:nav:settings"]');
   await b.until(`document.querySelectorAll('.setrow').length >= 20`, 'the rows');
   assert.equal(await b.ev(`${Q('[data-key="DomNode:shell:slot:settings:empty"]')}.hidden`), true, 'the placeholder is gone');
-  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.setgroup > h3')].map((e) => e.textContent)`), ['Model', 'Chat', 'Home', 'Import', 'Access', 'Limits'], 'the groups, in the operator\'s order, no Map');
+  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.setgroup > h3')].map((e) => e.textContent)`), ['Model', 'Chat', 'Home', 'Import', 'Access', 'Limits', 'Components'], 'the groups, in the operator\'s order, no Map');
   const labels = await b.ev(`[...document.querySelectorAll('.setrow .setlabel')].map((e) => e.textContent)`);
   assert.deepEqual(labels.slice(0, 9), ['Model', 'Fallback model', 'Available models', 'Other providers', 'Sign-in', 'Answering program', 'Name', 'Most steps per answer', 'Answer time limit'], 'rows in the seat\'s order');
   assert.ok(!labels.some((l) => /Hidden kinds|Things shown|Tile size|Refresh every|Recent activity/.test(l)), 'no Map row');
