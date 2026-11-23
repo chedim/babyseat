@@ -21,6 +21,7 @@ The old JavaScript page and its folder `membrane/ui/` are gone.
 | Shell (`shell_view.c1f`): layout, nav, status line, theme, the slide-over panel | built, in the release | below |
 | Settings view (`settings_view.c1f`) | built, in the release | docs/settings-groups.md |
 | Log tab (`log_view.c1f`): the boundary log and the raw chat with the model, no peer needed | built (tests/js/log_view.test.mjs) | docs/logview.md, docs/model-chat.md |
+| Goals tab (`goals_view.c1f`, `Nav:goals`, between Chat and Log): the goals, and the selected goal's graph (its tasks with their receipts, waits and cards) read with the door's `run_cliff`; read-only | built (tests/js/goals_view.test.mjs); the goal's own chat and a way to say something to it are not built | docs/goalgraph.md (the goal graph pack) |
 | Link view (`link_view.c1f`): the page reports to the seat | built, in the release (slices 1 and 2 of the graph link: the page reports to the seat and subscribes through `POST /ui/link`, `membrane/packs/link_route.c1f`) | docs/graph-link.md |
 | Field view, 3D (`membrane/apps/field.c1f/field_view.c1f`) | built, DISABLED: not in the dist, not loaded by the default launch. To try it on a checkout, load the folder as one more app after the barest one: `cliffvm run <the packs of apps/barest.packs> membrane/apps/barest.c1f membrane/apps/field.c1f` (`tests/js/shell_page.test.mjs` does this) | `field_view.c1f`, `door_fieldvm.c1f` |
 | The released 0.7 page (panel.js, quota popups, voice, decisions cockpit, home) | not rebuilt and not planned for this release | |

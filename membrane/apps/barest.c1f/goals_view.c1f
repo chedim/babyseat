@@ -1,0 +1,129 @@
+PACK goals_view 1
+IMPORT dom 1
+IMPORT fetch 1
+IMPORT shell_view 1
+-- THE GOALS TAB, A VIEW PACK (#1143, operator 2026-11-23: "a Goals button between Chat and Log; every goal is a chat, so the operator can watch it move").
+-- It runs in the PAGE's field engine (it imports `dom`; the seat sends it, door_fieldvm.c1f, and does not run it) and follows the view-pack contract of shell_view.c1f:
+-- it registers `Nav:goals` (order 50, between Chat 10 and Log 85) when the shell opens, draws into `DomNode:shell:slot:goals` when the tab is first shown, and does no work while it is not in front.
+--   GoalsView:main   the tab: `goals` (the rows the seat last answered), `sel` (the goal the person picked), `cur` (the goal shown: the pick, else the first that is moving, else the first), `rows`,
+--                    `listing` (the list of goals as drawn), `items` (the selected goal's graph as drawn: its tasks, waits and cards), `note` (why the last ask failed), `polling`, `last_poll`, `seq`, `on`
+--   Fetch:goals:ask  the one call: the door's `run_cliff` (a clifflet that READS every Goal: its status, first line, node count and whether it moves, and the `view` of the selected goal only).
+-- THE TAB ONLY READS: no write goes from here (no `tell`, no decision). Everything drawn is a getter of the rows; the numbered DomNodes (`DomNode:goals:g:<n>`, `DomNode:goals:i:<n>`) are kept in order and the extra ones retired.
+-- WHAT IS NOT HERE (yet): the goal's own chat (`Chat:<goal>`: the planner pass and each worker step are messages in it) and a box to say something to the goal; the page's chat view shows the main chat only.
+
+GoalsView.cur getter:
+  WHEN this.sel != None and len([r for r in (this.rows or []) if prop(r, 'e') == this.sel]) > 0: this.sel
+  ELSE WHEN len(this.rows or []) > 0: prop(this.rows[0], 'e')
+  ELSE: None
+GoalsView.code getter: "[{'e': g.eid, 's': g.status, 'ti': g.title, 'ls': clip(lines(g.text or '')[0], 160), 'n': len(g.graph_nodes), 'mv': g.moving, 'view': (g.view if g.eid == '" + str(this.cur or '') + "' else None)} for g in instances('Goal')]"
+-- the rows, each tidied: a null that carries a reason (a goal with no status or title) is an empty text, and a goal that is moving comes first, a finished one last
+GoalsView.norm getter: [{'e': str(prop(g, 'e')), 'st': prop(g, 's') if prop(g, 's') is Text else 'open', 'ti': prop(g, 'ti') if prop(g, 'ti') is Text else '', 'ls': prop(g, 'ls') if prop(g, 'ls') is Text else '', 'n': prop(g, 'n') or 0, 'mv': prop(g, 'mv') == True, 'view': prop(g, 'view') if prop(g, 'view') is Dict else None, 'k': 0 if prop(g, 'mv') == True else (2 if (prop(g, 's') if prop(g, 's') is Text else 'open') in ['done', 'closed', 'dropped', 'failed'] else 1)} for g in (this.goals or []) if g is Dict]
+GoalsView.rows getter: sort_by(this.norm or [], 'k')
+GoalsView.cur_row getter: ([r for r in (this.rows or []) if prop(r, 'e') == this.cur] or [None])[0]
+GoalsView.listing getter: fold([], [concat(acc, [{'n': len(acc), 'c': 'goalrow on' if prop(r, 'e') == this.cur else 'goalrow', 't': prop(r, 'e') + '  |  ' + prop(r, 'st') + ('  |  moving' if prop(r, 'mv') else '') + ('  |  ' + (prop(r, 'ti') or clip(prop(r, 'ls'), 70)) if (prop(r, 'ti') or prop(r, 'ls')) else '')}]) for r in (this.rows or [])])
+
+-- the selected goal's graph as lines: a title, a summary, the cards that wait for the person, the waits, then the tasks (what is stuck or running first, what is done last; a dropped task is only counted)
+GoalsView.parts getter:
+  r = this.cur_row
+  v = prop(r, 'view')
+  every = [t for t in (prop(v, 'tasks') or [])]
+  ts = [t for t in every if prop(t, 'status') != 'dropped']
+  ws = [w for w in (prop(v, 'waits') or [])]
+  cs = [c for c in (prop(v, 'cards') or [])]
+  top = [{'c': 'gv-title', 't': prop(r, 'e') + '  |  ' + (prop(r, 'ti') or prop(r, 'st')) + ('  |  moving' if prop(r, 'mv') else '  |  nothing moving')}, {'c': 'gv-sum', 't': clip(prop(r, 'ls') or '', 200)}] if r != None else [{'c': 'gv-sum', 't': 'No goal on this seat yet.'}]
+  sums = [{'c': 'gv-sum', 't': str(len(ts)) + ' tasks (' + str(len([t for t in ts if prop(t, 'status') == 'running'])) + ' running, ' + str(len([t for t in ts if prop(t, 'status') == 'owed'])) + ' ready, ' + str(len([t for t in ts if prop(t, 'status') == 'done'])) + ' done, ' + str(len(every) - len(ts)) + ' dropped), ' + str(len(ws)) + ' waits, ' + str(len([c for c in cs if prop(c, 'status') == 'open'])) + ' cards open'}] if v != None else ([{'c': 'gv-sum', 't': 'Reading the graph...'}] if r != None else [])
+  cards = concat([{'c': 'gv-h', 't': 'Waiting for you'}] if len(cs) > 0 else [], [{'c': 'gv-card', 't': 'Decision: ' + str(prop(c, 'name')) + '  [' + str(prop(c, 'status')) + ']'} for c in cs])
+  waits = concat([{'c': 'gv-h', 't': 'Waits'}] if len(ws) > 0 else [], [{'c': 'gv-wait', 't': str(prop(w, 'title')) + '  [' + str(prop(w, 'status')) + ']  checks ' + clip(str(prop(w, 'condition')), 90)} for w in ws])
+  ranked = sort_by([{'k': 0 if prop(t, 'status') in ['running', 'stuck', 'failed'] else (1 if prop(t, 'status') == 'owed' else (3 if prop(t, 'status') == 'done' else 2)), 'c': 'gv-task ' + str(prop(t, 'status')), 't': '[' + str(prop(t, 'status')) + '] ' + str(prop(t, 'title')) + ('  (sub-task)' if prop(t, 'parent') is Text else '') + ('  waits on ' + str(len(prop(t, 'waits_on'))) if len(prop(t, 'waits_on') or []) > 0 else ''), 'rc': prop(t, 'receipt') if prop(t, 'receipt') is Text else ''} for t in ts], 'k')
+  tasks = concat([{'c': 'gv-h', 't': 'Tasks'}] if len(ts) > 0 else [], fold([], [concat(acc, concat([{'c': prop(x, 'c'), 't': prop(x, 't')}], [{'c': 'gv-receipt', 't': clip(prop(x, 'rc'), 320)}] if prop(x, 'rc') != '' else [])) for x in ranked]))
+  concat(concat(concat(concat(top, sums), cards), waits), tasks)
+GoalsView.items getter: fold([], [concat(acc, [{'n': len(acc), 'c': prop(x, 'c'), 't': prop(x, 't')}]) for x in (this.parts or [])])
+GoalsView.paint getter: {'on': this.on, 'count': str(len(this.rows or [])) + ' goals', 'note': this.note or '', 'listing': this.listing or [], 'items': this.items or []}
+
+Shell.open on-setter goals-view-register:
+  WHEN this.open:
+    ('Nav:goals').title = 'Goals'
+    ('Nav:goals').order = 50
+
+Nav.active on-setter goals-view-draw:
+  WHEN this.eid == 'Nav:goals' and this.active == True and not prop('GoalsView:main', 'on'):
+    ('DomNode:goals:root').tag = 'div'
+    ('DomNode:goals:root').class = 'panelrows goalsview'
+    ('DomNode:goals:root').parent = 'DomNode:shell:slot:goals'
+    ('DomNode:goals:head').parent = 'DomNode:goals:root'
+    ('DomNode:goals:head').tag = 'div'
+    ('DomNode:goals:head').class = 'goalshead'
+    ('DomNode:goals:count').parent = 'DomNode:goals:head'
+    ('DomNode:goals:count').tag = 'span'
+    ('DomNode:goals:count').role = 'status'
+    ('DomNode:goals:note').parent = 'DomNode:goals:root'
+    ('DomNode:goals:note').tag = 'div'
+    ('DomNode:goals:note').class = 'panelnote'
+    ('DomNode:goals:note').role = 'alert'
+    ('DomNode:goals:note').hidden = True
+    ('DomNode:goals:list').parent = 'DomNode:goals:root'
+    ('DomNode:goals:list').tag = 'div'
+    ('DomNode:goals:list').class = 'goalslist'
+    ('DomNode:goals:detail').parent = 'DomNode:goals:root'
+    ('DomNode:goals:detail').tag = 'div'
+    ('DomNode:goals:detail').class = 'goalsdetail'
+    ('Nav:goals').filled = True
+    ('GoalsView:main').on = True
+
+-- everything on the page is drawn from `paint`: the count, the note, the list of goals, the selected goal's lines (numbered nodes in order; the ones that are no longer needed are retired)
+GoalsView.paint on-setter goals-view-paint:
+  WHEN prop(this.paint, 'on') == True:
+    ('DomNode:goals:count').text = prop(this.paint, 'count')
+    ('DomNode:goals:note').text = prop(this.paint, 'note')
+    ('DomNode:goals:note').hidden = prop(this.paint, 'note') == ''
+    FOR x IN prop(this.paint, 'listing'):
+      ('DomNode:goals:g:' + str(prop(x, 'n'))).parent = 'DomNode:goals:list'
+      ('DomNode:goals:g:' + str(prop(x, 'n'))).tag = 'button'
+      ('DomNode:goals:g:' + str(prop(x, 'n'))).type = 'button'
+      ('DomNode:goals:g:' + str(prop(x, 'n'))).class = prop(x, 'c')
+      ('DomNode:goals:g:' + str(prop(x, 'n'))).text = prop(x, 't')
+    FOR y IN [y for y in instances('DomNode') if startswith(y.eid, 'DomNode:goals:g:') and not (y.eid in ['DomNode:goals:g:' + str(prop(z, 'n')) for z in prop(this.paint, 'listing')])]:
+      (y.eid).retire = True
+    FOR i IN prop(this.paint, 'items'):
+      ('DomNode:goals:i:' + str(prop(i, 'n'))).parent = 'DomNode:goals:detail'
+      ('DomNode:goals:i:' + str(prop(i, 'n'))).tag = 'div'
+      ('DomNode:goals:i:' + str(prop(i, 'n'))).class = prop(i, 'c')
+      ('DomNode:goals:i:' + str(prop(i, 'n'))).text = prop(i, 't')
+    FOR j IN [j for j in instances('DomNode') if startswith(j.eid, 'DomNode:goals:i:') and not (j.eid in ['DomNode:goals:i:' + str(prop(k, 'n')) for k in prop(this.paint, 'items')])]:
+      (j.eid).retire = True
+
+-- a click on a goal selects it; its graph comes with the next ask
+DomNode.clicked on-setter goals-view-click:
+  WHEN startswith(this.eid, 'DomNode:goals:g:') and this.clicked != None:
+    ('GoalsView:main').sel = prop((prop('GoalsView:main', 'rows') or [])[num(replace(this.eid, 'DomNode:goals:g:', ''))], 'e')
+    ('GoalsView:main').last_poll = 0
+
+-- the receipt of the call, read once: ok = the seat answered 2xx and the call has no error; `text` is what the door's `run_cliff` answered (the value, as JSON)
+Fetch.goalsq getter:
+  rq = this.request_result
+  bd = json(str(prop(rq, 'body') or ''))
+  jd = bd if bd is Dict else {}
+  hs = prop(rq, 'http_status')
+  cs = prop(prop(jd, 'result'), 'content') or []
+  er = prop(jd, 'error')
+  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not prop(prop(jd, 'result'), 'isError'), 'text': prop(cs[0], 'text') if len(cs) > 0 else None, 'why': (str(prop(er, 'message') if er is Dict else (er or prop(prop(jd, 'result'), 'content'))) if (er or prop(prop(jd, 'result'), 'isError')) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+
+-- an ask starts on the shell's tick, while the tab is in front and none is running
+Shell.tick on-setter goals-view-poll:
+  WHEN this.open and prop('Nav:goals', 'active') == True and not prop('GoalsView:main', 'polling') and not prop('Conn:page', 'hidden') and this.tick - (prop('GoalsView:main', 'last_poll') or 0) >= this.status_ms / 1000:
+    n = (prop('GoalsView:main', 'seq') or 0) + 1
+    ('GoalsView:main').seq = n
+    ('GoalsView:main').polling = True
+    ('Fetch:goals:ask').request = {'timeout_s': 20, 'id': 'goals-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'run_cliff', 'arguments': {'code': prop('GoalsView:main', 'code')}}})}
+
+Fetch.goalsq on-setter goals-view-got:
+  WHEN this.eid == 'Fetch:goals:ask' and this.goalsq != None and not prop(this.goalsq, 'ok'):
+    ('GoalsView:main').note = 'the seat did not answer the Goals tab: ' + str(prop(this.goalsq, 'why'))
+    ('GoalsView:main').polling = False
+    ('GoalsView:main').last_poll = prop('Shell:main', 'tick')
+  ELSE WHEN this.eid == 'Fetch:goals:ask' and this.goalsq != None:
+    rs = json(str(prop(this.goalsq, 'text') or ''))
+    ('GoalsView:main').goals = rs if rs is List else (prop('GoalsView:main', 'goals') or [])
+    ('GoalsView:main').note = '' if rs is List else 'the seat answered the Goals tab with something that is not a list'
+    ('GoalsView:main').polling = False
+    ('GoalsView:main').last_poll = prop('Shell:main', 'tick')

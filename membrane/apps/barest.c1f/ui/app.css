@@ -242,3 +242,19 @@ code.md-code { font: .92em var(--mono); background: rgb(127 127 127 / .18); padd
 .frrefresh { align-self: flex-start; }
 .frerror { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--note); color: var(--note-ink); font-size: 12px; }
 .frgo { align-self: flex-start; background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); padding: 6px 16px; border-radius: 6px; }
+
+/* the goals view (goals_view.c1f): the list of goals, then the selected goal as lines */
+.goalsview { display: flex; flex-direction: column; gap: 8px; }
+.goalshead { font: 600 12px var(--mono); color: var(--mute); }
+.goalslist { display: flex; flex-direction: column; gap: 2px; }
+.goalrow { text-align: left; padding: 4px 8px; font: 12px var(--mono); border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.goalrow.on { border-color: var(--accent); }
+.goalsdetail { display: flex; flex-direction: column; gap: 4px; }
+.gv-title { margin-top: 8px; font: 650 14px var(--mono); word-break: break-word; }
+.gv-sum { color: var(--mute); font-size: 12px; word-break: break-word; }
+.gv-h { margin-top: 10px; font-weight: 650; color: var(--mute); text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+.gv-task, .gv-wait, .gv-card { font: 12px/1.4 var(--mono); word-break: break-word; }
+.gv-task.running { color: var(--accent); }
+.gv-task.done, .gv-task.split { color: var(--mute); }
+.gv-card { font-weight: 650; }
+.gv-receipt { margin: 0 0 2px 16px; font: 11px/1.4 var(--mono); color: var(--mute); white-space: pre-wrap; word-break: break-word; }
