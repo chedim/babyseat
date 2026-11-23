@@ -2,7 +2,7 @@
 
 A goal is worked as a graph of tasks, waits and cards. A planner pass writes the graph, a pool of workers runs its tasks, and the chat is told when nothing moves any more.
 
-**It is one pack, shipped** (`membrane/packs/goalgraph.c1f`, listed in `apps/barest.packs`). It is named `goalgraph` because that is the name of the engine's older built-in goal graph, which it replaces; a pack of any other name would run beside the built-in and fight it over the same classes. The model is `Pool:workers.model` (the `pick` of every planner and worker message; empty = the seat's own pick). Everything below happens by itself once a goal exists: see "What runs without being asked".
+**It is one pack, and a seat loads it by writing `Pack:goalgraph`** (the file is `membrane/packs/goalgraph.c1f`). It is not in `apps/barest.packs`: the engine registers its own built-in `goalgraph` before any pack loads, and the loader skips a shipped pack whose name is already loaded; a pack of any other name would fail against the built-in's classes. Shipping it, or calling the file `goalpack.c1f`, needs a cliffvm release without the built-in. The model is `Pool:workers.model` (the `pick` of every planner and worker message; empty = the seat's own pick). Everything below happens by itself once a goal exists: see "What runs without being asked".
 
 ## The entities
 
@@ -30,6 +30,7 @@ The planner and the workers are model turns. This seat refuses `membrane::llm.ca
 ## What keeps it from getting stuck
 
 - A planner pass answers the reason it was called for when its reply lands, whether or not it wrote a plan (UNCHANGED, FULFILLED, an error, a refused plan). Without this a goal whose planner wrote no plan waited for ever. A refused plan is told to the next pass (`Your last plan was refused: ...`).
+- A split task whose sub-tasks all ended is closed (by the state it is in, on the beat, not only when the last sub-task ends).
 - A planner pass nobody answered for 15 minutes (its turn was lost), or one cut off by a restart, is asked again. A worker nobody answered for 15 minutes becomes `stuck`, which frees its pool slot and asks the planner. A task that was running or owed at boot goes back to the pool.
 
 ## The ceiling

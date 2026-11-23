@@ -10,8 +10,9 @@ RESIDENT Decision
 RESIDENT Result
 RESIDENT Pool
 -- THE GOAL GRAPH, ONE PACK (#773, #994): goals, tasks, waits and cards, the planner and the workers as turns of the model, the report to the chat, the method waits.
--- It is shipped (apps/barest.packs) under the name `goalgraph`, which is also the name of the engine's older built-in goal graph: this pack replaces it (a pack of any other name
--- would run beside it and fight over the same classes). Its behaviour is held by tests/specs/goalgraph.json and goalgraph_lanes.json, and described in docs/goalgraph.md.
+-- It is NOT in apps/barest.packs: the engine registers its own built-in pack named `goalgraph` before any pack loads, and the loader skips a shipped pack whose name is already loaded.
+-- A seat loads it by writing `Pack:goalgraph` through the door, which replaces the built-in (a pack of any other name fails: "declares on Decision, which belongs to pack goalgraph").
+-- Shipping it, or naming the file goalpack.c1f, needs a cliffvm release without the built-in. Behaviour: tests/specs/goalgraph.json and goalgraph_lanes.json; description: docs/goalgraph.md.
 -- THE MODEL: `Pool:workers.model` is the model every planner and worker turn runs on (the `pick` of its message); empty = the seat's own pick. No `membrane::llm.call`: this seat refuses it.
 --
 -- The getters live here too (below): `finished` per class, `open_blockers` and `due`. A task's or wait's open
@@ -116,7 +117,10 @@ Goal.plan on-setter apply-plan:
   WHEN this.plan != None:
     g = replace(this.eid, 'Goal:', '')
     p = this.plan
-    tasks = p['tasks'] or []
+    pre = 'Task:' + g + ':'
+    -- a key may be written as the task's eid (the planner reads eids in the graph): it names the same task, never a new one with the prefix twice
+    tasks = [{'key': (after(str(t['key']), head(str(t['key']), len(pre))) if startswith(str(t['key']), pre) else t['key']), 'title': t['title'], 'detail': t['detail'], 'after': t['after'], 'parent': t['parent'], 'redo': t['redo']} for t in (p['tasks'] or [])]
+    drops = [(after(str(k), head(str(k), len(pre))) if startswith(str(k), pre) else k) for k in (p['drop'] or [])]
     waits = p['waits'] or []
     cards = p['cards'] or []
     refs = concat(concat([[str(t['key']), 'Task:' + g + ':' + str(t['key'])] for t in tasks], [[str(w['key']), 'Wait:' + g + ':' + str(w['key'])] for w in waits]), [[str(c['key']), 'Decision:' + g + ':' + str(c['key'])] for c in cards])
@@ -148,7 +152,7 @@ Goal.plan on-setter apply-plan:
       e[0].blocks = concat(prop(e[0], 'blocks') or [], [x for x in [e[1]] if not (x in (prop(e[0], 'blocks') or []))])
     FOR t IN again:
       ('Task:' + g + ':' + str(t['key'])).status = 'owed' if ((prop('Task:' + g + ':' + str(t['key']), 'open_blockers') or 0) + len([e for e in edges if e[1] == ('Task:' + g + ':' + str(t['key'])) and not prop(e[0], 'finished')])) < 0.5 else 'open'
-    FOR k IN [k for k in (p['drop'] or []) if ok and prop('Task:' + g + ':' + str(k), 'status') != None]:
+    FOR k IN [k for k in drops if ok and prop('Task:' + g + ':' + str(k), 'status') != None]:
       ('Task:' + g + ':' + str(k)).status = 'dropped'
     this.planned_replan = this.replan if ok else this.planned_replan
     this.planned_ts = clock
@@ -195,15 +199,14 @@ Task.finish on-setter finish-task:
     this.ended_ts = clock
     this.status = v
 
--- a split task ends when every sub-task has ended done or dropped: done when one is done, dropped when all were; its own parent is checked next
-Task.status on-setter close-parent:
-  WHEN this.parent != None and this.status in ('done', 'dropped') and prop(this.parent, 'status') == 'split':
-    subs = referencing(this.parent, 'parent')
-    open_subs = [s for s in subs if s.eid != this.eid and not (s.status in ('done', 'dropped'))]
-    any_done = this.status == 'done' or len([s for s in subs if s.eid != this.eid and s.status == 'done']) > 0
-    FOR x IN [1] if len(open_subs) == 0 else []:
-      this.parent.status = 'done' if any_done else 'dropped'
-      this.parent.receipt = 'its sub-tasks are done' if any_done else 'all its sub-tasks were dropped'
+-- a split task ends when every sub-task has ended done or dropped: done when one is done, dropped when all were; its own parent is checked next.
+-- It is a getter, so it closes a split task by the state it is in (sub-tasks that ended before the task was looked at, a restart, a pack loaded late), not only at the moment a sub-task ends.
+Task.subs_ended getter: this.status == 'split' and len(referencing(this, 'parent')) > 0 and len([s for s in referencing(this, 'parent') if not (s.status in ('done', 'dropped'))]) == 0
+Task.subs_ended on-setter close-split:
+  WHEN this.subs_ended:
+    any_done = len([s for s in referencing(this, 'parent') if s.status == 'done']) > 0
+    this.receipt = 'its sub-tasks are done' if any_done else 'all its sub-tasks were dropped'
+    this.status = 'done' if any_done else 'dropped'
 
 -- a task that has not run yet and is given a sub-task is split: its sub-tasks do its work (and it is done when they are)
 Task.splits_parent getter: this.parent != None and prop(this.parent, 'status') in ('open', 'owed')
@@ -362,6 +365,13 @@ Pool.pump on-setter lane-collect:
     FOR g IN [g for g in instances('Goal') if g.plan_msg != None and prop('membrane::Chat:gg:message:' + g.plan_msg + ':turn:response', 'text') != None]:
       g.planner_reply = prop('membrane::Chat:gg:message:' + g.plan_msg + ':turn:response', 'text')
       g.plan_msg = None
+    -- a sub-task whose parent was written with the goal's prefix twice (the plan did that before it took an eid as a parent) is attached to the real parent, one prefix a beat
+    FOR t IN [t for t in instances('Task') if t.parent != None and startswith(str(t.parent), 'Task:' + replace(str(t.goal), 'Goal:', '') + ':Task:')]:
+      t.parent = after(str(t.parent), head(str(t.parent), len('Task:' + replace(str(t.goal), 'Goal:', '') + ':')))
+    -- a split task whose sub-tasks all ended before anything looked at it (a restart, a pack loaded late) is closed on the beat
+    FOR t IN [t for t in instances('Task') if t.subs_ended]:
+      t.receipt = 'its sub-tasks are done' if len([s for s in referencing(t, 'parent') if s.status == 'done']) > 0 else 'all its sub-tasks were dropped'
+      t.status = 'done' if len([s for s in referencing(t, 'parent') if s.status == 'done']) > 0 else 'dropped'
     -- a planner pass nobody answered for 15 minutes (its turn was lost) is called again; a worker nobody answered for 15 minutes is stuck, which frees its pool slot and asks the planner
     FOR g IN [g for g in instances('Goal') if g.plan_msg != None and clock - (g.plan_asked_ts or clock) > 900 and prop('membrane::Chat:gg:message:' + g.plan_msg + ':turn:response', 'text') == None]:
       g.plan_msg = None

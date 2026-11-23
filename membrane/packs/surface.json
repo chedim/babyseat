@@ -898,7 +898,7 @@
       "Task",
       "Wait"
     ],
-    "members": 49,
+    "members": 50,
     "writes": [
       "Task:*.status",
       "membrane:*.queued",
@@ -911,7 +911,6 @@
       "ref(goal).replan",
       "ref(goal).tell",
       "ref(method_cmd).run",
-      "ref(parent).receipt",
       "ref(parent).status"
     ],
     "claims": [],

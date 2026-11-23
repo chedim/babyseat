@@ -1676,6 +1676,7 @@
       "Task.is_ready": "Bool",
       "Task.open_blockers": "Int",
       "Task.splits_parent": "Bool",
+      "Task.subs_ended": "Bool",
       "Task.worker_text": "Text?",
       "Wait.due": "Bool|Num",
       "Wait.finished": "Bool",
@@ -1687,7 +1688,6 @@
     },
     "writes": {
       "*.blocks": "List(Any)",
-      "*.receipt": "Text",
       "*.replan": "Text?",
       "*.run": "Dict",
       "*.status": "Text",
@@ -1717,6 +1717,7 @@
       "Task.continues": "Num?",
       "Task.ended_ts": "Num",
       "Task.finish": "Dict",
+      "Task.parent": "Text",
       "Task.pool": "Text",
       "Task.receipt": "Text",
       "Task.reowe": "Any",
