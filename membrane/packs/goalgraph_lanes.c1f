@@ -9,12 +9,34 @@ IMPORT goalgraph 1
 -- reply (planner_reply, worker_reply), which goalgraph.c1f already reads (the FULFILLED claim, the DONE / FAILED / STUCK / SPLIT verdict).
 -- A lane message is made once per call: its id is on the goal (plan_msg) or the task (worker_msg). The answer is collected on the pool's pump (a getter
 -- over a response that did not exist yet is not read again when it arrives), and the id is cleared once it is collected: the pump then looks for a response only for the lanes still waiting.
+-- THE MODEL: `Pool:workers.model` is the model the goals run on (the `pick` of a lane message); empty = the seat's own pick.
+-- NO llm.call: the three setters below have the names of goalgraph's (call-planner, replan-lost, dispatch) and replace them, without the refused `membrane::llm.call` write.
+Goal.plan_due on-setter call-planner:
+  WHEN this.plan_due and this.replan != this.plan_called:
+    this.plan_called = this.replan
+    this.plan_calls = (this.plan_calls or 0) + 1
+    this.plan_prompt = this.plan_due
+
+Goal.replan_lost on-setter replan-lost:
+  WHEN this.replan_lost and this.plan_due:
+    this.plan_called = this.replan
+    this.plan_calls = (this.plan_calls or 0) + 1
+    this.plan_prompt = this.plan_due
+
+Pool.pump on-setter dispatch:
+  WHEN this.pump:
+    owed = [t.eid for t in referencing(this, 'pool') if t.status == 'owed']
+    free = (this.size or 3) - this.busy
+    FOR e IN head(owed, 1) if (free > 0 and len(owed) > 0) else []:
+      e.take = True
+      e.worker_prompt = prop(e, 'worker_text')
+
 Goal.plan_calls on-setter lane-planner:
   WHEN this.plan_prompt != None:
     id = words(replace(str(clock * 1000000), '.', ' '))[0] + '-' + tail('00000000' + str(this.plan_calls), 8)
     this.plan_msg = id
     membrane::Chat:gg = Chat(name: 'gg')
-    membrane::Chat:gg:message[id] = ChatMessage(text: this.plan_prompt, at: clock)
+    membrane::Chat:gg:message[id] = ChatMessage(text: this.plan_prompt, at: clock, pick: (prop('Pool:workers', 'model') or ''))
     membrane::Chat:gg:message[id]:body = SemText(text: this.plan_prompt)
     membrane::Chat:gg:message[id]:turn = ChatTurn(message: 'membrane::Chat:gg:message:' + id, queued_at: clock)
     membrane::Chat:gg:time[id]:main = ChatLine(chat: 'gg')
@@ -25,7 +47,7 @@ Task.started_ts on-setter lane-worker:
     id = words(replace(str(clock * 1000000), '.', ' '))[0] + '-' + tail('00000000' + str((this.runs or 0) + 1 + (this.continues or 0) * 100), 8)
     this.worker_msg = id
     membrane::Chat:gg = Chat(name: 'gg')
-    membrane::Chat:gg:message[id] = ChatMessage(text: this.worker_prompt, at: clock)
+    membrane::Chat:gg:message[id] = ChatMessage(text: this.worker_prompt, at: clock, pick: (prop('Pool:workers', 'model') or ''))
     membrane::Chat:gg:message[id]:body = SemText(text: this.worker_prompt)
     membrane::Chat:gg:message[id]:turn = ChatTurn(message: 'membrane::Chat:gg:message:' + id, queued_at: clock)
     membrane::Chat:gg:time[id]:main = ChatLine(chat: 'gg')
