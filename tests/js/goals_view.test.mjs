@@ -49,6 +49,7 @@ assert.equal(ask.method, 'tools/call');
 assert.equal(ask.params.name, 'run_cliff');
 assert.match(ask.params.arguments.code, /instances\('Goal'\)/);
 assert.ok(!/entity_write|\.tell\s*=/.test(ask.params.arguments.code), 'the tab only reads');
+assert.match(ask.params.arguments.code, /:message:/, 'the goal chat is read');
 
 // the answer: the goals are listed (the one that is moving first) and that one is shown
 const nul = { $null: 'absent' };
@@ -64,23 +65,41 @@ const view = {
 };
 const rowsList = [
   { e: 'Goal:old', s: 'done', ti: nul, ls: 'an old goal', n: 1, mv: false, view: null },
-  { e: 'Goal:a', s: nul, ti: 'Ship it', ls: 'ship the thing', n: 3, mv: true, view },
+  { e: 'Goal:a', s: nul, ti: 'Ship it', ls: 'ship the thing', n: 3, mv: true, view,
+    msgs: [
+      { at: 1, u: 'You are the PLANNER for goal Goal:a: ship the thing\nmore', a: 'PLAN made' },
+      { at: 3, u: 'You are a WORKER on task Task:a:k2 of goal Goal:a.\nTask: open the PR\nx', a: '' },
+      { at: 2, u: 'You are a WORKER on task Task:a:k1 of goal Goal:a.\nTask: write the pack\nx', a: 'DONE tests green' },
+      { at: 4, u: 'please hurry', a: 'ok, hurrying' },
+    ] },
 ];
 w('Fetch:goals:ask', 'request_result', receipt(rowsList), 100001);
 assert.equal(get('GoalsView:main').cur, 'Goal:a', 'the goal that is moving is shown first');
 const list = nodeTexts('DomNode:goals:g:');
 assert.equal(list.length, 2);
-assert.match(list[0], /Goal:a/, 'the moving goal is first in the list');
-assert.match(list[1], /Goal:old/);
+assert.match(list[0], /Ship it/, 'the moving goal is first in the list');
+assert.match(list[0], /Working/);
+assert.match(list[1], /an old goal/, 'a goal with no title is named by the start of its text');
+assert.match(list[1], /Done/);
+assert.ok(!/Goal:/.test(list.join('\n')), 'no entity id in the list');
 const detail = nodeTexts('DomNode:goals:i:').join('\n');
 assert.match(detail, /Ship it/);
 assert.match(detail, /open the PR/);
-assert.match(detail, /running/);
+assert.match(detail, /open the PR  -  working/);
 assert.match(detail, /tests green/, 'a done task shows its receipt');
 assert.match(detail, /CI green/, 'the wait is drawn');
 assert.match(detail, /Which bug/, 'the card the operator must answer is drawn');
 assert.ok(!/dropped idea/.test(detail), 'a dropped task is counted, not drawn');
-assert.match(detail, /1 dropped/);
+assert.match(detail, /1 of 2 steps done/);
+assert.ok(!/Goal:|Task:|Decision:/.test(detail), 'no entity id in the goal');
+// the goal's own chat, oldest first, each message said for what it is
+assert.match(detail, /Conversation/);
+assert.match(detail, /Planning the work/);
+assert.match(detail, /Worker step: write the pack/);
+assert.match(detail, /DONE tests green/);
+assert.match(detail, /working on it\.\.\./, 'a step with no answer yet says it is working');
+assert.match(detail, /please hurry/);
+assert.ok(detail.indexOf('write the pack') < detail.indexOf('open the PR'), 'the chat is in time order');
 
 // the next ask names the selected goal (its graph is read for that one only)
 w('Shell:main', 'tick', 200, 200000);
