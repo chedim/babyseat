@@ -141,6 +141,8 @@ Box.done on-setter bye:
     this.retire = True
 ```
 
+The same removal, from outside a pack, is a write of a plain `None` to the entity itself, the mirror of a birth: in a rule `Box:a = None` (a computed identity: `('Box:' + this.n) = None`), through the tool `entity_write {spec: "Box:a", value: null}` with no `prop`. Only a plain `None` destroys: a null that has a reason, an Error or any other value is refused with its reason and nothing is removed. A pack is removed the same way (`Help:packs`).
+
 ## Apps, layers, privilege, Pack entities
 
 - An app is a folder `<name>.c1f/` of packs (loaded in dependency order) and data files; several apps are layers, the later one above.
@@ -160,7 +162,7 @@ Box.done on-setter bye:
 | SQL view | a getter |
 | SQL trigger | `Class.prop on-setter name:` |
 | SQL `INSERT`, JS `new Thing(...)` | `Thing:id = Thing(a: 1)` |
-| SQL `DELETE` | `this.retire = True` |
+| SQL `DELETE` | `this.retire = True`, or a plain `None` written to the entity |
 | SQL `COUNT(*)`, JS `arr.length` | `len(...)` |
 | Vue `computed` | a getter |
 | Vue `watch` | an on-setter |
