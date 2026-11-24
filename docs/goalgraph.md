@@ -25,7 +25,7 @@ A goal is worked as a graph of tasks, waits and cards. A planner pass writes the
 
 ## The lanes
 
-The planner and the workers are model turns. This seat refuses `membrane::llm.call`, so each pass is a message in the chat `gg`, on the model `Pool:workers.model` names, and the turn's answer text is the reply (`planner_reply`, `worker_reply`): the last `FULFILLED` line of the planner's answer is the claim; the last `DONE` / `FAILED` / `STUCK` / `SPLIT` line of a worker's answer ends its task. A worker works its task to the end of its turn, with as many tool calls as it needs; `SPLIT` is only for a task too big for one turn. A worker answer with no verdict is one more step (twice at most), then the task is `stuck`.
+The planner and the workers are model turns. This seat refuses `membrane::llm.call`, so each pass is a message in the goal's own chat `goal-<name>` (the planner and all the workers of a goal share it), on the model `Pool:workers.model` names, and the turn's answer text is the reply (`planner_reply`, `worker_reply`): the last `FULFILLED` line of the planner's answer is the claim; the last `DONE` / `FAILED` / `STUCK` / `SPLIT` line of a worker's answer ends its task. A worker works its task to the end of its turn, with as many tool calls as it needs; `SPLIT` is only for a task too big for one turn. A worker answer with no verdict is one more step (twice at most), then the task is `stuck`.
 
 ## What keeps it from getting stuck
 
