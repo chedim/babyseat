@@ -35,6 +35,6 @@ One clifflet reads the turn's record of its backend and its state:
 ```cliff
 -- given Chat:demo:message:7:turn {"kind": "turn", "backend": "oai", "state": "running"}
 t = 'Chat:demo:message:7:turn'
-{'backend': prop(t, 'backend'), 'state': prop(t, 'state')}
+{'backend': ${t}['backend'], 'state': ${t}['state']}
 -- value {"backend": "oai", "state": "running"}
 ```

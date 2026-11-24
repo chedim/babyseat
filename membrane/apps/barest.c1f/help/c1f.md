@@ -159,9 +159,26 @@ V.spread getter: fold([], [concat(acc, [x]) for x in this.xs if len([k for k in 
 
 `keys(d)` is the keys of a dict as a list of text, in the order the dict holds them (`keys({'b': 1, 'a': 2})` is `['b', 'a']`).
 
-A long list is cheaper in one builtin than in a comprehension (a builtin is one step, a comprehension pays per item): `props(ids, 'name')` reads one property of every
-entity of a list (`props(ids, at, 'name')` takes element `at[i]` of each value), `vmean(ids)` is the mean of the unit vectors `v` of a list of entities (an id with no
-vector is skipped), and `group_by(rows, key, ['col'])` also totals each named column per group:
+`meta(eid)` says what an entity is made of, as a dict of names and no value: `class`, `parents`, `properties` (what it holds; a getter's value is not one), `getters` and `setters` (`{prop, name}`: a write of `prop` runs it).
+
+An entity whose id is data (a value you hold, not a name you write) is read with `${id}[name]` or `${id}.name`: the class and the property can both be data. On a list of ids it reads one property of every entity, in one step; `${ids}.name[at]` takes element `at[i]` of the i-th value:
+
+```c1f
+-- given Lamp:a {"watts": 40, "tags": ["x", "y"]}
+-- given Lamp:b {"watts": 60, "tags": ["p", "q"]}
+-- given P:q {"target": "Lamp:a", "prop": "watts", "ids": ["Lamp:a", "Lamp:b"], "at": [1, 0]}
+-- reads P:q.one = 40
+-- reads P:q.all = [40, 60]
+-- reads P:q.picked = ["y", "p"]
+-- reads P:q.names = ["tags", "watts"]
+P.one getter: ${this.target}[this.prop]
+P.all getter: ${this.ids}['watts']
+P.picked getter: ${this.ids}.tags[this.at]
+P.names getter: meta('Lamp:a')['properties']
+```
+
+A long list is cheaper in one builtin than in a comprehension (a builtin is one step, a comprehension pays per item): `vmean(ids)` is the mean of the unit vectors `v`
+of a list of entities (an id with no vector is skipped), and `group_by(rows, key, ['col'])` also totals each named column per group:
 
 ```c1f
 -- given Vector:a {"v": [3.0, 4.0]}
@@ -170,7 +187,7 @@ vector is skipped), and `group_by(rows, key, ['col'])` also totals each named co
 -- reads P:q.dims = [2, 2, null]
 -- reads P:q.mid = [0.30000001192092896, 0.8999999761581421]
 -- reads P:q.tot = [3, 5]
-P.dims getter: props(this.ids, 'dim')
+P.dims getter: [${i}['dim'] for i in this.ids]
 P.mid getter: vmean(this.ids)
 P.tot getter: pluck(group_by(this.rows, 'k', ['n']), 'n')
 ```
@@ -186,7 +203,7 @@ Box.rest getter: this.a % 2
 
 ## Entities, reads and loops
 
-`instances('Box')` is every Box. Reading `b.w` or `prop(b, 'w')` takes a property of an entity:
+`instances('Box')` is every Box. Reading `b.w` or `${b}['w']` takes a property of an entity:
 
 ```c1f
 -- given Box:a {"w": 1}

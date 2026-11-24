@@ -45,7 +45,7 @@ fn a_variable_that_is_not_set_reads_absent_and_a_pack_reads_the_names_as_written
     let h = host(None);
     boot_environment(&h, &facts(&[]), &env(&[("HOME", "/h")]));
     assert!(read(&h, "LANG").is_null());
-    h.load_pack("envuse", "PACK envuse 1\nProbe.dir getter: Environment:host.MEMBRANE_DATA_DIR or 'none'\nProbe.home getter: Environment:host.HOME\nProbe.v2 getter: prop('Environment:host', 'X_2') or 'no'\n").unwrap();
+    h.load_pack("envuse", "PACK envuse 1\nProbe.dir getter: Environment:host.MEMBRANE_DATA_DIR or 'none'\nProbe.home getter: Environment:host.HOME\nProbe.v2 getter: ${'Environment:host'}['X_2'] or 'no'\n").unwrap();
     h.born("Probe:a", "Probe", Map::new(), "person");
     h.pump();
     assert_eq!(h.get("Probe:a", "dir"), json!("none"));

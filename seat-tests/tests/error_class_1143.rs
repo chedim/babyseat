@@ -97,7 +97,7 @@ fn an_arm_that_loses_resolution_is_never_evaluated_so_it_cannot_fail() {
 
 #[test]
 fn a_reader_of_the_class_list_and_instances_of_error_follow_the_change() {
-    let h = host(&format!("{Q}Dash.n getter: len(instances('Error'))\nDash.w getter: prop('Box:a', 'x') is Error\nBox.k getter: 1\nSeat.f getter: instances('Box')[0] is Error\n"));
+    let h = host(&format!("{Q}Dash.n getter: len(instances('Error'))\nDash.w getter: ${{'Box:a'}}['x'] is Error\nBox.k getter: 1\nSeat.f getter: instances('Box')[0] is Error\n"));
     born(&h, "Dash:d", json!({}));
     born(&h, "Box:a", json!({}));
     assert_eq!(h.get("Dash:d", "n"), json!(1), "instances('Error') lists every failed entity");
@@ -279,7 +279,7 @@ fn a_whole_entity_read_shows_failed_properties_as_error_and_the_rest_normally() 
     assert!(p.get("failed").is_none(), "the dict itself is not shown twice: {rows}");
     let plain = &parse(&h.get("Dash:d", "plain"));
     assert_eq!(plain["price"], json!(3));
-    assert_eq!(plain["q"], json!(3));
+    assert!(plain.get("q").is_none(), "a getter's value is not stored, so a plain row has no `q` (#1143, operator 2026-11-24): {plain}");
     let _ = std::fs::remove_file(&file);
 }
 

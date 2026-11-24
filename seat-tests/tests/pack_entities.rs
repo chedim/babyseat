@@ -274,7 +274,7 @@ fn a_plain_null_written_to_an_entity_destroys_it_and_its_children_and_a_pack_unl
 fn a_setter_destroys_with_a_plain_none_and_a_reasoned_null_or_an_error_destroys_nothing() {
     let (_run, port) = start("deathset", None);
     let pack = "PACK reaper 1\nIMPORT door_tools 1\nPack.how on-setter reap:\n  ALWAYS:\n    Lamp:z = None\n\
-                Pack.how2 on-setter reap2:\n  ALWAYS:\n    Lamp:z = prop('Nothing:here', 'x')\n\
+                Pack.how2 on-setter reap2:\n  ALWAYS:\n    Lamp:z = ${'Nothing:here'}['x']\n\
                 Pack.how3 on-setter reap3:\n  ALWAYS:\n    Lamp:z = 1 + None\n\
                 Pack.how4 on-setter reap4:\n  ALWAYS:\n    Lamp:z = 5\n";
     wtext(port, "Lamp:z", "x", json!(1));

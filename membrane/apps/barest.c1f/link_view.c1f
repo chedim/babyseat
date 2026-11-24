@@ -17,14 +17,14 @@ Shell.open on-setter link-start:
     ('LinkView:main').live = True
 
 -- the page is up when the shell is open and the host has told what it holds
-LinkView.ns getter: prop('Link:page', 'ns')
-LinkView.ready getter: this.live == True and this.ns != None and prop('Host:page', 'provides') != None
+LinkView.ns getter: ${'Link:page'}['ns']
+LinkView.ready getter: this.live == True and this.ns != None and ${'Host:page'}['provides'] != None
 LinkView.caps getter:
   WHEN not this.ready: None
-  ELSE: {'protocol': prop('Host:page', 'protocol'), 'encodings': prop('Host:page', 'encodings'), 'frames': prop('Host:page', 'frames'), 'dom': prop('Host:page', 'dom'), 'provides': prop('Host:page', 'provides'), 'classes': prop('Host:page', 'classes'), 'limits': prop('Host:page', 'limits'), 'device': prop('Host:page', 'device'), 'host_version': prop('Host:page', 'host_version'), 'build': prop('Link:page', 'build')}
+  ELSE: {'protocol': ${'Host:page'}['protocol'], 'encodings': ${'Host:page'}['encodings'], 'frames': ${'Host:page'}['frames'], 'dom': ${'Host:page'}['dom'], 'provides': ${'Host:page'}['provides'], 'classes': ${'Host:page'}['classes'], 'limits': ${'Host:page'}['limits'], 'device': ${'Host:page'}['device'], 'host_version': ${'Host:page'}['host_version'], 'build': ${'Link:page'}['build']}
 LinkView.report getter:
   WHEN not this.ready: None
-  ELSE: {'view': prop('Shell:main', 'view'), 'hidden': prop('Conn:page', 'hidden') == True, 'width': prop('Host:page', 'width'), 'load_errors': prop('Shell:main', 'load_errors') or {}, 'packs': prop('Host:page', 'sizes'), 'build': prop('Link:page', 'build'), 'host_version': prop('Host:page', 'host_version')}
+  ELSE: {'view': ${'Shell:main'}['view'], 'hidden': ${'Conn:page'}['hidden'] == True, 'width': ${'Host:page'}['width'], 'load_errors': ${'Shell:main'}['load_errors'] or {}, 'packs': ${'Host:page'}['sizes'], 'build': ${'Link:page'}['build'], 'host_version': ${'Host:page'}['host_version']}
 
 LinkView.caps on-setter link-send-caps:
   WHEN this.caps != None:
@@ -38,11 +38,11 @@ LinkView.report on-setter link-send-report:
 -- the receipt of a write, read once: ok = the seat answered 2xx and the call has no error; else the seat's own reason, else the network's
 Fetch.lk getter:
   rq = this.request_result
-  bd = json(str(prop(rq, 'body') or ''))
+  bd = json(str(${rq}['body'] or ''))
   jd = bd if bd is Dict else {}
-  hs = prop(rq, 'http_status')
-  er = prop(jd, 'error')
-  {'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not prop(prop(jd, 'result'), 'isError'), 'why': (str(prop(er, 'message') if er is Dict else (er or prop(prop(jd, 'result'), 'content'))) if (er or prop(prop(jd, 'result'), 'isError')) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+  hs = ${rq}['http_status']
+  er = ${jd}['error']
+  {'ok': ${rq}['status'] == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not ${${jd}['result']}['isError'], 'why': (str(${er}['message'] if er is Dict else (er or ${${jd}['result']}['content'])) if (er or ${${jd}['result']}['isError']) else 'the seat answered ' + str(hs)) if ${rq}['status'] == 'ok' else str(${rq}['head'] or 'the request failed')} if rq != None else None
 Fetch.lk on-setter link-receipt:
   WHEN startswith(this.eid, 'Fetch:link:') and this.lk != None:
-    ('LinkView:main').note = None if prop(this.lk, 'ok') else 'the seat did not take what the page told it (' + this.eid + '): ' + str(prop(this.lk, 'why'))
+    ('LinkView:main').note = None if ${this.lk}['ok'] else 'the seat did not take what the page told it (' + this.eid + '): ' + str(${this.lk}['why'])

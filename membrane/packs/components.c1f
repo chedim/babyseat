@@ -12,8 +12,8 @@ RESIDENT Component
 -- `unload` leaves `refused` with that reason and changes nothing. Phase 1b is the native `Peer:<name>.declare` verb that these two will use.
 
 Component.state getter:
-  WHEN prop('Vm:' + str(this.ns), 'link') == 'up': 'up'
-  ELSE WHEN prop('Vm:' + str(this.ns), 'link') == 'gone': 'gone'
+  WHEN ${'Vm:' + str(this.ns)}['link'] == 'up': 'up'
+  ELSE WHEN ${'Vm:' + str(this.ns)}['link'] == 'gone': 'gone'
   ELSE: 'available'
 
 -- the scan: a listing of the folder of the seat's binary, kept to the `graphlink-*` names (one Command, written at start, read when it finishes)
@@ -24,10 +24,10 @@ Boot.started on-setter components-scan-start:
 
 Command.run_result on-setter components-scan-done:
   WHEN 'components_scan' in this.eid:
-    FOR n IN [after(l, 'graphlink-') for l in lines(prop(this.run_result, 'stdout') or '') if startswith(l, 'graphlink-') and len(l) > 10]:
+    FOR n IN [after(l, 'graphlink-') for l in lines(${this.run_result}['stdout'] or '') if startswith(l, 'graphlink-') and len(l) > 10]:
       ('Component:' + n).binary = 'graphlink-' + n
       ('Component:' + n).ns = n
-      ('Component:' + n).autoload = prop('Component:' + n, 'autoload') or False
+      ('Component:' + n).autoload = ${'Component:' + n}['autoload'] or False
 
 -- load / unload: refused with the reason until the native declare verb exists (Phase 1b)
 Component.load on-setter component-load:

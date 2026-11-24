@@ -17,8 +17,8 @@ RESIDENT Command
 -- (`run_rc` is the raw receipt value, 124 for a timeout; read `rc` for the checked one.)
 -- the limit a run without `timeout_s` gets: the boot fact, else 120 (the same default as drivers.rs; this one is for what the pending reply shows)
 Command.timeout_default getter: ([b.command_timeout_s for b in instances('Boot') if b.command_timeout_s != None] or [120])[0]
-Command.timed_out getter: this.run_result != None and prop(this.run_result, 'status') == 'timeout'
-Command.timeout_why getter: str(this.eid) + ' timed out after ' + str(prop(this.run_result, 'timeout_s')) + ' s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}'
+Command.timed_out getter: this.run_result != None and ${this.run_result}['status'] == 'timeout'
+Command.timeout_why getter: str(this.eid) + ' timed out after ' + str(${this.run_result}['timeout_s']) + ' s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}'
 Command.ok getter:
   WHEN this.timed_out: Error(this.timeout_why)
   ELSE: this.run_rc == 0 if this.run_rc != None else None
@@ -27,17 +27,17 @@ Command.rc getter:
   ELSE: this.run_rc
 Command.output getter:
   WHEN this.timed_out: Error(this.timeout_why)
-  ELSE: prop(this.run_result, 'stdout') if this.run_result else None
+  ELSE: ${this.run_result}['stdout'] if this.run_result else None
 Command.errors getter:
   WHEN this.timed_out: Error(this.timeout_why)
-  ELSE: prop(this.run_result, 'stderr') if this.run_result else None
-Command.partial_output getter: prop(this.run_result, 'stdout') if this.timed_out else None
-Command.partial_errors getter: prop(this.run_result, 'stderr') if this.timed_out else None
+  ELSE: ${this.run_result}['stderr'] if this.run_result else None
+Command.partial_output getter: ${this.run_result}['stdout'] if this.timed_out else None
+Command.partial_errors getter: ${this.run_result}['stderr'] if this.timed_out else None
 -- A run in flight is told apart from one never started (#1143): the engine notes `running` = {id, started} (the clock of the write) when it takes a `run` (the
 -- slot is consumed at once, so a pack setter cannot read the value); `status` reads `running` until a receipt of that run (finished no earlier than the write)
 -- lands, then the receipt's own status (ok or error); none before any run.
 Command.status getter:
   WHEN this.running == None and not this.run_result: None(str(this.eid) + ' has not been run: write run = {id, cmd} (a run in flight reads status running)')
-  ELSE WHEN this.running == None: prop(this.run_result, 'status')
-  ELSE WHEN this.run_result == None or prop(this.run_result, 'finished') < prop(this.running, 'started'): 'running'
-  ELSE: prop(this.run_result, 'status')
+  ELSE WHEN this.running == None: ${this.run_result}['status']
+  ELSE WHEN this.run_result == None or ${this.run_result}['finished'] < ${this.running}['started']: 'running'
+  ELSE: ${this.run_result}['status']

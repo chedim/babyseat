@@ -8,7 +8,7 @@ use std::path::PathBuf;
 fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap() }
 
 const MAKER: &str = "PACK rsmaker 1\nIMPORT semtext 1\nIMPORT mentions 1\nIMPORT chat 1\n\
-Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[prop(this.say, 'id')]:body = SemText(text: prop(this.say, 'text'))\n    membrane::Chat:main:message[prop(this.say, 'id')]:body.mention = True\n";
+Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[${this.say}['id']]:body = SemText(text: ${this.say}['text'])\n    membrane::Chat:main:message[${this.say}['id']]:body.mention = True\n";
 
 fn seat() -> Host {
     cliffvm::expr::set_eval_time_ms(Some(10_000));

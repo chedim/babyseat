@@ -29,7 +29,7 @@ entity: `('Fetch:' + this.conn).request = {...}` and read its `request_result`.
 
 ## Boot facts
 The launcher writes each fact as a property of `Boot:seat` and also the whole set as the dict `facts`; a pack reads
-`prop(this.facts, 'seat_name')` instead of a comprehension over `instances('Boot')`.
+`${this.facts}['seat_name']` instead of a comprehension over `instances('Boot')`.
 `cliffvm` builds them (`cliffvm:src/cli.rs` `facts`, `serve_plan`, then `launcher.c1f`): a missing source leaves its fact out (never None); `door_port` comes from `--port`;
 `door_secret_file` is a path, never the secret; `anthropic_key_set` is a yes or no, never the key. `membrane/packs/facts.json` is the registry (name, `wired`, `why`): a fact a pack reads must be there,
 and a fact marked `wired` must be written by the launcher (cli.rs, host.rs, `scripts/seat` or `launcher.c1f`). Facts the router adds after the boot (`router_on`, `cloud_models`, `minds`) come with `launcher.c1f`'s setters on `Boot.started`.
@@ -74,14 +74,9 @@ rounded to f32, so two devices whose math libraries differ in the last bits of a
 not an Int or a Float (`log('e')`, `log(True)`, `log([1])`); a null gives a null (as every call). One step. Typed `Float`. Tests: `cliffvm:tests/log_1143.rs`.
 **Builtins over long lists** (#1143, operator 2026-11-15: the field's recall must scale; a comprehension pays steps per item, a builtin one step). Tests: `cliffvm:tests/props_vmean_1143.rs`;
 what they bought: `seat-tests/tests/recall_scale_1143.rs` and docs/semtext-and-legs.md ("Cost of the whole recall").
-- `props(ids, 'name')` is `[prop(e, 'name') for e in ids]` in one step: one property of every entity of a list (an entity or its id; a dict item reads its key, as `prop`; a null item
-  stays a null; a property an entity does not hold is its reasoned null `absent: ...`). `props(ids, at, 'name')` takes element `at[i]` of the i-th value, as `x[k]` does (a list by its
-  whole-number index, negative from the end; a dict by its key; a miss, a null value or a null index is a null): the GATHER a comprehension would write as `[prop(e, 'name')[k] ...]`.
-  The name is the LAST argument, so the getter ordering reads it as a property name (as `prop` and `pluck`). Each read is a read of the getter (it recomputes when one of those
-  properties changes). An Error with its reason: `ids` not a list, the name not text (or starting with `_`), `at` not a list or of another length than `ids` (one index per id), an item
-  that is not an entity, id, dict or null, an index that is a float, bool, list or dict. Typed `List(Any)`. Plain expression code (the browser engine has it).
+- `props(ids, 'name')` is gone (operator 2026-11-24, with `prop(id, name)`): `[${i}['name'] for i in ids]` reads one property of every entity of a list, and a comprehension pays steps per item where `props` paid one. The recall getters that walk long lists are the cost to watch (`seat-tests/tests/recall_scale_1143.rs`).
 - `vmean(ids)` is the mean of the UNIT vectors `v` of a list of entities (each vector's direction counts the same, whatever its length), computed exactly as
-  `vsum([unit(prop(e, 'v')) for e in ids]) / n`: the unit in f64, the sum in f32 in list order (deterministic on every device), the division by the count in f64. The vectors are read
+  `vsum([unit(${e}['v']) for e in ids]) / n`: the unit in f64, the sum in f32 in list order (deterministic on every device), the division by the count in f64. The vectors are read
   one at a time (for a MAPPED class, from the native store) and never held as a list. An id with no vector (`v` null or absent) and a null id are SKIPPED; when none has one the answer
   is the reasoned null `empty: none of the N ids has a vector (v)`. An Error with its reason: `ids` not a list, an item that is not an entity or an id, a `v` that is not a list of
   numbers (or failed), vectors of different dimensions, an f32 overflow. A zero vector counts as itself (as `unit` leaves it). Typed `List(Float)?`. Plain expression code.
@@ -91,13 +86,18 @@ what they bought: `seat-tests/tests/recall_scale_1143.rs` and docs/semtext-and-l
 All three are one step however long the list (the reads and the arithmetic are the builtin's own cost, not counted: see Limits).
 There is NO `int()`, `dict()`, `merge` or `urldecode`: they were proposed and not added (the language says what it needs another way: `Int(x)` checks a type, a dict with fixed keys is a literal, a query's pairs are `qpairs`).
 `keys(d)` is the one that was added (#1143, operator 2026-11-16): the keys of a dict as a list of text, in the order the dict holds them (so `{'b': 1, 'a': 2}` gives `['b', 'a']`); a read still pending is `[]`, anything that is not a dict is an error. It costs one step whatever the size (`cliffvm:tests/keys_1143.rs`). `keys` is a reserved name, like the other builtins.
+`meta(eid)` (#1143, operator 2026-11-24): what an entity is made of, as a dict of NAMES and no value: `class`, `parents` (its class list, nearest first), `properties` (what it holds; a getter's value is not one), `getters` (the names of the getters of its classes) and `setters` (`{prop, name}` of each setter of its classes: a write of `prop` runs it). A null that says why for an entity that is not there; one not loaded yet is asked for, and the getter that read it runs again when it arrives. One step; a getter that reads it recomputes when the entity's properties change. Reserved name. Test: `cliffvm:tests/meta_1143.rs`.
+**Reading by an id that is data: `${expr}`** (#1143, operator 2026-11-24; it replaces the builtins `prop(id, name)` and `props(ids, name)`, which are gone). `${expr}` is the entity whose id is the value of `expr`, and `[name]` or `.name` after it reads a property: `${this.target}[this.prop]`, `${r}['status']`. An entity literal (`Goal:board`, `Chat:message[id]`) fixes the class in the source; `${...}` is for an id whose class arrives as data. A dict in braces stays the dict (`${d}['k']` is its key), a null stays a null, a number or a bool gives a null.
+- `${ids}[name]` and `${ids}.name` on a LIST of ids: that property of every entity, in one step however long the list (a null item stays null, a property an entity lacks is its reasoned null, a dict item reads its key, an item that is no id is an Error naming it).
+- `${ids}.name[at]`: the i-th value takes `at[i]` (a list by its index, negative from the end; a dict by its key; a miss, a null value or a null index is a null; one index per value). `${texts}.ent_vids[sentences]` is element `sentences[i]` of the `ent_vids` of `texts[i]`.
+- The getter ordering reads `${id}['n']` as a read of a getter named `n` on any class (as `prop(id, 'n')` did), so the getter sits above the getters named `n`. Tests: `cliffvm:tests/dyn_ent_1143.rs`.
 A new builtin needs the operator's approval; it is an arm of `call` and a name in `RESERVED`, with a Rust test.
 
 ## Conventions (the traps that bit)
 - There is no size cap on an expression (the old 64-node / 400-character caps are gone). Name a part with a LOCAL (below) when it
   reads better; an evaluation has a step budget instead (see Blocks and locals).
 - How getters are ordered (computed once per pack load, never per write): a getter sits above the getters it reads. The read is
-  class-aware: `this.n` is `n` of the getter's own class; `x.n`, `g.n` and `prop(x, 'n')` are `n` of x's class when it is known
+  class-aware: `this.n` is `n` of the getter's own class; `x.n`, `g.n` and `${x}['n']` are `n` of x's class when it is known
   (`this`, a loop variable over `instances('X')` or over a getter of known element type, a constructor, an entity literal, a
   literal-key subscript `x['n']` of such an entity). Where x's class is unknown (a plain property, a dict) the read still orders
   after every getter of that name, EXCEPT where that would close a cycle the known reads do not: a name shared with an unrelated
@@ -126,7 +126,7 @@ A bare line `name = expr` (no dotted target; a write always has one, like `this.
   ```
 - a setter's body: locals feed the writes (and FOR loops) below them, per branch; a local made inside a FOR ends with it;
 - **Nulls and their reasons** (#1143; `cliffvm:tests/semantics_1143.rs`): reading a property an entity does not hold is the null `absent: <entity>.<property>`, an entity that is not there (not stored, not collected, not waiting to be loaded) the null `absent: <entity> does not exist` (`View::attr`; a getter that computed `None` is a plain null, `Core.nulled`; the help `Help:upgrade` says the same). A reasoned null inside a list or a dict is kept: in an expression it is the element itself; in a
-  value a getter STORED (JSON, where every null is plain: what is stored and sent is unchanged) the engine remembers the reason beside it in `Core.why` under `<prop> NUL <path>` (`expr::nested_nulls`, set by the getter that stores it, replaced with its next value, dropped with the entity) and a read of the stored list or dict puts the
+  value a getter HOLDS (in memory; JSON, where every null is plain: what is sent is unchanged) the engine remembers the reason beside it in `Core.why` under `<prop> NUL <path>` (`expr::nested_nulls`, set by the getter that holds it, replaced with its next value, dropped with the entity) and a read of the held list or dict puts the
   reasoned nulls back (`overlay_nested`). `str` of a list or a dict writes such a null as `{"$null": "<reason>"}` (`expr::to_json_shown`; a null without a reason stays `null`), which is what `run_cliff` prints. Not covered: a nested null a SETTER wrote (setter values keep plain nulls).
 - **Error: a failure is not a null** (#1143; `docs/c1f-error.md`, `cliffvm:tests/error_*_1143.rs`). `null` = not initialised, absent, not applicable (it keeps its
   `why`); `Error` = something FAILED: a value kind (`V::Error`) that carries its reason (the remedy is part of the text). `x == None` is False for an Error; `or`

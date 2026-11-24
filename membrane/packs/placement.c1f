@@ -18,8 +18,8 @@ Boot.started on-setter placements-root:
 Pack.imports getter: [{'pack': w[1], 'major': num(w[2])} for w in [words(l) for l in lines(str(this.text or ''))] if len(w) >= 3 and w[0] == 'IMPORT']
 Pack.seat_runs getter: this.loaded == True
 -- the VMs and what each provides: pages by the `caps` they wrote, peers by the node in their own namespace
-Placements.vms getter: concat([{'vm': replace(v.eid, 'Vm:', ''), 'provides': (prop(v.caps, 'provides') or [])} for v in instances('Vm') if v.kind == 'page' and v.caps != None], [{'vm': replace(v.eid, 'Vm:', ''), 'provides': (prop(replace(v.eid, 'Vm:', '') + '::Caps:main', 'provides') or [])} for v in instances('Vm') if v.kind == 'peer'])
-Pack.fits getter: [x['vm'] for x in prop('Placements:seat', 'vms') if len(this.imports) > 0 and len([i for i in this.imports if len([p for p in x['provides'] if prop(p, 'pack') == i['pack'] and prop(p, 'major') == i['major']]) == 0]) == 0] if prop('Placements:seat', 'vms') != None else []
+Placements.vms getter: concat([{'vm': replace(v.eid, 'Vm:', ''), 'provides': (${v.caps}['provides'] or [])} for v in instances('Vm') if v.kind == 'page' and v.caps != None], [{'vm': replace(v.eid, 'Vm:', ''), 'provides': (${replace(v.eid, 'Vm:', '') + '::Caps:main'}['provides'] or [])} for v in instances('Vm') if v.kind == 'peer'])
+Pack.fits getter: [x['vm'] for x in ${'Placements:seat'}['vms'] if len(this.imports) > 0 and len([i for i in this.imports if len([p for p in x['provides'] if ${p}['pack'] == i['pack'] and ${p}['major'] == i['major']]) == 0]) == 0] if ${'Placements:seat'}['vms'] != None else []
 Pack.placement_error getter:
   WHEN this.loaded == None or len(this.imports) == 0 or this.seat_runs: None
   ELSE WHEN len(this.fits) > 0: None

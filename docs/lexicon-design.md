@@ -80,7 +80,7 @@ SemText.lex_base getter:
           (SELECT substr(w.value,1,length(w.value)-length(m.suffix))||m.repl FROM morph m
             WHERE w.value LIKE '%'||m.suffix AND EXISTS (SELECT 1 FROM sense s WHERE s.lemma = substr(w.value,1,length(w.value)-length(m.suffix))||m.repl)
             ORDER BY m.seq LIMIT 1), w.value) AS base FROM json_each(?) w", json(this.lex_words))
-Span.lemma getter: ([r['base'] for r in prop(this.of, 'lex_base') or [] if r['w'] == lower(this.text)] or [lower(this.text)])[0]   -- no lexicon: the SemPlural crude rule stays the fallback
+Span.lemma getter: ([r['base'] for r in ${this.of}['lex_base'] or [] if r['w'] == lower(this.text)] or [lower(this.text)])[0]   -- no lexicon: the SemPlural crude rule stays the fallback
 ```
 **Base forms (lemmatisation): c1f over data, no Rust.** WordNet's `morphy` is: look the form up in the exception list; else try each detachment rule of
 the part of speech in order (noun: `s`->``, `ses`->`s`, `ves`->`f`, `xes`->`x`, `zes`->`z`, `ches`->`ch`, `shes`->`sh`, `men`->`man`, `ies`->`y`; verb: `s`, `ies`->`y`,

@@ -14,15 +14,15 @@ RESIDENT Banner
 Banner.header_label getter: this.header_dial or 'CONVERSATION'
 Banner.error_label getter: this.error_dial or 'THE PREVIOUS TURN ENDED WITH AN ERROR'
 Banner.now_parts getter: localtime(clock)
-Banner.now_line getter: 'NOW (for reference, not an event): ' + prop(this.now_parts, 'date') + ' ' + prop(this.now_parts, 'clock') + ' ' + prop(this.now_parts, 'zone')
+Banner.now_line getter: 'NOW (for reference, not an event): ' + ${this.now_parts}['date'] + ' ' + ${this.now_parts}['clock'] + ' ' + ${this.now_parts}['zone']
 Banner.conv_header getter: this.header_label + ': ' + str(this.chat or 'main')
 -- THE PREVIOUS TURN is the one the chat names: a turn that ends (done or error) writes its eid to `last_turn` on its chat (`membrane::Chat:<chat>`, packs/chat_turn.c1f,
 -- the setter `last-turn`). The chat's turns are a LAZY class (stored, loaded on demand), so a banner that listed them with `instances('Chat')` would see only the
 -- few that happen to be loaded; one reference to the turn the pointer names loads it. A chat from before the pointer has none: no error line until its next turn ends.
-Banner.last_turn getter: prop('membrane::Chat:' + str(this.chat or 'main'), 'last_turn')
-Banner.previous getter: [{'eid': this.last_turn, 'state': prop(this.last_turn, 'state')}] if this.last_turn != None else []
-Banner.error_ids getter: [prop(p, 'eid') + ':response' for p in this.previous if prop(p, 'state') == 'error']
-Banner.error_lines getter: [this.error_label + ': ' + e + ' - ' + str(prop(e, 'summary') or '') for e in this.error_ids]
+Banner.last_turn getter: ${'membrane::Chat:' + str(this.chat or 'main')}['last_turn']
+Banner.previous getter: [{'eid': this.last_turn, 'state': ${this.last_turn}['state']}] if this.last_turn != None else []
+Banner.error_ids getter: [${p}['eid'] + ':response' for p in this.previous if ${p}['state'] == 'error']
+Banner.error_lines getter: [this.error_label + ': ' + e + ' - ' + str(${e}['summary'] or '') for e in this.error_ids]
 -- ANOTHER BANNER (operator 2026-11-14): a `Banner:<name>` instance with its own `words` shows exactly those; the main banner has none and shows the computed lines.
 -- chat_turn.c1f joins every banner into the one a turn shows.
 Banner.text getter:
@@ -30,5 +30,5 @@ Banner.text getter:
   ELSE: join(concat([this.now_line, this.conv_header], this.error_lines), '\n')
 
 Boot.started on-setter seed-banner:
-  WHEN prop('membrane::Banner:admin:main', 'seeded') != True:
+  WHEN ${'membrane::Banner:admin:main'}['seeded'] != True:
     membrane::Banner:admin:main = Banner(chat: 'main', admin: 'admin', seeded: True)

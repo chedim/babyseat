@@ -135,7 +135,7 @@ fn a_live_run_is_journalled_outside_only_and_replays_to_the_same_state() {
     // the rows carry the stamps
     let rows = h.rows();
     let req = rows.iter().find(|(k, _)| k.starts_with("Request:")).unwrap().1.clone();
-    assert_eq!(req["writers"]["reply"], json!("trigger:field:getter:reply"));
+    assert!(req["writers"].get("reply").is_none() && req["props"].get("reply").is_none(), "a getter's value is not stored, and neither is its stamp (#1143, operator 2026-11-24): {req}");
     assert_eq!(req["writers"]["respond"], json!("trigger:field:direct:consumed"), "the answer was written by the setter, then the driver consumed the slot");
     assert_eq!(req["writers"]["method"], json!("host:door"));
     assert_eq!(rows["Box:a"]["writers"]["w"], json!("person"));

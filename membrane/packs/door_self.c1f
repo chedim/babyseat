@@ -21,10 +21,10 @@ Request.o_self getter: this.route in ['/membrane/self/sheet', '/membrane/self/re
 Request.m_self getter: ['GET'] if this.route in ['/membrane/self/sheet', '/membrane/self/recent', '/membrane/toybox/state'] else ['POST']
 
 -- ---- the feedback press ---------------------------------------------------------------------------------------------------------
-Request.fb_msg getter: strip(str(prop(this.jbody, 'message') or ''))
-Request.fb_kind getter: lower(strip(str(prop(this.jbody, 'kind') or '')))
-Request.fb_why getter: clip(strip(str(prop(this.jbody, 'why') or '')), 500)
-Request.fb_session getter: clip(strip(str(prop(this.jbody, 'session') or '')), 200)
+Request.fb_msg getter: strip(str(${this.jbody}['message'] or ''))
+Request.fb_kind getter: lower(strip(str(${this.jbody}['kind'] or '')))
+Request.fb_why getter: clip(strip(str(${this.jbody}['why'] or '')), 500)
+Request.fb_session getter: clip(strip(str(${this.jbody}['session'] or '')), 200)
 Request.fb_obj getter: startswith(strip(this.body or ''), '{')
 Request.fb_eid getter: 'Feedback:' + this.fb_msg
 Request.fb_label getter: {'up': 'helpful', 'down': 'not helpful', 'clear': 'cleared'}[this.fb_kind]

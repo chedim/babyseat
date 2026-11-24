@@ -35,7 +35,7 @@ One setter, `turn-start` (on `Chat.plan`), acts on every plan:
 - a refusal ends the turn through `turn.outcome` (`{text: <reason>, fail: <reason>}`), so a refused turn finishes like any other;
 - a start writes the turn's `state` = `running`, `started` = the clock and `backend` = the plan's backend.
 
-Then the backend's own start setter, guarded by `WHEN prop(this.plan, 'backend') == '<name>'`, does only its effect: `claude-start` makes and runs `Command:chat:<cp>` with the argv and the stdin of the plan; `oai-start` (for `oai` and `peer`) writes `turn.oai` and reads the door's tool list; `brain-start` writes `turn.brain` and the empty `ChatResponse` the brain answers on. A start setter writes no `state`.
+Then the backend's own start setter, guarded by `WHEN ${this.plan}['backend'] == '<name>'`, does only its effect: `claude-start` makes and runs `Command:chat:<cp>` with the argv and the stdin of the plan; `oai-start` (for `oai` and `peer`) writes `turn.oai` and reads the door's tool list; `brain-start` writes `turn.brain` and the empty `ChatResponse` the brain answers on. A start setter writes no `state`.
 
 ## 4. Live progress: `<backend>_live`
 

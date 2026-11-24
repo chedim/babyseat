@@ -1358,7 +1358,7 @@
       "Return.state": "Text"
     },
     "writes": {
-      "*.[prop(this.mc_write, 'prop')]": "Any",
+      "*.[${this.mc_write}['prop']]": "Any",
       "*.births_to": "Any",
       "*.go": "Bool",
       "*.privileged": "Bool",
@@ -2081,6 +2081,7 @@
       "LinkPeer.maxf": "Num?",
       "LinkPeer.maxv": "Num?",
       "LinkPeer.mine": "List(Entity(LinkPeer))?",
+      "LinkPeer.rid": "Any",
       "LinkPeer.row": "Dict?",
       "LinkPeer.sig": "Text?",
       "LinkPeer.silent": "Num?",

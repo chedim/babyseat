@@ -14,16 +14,16 @@ IMPORT boot 1
 -- Nothing is shown while the ask has no lines.
 RecallPart.kind getter: 'recall'
 
-RecallPart.banner_n getter: prop('recall:dials', 'banner_n')
-RecallPart.fact_chars getter: prop('recall:dials', 'fact_chars')
-RecallPart.header getter: prop('recall:dials', 'header')
+RecallPart.banner_n getter: ${'recall:dials'}['banner_n']
+RecallPart.fact_chars getter: ${'recall:dials'}['fact_chars']
+RecallPart.header getter: ${'recall:dials'}['header']
 -- THE ASK is the OLDEST queued message whose turn has not started (`waiting`, kept by the setter below): the turns wait for their own ask's recall, in order (`ready`, below; chat_turn.c1f `recall_wait`).
 ChatMessage.queued on-setter recall-ask:
-  WHEN this.queued == True and prop('membrane::Banner:recall', 'seeded') == True:
+  WHEN this.queued == True and ${'membrane::Banner:recall'}['seeded'] == True:
     membrane::Banner:recall.latest = this.eid
-    membrane::Banner:recall.waiting = concat([m for m in (prop('membrane::Banner:recall', 'waiting') or []) if prop(m, 'tstate') == 'queued' and m != this.eid], [this.eid])
+    membrane::Banner:recall.waiting = concat([m for m in (${'membrane::Banner:recall'}['waiting'] or []) if ${m}['tstate'] == 'queued' and m != this.eid], [this.eid])
 -- once every queued message has started, the ask stays the latest one (the part keeps showing what was recalled for it)
-RecallPart.ask_msg getter: ([m for m in (this.waiting or []) if prop(m, 'tstate') == 'queued'] or [this.latest])[0]
+RecallPart.ask_msg getter: ([m for m in (this.waiting or []) if ${m}['tstate'] == 'queued'] or [this.latest])[0]
 RecallPart.ask_body getter: this.ask_msg + ':body' if this.ask_msg != None else None
 -- the recall is on for the ask's body only: the body asked before is let go (its recall stops computing)
 RecallPart.ask_body on-setter arm-recall:
@@ -34,14 +34,14 @@ RecallPart.ask_body on-setter arm-recall:
     this.armed = this.ask_body
 -- READY (read by chat_turn.c1f `recall_wait`): false ONLY while the ask's own embedding call is out (`in_flight`: the call has its own 10 s limit, then the edges alone) or the chat's
 -- window is still being read from the store (a message that has no body text, as a pack's own post may be, has no window to read: ready). No backend, no text, a failed or refused call, or no ask at all: ready.
-RecallPart.ready getter: not (prop(this.ask_body, 'in_flight') == True) and not (prop(this.ask_body, 'recall_on') == True and prop(this.ask_body, 'r_win') == None and prop(this.ask_body, 'text') != None)
+RecallPart.ready getter: not (${this.ask_body}['in_flight'] == True) and not (${this.ask_body}['recall_on'] == True and ${this.ask_body}['r_win'] == None and ${this.ask_body}['text'] != None)
 
 -- THE LINES with their origin
-RecallPart.picked getter: [{'text': x['text'], 'of': x['semtext'], 'o': head(x['semtext'], len(x['semtext']) - 5) if tail(x['semtext'], 5) == ':body' else x['semtext']} for x in head(prop(this.ask_body, 'recall') or [], this.banner_n or 0)]
+RecallPart.picked getter: [{'text': x['text'], 'of': x['semtext'], 'o': head(x['semtext'], len(x['semtext']) - 5) if tail(x['semtext'], 5) == ':body' else x['semtext']} for x in head(${this.ask_body}['recall'] or [], this.banner_n or 0)]
 RecallPart.picked_msg getter: [{'text': y['text'], 'of': y['of'], 'o': y['o'], 'msg': before(y['o'], ':turn')} for y in this.picked]
-RecallPart.picked_when getter: [{'text': y['text'], 'of': y['of'], 'o': y['o'], 'msg': y['msg'], 'at': prop(y['msg'], 'at')} for y in this.picked_msg]
+RecallPart.picked_when getter: [{'text': y['text'], 'of': y['of'], 'o': y['o'], 'msg': y['msg'], 'at': ${y['msg']}['at']} for y in this.picked_msg]
 RecallPart.picked_origin getter:
-  [{'text': y['text'], 'origin': (('the person said' if y['o'] == y['msg'] else 'the answer to the person') + ' in ' + y['msg'] + ((' at ' + prop(localtime(y['at']), 'date') + ' ' + prop(localtime(y['at']), 'clock')) if y['at'] != None else '')) if startswith(y['of'], 'membrane::Chat:') else 'NOT the person\'s words, text of ' + y['o']} for y in this.picked_when]
+  [{'text': y['text'], 'origin': (('the person said' if y['o'] == y['msg'] else 'the answer to the person') + ' in ' + y['msg'] + ((' at ' + ${localtime(y['at'])}['date'] + ' ' + ${localtime(y['at'])}['clock']) if y['at'] != None else '')) if startswith(y['of'], 'membrane::Chat:') else 'NOT the person\'s words, text of ' + y['o']} for y in this.picked_when]
 RecallPart.shown getter:
   WHEN this.fact_chars == None: []
   ELSE: ['- ' + head(strip(replace(y['text'], '\n', ' ')), this.fact_chars) + ' [' + y['origin'] + ']' for y in this.picked_origin if y['text'] != '']
@@ -51,5 +51,5 @@ RecallPart.words getter:
 
 -- BORN with the seat: the instance is `Banner:recall` (the eid class is Banner, so the turn's banner list finds it; its kind is RecallPart, which owns `words`).
 Boot.started on-setter seed-recall:
-  WHEN prop('membrane::Banner:recall', 'seeded') != True:
+  WHEN ${'membrane::Banner:recall'}['seeded'] != True:
     membrane::Banner:recall = RecallPart(seeded: True)

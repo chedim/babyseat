@@ -26,20 +26,20 @@ FirstRun.want on-setter firstrun-load:
 
 -- the read lands (`Fetch.gv` is the receipt reader of settings_view.c1f): the two rows, as the seat tells them
 Fetch.gv on-setter firstrun-feed:
-  WHEN this.eid == 'Fetch:firstrun' and prop(this.gv, 'rid') == prop(prop('Fetch:firstrun', 'request'), 'id') and prop(this.gv, 'ok') and prop(this.gv, 'rows') is List:
-    mr = [r for r in prop(this.gv, 'rows') if prop(r, 'id') == 'model.chat']
-    nr = [r for r in prop(this.gv, 'rows') if prop(r, 'id') == 'chat.name']
+  WHEN this.eid == 'Fetch:firstrun' and ${this.gv}['rid'] == ${${'Fetch:firstrun'}['request']}['id'] and ${this.gv}['ok'] and ${this.gv}['rows'] is List:
+    mr = [r for r in ${this.gv}['rows'] if ${r}['id'] == 'model.chat']
+    nr = [r for r in ${this.gv}['rows'] if ${r}['id'] == 'chat.name']
     ('FirstRun:main').note = ''
-    ('FirstRun:main').choices = [str(c) for c in (prop(mr[0], 'choices') or [])] if len(mr) > 0 else []
-    ('FirstRun:main').model_cur = str(prop(mr[0], 'current') or '') if len(mr) > 0 else ''
-    ('FirstRun:main').model_chosen = prop(mr[0], 'chosen') == True if len(mr) > 0 else True
-    ('FirstRun:main').model_refused = str(prop(mr[0], 'refused') or '') if len(mr) > 0 else ''
-    ('FirstRun:main').name_cur = str(prop(nr[0], 'current') or '') if len(nr) > 0 else ''
-    ('FirstRun:main').name_chosen = prop(nr[0], 'chosen') == True if len(nr) > 0 else True
-    ('FirstRun:main').name_refused = str(prop(nr[0], 'refused') or '') if len(nr) > 0 else ''
+    ('FirstRun:main').choices = [str(c) for c in (${mr[0]}['choices'] or [])] if len(mr) > 0 else []
+    ('FirstRun:main').model_cur = str(${mr[0]}['current'] or '') if len(mr) > 0 else ''
+    ('FirstRun:main').model_chosen = ${mr[0]}['chosen'] == True if len(mr) > 0 else True
+    ('FirstRun:main').model_refused = str(${mr[0]}['refused'] or '') if len(mr) > 0 else ''
+    ('FirstRun:main').name_cur = str(${nr[0]}['current'] or '') if len(nr) > 0 else ''
+    ('FirstRun:main').name_chosen = ${nr[0]}['chosen'] == True if len(nr) > 0 else True
+    ('FirstRun:main').name_refused = str(${nr[0]}['refused'] or '') if len(nr) > 0 else ''
     ('FirstRun:main').loaded = True
-  ELSE WHEN this.eid == 'Fetch:firstrun' and prop(this.gv, 'rid') == prop(prop('Fetch:firstrun', 'request'), 'id'):
-    ('FirstRun:main').note = 'The seat could not be asked which models it has: ' + str(prop(this.gv, 'why')) + '.'
+  ELSE WHEN this.eid == 'Fetch:firstrun' and ${this.gv}['rid'] == ${${'Fetch:firstrun'}['request']}['id']:
+    ('FirstRun:main').note = 'The seat could not be asked which models it has: ' + str(${this.gv}['why']) + '.'
 
 -- what the window shows
 FirstRun.shown getter: this.loaded == True and (this.model_chosen != True or this.name_chosen != True)
@@ -116,22 +116,22 @@ FirstRun.view getter: {'shown': this.shown == True, 'name': this.name_now, 'hint
 FirstRun.view on-setter firstrun-parts:
   WHEN this.view != None:
     v = this.view
-    ('DomNode:fr:back').hidden = not prop(v, 'shown')
-    ('DomNode:fr:name').value = prop(v, 'name')
-    ('DomNode:fr:hint').text = prop(v, 'hint')
-    ('DomNode:fr:hint').hidden = prop(v, 'hint') == ''
-    ('DomNode:fr:error').text = prop(v, 'err')
-    ('DomNode:fr:error').hidden = prop(v, 'err') == ''
-    FOR o IN prop(v, 'opts'):
-      ('DomNode:fr:o:' + prop(o, 'v')).parent = 'DomNode:fr:model'
-      ('DomNode:fr:o:' + prop(o, 'v')).tag = 'option'
-      ('DomNode:fr:o:' + prop(o, 'v')).value = prop(o, 'v')
-      ('DomNode:fr:o:' + prop(o, 'v')).text = prop(o, 't')
-      ('DomNode:fr:o:' + prop(o, 'v')).selected = prop(o, 'v') == prop(v, 'sel')
-    keep = ['DomNode:fr:o:' + prop(o, 'v') for o in prop(v, 'opts')]
+    ('DomNode:fr:back').hidden = not ${v}['shown']
+    ('DomNode:fr:name').value = ${v}['name']
+    ('DomNode:fr:hint').text = ${v}['hint']
+    ('DomNode:fr:hint').hidden = ${v}['hint'] == ''
+    ('DomNode:fr:error').text = ${v}['err']
+    ('DomNode:fr:error').hidden = ${v}['err'] == ''
+    FOR o IN ${v}['opts']:
+      ('DomNode:fr:o:' + ${o}['v']).parent = 'DomNode:fr:model'
+      ('DomNode:fr:o:' + ${o}['v']).tag = 'option'
+      ('DomNode:fr:o:' + ${o}['v']).value = ${o}['v']
+      ('DomNode:fr:o:' + ${o}['v']).text = ${o}['t']
+      ('DomNode:fr:o:' + ${o}['v']).selected = ${o}['v'] == ${v}['sel']
+    keep = ['DomNode:fr:o:' + ${o}['v'] for o in ${v}['opts']]
     FOR x IN [x for x in instances('DomNode') if startswith(x.eid, 'DomNode:fr:o:') and not (x.eid in keep)]:
       (x.eid).retire = True
-    ('DomNode:fr:model').disabled = prop(v, 'off')
+    ('DomNode:fr:model').disabled = ${v}['off']
 
 -- ---- the person: the dropdown and the name are drafts until the submit; Refresh asks the seat again ----
 DomNode.value on-setter firstrun-typed:
@@ -143,10 +143,10 @@ DomNode.value on-setter firstrun-typed:
     ('FirstRun:main').local = ''
 DomNode.clicked on-setter firstrun-refresh:
   WHEN this.eid == 'DomNode:fr:refresh':
-    ('FirstRun:main').want = (prop('FirstRun:main', 'want') or 0) + 1
+    ('FirstRun:main').want = (${'FirstRun:main'}['want'] or 0) + 1
 DomNode.submitted on-setter firstrun-submit:
   WHEN this.eid == 'DomNode:fr:form':
-    ('FirstRun:main').go = (prop('FirstRun:main', 'go') or 0) + 1
+    ('FirstRun:main').go = (${'FirstRun:main'}['go'] or 0) + 1
 
 -- ---- one submit, both writes (the Settings rows' door: POST /mcp, entity_write of `Setting:<id>.set`); a missing value writes nothing and says so ----
 FirstRun.go on-setter firstrun-validate:
@@ -166,11 +166,11 @@ FirstRun.go on-setter firstrun-write-name:
     ('Fetch:frw:name').request = {'timeout_s': 10, 'id': 'frn-' + str(n + 1), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n + 1, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': 'Setting:chat.name', 'prop': 'set', 'value': this.name_out}}})}
 -- a write is answered: the rows are read again (the window closes when the seat says both are chosen); a refusal of the value is the row's `refused`, read back; a failed call is said here
 Fetch.gv on-setter firstrun-write-done:
-  WHEN startswith(this.eid, 'Fetch:frw:') and this.gv != None and prop(this.gv, 'ok'):
-    ('FirstRun:main').busy_m = False if this.eid == 'Fetch:frw:model' else prop('FirstRun:main', 'busy_m')
-    ('FirstRun:main').busy_n = False if this.eid == 'Fetch:frw:name' else prop('FirstRun:main', 'busy_n')
-    ('FirstRun:main').want = (prop('FirstRun:main', 'want') or 0) + 1
+  WHEN startswith(this.eid, 'Fetch:frw:') and this.gv != None and ${this.gv}['ok']:
+    ('FirstRun:main').busy_m = False if this.eid == 'Fetch:frw:model' else ${'FirstRun:main'}['busy_m']
+    ('FirstRun:main').busy_n = False if this.eid == 'Fetch:frw:name' else ${'FirstRun:main'}['busy_n']
+    ('FirstRun:main').want = (${'FirstRun:main'}['want'] or 0) + 1
   ELSE WHEN startswith(this.eid, 'Fetch:frw:') and this.gv != None:
-    ('FirstRun:main').busy_m = False if this.eid == 'Fetch:frw:model' else prop('FirstRun:main', 'busy_m')
-    ('FirstRun:main').busy_n = False if this.eid == 'Fetch:frw:name' else prop('FirstRun:main', 'busy_n')
-    ('FirstRun:main').local = 'Not saved: the seat answered: ' + str(prop(this.gv, 'why'))
+    ('FirstRun:main').busy_m = False if this.eid == 'Fetch:frw:model' else ${'FirstRun:main'}['busy_m']
+    ('FirstRun:main').busy_n = False if this.eid == 'Fetch:frw:name' else ${'FirstRun:main'}['busy_n']
+    ('FirstRun:main').local = 'Not saved: the seat answered: ' + str(${this.gv}['why'])

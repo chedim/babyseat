@@ -17,10 +17,10 @@ Intent.intend on-setter intend-stamp:
   ALWAYS:
     this.intend_id = clock
 
-Intent.in_text getter: join(words(str(prop(this.intend, 'text') or '')), ' ')
+Intent.in_text getter: join(words(str(${this.intend}['text'] or '')), ' ')
 Intent.in_plain getter: plain(this.in_text)
 Intent.in_slug getter: join(words(this.in_plain), '-')
-Intent.in_by getter: clip(strip(str(prop(this.intend, 'by') or '')), 40) or 'model'
+Intent.in_by getter: clip(strip(str(${this.intend}['by'] or '')), 40) or 'model'
 Intent.in_match getter: [g.eid for g in this.open_goals if plain(str(g.text or g.name or '')) == this.in_plain]
 
 Intent.intend_plan getter:
@@ -30,29 +30,29 @@ Intent.intend_plan getter:
   ELSE: {'id': this.intend_id, 'eid': 'Goal:' + this.in_slug, 'slug': this.in_slug, 'created': True, 'text': this.in_text, 'by': this.in_by}
 
 Intent.intend_plan on-setter intend-refused:
-  WHEN prop(this.intend_plan, 'error') != None and prop(this.intend_result, 'id') != prop(this.intend_plan, 'id'):
-    this.intend_result = {'id': prop(this.intend_plan, 'id'), 'ok': False, 'error': prop(this.intend_plan, 'error')}
+  WHEN ${this.intend_plan}['error'] != None and ${this.intend_result}['id'] != ${this.intend_plan}['id']:
+    this.intend_result = {'id': ${this.intend_plan}['id'], 'ok': False, 'error': ${this.intend_plan}['error']}
 Intent.intend_plan on-setter intend-found:
-  WHEN prop(this.intend_plan, 'created') == False and prop(this.intend_result, 'id') != prop(this.intend_plan, 'id'):
-    this.intend_result = {'id': prop(this.intend_plan, 'id'), 'ok': True, 'created': False, 'eid': prop(this.intend_plan, 'eid')}
+  WHEN ${this.intend_plan}['created'] == False and ${this.intend_result}['id'] != ${this.intend_plan}['id']:
+    this.intend_result = {'id': ${this.intend_plan}['id'], 'ok': True, 'created': False, 'eid': ${this.intend_plan}['eid']}
 Intent.intend_plan on-setter intend-create:
-  WHEN prop(this.intend_plan, 'created') == True and prop(this.intend_result, 'id') != prop(this.intend_plan, 'id'):
-    ('Goal:' + prop(this.intend_plan, 'slug')).name = clip(prop(this.intend_plan, 'text'), 120)
-    ('Goal:' + prop(this.intend_plan, 'slug')).summary = clip(prop(this.intend_plan, 'text'), 600)
-    ('Goal:' + prop(this.intend_plan, 'slug')).text = prop(this.intend_plan, 'text')
-    ('Goal:' + prop(this.intend_plan, 'slug')).planted_by = prop(this.intend_plan, 'by')
-    ('Goal:' + prop(this.intend_plan, 'slug')).born = clock
-    ('Goal:' + prop(this.intend_plan, 'slug')).status = 'open'
-    this.intend_result = {'id': prop(this.intend_plan, 'id'), 'ok': True, 'created': True, 'eid': prop(this.intend_plan, 'eid')}
+  WHEN ${this.intend_plan}['created'] == True and ${this.intend_result}['id'] != ${this.intend_plan}['id']:
+    ('Goal:' + ${this.intend_plan}['slug']).name = clip(${this.intend_plan}['text'], 120)
+    ('Goal:' + ${this.intend_plan}['slug']).summary = clip(${this.intend_plan}['text'], 600)
+    ('Goal:' + ${this.intend_plan}['slug']).text = ${this.intend_plan}['text']
+    ('Goal:' + ${this.intend_plan}['slug']).planted_by = ${this.intend_plan}['by']
+    ('Goal:' + ${this.intend_plan}['slug']).born = clock
+    ('Goal:' + ${this.intend_plan}['slug']).status = 'open'
+    this.intend_result = {'id': ${this.intend_plan}['id'], 'ok': True, 'created': True, 'eid': ${this.intend_plan}['eid']}
 
 -- ---- fulfill ----------------------------------------------------------------------------------------------------------------
 Intent.fulfill on-setter fulfill-stamp:
   ALWAYS:
     this.fulfill_id = clock
 
-Intent.ful_spec getter: strip(str(prop(this.fulfill, 'spec') or ''))
-Intent.ful_ev getter: join(words(str(prop(this.fulfill, 'evidence') or '')), ' ')
-Intent.ful_by getter: clip(strip(str(prop(this.fulfill, 'by') or '')), 40) or 'listener'
+Intent.ful_spec getter: strip(str(${this.fulfill}['spec'] or ''))
+Intent.ful_ev getter: join(words(str(${this.fulfill}['evidence'] or '')), ' ')
+Intent.ful_by getter: clip(strip(str(${this.fulfill}['by'] or '')), 40) or 'listener'
 -- an eid-shaped spec (it has a ':') is an id and NEVER name-matches: a re-plant's name quoting an old eid once closed the wrong goal
 Intent.open_goals getter: [g for g in instances('Goal') if (g.status or 'open') == 'open']
 Intent.ful_exact getter: [g.eid for g in this.open_goals if g.eid == this.ful_spec]
@@ -68,22 +68,22 @@ Intent.fulfill_plan getter:
   ELSE: {'id': this.fulfill_id, 'eid': this.ful_target, 'by': this.ful_by, 'evidence': clip(this.ful_ev, 500)}
 
 Intent.fulfill_plan on-setter fulfill-refused:
-  WHEN prop(this.fulfill_plan, 'error') != None and prop(this.fulfill_result, 'id') != prop(this.fulfill_plan, 'id'):
-    this.fulfill_result = {'id': prop(this.fulfill_plan, 'id'), 'ok': False, 'error': prop(this.fulfill_plan, 'error')}
+  WHEN ${this.fulfill_plan}['error'] != None and ${this.fulfill_result}['id'] != ${this.fulfill_plan}['id']:
+    this.fulfill_result = {'id': ${this.fulfill_plan}['id'], 'ok': False, 'error': ${this.fulfill_plan}['error']}
 Intent.fulfill_plan on-setter fulfill-close:
-  WHEN prop(this.fulfill_plan, 'eid') != None and prop(this.fulfill_result, 'id') != prop(this.fulfill_plan, 'id'):
-    (prop(this.fulfill_plan, 'eid')).fulfilled_by = prop(this.fulfill_plan, 'by')
-    (prop(this.fulfill_plan, 'eid')).fulfilled_evidence = prop(this.fulfill_plan, 'evidence')
-    (prop(this.fulfill_plan, 'eid')).fulfilled_ts = clock
-    (prop(this.fulfill_plan, 'eid')).status = 'fulfilled'
-    this.fulfill_result = {'id': prop(this.fulfill_plan, 'id'), 'ok': True, 'eid': prop(this.fulfill_plan, 'eid')}
+  WHEN ${this.fulfill_plan}['eid'] != None and ${this.fulfill_result}['id'] != ${this.fulfill_plan}['id']:
+    (${this.fulfill_plan}['eid']).fulfilled_by = ${this.fulfill_plan}['by']
+    (${this.fulfill_plan}['eid']).fulfilled_evidence = ${this.fulfill_plan}['evidence']
+    (${this.fulfill_plan}['eid']).fulfilled_ts = clock
+    (${this.fulfill_plan}['eid']).status = 'fulfilled'
+    this.fulfill_result = {'id': ${this.fulfill_plan}['id'], 'ok': True, 'eid': ${this.fulfill_plan}['eid']}
 
 -- ---- the board's read -------------------------------------------------------------------------------------------------------
 Intent.rep_open getter: sort_by([{'t': '- ' + g.eid + ' ' + clip(str(g.name or g.eid), 120), 'born': g.born or 0} for g in this.open_goals], 'born', True)
 Intent.done_goals getter: [g for g in instances('Goal') if g.status == 'fulfilled']
 Intent.done_line getter: [[g.eid + ' ' + clip(str(g.name or g.eid), 120) + ' [' + str(g.fulfilled_by or '') + ']', g.fulfilled_ts or 0] for g in this.done_goals]
 Intent.rep_done getter: head(sort_by([{'t': '- ' + x[0], 'ts': x[1]} for x in this.done_line], 'ts', True), 8)
-Intent.report getter: join(concat(['Open goals (' + str(len(this.rep_open)) + '):'], [prop(x, 't') for x in this.rep_open], ['Fulfilled (recent):'], [prop(x, 't') for x in this.rep_done]), '\n')
+Intent.report getter: join(concat(['Open goals (' + str(len(this.rep_open)) + '):'], [${x}['t'] for x in this.rep_open], ['Fulfilled (recent):'], [${x}['t'] for x in this.rep_done]), '\n')
 
 Boot.started on-setter intent-node:
   ALWAYS:

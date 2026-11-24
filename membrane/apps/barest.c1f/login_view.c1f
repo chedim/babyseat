@@ -57,7 +57,7 @@ DomNode.value on-setter login-typed:
     ('Login:main').token = this.value
 DomNode.submitted on-setter login-submit:
   WHEN this.eid == 'DomNode:login:form':
-    ('Login:main').go = (prop('Login:main', 'go') or 0) + 1
+    ('Login:main').go = (${'Login:main'}['go'] or 0) + 1
 
 -- ONE POST at a time (a second Enter or click while busy does nothing); an empty box says what is missing and sends nothing
 Login.go on-setter login-send:
@@ -87,13 +87,13 @@ Login.why on-setter login-note:
 -- the receipt, read once: ok = a 2xx; `why` = the seat's own reason (its error message), else its status; a call that got no answer says so
 Fetch.lg getter:
   rq = this.request_result
-  bd = json(str(prop(rq, 'body') or ''))
+  bd = json(str(${rq}['body'] or ''))
   jd = bd if bd is Dict else {}
-  hs = prop(rq, 'http_status')
-  {'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'why': ('The seat did not answer' if prop(rq, 'status') != 'ok' else str(prop(prop(jd, 'error'), 'message') or prop(jd, 'error') or ('the seat answered ' + str(hs))))} if rq != None else None
+  hs = ${rq}['http_status']
+  {'ok': ${rq}['status'] == 'ok' and hs != None and hs >= 200 and hs < 300, 'why': ('The seat did not answer' if ${rq}['status'] != 'ok' else str(${${jd}['error']}['message'] or ${jd}['error'] or ('the seat answered ' + str(hs))))} if rq != None else None
 Fetch.lg on-setter login-receipt:
   WHEN this.eid == 'Fetch:login' and this.lg != None:
     this.request = None
     ('Login:main').busy = False
-    ('Login:main').why = '' if prop(this.lg, 'ok') else prop(this.lg, 'why')
-    ('DomNode:login:root').reload = True if prop(this.lg, 'ok') else None
+    ('Login:main').why = '' if ${this.lg}['ok'] else ${this.lg}['why']
+    ('DomNode:login:root').reload = True if ${this.lg}['ok'] else None

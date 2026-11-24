@@ -10,4 +10,4 @@ Boot.old_requests on-setter sweep-old-requests:
   WHEN this.old_requests != None and this.swept != True:
     this.swept = True
     FOR r IN this.old_requests:
-      (prop(r, 'k')).retire = True
+      (${r}['k']).retire = True

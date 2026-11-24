@@ -33,9 +33,9 @@ Request.layer_files getter: [r + '/' + this.rel for r in this.ui_roots] if this.
 Request.cand getter: this.layer_files[(this.skip or 0)] if (this.skip or 0) < len(this.layer_files) else None
 Request.found getter: stat(this.cand) if this.cand != None else None
 Request.found on-setter next-layer:
-  WHEN this.found != None and not (prop(this.found, 'exists') == True and prop(this.found, 'kind') == 'file') and (this.skip or 0) + 1 < len(this.layer_files):
+  WHEN this.found != None and not (${this.found}['exists'] == True and ${this.found}['kind'] == 'file') and (this.skip or 0) + 1 < len(this.layer_files):
     this.skip = (this.skip or 0) + 1
-Request.hit getter: prop(this.found, 'exists') == True and prop(this.found, 'kind') == 'file'
+Request.hit getter: ${this.found}['exists'] == True and ${this.found}['kind'] == 'file'
 Request.last getter: (this.skip or 0) + 1 >= len(this.layer_files)
 Request.file getter: this.cand if this.hit == True else None
 Request.parts getter: concat([''], words(replace(this.rel or '', '.', ' ')))
@@ -65,7 +65,7 @@ Request.static_reply getter:
 -- once the door has a secret, a request with no token, from loopback or anywhere, is refused; the admin's token is the file the seat writes at boot
 -- (docs/auth.md). A token that is sent and bad is refused the same way. A door with no secret at all (the barest seat) is open by decision.
 Request.loop getter: startswith(this.peer or '', '127.0.0.1:') or startswith(this.peer or '', '[::1]:')
-Request.fwd getter: prop(this.headers, 'x-forwarded-for') != None or prop(this.headers, 'forwarded') != None or prop(this.headers, 'x-real-ip') != None
+Request.fwd getter: ${this.headers}['x-forwarded-for'] != None or ${this.headers}['forwarded'] != None or ${this.headers}['x-real-ip'] != None
 Request.entrant getter: this.authed == True
 -- NO USERS (#1143, operator 2026-11-14): every request that carries a VALID token (or the page cookie) is THE ADMIN, whatever the token's `sub` says: the host's door
 -- replaces `sub` and `name` by `admin` after it has verified the token, so no pack reads a sub as an identity. There is no second person, no non-admin tier and nothing
@@ -91,16 +91,16 @@ Request.conf_reply getter:
 -- A person's token (JSON only: a cross-site form cannot post it; the seat's internal token never logs in) becomes this seat's
 -- HttpOnly, SameSite=Strict cookie, Secure behind an https proxy. The door checks the token (`Request.verify`, a write whose
 -- receipt is data); everything else is decided here.
-Request.ct getter: (words(replace(lower(str(prop(this.headers, 'content-type') or '')), ';', ' ')) or [''])[0]
-Request.proto getter: (words(replace(lower(str(prop(this.headers, 'x-forwarded-proto') or '')), ',', ' ')) or [''])[0]
-Request.fwdh getter: lower(str(prop(this.headers, 'forwarded') or ''))
+Request.ct getter: (words(replace(lower(str(${this.headers}['content-type'] or '')), ';', ' ')) or [''])[0]
+Request.proto getter: (words(replace(lower(str(${this.headers}['x-forwarded-proto'] or '')), ',', ' ')) or [''])[0]
+Request.fwdh getter: lower(str(${this.headers}['forwarded'] or ''))
 Request.https getter: this.proto == 'https' or 'proto=https' in this.fwdh or 'proto="https"' in this.fwdh
-Request.cookie_name getter: ([prop(h.listen_result, 'cookie') for h in instances('Http') if prop(h.listen_result, 'cookie') != None] or ['membrane_jwt'])[0]
+Request.cookie_name getter: ([${h.listen_result}['cookie'] for h in instances('Http') if ${h.listen_result}['cookie'] != None] or ['membrane_jwt'])[0]
 Request.secure getter: '; Secure' if this.https else ''
 Request.login_token getter:
   WHEN this.method == 'POST' and this.route == '/ui/login':
     lj = json(this.body or '')
-    None if lj is Error else prop(lj, 'token')
+    None if lj is Error else ${lj}['token']
   ELSE: None
 Request.login_shape getter: this.route == '/ui/login' and this.method == 'POST' and this.ct == 'application/json' and len(this.body or '') <= 16384
 Request.login_has getter: this.login_token != None and len(str(this.login_token)) > 0
@@ -108,8 +108,8 @@ Request.login_ask getter: {'id': 'login', 'token': this.login_token} if this.log
 Request.login_ask on-setter login-verify:
   WHEN this.login_ask != None:
     this.verify = this.login_ask
-Request.login_ok getter: prop(this.verify_result, 'rc') == 0 and prop(prop(this.verify_result, 'claims'), 'sub') != 'seat:internal'
-Request.login_age getter: words(replace(str(max(0, prop(prop(this.verify_result, 'claims'), 'exp') - clock)), '.', ' '))[0] if this.verify_result != None else None
+Request.login_ok getter: ${this.verify_result}['rc'] == 0 and ${${this.verify_result}['claims']}['sub'] != 'seat:internal'
+Request.login_age getter: words(replace(str(max(0, ${${this.verify_result}['claims']}['exp'] - clock)), '.', ' '))[0] if this.verify_result != None else None
 Request.login_cookie getter: None if this.login_age == None else this.cookie_name + '=' + str(this.login_token) + '; Path=/; Max-Age=' + this.login_age + '; HttpOnly; SameSite=Strict' + this.secure
 Request.login_reply getter:
   WHEN this.method != 'POST': {'status': 405, 'body': {'error': 'method not allowed'}}
@@ -149,8 +149,8 @@ Request.ag_body getter: [{'name': 'build', 'native': True, 'mode': 'primary', 'd
 -- THE CONFIG (opencode.py writes the released one at launch; the page reads `model` of it, opencode's TUI the provider): the one provider is membrane's own /v1
 -- on this door, serving the seat's default model (Boot fact `minds.seat_default`, the model the launcher picked: claude is the only one in the first swap).
 -- No model picked: no `model` keys and no models, the released config's shape without a model.
-Request.cf_model getter: str(prop(([b.minds for b in instances('Boot') if b.minds != None] or [None])[0], 'seat_default') or '')   -- the fact `minds`, or the launcher pack's default (a default is a write at `started`, so it is not in the `facts` dict)
-Request.cf_port getter: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [0])[0]
+Request.cf_model getter: str(${([b.minds for b in instances('Boot') if b.minds != None] or [None])[0]}['seat_default'] or '')   -- the fact `minds`, or the launcher pack's default (a default is a write at `started`, so it is not in the `facts` dict)
+Request.cf_port getter: ([${h.listen_result}['port'] for h in instances('Http') if ${h.listen_result}['port'] != None] or [0])[0]
 -- (a dict with a DATA key has no c1f form -- `dict(rows)` is a proposed builtin, docs/c1f-stdlib.md --: the one models row is read from JSON text, only for a name
 -- that needs no escaping; any other name leaves the list empty)
 Request.cf_safe getter: this.cf_model != '' and '"' not in this.cf_model and '\\' not in this.cf_model
@@ -204,7 +204,7 @@ Request.jbody getter:
     {} if jb is Error else (jb or {})
   ELSE: {}
 Request.qpairs getter: [head(concat(words(replace(p, '=', ' ')), ['']), 2) for p in words(replace(this.query or '', '&', ' '))]
-Request.person getter: (prop(this.claims, 'name') or this.sub) if this.authed == True else None
+Request.person getter: (${this.claims}['name'] or this.sub) if this.authed == True else None
 
 -- the declarative method gate: a family that declares `Request.m_<f>` (its allowed methods) gets the 405 and the `allow` header
 -- from here; a family that declares none checks for itself (the early families do). A HEAD is NOT a GET here: the families' replies are written for the methods they list, and a HEAD that no reply
@@ -241,13 +241,13 @@ Request.route getter: this.ui_path if this.ui_served else this.path
 Request.reply getter: this.override if this.override != None else this.shipped
 
 Request.reply on-setter answer:
-  WHEN this.reply != None and prop(this.reply, 'stream') != True:
+  WHEN this.reply != None and ${this.reply}['stream'] != True:
     this.respond = this.reply
 -- a reply with `stream: True` is not a whole answer: it opens an event stream (docs/cliffvm.md, "The event stream"), and the route's own
 -- setters then write `send` and `end` on the request. {status?, headers?} are the head.
 Request.reply on-setter answer-stream:
-  WHEN this.reply != None and prop(this.reply, 'stream') == True:
-    this.stream = {'id': 'stream', 'status': prop(this.reply, 'status') or 200, 'headers': prop(this.reply, 'headers') or {}}
+  WHEN this.reply != None and ${this.reply}['stream'] == True:
+    this.stream = {'id': 'stream', 'status': ${this.reply}['status'] or 200, 'headers': ${this.reply}['headers'] or {}}
 
 -- ---- the boot starts the door ------------------------------------------------------------------------------------------------
 -- The launcher tells the seat's facts (Boot:seat.door_port, .door_secret_file, .ui_dir) before it says `started`; with a

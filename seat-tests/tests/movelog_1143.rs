@@ -263,7 +263,7 @@ fn a_message_with_no_answer_before_it_holds_the_message_before() {
 }
 
 /// the store's answer (which message came before) can come after the text's first landing: the link is made then, by its own setter
-const GATE: &str = "PACK mllayer 1\nIMPORT semtext 1\nIMPORT movelog 1\nSemText.ml_prev_msg getter WHEN prop('Box:gate', 'shut') == True:\n  None\n";
+const GATE: &str = "PACK mllayer 1\nIMPORT semtext 1\nIMPORT movelog 1\nSemText.ml_prev_msg getter WHEN ${'Box:gate'}['shut'] == True:\n  None\n";
 
 #[test]
 fn a_text_that_landed_before_its_previous_turn_was_known_is_linked_when_it_is() {
@@ -398,7 +398,7 @@ fn a_question_of_common_things_stays_inside_the_step_budget() {
 }
 
 /// the posting setter's per-thing write, as a getter the measurement can evaluate alone
-const PROBE: &str = "PACK mllayer 1\nIMPORT movelog 1\nProbe.post getter:\n  old = prop(this.e, 'ml_held_by') or []\n  by = [{'key': this.t, 'rows': [{'t': this.t, 'e': this.e, 'm': 0.5}]}]\n  concat([x for x in old if len([b for b in by if b['key'] == x['t']]) == 0], [{'t': b['key'], 'h': max(concat([x['h'] for x in old if x['t'] == b['key']], pluck(b['rows'], 'm')))} for b in by])\n";
+const PROBE: &str = "PACK mllayer 1\nIMPORT movelog 1\nProbe.post getter:\n  old = ${this.e}['ml_held_by'] or []\n  by = [{'key': this.t, 'rows': [{'t': this.t, 'e': this.e, 'm': 0.5}]}]\n  concat([x for x in old if len([b for b in by if b['key'] == x['t']]) == 0], [{'t': b['key'], 'h': max(concat([x['h'] for x in old if x['t'] == b['key']], pluck(b['rows'], 'm')))} for b in by])\n";
 
 /// the measurement (run by hand: `cargo test --test movelog_1143 measure -- --ignored --nocapture`, MOVELOG_N texts): the smallest step budget that the vote and the
 /// posting setter of one more landing each need, found by bisecting the thread's budget
