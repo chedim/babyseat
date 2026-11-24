@@ -5,11 +5,11 @@ IMPORT chat_turn 1
 -- `<message>.tool_ids` = the call ids so far, space separated, in call order. `tool_rows` (packs/chat.c1f) already reads them from `tool_ids`, so `tool_calls` of the page row lists them while the turn runs; what was missing is the
 -- `tools` NAMES of the message route, the page row and the event stream, which a rung fills only when its turn finishes (`tools_run`). Each arm below applies ONLY to a turn the brain took (`turn.brain` is set, packs/chat_turn.c1f), running or finished,
 -- and is the view's own dict with `tools` = the names of the rows so far; every other message keeps the view as chat.c1f writes it. A finished brain turn keeps the same rows and names. This pack changes no other pack: it can be loaded on a running seat.
-ChatMessage.brain_has getter: prop(this.turn_eid, 'brain') != None
+ChatMessage.brain_has getter: ${this.turn_eid}['brain'] != None
 ChatMessage.live_tools getter: [t['name'] for t in this.tool_rows] if this.brain_has else None
 -- THE LIVE TEXT: the brain publishes `<ns>::Loop:main.live` (the text of its current model round so far, replaced as it grows, cleared when the round ends); the seat reads that cell as a foreign replica and the running brain
 -- turn's page row carries it as `live` (the page shows it muted under "Working on it", and drops it when the turn finishes). The RESULT of each tool row is added to the page row only while the turn runs (a result can be megabytes).
-ChatMessage.live_raw getter: prop(prop(this.turn_eid, 'brain') + '::Loop:main', 'live') if this.brain_turn else None
+ChatMessage.live_raw getter: ${${this.turn_eid}['brain'] + '::Loop:main'}['live'] if this.brain_turn else None
 ChatMessage.live_text getter: (this.live_raw if this.live_raw is Text else '') if this.brain_turn else None
 ChatMessage.page_rows getter: [{'id': t['id'], 'name': t['name'], 'input': t['input'], 'result': t['result']} for t in this.tool_rows] if this.brain_turn else [{'id': t['id'], 'name': t['name'], 'input': t['input']} for t in this.tool_rows]
 ChatMessage.view getter:

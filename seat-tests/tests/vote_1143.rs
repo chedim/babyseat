@@ -15,15 +15,15 @@ fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 /// `Leaf.go` makes a text that is not the chat's; `Box.say` a mentioned chat body
 const MAKER: &str = "PACK vtmaker 1\nIMPORT semtext 1\nIMPORT mentions 1\nIMPORT chat 1\n\
 Leaf.go on-setter leaf:\n  WHEN this.go != None:\n    Leaf:x[this.k]:body = SemText(text: this.go)\n    Leaf:x[this.k]:body.mention = True\n\
-Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[prop(this.say, 'id')]:body = SemText(text: prop(this.say, 'text'))\n    membrane::Chat:main:message[prop(this.say, 'id')]:body.mention = True\n";
+Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[${this.say}['id']]:body = SemText(text: ${this.say}['text'])\n    membrane::Chat:main:message[${this.say}['id']]:body.mention = True\n";
 
 /// a model's layer that replaces the four voters by the rows of `Stub:s` while `on` (a voter `'fail'` is an Error, a voter not given is absent)
 const STUB: &str = "PACK votestub 1\nIMPORT semtext 1\nIMPORT mentions 1\nIMPORT movelog 1\nIMPORT entityrecall 1\n\
 Stub.kind getter: 'stub'\n\
-SemText.movelog_votes getter WHEN prop('Stub:s', 'on') == True:\n  Error('the voter failed') if prop('Stub:s', 'ml') == 'fail' else prop('Stub:s', 'ml')\n\
-SemText.entity_votes getter WHEN prop('Stub:s', 'on') == True:\n  Error('the voter failed') if prop('Stub:s', 'er') == 'fail' else prop('Stub:s', 'er')\n\
-SemText.r_edge_rows getter WHEN prop('Stub:s', 'on') == True:\n  prop('Stub:s', 'edge') or []\n\
-SemText.r_cos_rows getter WHEN prop('Stub:s', 'on') == True:\n  prop('Stub:s', 'cos') or []\n";
+SemText.movelog_votes getter WHEN ${'Stub:s'}['on'] == True:\n  Error('the voter failed') if ${'Stub:s'}['ml'] == 'fail' else ${'Stub:s'}['ml']\n\
+SemText.entity_votes getter WHEN ${'Stub:s'}['on'] == True:\n  Error('the voter failed') if ${'Stub:s'}['er'] == 'fail' else ${'Stub:s'}['er']\n\
+SemText.r_edge_rows getter WHEN ${'Stub:s'}['on'] == True:\n  ${'Stub:s'}['edge'] or []\n\
+SemText.r_cos_rows getter WHEN ${'Stub:s'}['on'] == True:\n  ${'Stub:s'}['cos'] or []\n";
 
 fn seat_with(layers: &[&str]) -> Host {
     cliffvm::expr::set_eval_time_ms(Some(10_000));

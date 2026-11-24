@@ -230,7 +230,7 @@ try {
   await b.until(`[...document.querySelectorAll('.panelrows li.link')].some((e) => e.textContent === 'child · Zed:a:x')`, 'the edges: a child link');
   await b.until(`!!${Q('.panelrows li.prop .v')}`, 'the properties');
   assert.ok((await b.ev(textOf('.panelrows li.prop .v'))).length < 450 && /…$/.test(await b.ev(textOf('.panelrows li.prop .v'))), 'a long value is cut');
-  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.panelrows li')].map((l) => l.className)`), ['head', 'prop', 'prop', 'head', 'link'], 'properties first, then the edges, whatever answered first');
+  assert.deepEqual(await b.ev(`[...document.querySelectorAll('.panelrows li')].map((l) => l.className)`), ['head', 'prop', 'head', 'link'], 'properties first (the stored ones: a getter\'s value is not stored, #1143), then the edges, whatever answered first');
   await b.ev(click('.panelrows li.prop .more'));
   await b.until(`${textOf('.panelrows li.prop .v')} === 'x'.repeat(450)`, 'Show all expands the whole value');
   assert.equal(await b.ev(`document.activeElement === ${Q('.panel')} || ${Q('.panel')}.contains(document.activeElement)`), true, 'the panel takes the focus');

@@ -60,5 +60,5 @@ About.changelog on-setter notes:
 
 -- the ⓘ opens and closes it; the × closes it
 DomNode.clicked on-setter about-open:
-  WHEN this.eid == 'DomNode:about:btn': ('DomNode:about:win').hidden = not prop('DomNode:about:win', 'hidden')
+  WHEN this.eid == 'DomNode:about:btn': ('DomNode:about:win').hidden = not ${'DomNode:about:win'}['hidden']
   ELSE WHEN this.eid == 'DomNode:about:x': ('DomNode:about:win').hidden = True

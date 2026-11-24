@@ -13,43 +13,43 @@ IMPORT shell_view 1
 -- WHAT IS NOT HERE (yet): a box to say something to the goal (the operator's word in its chat) and the answer to a decision card.
 
 GoalsView.cur getter:
-  WHEN this.sel != None and len([r for r in (this.rows or []) if prop(r, 'e') == this.sel]) > 0: this.sel
-  ELSE WHEN len(this.rows or []) > 0: prop(this.rows[0], 'e')
+  WHEN this.sel != None and len([r for r in (this.rows or []) if ${r}['e'] == this.sel]) > 0: this.sel
+  ELSE WHEN len(this.rows or []) > 0: ${this.rows[0]}['e']
   ELSE: None
 GoalsView.code getter: "[{'e': g.eid, 's': g.status, 'ti': g.title, 'ls': clip(lines(g.text or '')[0], 160), 'mv': g.moving, 'view': (g.view if g.eid == '" + str(this.cur or '') + "' else None), 'msgs': ([{'at': m.at, 'u': clip(str(m.text or ''), 400), 'a': clip(str(m.said or ''), 900)} for m in instances('Chat') if startswith(m.cp if m.cp is Text else '', '" + replace(str(this.cur or ''), 'Goal:', '') + ":message:')] if g.eid == '" + str(this.cur or '') + "' else None)} for g in instances('Goal')]"
 -- the rows, each tidied: a null that carries a reason (a goal with no status or title) is an empty text, and a goal that is moving comes first, a finished one last
-GoalsView.norm getter: [{'e': str(prop(g, 'e')), 'st': prop(g, 's') if prop(g, 's') is Text else 'open', 'ti': prop(g, 'ti') if prop(g, 'ti') is Text else '', 'ls': prop(g, 'ls') if prop(g, 'ls') is Text else '', 'mv': prop(g, 'mv') == True, 'view': prop(g, 'view') if prop(g, 'view') is Dict else None, 'msgs': prop(g, 'msgs') if prop(g, 'msgs') is List else [], 'k': 0 if prop(g, 'mv') == True else (2 if (prop(g, 's') if prop(g, 's') is Text else 'open') in ['done', 'closed', 'dropped', 'failed'] else 1)} for g in (this.goals or []) if g is Dict]
+GoalsView.norm getter: [{'e': str(${g}['e']), 'st': ${g}['s'] if ${g}['s'] is Text else 'open', 'ti': ${g}['ti'] if ${g}['ti'] is Text else '', 'ls': ${g}['ls'] if ${g}['ls'] is Text else '', 'mv': ${g}['mv'] == True, 'view': ${g}['view'] if ${g}['view'] is Dict else None, 'msgs': ${g}['msgs'] if ${g}['msgs'] is List else [], 'k': 0 if ${g}['mv'] == True else (2 if (${g}['s'] if ${g}['s'] is Text else 'open') in ['done', 'closed', 'dropped', 'failed'] else 1)} for g in (this.goals or []) if g is Dict]
 -- the words of a row: its name (the title, else the start of its text), its state and the mark before it
-GoalsView.named getter: [{'e': prop(r, 'e'), 'st': prop(r, 'st'), 'ti': prop(r, 'ti'), 'ls': prop(r, 'ls'), 'mv': prop(r, 'mv'), 'view': prop(r, 'view'), 'msgs': prop(r, 'msgs'), 'k': prop(r, 'k'), 'name': prop(r, 'ti') if prop(r, 'ti') != '' else (clip(prop(r, 'ls'), 60) if prop(r, 'ls') != '' else 'Untitled goal'), 'state': 'Working' if prop(r, 'mv') else (prop({'done': 'Done', 'closed': 'Closed', 'dropped': 'Dropped', 'failed': 'Failed'}, prop(r, 'st')) or 'Idle'), 'mark': '*' if prop(r, 'mv') else ('+' if prop(r, 'st') in ['done', 'closed'] else ('x' if prop(r, 'st') in ['failed', 'dropped'] else 'o'))} for r in (this.norm or [])]
+GoalsView.named getter: [{'e': ${r}['e'], 'st': ${r}['st'], 'ti': ${r}['ti'], 'ls': ${r}['ls'], 'mv': ${r}['mv'], 'view': ${r}['view'], 'msgs': ${r}['msgs'], 'k': ${r}['k'], 'name': ${r}['ti'] if ${r}['ti'] != '' else (clip(${r}['ls'], 60) if ${r}['ls'] != '' else 'Untitled goal'), 'state': 'Working' if ${r}['mv'] else (${{'done': 'Done', 'closed': 'Closed', 'dropped': 'Dropped', 'failed': 'Failed'}}[${r}['st']] or 'Idle'), 'mark': '*' if ${r}['mv'] else ('+' if ${r}['st'] in ['done', 'closed'] else ('x' if ${r}['st'] in ['failed', 'dropped'] else 'o'))} for r in (this.norm or [])]
 GoalsView.rows getter: sort_by(this.named or [], 'k')
-GoalsView.cur_row getter: ([r for r in (this.rows or []) if prop(r, 'e') == this.cur] or [None])[0]
-GoalsView.listing getter: fold([], [concat(acc, [{'n': len(acc), 'c': 'goalrow' + (' on' if prop(r, 'e') == this.cur else '') + (' working' if prop(r, 'mv') else (' finished' if prop(r, 'k') == 2 else '')), 't': prop(r, 'name') + '  -  ' + prop(r, 'state')}]) for r in (this.rows or [])])
-GoalsView.count getter: str(len(this.rows or [])) + (' goal' if len(this.rows or []) == 1 else ' goals') + (', ' + str(len([r for r in (this.rows or []) if prop(r, 'mv')])) + ' working' if len([r for r in (this.rows or []) if prop(r, 'mv')]) > 0 else '')
+GoalsView.cur_row getter: ([r for r in (this.rows or []) if ${r}['e'] == this.cur] or [None])[0]
+GoalsView.listing getter: fold([], [concat(acc, [{'n': len(acc), 'c': 'goalrow' + (' on' if ${r}['e'] == this.cur else '') + (' working' if ${r}['mv'] else (' finished' if ${r}['k'] == 2 else '')), 't': ${r}['name'] + '  -  ' + ${r}['state']}]) for r in (this.rows or [])])
+GoalsView.count getter: str(len(this.rows or [])) + (' goal' if len(this.rows or []) == 1 else ' goals') + (', ' + str(len([r for r in (this.rows or []) if ${r}['mv']])) + ' working' if len([r for r in (this.rows or []) if ${r}['mv']]) > 0 else '')
 
 -- the selected goal as lines: its name and state, a summary, the cards that wait for the person, the conversation of its chat (the last twelve messages), then the steps (what is stuck or running first, done last; a dropped step is only counted) and the waits
 GoalsView.parts getter:
   r = this.cur_row
-  v = prop(r, 'view')
-  every = [t for t in (prop(v, 'tasks') or [])]
-  ts = [t for t in every if prop(t, 'status') != 'dropped']
-  ws = [w for w in (prop(v, 'waits') or [])]
-  cs = [c for c in (prop(v, 'cards') or []) if prop(c, 'status') == 'open']
-  nrun = len([t for t in ts if prop(t, 'status') == 'running'])
-  ndone = len([t for t in ts if prop(t, 'status') == 'done'])
-  top = [{'c': 'gv-title', 't': prop(r, 'name')}, {'c': 'gv-state ' + ('working' if prop(r, 'mv') else 'idle'), 't': prop(r, 'state') + ('' if prop(r, 'mv') else ' - nothing is moving')}] if r != None else [{'c': 'gv-sum', 't': 'No goal on this seat yet.'}]
-  brief = [{'c': 'gv-sum', 't': clip(prop(r, 'ls'), 220)}] if r != None and prop(r, 'ti') != '' and prop(r, 'ls') != '' else []
+  v = ${r}['view']
+  every = [t for t in (${v}['tasks'] or [])]
+  ts = [t for t in every if ${t}['status'] != 'dropped']
+  ws = [w for w in (${v}['waits'] or [])]
+  cs = [c for c in (${v}['cards'] or []) if ${c}['status'] == 'open']
+  nrun = len([t for t in ts if ${t}['status'] == 'running'])
+  ndone = len([t for t in ts if ${t}['status'] == 'done'])
+  top = [{'c': 'gv-title', 't': ${r}['name']}, {'c': 'gv-state ' + ('working' if ${r}['mv'] else 'idle'), 't': ${r}['state'] + ('' if ${r}['mv'] else ' - nothing is moving')}] if r != None else [{'c': 'gv-sum', 't': 'No goal on this seat yet.'}]
+  brief = [{'c': 'gv-sum', 't': clip(${r}['ls'], 220)}] if r != None and ${r}['ti'] != '' and ${r}['ls'] != '' else []
   sums = [{'c': 'gv-sum', 't': str(ndone) + ' of ' + str(len(ts)) + ' steps done' + (', ' + str(nrun) + ' working now' if nrun > 0 else '') + (', ' + str(len(cs)) + ' waiting for you' if len(cs) > 0 else '')}] if v != None and len(ts) > 0 else ([{'c': 'gv-sum', 't': 'No steps planned yet.'}] if v != None else ([{'c': 'gv-sum', 't': 'Reading the goal...'}] if r != None else []))
-  cards = concat([{'c': 'gv-h', 't': 'Waiting for your answer'}] if len(cs) > 0 else [], [{'c': 'gv-card', 't': '? ' + str(prop(c, 'name'))} for c in cs])
-  ms = sort_by([m for m in (prop(r, 'msgs') or [])], 'at')
+  cards = concat([{'c': 'gv-h', 't': 'Waiting for your answer'}] if len(cs) > 0 else [], [{'c': 'gv-card', 't': '? ' + str(${c}['name'])} for c in cs])
+  ms = sort_by([m for m in (${r}['msgs'] or [])], 'at')
   idx = fold([], [concat(acc, [{'i': len(acc), 'm': m}]) for m in ms])
   cut = len(ms) - 12
-  recent = [prop(x, 'm') for x in idx if prop(x, 'i') >= cut]
-  chat = concat(concat([{'c': 'gv-h', 't': 'Conversation'}] if len(ms) > 0 else [], [{'c': 'gv-sum', 't': str(cut) + ' earlier messages are not shown'}] if cut > 0 else []), fold([], [concat(acc, [{'c': 'gv-msg me', 't': ('Worker step: ' + replace(lines(str(prop(m, 'u')))[1], 'Task: ', '') if startswith(str(prop(m, 'u')), 'You are a WORKER') else ('Planning the work' if startswith(str(prop(m, 'u')), 'You are the PLANNER') else clip(str(prop(m, 'u')), 300)))}, {'c': 'gv-msg seat', 't': str(prop(m, 'a')) if str(prop(m, 'a')) != '' else 'working on it...'}]) for m in recent]))
-  ranked = sort_by([{'k': 0 if prop(t, 'status') in ['running', 'stuck', 'failed'] else (1 if prop(t, 'status') == 'owed' else (3 if prop(t, 'status') == 'done' else 2)), 'c': 'gv-task ' + str(prop(t, 'status')), 't': ('*' if prop(t, 'status') == 'running' else ('+' if prop(t, 'status') == 'done' else ('!' if prop(t, 'status') in ['stuck', 'failed'] else 'o'))) + ' ' + str(prop(t, 'title')) + '  -  ' + (prop({'running': 'working', 'owed': 'ready to start', 'done': 'done', 'stuck': 'stuck', 'failed': 'failed', 'split': 'split into smaller steps'}, prop(t, 'status')) or str(prop(t, 'status'))) + ('  (part of a bigger step)' if prop(t, 'parent') is Text else ''), 'rc': prop(t, 'receipt') if prop(t, 'receipt') is Text else ''} for t in ts], 'k')
-  tasks = concat([{'c': 'gv-h', 't': 'Steps'}] if len(ts) > 0 else [], fold([], [concat(acc, concat([{'c': prop(x, 'c'), 't': prop(x, 't')}], [{'c': 'gv-receipt', 't': clip(prop(x, 'rc'), 320)}] if prop(x, 'rc') != '' else [])) for x in ranked]))
-  waits = concat([{'c': 'gv-h', 't': 'Waiting for'}] if len(ws) > 0 else [], [{'c': 'gv-wait', 't': 'o ' + str(prop(w, 'title')) + '  (' + str(prop(w, 'status')) + ')'} for w in ws])
+  recent = [${x}['m'] for x in idx if ${x}['i'] >= cut]
+  chat = concat(concat([{'c': 'gv-h', 't': 'Conversation'}] if len(ms) > 0 else [], [{'c': 'gv-sum', 't': str(cut) + ' earlier messages are not shown'}] if cut > 0 else []), fold([], [concat(acc, [{'c': 'gv-msg me', 't': ('Worker step: ' + replace(lines(str(${m}['u']))[1], 'Task: ', '') if startswith(str(${m}['u']), 'You are a WORKER') else ('Planning the work' if startswith(str(${m}['u']), 'You are the PLANNER') else clip(str(${m}['u']), 300)))}, {'c': 'gv-msg seat', 't': str(${m}['a']) if str(${m}['a']) != '' else 'working on it...'}]) for m in recent]))
+  ranked = sort_by([{'k': 0 if ${t}['status'] in ['running', 'stuck', 'failed'] else (1 if ${t}['status'] == 'owed' else (3 if ${t}['status'] == 'done' else 2)), 'c': 'gv-task ' + str(${t}['status']), 't': ('*' if ${t}['status'] == 'running' else ('+' if ${t}['status'] == 'done' else ('!' if ${t}['status'] in ['stuck', 'failed'] else 'o'))) + ' ' + str(${t}['title']) + '  -  ' + (${{'running': 'working', 'owed': 'ready to start', 'done': 'done', 'stuck': 'stuck', 'failed': 'failed', 'split': 'split into smaller steps'}}[${t}['status']] or str(${t}['status'])) + ('  (part of a bigger step)' if ${t}['parent'] is Text else ''), 'rc': ${t}['receipt'] if ${t}['receipt'] is Text else ''} for t in ts], 'k')
+  tasks = concat([{'c': 'gv-h', 't': 'Steps'}] if len(ts) > 0 else [], fold([], [concat(acc, concat([{'c': ${x}['c'], 't': ${x}['t']}], [{'c': 'gv-receipt', 't': clip(${x}['rc'], 320)}] if ${x}['rc'] != '' else [])) for x in ranked]))
+  waits = concat([{'c': 'gv-h', 't': 'Waiting for'}] if len(ws) > 0 else [], [{'c': 'gv-wait', 't': 'o ' + str(${w}['title']) + '  (' + str(${w}['status']) + ')'} for w in ws])
   concat(concat(concat(concat(concat(concat(top, brief), sums), cards), chat), tasks), waits)
-GoalsView.items getter: fold([], [concat(acc, [{'n': len(acc), 'c': prop(x, 'c'), 't': prop(x, 't')}]) for x in (this.parts or [])])
+GoalsView.items getter: fold([], [concat(acc, [{'n': len(acc), 'c': ${x}['c'], 't': ${x}['t']}]) for x in (this.parts or [])])
 GoalsView.paint getter: {'on': this.on, 'count': this.count, 'note': this.note or '', 'listing': this.listing or [], 'items': this.items or []}
 
 Shell.open on-setter goals-view-register:
@@ -58,7 +58,7 @@ Shell.open on-setter goals-view-register:
     ('Nav:goals').order = 50
 
 Nav.active on-setter goals-view-draw:
-  WHEN this.eid == 'Nav:goals' and this.active == True and not prop('GoalsView:main', 'on'):
+  WHEN this.eid == 'Nav:goals' and this.active == True and not ${'GoalsView:main'}['on']:
     ('DomNode:goals:root').tag = 'div'
     ('DomNode:goals:root').class = 'panelrows goalsview'
     ('DomNode:goals:root').parent = 'DomNode:shell:slot:goals'
@@ -84,58 +84,58 @@ Nav.active on-setter goals-view-draw:
 
 -- everything on the page is drawn from `paint`: the count, the note, the list of goals, the selected goal's lines (numbered nodes in order; the ones that are no longer needed are retired)
 GoalsView.paint on-setter goals-view-paint:
-  WHEN prop(this.paint, 'on') == True:
-    ('DomNode:goals:count').text = prop(this.paint, 'count')
-    ('DomNode:goals:note').text = prop(this.paint, 'note')
-    ('DomNode:goals:note').hidden = prop(this.paint, 'note') == ''
-    FOR x IN prop(this.paint, 'listing'):
-      ('DomNode:goals:g:' + str(prop(x, 'n'))).parent = 'DomNode:goals:list'
-      ('DomNode:goals:g:' + str(prop(x, 'n'))).tag = 'button'
-      ('DomNode:goals:g:' + str(prop(x, 'n'))).type = 'button'
-      ('DomNode:goals:g:' + str(prop(x, 'n'))).class = prop(x, 'c')
-      ('DomNode:goals:g:' + str(prop(x, 'n'))).text = prop(x, 't')
-    FOR y IN [y for y in instances('DomNode') if startswith(y.eid, 'DomNode:goals:g:') and not (y.eid in ['DomNode:goals:g:' + str(prop(z, 'n')) for z in prop(this.paint, 'listing')])]:
+  WHEN ${this.paint}['on'] == True:
+    ('DomNode:goals:count').text = ${this.paint}['count']
+    ('DomNode:goals:note').text = ${this.paint}['note']
+    ('DomNode:goals:note').hidden = ${this.paint}['note'] == ''
+    FOR x IN ${this.paint}['listing']:
+      ('DomNode:goals:g:' + str(${x}['n'])).parent = 'DomNode:goals:list'
+      ('DomNode:goals:g:' + str(${x}['n'])).tag = 'button'
+      ('DomNode:goals:g:' + str(${x}['n'])).type = 'button'
+      ('DomNode:goals:g:' + str(${x}['n'])).class = ${x}['c']
+      ('DomNode:goals:g:' + str(${x}['n'])).text = ${x}['t']
+    FOR y IN [y for y in instances('DomNode') if startswith(y.eid, 'DomNode:goals:g:') and not (y.eid in ['DomNode:goals:g:' + str(${z}['n']) for z in ${this.paint}['listing']])]:
       (y.eid).retire = True
-    FOR i IN prop(this.paint, 'items'):
-      ('DomNode:goals:i:' + str(prop(i, 'n'))).parent = 'DomNode:goals:detail'
-      ('DomNode:goals:i:' + str(prop(i, 'n'))).tag = 'div'
-      ('DomNode:goals:i:' + str(prop(i, 'n'))).class = prop(i, 'c')
-      ('DomNode:goals:i:' + str(prop(i, 'n'))).text = prop(i, 't')
-    FOR j IN [j for j in instances('DomNode') if startswith(j.eid, 'DomNode:goals:i:') and not (j.eid in ['DomNode:goals:i:' + str(prop(k, 'n')) for k in prop(this.paint, 'items')])]:
+    FOR i IN ${this.paint}['items']:
+      ('DomNode:goals:i:' + str(${i}['n'])).parent = 'DomNode:goals:detail'
+      ('DomNode:goals:i:' + str(${i}['n'])).tag = 'div'
+      ('DomNode:goals:i:' + str(${i}['n'])).class = ${i}['c']
+      ('DomNode:goals:i:' + str(${i}['n'])).text = ${i}['t']
+    FOR j IN [j for j in instances('DomNode') if startswith(j.eid, 'DomNode:goals:i:') and not (j.eid in ['DomNode:goals:i:' + str(${k}['n']) for k in ${this.paint}['items']])]:
       (j.eid).retire = True
 
 -- a click on a goal selects it; its graph and chat come with the next ask
 DomNode.clicked on-setter goals-view-click:
   WHEN startswith(this.eid, 'DomNode:goals:g:') and this.clicked != None:
-    ('GoalsView:main').sel = prop((prop('GoalsView:main', 'rows') or [])[num(replace(this.eid, 'DomNode:goals:g:', ''))], 'e')
+    ('GoalsView:main').sel = ${(${'GoalsView:main'}['rows'] or [])[num(replace(this.eid, 'DomNode:goals:g:', ''))]}['e']
     ('GoalsView:main').last_poll = 0
 
 -- the receipt of the call, read once: ok = the seat answered 2xx and the call has no error; `text` is what the door's `run_cliff` answered (the value, as JSON)
 Fetch.goalsq getter:
   rq = this.request_result
-  bd = json(str(prop(rq, 'body') or ''))
+  bd = json(str(${rq}['body'] or ''))
   jd = bd if bd is Dict else {}
-  hs = prop(rq, 'http_status')
-  cs = prop(prop(jd, 'result'), 'content') or []
-  er = prop(jd, 'error')
-  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not prop(prop(jd, 'result'), 'isError'), 'text': prop(cs[0], 'text') if len(cs) > 0 else None, 'why': (str(prop(er, 'message') if er is Dict else (er or prop(prop(jd, 'result'), 'content'))) if (er or prop(prop(jd, 'result'), 'isError')) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+  hs = ${rq}['http_status']
+  cs = ${${jd}['result']}['content'] or []
+  er = ${jd}['error']
+  {'rid': ${rq}['id'], 'ok': ${rq}['status'] == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not ${${jd}['result']}['isError'], 'text': ${cs[0]}['text'] if len(cs) > 0 else None, 'why': (str(${er}['message'] if er is Dict else (er or ${${jd}['result']}['content'])) if (er or ${${jd}['result']}['isError']) else 'the seat answered ' + str(hs)) if ${rq}['status'] == 'ok' else str(${rq}['head'] or 'the request failed')} if rq != None else None
 
 -- an ask starts on the shell's tick, while the tab is in front and none is running
 Shell.tick on-setter goals-view-poll:
-  WHEN this.open and prop('Nav:goals', 'active') == True and not prop('GoalsView:main', 'polling') and not prop('Conn:page', 'hidden') and this.tick - (prop('GoalsView:main', 'last_poll') or 0) >= this.status_ms / 1000:
-    n = (prop('GoalsView:main', 'seq') or 0) + 1
+  WHEN this.open and ${'Nav:goals'}['active'] == True and not ${'GoalsView:main'}['polling'] and not ${'Conn:page'}['hidden'] and this.tick - (${'GoalsView:main'}['last_poll'] or 0) >= this.status_ms / 1000:
+    n = (${'GoalsView:main'}['seq'] or 0) + 1
     ('GoalsView:main').seq = n
     ('GoalsView:main').polling = True
-    ('Fetch:goals:ask').request = {'timeout_s': 20, 'id': 'goals-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'run_cliff', 'arguments': {'code': prop('GoalsView:main', 'code')}}})}
+    ('Fetch:goals:ask').request = {'timeout_s': 20, 'id': 'goals-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'run_cliff', 'arguments': {'code': ${'GoalsView:main'}['code']}}})}
 
 Fetch.goalsq on-setter goals-view-got:
-  WHEN this.eid == 'Fetch:goals:ask' and this.goalsq != None and not prop(this.goalsq, 'ok'):
-    ('GoalsView:main').note = 'the seat did not answer the Goals tab: ' + str(prop(this.goalsq, 'why'))
+  WHEN this.eid == 'Fetch:goals:ask' and this.goalsq != None and not ${this.goalsq}['ok']:
+    ('GoalsView:main').note = 'the seat did not answer the Goals tab: ' + str(${this.goalsq}['why'])
     ('GoalsView:main').polling = False
-    ('GoalsView:main').last_poll = prop('Shell:main', 'tick')
+    ('GoalsView:main').last_poll = ${'Shell:main'}['tick']
   ELSE WHEN this.eid == 'Fetch:goals:ask' and this.goalsq != None:
-    rs = json(str(prop(this.goalsq, 'text') or ''))
-    ('GoalsView:main').goals = rs if rs is List else (prop('GoalsView:main', 'goals') or [])
+    rs = json(str(${this.goalsq}['text'] or ''))
+    ('GoalsView:main').goals = rs if rs is List else (${'GoalsView:main'}['goals'] or [])
     ('GoalsView:main').note = '' if rs is List else 'the seat answered the Goals tab with something that is not a list'
     ('GoalsView:main').polling = False
-    ('GoalsView:main').last_poll = prop('Shell:main', 'tick')
+    ('GoalsView:main').last_poll = ${'Shell:main'}['tick']

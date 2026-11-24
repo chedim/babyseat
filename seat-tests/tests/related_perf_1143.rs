@@ -110,11 +110,11 @@ fn a_mention_evaluates_mention_done_about_once_per_span() {
 const PARTS: &str = "PACK xp 1
 IMPORT mentions 1
 IMPORT semtext 1
-SemText.x_parts getter: [prop(m, 'edge_rows') for m in this.mentions] if this.related_n != None and this.mentions != None else None
+SemText.x_parts getter: [${m}['edge_rows'] for m in this.mentions] if this.related_n != None and this.mentions != None else None
 SemText.x_hits getter: json('[' + join([p for p in this.x_parts if p != ''], ',') + ']') if this.x_parts != None else None
 SemText.x_rows getter: [{'text': g['rows'][0]['text'], 'sent': g['rows'][0]['sent'], 'shared': len(g['rows']), 'score': dot([r['w'] for r in g['rows']], [1 for r in g['rows']])} for g in group_by(this.x_hits, 'key') if g['rows'][0]['text'] != this.eid] if this.x_hits != None else None
 SemText.x_top getter: head(sort_by(this.x_rows, 'score', True), this.related_n) if this.x_rows != None else None
-SemText.x_final getter: [{'semtext': r['text'], 'sentence_index': r['sent'], 'text': prop(prop(r['text'], 'sentences')[r['sent']], 'text'), 'shared': r['shared']} for r in this.x_top] if this.x_top != None else None
+SemText.x_final getter: [{'semtext': r['text'], 'sentence_index': r['sent'], 'text': ${${r['text']}['sentences'][r['sent']]}['text'], 'shared': r['shared']} for r in this.x_top] if this.x_top != None else None
 ";
 
 /// MEASURE on a store: `W36_STORE=<copy of a seat store> cargo test --release --features bin --test related_perf_1143 -- --ignored --nocapture real_store_report`

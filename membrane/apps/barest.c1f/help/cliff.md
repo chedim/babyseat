@@ -80,14 +80,14 @@ A block that runs past its step budget answers with that reason (`Error: budget 
 entity_read('Help:c1f')
 ```
 
-Inside a block, read a class with `instances('<Class>')`, an entity's property with `x.prop` or `prop(x, 'prop')` (also when the id is text you built), and one property of many entities with `props`:
+Inside a block, read a class with `instances('<Class>')`, an entity's property with `x.prop` or `${x}['prop']` (also when the id is text you built), and one property of many entities with `props`:
 
 ```cliff
 -- given Lamp:desk {"watts": 40}
 -- given Lamp:hall {"watts": 60}
 -- value {"ids": ["Lamp:desk", "Lamp:hall"], "desk": 40, "all": [40, 60]}
 ids = [l.eid for l in instances('Lamp')]
-{'ids': ids, 'desk': prop('Lamp:' + 'desk', 'watts'), 'all': props(ids, 'watts')}
+{'ids': ids, 'desk': ${'Lamp:' + 'desk'}['watts'], 'all': [${i}['watts'] for i in ids]}
 ```
 
 `instances` lists the entities that are LOADED (a class declared `RESIDENT` is always loaded whole; `Help:packs`, "Storage"). For every stored entity of a class, loaded or not, use the tool `entity_query` (`Help:c1f`, "Finding entities").
@@ -143,7 +143,7 @@ xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
 len([len([len([c for c in xs if c > b]) for b in xs]) for a in xs])
 ```
 
-A cheap getter hands the long walk to a builtin: `props(ids, 'name')` in place of `[prop(e, 'name') for e in ids]`, `group_by(rows, key, ['col'])` in place of a total per key, `near` in place of a
+A cheap getter hands the long walk to a builtin: `group_by(rows, key, ['col'])` in place of a total per key, `near` in place of a
 cosine against every vector. Keep a loop off lists that grow without end (every message, every mention of a word: `mentioned_in`), or cut them first with `head` or `tail`.
 
 ## Writes
@@ -153,7 +153,7 @@ with the `reactions:` of the round (the values the engine wrote on the entities 
 effect (`Command:x.run = ...`) has its receipt in a LATER round: read `<entity>.<verb>_result` afterwards (`Help:c1f`, "Effects are writes"). A Command starts with ONE write, its `cmd` in the run value:
 
 A command that outlives its `timeout_s` (default 120 s; set your own estimate in the run value, `timeout_s: 600`) is killed, and its `output`, `errors`, `ok` and `rc` read as an Error whose reason tells you how to retry:
-`prop('Command:cl', 'output')` answers `Error: Command:cl timed out after 120 s (killed); start it again with a bigger timeout_s ...`. What was collected is in `partial_output`.
+`${'Command:cl'}['output']` answers `Error: Command:cl timed out after 120 s (killed); start it again with a bigger timeout_s ...`. What was collected is in `partial_output`.
 
 ```c1f-run
 -- write Command:cl.run = {"id": "c1", "cmd": ["echo", "from a block"]}

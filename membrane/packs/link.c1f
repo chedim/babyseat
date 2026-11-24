@@ -32,9 +32,9 @@ Boot.lk_epoch getter: str(this.lk_since) if this.lk_since != None else None
 -- A PAGE THAT TALKS IS CONNECTED (slice 2; this replaces the slice-1 guess of 120 s of silence): every frame of the link (packs/link_route.c1f) is a word from the page, kept on the page's `LinkPeer` (RAM: a frame is not history),
 -- and `last` is the later of that and the stamps of `caps` / `report`. The page is `stale` when it has been silent past its LEASE (`link_lease_s` 60 s for a visible page; `link_lease_hidden_s` 600 s for one that told the
 -- seat it is hidden). `stale` means "nothing has been heard", not "gone".
-Vm.peer_heard getter: prop(this.peer, 'heard')
+Vm.peer_heard getter: ${this.peer}['heard']
 Vm.last getter: max([x for x in [this.seen, this.peer_heard, this.heard] if x != None]) if len([x for x in [this.seen, this.peer_heard, this.heard] if x != None]) > 0 else None
-Vm.hidden getter: prop(this.peer, 'hidden') if prop(this.peer, 'hidden') != None else this.was_hidden
+Vm.hidden getter: ${this.peer}['hidden'] if ${this.peer}['hidden'] != None else this.was_hidden
 Vm.lease_s getter: ([b.lk_lease_hidden for b in instances('Boot')] or [600])[0] if this.hidden == True else ([b.lk_lease for b in instances('Boot')] or [60])[0]
 Vm.silent getter: clock - this.last if this.last != None else None
 Vm.state getter:
@@ -59,18 +59,18 @@ Vm.caps on-setter link-caps:
 Page.report on-setter link-report:
   WHEN this.report != None:
     ('Vm:' + this.ns).page = this
-    ('Vm:' + this.ns).connected_at = prop('Vm:' + this.ns, 'connected_at') or clock
+    ('Vm:' + this.ns).connected_at = ${'Vm:' + this.ns}['connected_at'] or clock
     ('Vm:' + this.ns).seen = clock
 
 -- a restart: the roots of the last run are retired (their tabs report again only when they are loaded again). The store is read after the seat has started, and a peer is a program of its own that may have said
 -- hello by then, so the sweep never retires the root of a PEER THE SEAT DECLARES (the fact `peers`): its driver makes that root again at every hello, and a root retired under a peer that is connected takes
 -- every reply it publishes with it (an id `<ns>::...` lives with its root `Vm:<ns>`). The roots of pages, and of peers that are no longer declared, are the last run's and go.
-Boot.declared_vms getter: ['Vm:' + str(prop(p, 'ns') or prop(p, 'name')) for p in (this.peers if this.peers is List else [])]
+Boot.declared_vms getter: ['Vm:' + str(${p}['ns'] or ${p}['name']) for p in (this.peers if this.peers is List else [])]
 Boot.old_vms getter: sql('SELECT k FROM c_field WHERE json_extract(body, \'$.cls\') = \'Vm\'') if this.started != None else None
 Boot.old_vms on-setter link-sweep:
   WHEN this.old_vms != None:
-    FOR r IN [x for x in this.old_vms if prop(x, 'k') not in this.declared_vms]:
-      (prop(r, 'k')).retire = True
+    FOR r IN [x for x in this.old_vms if ${x}['k'] not in this.declared_vms]:
+      (${r}['k']).retire = True
 
 -- A WRITE A PEER ASKED FOR (docs/graph-link.md, sections 7 and 18): a peer's `wr` over shared memory becomes `LinkWrite:<peer name>:<wid>` {peer, id, prop, value} (the seat's peer driver, cliffvm:src/peers.rs; the driver reads the verdict and retires it at once: a question is not memory),
 -- and the verdict below decides. THE POLICY IS DATA, A FACT THE OWNER SETS: `peer_writes`, a list of rules `{peer, prefix}`: the peer whose namespace is `peer` may write the nodes whose id starts with `prefix`. No rule, no write: the default is

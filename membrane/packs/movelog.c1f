@@ -46,17 +46,17 @@ SemText.field_ready on-setter movelog-post:
     lk = this.ml_prev if this.field_from == 0 and this.ml_prev != None else None
     pv = lk['p'] if lk != None else None
     own = fold([], [concat(acc, [{'t': r['t'], 'e': r['e'], 'm': r['m']} for r in d['rows']]) for d in this.field_ready if d['e'] != 'FieldBg:all'])
-    nxt = [{'t': t, 'n': this.eid if t == pv else prop(t, 'ml_next')} for t in distinct([r['t'] for r in own])]
+    nxt = [{'t': t, 'n': this.eid if t == pv else ${t}['ml_next']} for t in distinct([r['t'] for r in own])]
     via = fold([], [concat(acc, [{'t': n['n'], 'e': r['e'], 'm': r['m']} for r in own if r['t'] == n['t']]) for n in nxt if n['n'] != None])
-    held = [{'t': this.eid, 'e': r['e'], 'm': r['m']} for r in ((prop(pv, 'field_moves') or []) if pv != None else [])]
+    held = [{'t': this.eid, 'e': r['e'], 'm': r['m']} for r in ((${pv}['field_moves'] or []) if pv != None else [])]
     FOR g IN group_by(concat(concat(own, via), held), 'e'):
-      old = prop(g['key'], 'ml_held_by') or []
+      old = ${g['key']}['ml_held_by'] or []
       by = group_by(g['rows'], 't')
       (g['key']).ml_held_by = concat([x for x in old if len([b for b in by if b['key'] == x['t']]) == 0], [{'t': b['key'], 'h': max(concat([x['h'] for x in old if x['t'] == b['key']], pluck(b['rows'], 'm')))} for b in by])
     -- a seed text (`FieldTerm`, field.c1f: the term of one entity) is not an event: it is not counted in N
     FOR f IN ([1] if this.field_from == 0 and this.term == None else []):
       MoveLog:all = MoveLog(of: 'all')
-      MoveLog:all.n = (prop('MoveLog:all', 'n') or 0) + 1
+      MoveLog:all.n = (${'MoveLog:all'}['n'] or 0) + 1
     FOR x IN ([pv] if pv != None else []):
       (x).ml_next = this.eid
     FOR x IN ([1] if lk != None else []):
@@ -70,18 +70,18 @@ SemText.ml_prev_msg getter:
   ELSE: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 AND instr(substr(k, length(?1) + 1), \':\') = 0 ORDER BY k DESC LIMIT 1', before(this.eid, ':message:') + ':message:', this.r_msg)
 SemText.ml_prev getter:
   WHEN not this.r_chat or this.ml_linked == True or this.mentions == None: None
-  ELSE WHEN tail(this.eid, 19) == ':turn:response:body': {'p': this.r_msg + ':body' if prop(this.r_msg + ':body', 'text') != None else None}
+  ELSE WHEN tail(this.eid, 19) == ':turn:response:body': {'p': this.r_msg + ':body' if ${this.r_msg + ':body'}['text'] != None else None}
   ELSE WHEN this.ml_prev_msg is Error: {'p': None}
   ELSE WHEN this.ml_prev_msg == None: None
   ELSE:
-    m = prop(this.ml_prev_msg[0], 'k') if len(this.ml_prev_msg) > 0 else None
-    {'p': None if m == None else (m + ':turn:response:body' if prop(m + ':turn:response:body', 'text') != None else (m + ':body' if prop(m + ':body', 'text') != None else None))}
+    m = ${this.ml_prev_msg[0]}['k'] if len(this.ml_prev_msg) > 0 else None
+    {'p': None if m == None else (m + ':turn:response:body' if ${m + ':turn:response:body'}['text'] != None else (m + ':body' if ${m + ':body'}['text'] != None else None))}
 SemText.ml_link getter:
   WHEN this.ml_prev == None or (this.field_n or 0) == 0: None
   ELSE:
     p = this.ml_prev['p']
-    by = group_by((prop(p, 'field_moves') or []) if p != None else [], 'e')
-    {'p': p, 'post': [{'e': g['key'], 'list': concat([x for x in (prop(g['key'], 'ml_held_by') or []) if x['t'] != this.eid], [{'t': this.eid, 'h': max(concat([x['h'] for x in (prop(g['key'], 'ml_held_by') or []) if x['t'] == this.eid], pluck(g['rows'], 'm')))}])} for g in by]}
+    by = group_by((${p}['field_moves'] or []) if p != None else [], 'e')
+    {'p': p, 'post': [{'e': g['key'], 'list': concat([x for x in (${g['key']}['ml_held_by'] or []) if x['t'] != this.eid], [{'t': this.eid, 'h': max(concat([x['h'] for x in (${g['key']}['ml_held_by'] or []) if x['t'] == this.eid], pluck(g['rows'], 'm')))}])} for g in by]}
 SemText.ml_link on-setter movelog-link:
   WHEN this.ml_link != None:
     FOR x IN ([this.ml_link['p']] if this.ml_link['p'] != None else []):
@@ -95,8 +95,8 @@ SemText.ml_link on-setter movelog-link:
 SemText.ml_cues getter:
   WHEN this.recall_on != True: None
   ELSE:
-    n = max(1, prop('MoveLog:all', 'n') or 0)
-    have = [{'e': str(m), 'k': len(prop(m, 'ml_held_by') or []), 'j': prop(m, 'ml_rows') or ''} for m in (this.mentions or [])]
+    n = max(1, ${'MoveLog:all'}['n'] or 0)
+    have = [{'e': str(m), 'k': len(${m}['ml_held_by'] or []), 'j': ${m}['ml_rows'] or ''} for m in (this.mentions or [])]
     [{'e': c['e'], 'r': log(n / c['k']), 'j': c['j']} for c in have if c['k'] > 0 and c['k'] < n]
 -- every event that holds a question's thing, with its score (the sum of weight x move held), the question left out; best first, ties by the text's eid (the key starts with it)
 SemText.ml_scores getter:
@@ -112,6 +112,6 @@ SemText.movelog_votes getter:
   ELSE:
     top = this.ml_scores[0]['s']
     cue = [c['e'] for c in this.ml_cues]
-    best = [{'t': x['t'], 's': x['s'], 'b': sort_by([r for r in (prop(x['t'], 'field_moves') or []) if r['e'] in cue], 'm', True)} for x in head(this.ml_scores, this.ml_depth)]
-    rows = [{'t': x['t'], 's': x['s'], 'sent': (prop(x['t'], 'sentences') or [])[x['b'][0]['s'] if len(x['b']) > 0 else 0]} for x in best]
-    [{'key': x['t'] + '#' + str(prop(x['sent'], 'start') or 0), 'of': x['t'], 'text': prop(x['sent'], 'text') or '', 'score': x['s'] / top} for x in rows]
+    best = [{'t': x['t'], 's': x['s'], 'b': sort_by([r for r in (${x['t']}['field_moves'] or []) if r['e'] in cue], 'm', True)} for x in head(this.ml_scores, this.ml_depth)]
+    rows = [{'t': x['t'], 's': x['s'], 'sent': (${x['t']}['sentences'] or [])[x['b'][0]['s'] if len(x['b']) > 0 else 0]} for x in best]
+    [{'key': x['t'] + '#' + str(${x['sent']}['start'] or 0), 'of': x['t'], 'text': ${x['sent']}['text'] or '', 'score': x['s'] / top} for x in rows]

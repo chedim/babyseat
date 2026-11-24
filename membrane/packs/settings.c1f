@@ -18,23 +18,23 @@ RESIDENT Setting
 
 -- ---- reading ------------------------------------------------------------------------------------------------------------------------------
 -- (the providers' fact holds base urls: it is never copied into a getter; its row reads three names of each provider and nothing else)
-Setting.boot_val getter: ([v for v in [prop(b, this.fact) for b in instances('Boot')] if v != None] or [None])[0] if this.fact != None and this.eid != 'Setting:model.cloud' else None
+Setting.boot_val getter: ([v for v in [${b}[this.fact] for b in instances('Boot')] if v != None] or [None])[0] if this.fact != None and this.eid != 'Setting:model.cloud' else None
 -- a list fact is a JSON list or comma-separated text
 Setting.fact_val getter:
   WHEN this.boot_val != None and this.kind == 'list': [strip(x) for x in this.boot_val] if this.boot_val is List else words(replace(str(this.boot_val), ',', ' '))
   ELSE: this.boot_val
 -- the rows whose value is computed from other entities (they are read-only, except the chat's model and the allow-list, whose write goes to their source)
 Setting.current getter:
-  WHEN this.eid == 'Setting:model.chat': prop('Minds:seat', 'loops') or prop('Minds:seat', 'seat_default') or ([b.seat_default for b in instances('Boot') if b.seat_default != None] or [''])[0]
-  ELSE WHEN this.eid == 'Setting:model.default': prop('Minds:seat', 'seat_default') or ''
+  WHEN this.eid == 'Setting:model.chat': ${'Minds:seat'}['loops'] or ${'Minds:seat'}['seat_default'] or ([b.seat_default for b in instances('Boot') if b.seat_default != None] or [''])[0]
+  ELSE WHEN this.eid == 'Setting:model.default': ${'Minds:seat'}['seat_default'] or ''
   ELSE WHEN this.eid == 'Setting:model.list': [m.name for m in instances('Model') if (m.listed == True and m.chat_ok == True) or m.rung == True]
-  ELSE WHEN this.eid == 'Setting:model.cloud': [{'name': prop(c, 'name'), 'backend': prop(c, 'backend'), 'api_key_env': prop(c, 'api_key_env')} for c in (([prop(b, 'cloud_models') for b in instances('Boot') if prop(b, 'cloud_models') != None] or [[]])[0])]
+  ELSE WHEN this.eid == 'Setting:model.cloud': [{'name': ${c}['name'], 'backend': ${c}['backend'], 'api_key_env': ${c}['api_key_env']} for c in (([${b}['cloud_models'] for b in instances('Boot') if ${b}['cloud_models'] != None] or [[]])[0])]
   ELSE WHEN this.eid == 'Setting:home.allow': [{'name': replace(replace(a.eid, 'membrane::', ''), 'HaAllow:', ''), 'services': a.services or [], 'entities': a.entities or []} for a in instances('HaAllow')]
   ELSE WHEN this.eid == 'Setting:import.sources': [{'name': replace(replace(s.eid, 'membrane::', ''), 'SqlSource:', ''), 'path': s.path, 'mode': s.mode or 'ro'} for s in instances('SqlSource')]
-  ELSE WHEN this.eid == 'Setting:import.history': prop('membrane::Legacy:cutover', 'history')
-  ELSE WHEN this.eid == 'Setting:import.embeddings': prop('membrane::Embed:queue', 'line')
+  ELSE WHEN this.eid == 'Setting:import.history': ${'membrane::Legacy:cutover'}['history']
+  ELSE WHEN this.eid == 'Setting:import.embeddings': ${'membrane::Embed:queue'}['line']
   ELSE WHEN this.eid == 'Setting:access.mode': 'tokens required' if this.boot_val != None else 'open'
-  ELSE WHEN this.eid == 'Setting:access.port': ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [this.boot_val])[0]
+  ELSE WHEN this.eid == 'Setting:access.port': ([${h.listen_result}['port'] for h in instances('Http') if ${h.listen_result}['port'] != None] or [this.boot_val])[0]
   ELSE WHEN this.eid == 'Setting:components.list': sort_by([{'name': c.ns, 'state': c.state, 'autoload': c.autoload == True} for c in instances('Component')], 'name')
   ELSE WHEN this.value != None: this.value
   ELSE WHEN this.fact_val != None: this.fact_val
@@ -77,7 +77,7 @@ Setting.set on-setter setting-set:
     this.refused = str(this.label) + ' must not hold an empty or non-text name (an empty name matches everything)'
   ELSE WHEN this.kind == 'allowlist' and not (this.set is List):
     this.refused = str(this.label) + ' must be a list of {name, services, entities}'
-  ELSE WHEN this.kind == 'allowlist' and len([x for x in this.set if not (x is Dict) or not (prop(x, 'name') is Text) or strip(prop(x, 'name')) == '' or not (prop(x, 'services') is List) or not (prop(x, 'entities') is List) or len([y for y in concat(prop(x, 'services'), prop(x, 'entities')) if not (y is Text)]) > 0]) > 0:
+  ELSE WHEN this.kind == 'allowlist' and len([x for x in this.set if not (x is Dict) or not (${x}['name'] is Text) or strip(${x}['name']) == '' or not (${x}['services'] is List) or not (${x}['entities'] is List) or len([y for y in concat(${x}['services'], ${x}['entities']) if not (y is Text)]) > 0]) > 0:
     this.refused = str(this.label) + ' must be a list of {name: text, services: [text], entities: [text]}'
   ELSE WHEN this.source != None:
     (this.source).[this.source_prop] = this.set
@@ -85,9 +85,9 @@ Setting.set on-setter setting-set:
     this.applied = clock
   ELSE WHEN this.kind == 'allowlist':
     FOR a IN this.set:
-      ('HaAllow:' + strip(prop(a, 'name'))).services = prop(a, 'services')
-      ('HaAllow:' + strip(prop(a, 'name'))).entities = prop(a, 'entities')
-    FOR old IN [x for x in instances('HaAllow') if not (replace(replace(x.eid, 'membrane::', ''), 'HaAllow:', '') in [strip(prop(a, 'name')) for a in this.set])]:
+      ('HaAllow:' + strip(${a}['name'])).services = ${a}['services']
+      ('HaAllow:' + strip(${a}['name'])).entities = ${a}['entities']
+    FOR old IN [x for x in instances('HaAllow') if not (replace(replace(x.eid, 'membrane::', ''), 'HaAllow:', '') in [strip(${a}['name']) for a in this.set])]:
       (old.eid).retire = True
     this.refused = ''
     this.applied = clock
@@ -139,10 +139,10 @@ Boot.setting_rows getter:
 Boot.started on-setter settings-seed:
   ALWAYS:
     FOR d IN this.setting_rows:
-      id = prop(d, 'id')
+      id = ${d}['id']
       g = before(id, '.')
-      pairs = concat([['group', g], ['key', tail(id, len(id) - len(g) - 1)]], [[k, prop(d, k)] for k in this.setting_keys if prop(d, k) != None])
-      FOR kv IN [x for x in pairs if prop('Setting:' + id, x[0]) != x[1]]:
+      pairs = concat([['group', g], ['key', tail(id, len(id) - len(g) - 1)]], [[k, ${d}[k]] for k in this.setting_keys if ${d}[k] != None])
+      FOR kv IN [x for x in pairs if ${'Setting:' + id}[x[0]] != x[1]]:
         ('Setting:' + id).[kv[0]] = kv[1]
 
 -- ---- the page's read feed: GET /ui/settings (#1143, the settings view apps/barest.c1f/settings_view.c1f) ------------------------------------------
@@ -153,7 +153,7 @@ Boot.started on-setter settings-seed:
 Request.o_settings getter: this.route == '/ui/settings'
 Request.m_settings getter: ['GET']
 -- (the rows are built here, not as a getter of the row: a getter of a Setting would be one more property on every stored row)
-Request.st_rows getter: sort_by([{'id': replace(s.eid, 'Setting:', ''), 'group': s.group, 'key': s.key, 'label': s.label, 'help': s.help, 'kind': s.kind, 'live': s.live, 'order': s.order, 'default': s.default, 'min': s.min, 'max': s.max, 'whole': s.whole == True, 'unit': s.unit, 'how': s.how, 'hidden': s.hidden == True, 'current': s.current, 'chosen': s.chosen, 'refused': s.refused or '', 'applied': s.applied, 'choices': (prop('Setting:model.list', 'current') if s.eid == 'Setting:model.chat' else None)} for s in instances('Setting') if s.group != None], 'order')
+Request.st_rows getter: sort_by([{'id': replace(s.eid, 'Setting:', ''), 'group': s.group, 'key': s.key, 'label': s.label, 'help': s.help, 'kind': s.kind, 'live': s.live, 'order': s.order, 'default': s.default, 'min': s.min, 'max': s.max, 'whole': s.whole == True, 'unit': s.unit, 'how': s.how, 'hidden': s.hidden == True, 'current': s.current, 'chosen': s.chosen, 'refused': s.refused or '', 'applied': s.applied, 'choices': (${'Setting:model.list'}['current'] if s.eid == 'Setting:model.chat' else None)} for s in instances('Setting') if s.group != None], 'order')
 -- THE MODEL ROW'S LIST is the backend's: the feed asks the backend for its tags the way `GET /v1/models` does (packs/router.c1f: `Router:seat.refresh`), once per request, and the reply waits for them
 -- (`models_ready`), so the chat model row's `choices` lists the backend's chat models and the rungs with nothing else asking first. A seat with no backend address asks nothing and waits for nothing.
 Request.sf_ask getter: {'id': this.eid} if (this.entrant and this.o_settings == True and this.models_asked != True and str(([bk.seat_backend for bk in instances('Boot') if bk.seat_backend != None] or [''])[0]) != '') else None

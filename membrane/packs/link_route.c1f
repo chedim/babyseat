@@ -23,17 +23,17 @@ RESIDENT LinkAllow
 
 -- ---- the allow-list (data) ----------------------------------------------------------------------------------------------------------
 Boot.started on-setter link-allow-seed:
-  WHEN prop('LinkAllow:seed', 'done') == None:
+  WHEN ${'LinkAllow:seed'}['done'] == None:
     ('LinkAllow:seed').done = True
     ('LinkAllow:setting').prefixes = ['Setting:']
     ('LinkAllow:doorbell').prefixes = ['Doorbell:']
 -- who is connected: a tab that comes and goes with its peer follows `Peers:seat` (packs/link.c1f). The log view's rows are read by the door (`entity_read`), a page's `Fetch`: the view is virtual, and a link does not carry a virtual entity's values
 Boot.started on-setter link-allow-log:
-  WHEN prop('LinkAllow:log', 'prefixes') == None:
+  WHEN ${'LinkAllow:log'}['prefixes'] == None:
     ('LinkAllow:log').prefixes = ['Peers:']
 -- the packs placed on a page (`Placed:<ns>`: packs/placement.c1f): the page follows them by its link; a store seeded before this had no such row
 Boot.started on-setter link-allow-placed:
-  WHEN prop('LinkAllow:placed', 'prefixes') == None:
+  WHEN ${'LinkAllow:placed'}['prefixes'] == None:
     ('LinkAllow:placed').prefixes = ['Placed:']
 
 -- ---- the doorbell: the smallest value that tells the chat page "something happened" (decision 10) ---------------------------------------
@@ -42,22 +42,22 @@ Boot.started on-setter link-allow-placed:
 -- ---- the route ------------------------------------------------------------------------------------------------------------------
 Request.o_link getter: this.route == '/ui/link'
 Request.m_link getter: ['POST']
-Request.lk_ns getter: str(prop(this.jbody, 'ns') or '')
+Request.lk_ns getter: str(${this.jbody}['ns'] or '')
 Request.lk_ns_ok getter: len(this.lk_ns) == 9 and startswith(this.lk_ns, 'p') and this.lk_ns == lower(this.lk_ns) and len([c for c in ['_', '#', '.', '/', ':', '-', '~', ' '] if c in this.lk_ns]) == 0
-Request.lk_n getter: prop(this.jbody, 'n')
+Request.lk_n getter: ${this.jbody}['n']
 Request.lk_shape getter: this.lk_ns_ok and this.lk_n is Int and this.lk_n >= 1
 Request.lk_big getter: len(this.body or '') > ([b.lk_max_frame for b in instances('Boot')] or [262144])[0]
 Request.lk_ready getter: this.entrant and this.o_link and not this.lk_big and this.lk_shape
 Request.lk_peer getter: 'LinkPeer:' + this.lk_ns
 Request.lk_epoch getter: ([b.lk_epoch for b in instances('Boot')] or [None])[0]
-Request.lk_hidden getter: prop(this.jbody, 'hidden') == True
-Request.lk_ack getter: prop(this.jbody, 'ack') if (prop(this.jbody, 'ack') is Int and (str(prop(this.jbody, 'epoch') or '') == '' or str(prop(this.jbody, 'epoch')) == str(this.lk_epoch))) else 0
+Request.lk_hidden getter: ${this.jbody}['hidden'] == True
+Request.lk_ack getter: ${this.jbody}['ack'] if (${this.jbody}['ack'] is Int and (str(${this.jbody}['epoch'] or '') == '' or str(${this.jbody}['epoch']) == str(this.lk_epoch))) else 0
 -- the ids as the page spells them (the seat is `membrane::`, so `membrane::Setting:x` is the seat's `Setting:x`); a sub is the colon child `LinkPeer:<ns>:k_<id with : as ~>~~<prop>` of its page's row
-Request.lk_pairs getter: [[s[0], s[1]] for s in (prop(this.jbody, 'subs') or []) if s is List and len(s) == 2 and s[0] is Text and s[1] is Text and s[0] != '' and s[1] != '']
+Request.lk_pairs getter: [[s[0], s[1]] for s in (${this.jbody}['subs'] or []) if s is List and len(s) == 2 and s[0] is Text and s[1] is Text and s[0] != '' and s[1] != '']
 Request.lk_subs getter: [{'wid': s[0], 'sid': (after(s[0], 'membrane::') if startswith(s[0], 'membrane::') else s[0]), 'sprop': s[1], 'key': 'LinkPeer:' + this.lk_ns + ':k_' + replace((after(s[0], 'membrane::') if startswith(s[0], 'membrane::') else s[0]), ':', '~') + '~~' + s[1]} for s in this.lk_pairs]
-Request.lk_unpairs getter: [[s[0], s[1]] for s in (prop(this.jbody, 'unsubs') or []) if s is List and len(s) == 2 and s[0] is Text and s[1] is Text and s[0] != '' and s[1] != '']
-Request.lk_unkeys getter: [k for k in ['LinkPeer:' + this.lk_ns + ':k_' + replace((after(s[0], 'membrane::') if startswith(s[0], 'membrane::') else s[0]), ':', '~') + '~~' + s[1] for s in this.lk_unpairs] if prop(k, 'sid') != None]
-Request.lk_fresh getter: [w for w in this.lk_subs if prop(prop(w, 'key'), 'live') != True]
+Request.lk_unpairs getter: [[s[0], s[1]] for s in (${this.jbody}['unsubs'] or []) if s is List and len(s) == 2 and s[0] is Text and s[1] is Text and s[0] != '' and s[1] != '']
+Request.lk_unkeys getter: [k for k in ['LinkPeer:' + this.lk_ns + ':k_' + replace((after(s[0], 'membrane::') if startswith(s[0], 'membrane::') else s[0]), ':', '~') + '~~' + s[1] for s in this.lk_unpairs] if ${k}['sid'] != None]
+Request.lk_fresh getter: [w for w in this.lk_subs if ${${w}['key']}['live'] != True]
 Request.lk_room getter: ([b.lk_max_subs for b in instances('Boot')] or [200])[0] - len([s for s in instances('LinkPeer') if s.sid != None and s.ns == this.lk_ns and s.live == True and s.capped != True])
 Request.lk_take getter: head(this.lk_fresh, max(0, this.lk_room))
 Request.lk_over getter: tail(this.lk_fresh, max(0, len(this.lk_fresh) - max(0, this.lk_room)))
@@ -68,49 +68,49 @@ Request.lk_hold getter: ([b.lk_hold for b in instances('Boot')] or [25])[0]
 -- (heard, hidden, the last n, the ack), what the page has acked is marked, the unsubs and subs are written. `lk_now` says the page told something (answer at once); `lk_took` that the frame was taken.
 Request.lk_plan getter:
   WHEN this.lk_ready != True: None
-  ELSE WHEN this.lk_n <= (prop(this.lk_peer, 'last_n') or 0): {'kind': 'dup'}
-  ELSE WHEN prop(this.lk_peer, 'ns') == None and len([p for p in instances('LinkPeer') if p.sid == None]) >= this.lk_maxl: {'kind': 'full'}
-  ELSE: {'kind': 'take', 'ns': this.lk_ns, 'n': this.lk_n, 'ack': this.lk_ack, 'hidden': this.lk_hidden, 'unkeys': this.lk_unkeys, 'take': this.lk_take, 'over': this.lk_over, 'unknown': prop(this.lk_peer, 'last_n') == None and this.lk_n != 1, 'quick': len(this.lk_subs) + len(this.lk_unkeys) > 0 or this.lk_hidden != (prop(this.lk_peer, 'hidden') == True) or prop(this.lk_peer, 'last_n') == None or prop(this.jbody, 'resync') == True or this.lk_hidden, 'mine': prop(this.lk_peer, 'mine') or []}
+  ELSE WHEN this.lk_n <= (${this.lk_peer}['last_n'] or 0): {'kind': 'dup'}
+  ELSE WHEN ${this.lk_peer}['ns'] == None and len([p for p in instances('LinkPeer') if p.sid == None]) >= this.lk_maxl: {'kind': 'full'}
+  ELSE: {'kind': 'take', 'ns': this.lk_ns, 'n': this.lk_n, 'ack': this.lk_ack, 'hidden': this.lk_hidden, 'unkeys': this.lk_unkeys, 'take': this.lk_take, 'over': this.lk_over, 'unknown': ${this.lk_peer}['last_n'] == None and this.lk_n != 1, 'quick': len(this.lk_subs) + len(this.lk_unkeys) > 0 or this.lk_hidden != (${this.lk_peer}['hidden'] == True) or ${this.lk_peer}['last_n'] == None or ${this.jbody}['resync'] == True or this.lk_hidden, 'mine': ${this.lk_peer}['mine'] or []}
 -- (the setter reads ONLY the plan, the one value computed last: a getter read inside a setter may be one round old)
 Request.lk_plan on-setter link-frame:
-  WHEN this.lk_plan != None and this.lk_took != True and prop(this.lk_plan, 'kind') == 'dup':
+  WHEN this.lk_plan != None and this.lk_took != True and ${this.lk_plan}['kind'] == 'dup':
     this.lk_dup = True
-  ELSE WHEN this.lk_plan != None and this.lk_took != True and prop(this.lk_plan, 'kind') == 'full':
+  ELSE WHEN this.lk_plan != None and this.lk_took != True and ${this.lk_plan}['kind'] == 'full':
     this.lk_full = True
   ELSE WHEN this.lk_plan != None and this.lk_took != True:
     pl = this.lk_plan
-    ns = prop(pl, 'ns')
+    ns = ${pl}['ns']
     ('LinkPeer:' + ns).ns = ns
     ('LinkPeer:' + ns).heard = clock
-    ('LinkPeer:' + ns).hidden = prop(pl, 'hidden')
-    ('LinkPeer:' + ns).last_n = prop(pl, 'n')
-    ('LinkPeer:' + ns).ack = prop(pl, 'ack')
+    ('LinkPeer:' + ns).hidden = ${pl}['hidden']
+    ('LinkPeer:' + ns).last_n = ${pl}['n']
+    ('LinkPeer:' + ns).ack = ${pl}['ack']
     ('LinkPeer:' + ns).cur = this.eid
     ('LinkPeer:' + ns).up = True
-    ('Vm:' + ns).connected_at = prop('Vm:' + ns, 'connected_at') or clock
-    FOR s IN prop(pl, 'mine'):
-      (s.eid).ackd = s.sent_sig if (s.sent_n != None and s.sent_n <= prop(pl, 'ack')) else s.ackd
-    FOR k IN prop(pl, 'unkeys'):
+    ('Vm:' + ns).connected_at = ${'Vm:' + ns}['connected_at'] or clock
+    FOR s IN ${pl}['mine']:
+      (s.eid).ackd = s.sent_sig if (s.sent_n != None and s.sent_n <= ${pl}['ack']) else s.ackd
+    FOR k IN ${pl}['unkeys']:
       (k).live = False
-    FOR w IN prop(pl, 'take'):
-      (prop(w, 'key')).sid = prop(w, 'sid')
-      (prop(w, 'key')).wid = prop(w, 'wid')
-      (prop(w, 'key')).sprop = prop(w, 'sprop')
-      (prop(w, 'key')).ns = ns
-      (prop(w, 'key')).capped = False
-      (prop(w, 'key')).ackd = None
-      (prop(w, 'key')).live = True
-    FOR w IN prop(pl, 'over'):
-      (prop(w, 'key')).sid = prop(w, 'sid')
-      (prop(w, 'key')).wid = prop(w, 'wid')
-      (prop(w, 'key')).sprop = prop(w, 'sprop')
-      (prop(w, 'key')).ns = ns
-      (prop(w, 'key')).capped = True
-      (prop(w, 'key')).ackd = None
-      (prop(w, 'key')).live = True
+    FOR w IN ${pl}['take']:
+      (${w}['key']).sid = ${w}['sid']
+      (${w}['key']).wid = ${w}['wid']
+      (${w}['key']).sprop = ${w}['sprop']
+      (${w}['key']).ns = ns
+      (${w}['key']).capped = False
+      (${w}['key']).ackd = None
+      (${w}['key']).live = True
+    FOR w IN ${pl}['over']:
+      (${w}['key']).sid = ${w}['sid']
+      (${w}['key']).wid = ${w}['wid']
+      (${w}['key']).sprop = ${w}['sprop']
+      (${w}['key']).ns = ns
+      (${w}['key']).capped = True
+      (${w}['key']).ackd = None
+      (${w}['key']).live = True
     this.lk_at = clock
-    this.lk_now = prop(pl, 'quick')
-    this.lk_reset = prop(pl, 'unknown')
+    this.lk_now = ${pl}['quick']
+    this.lk_reset = ${pl}['unknown']
     this.lk_took = True
 
 -- the page's row holds itself by its Vm (a virtual row is collected when nothing holds it)
@@ -119,26 +119,26 @@ LinkPeer.up on-setter link-hold:
     ('Vm:' + this.ns).peer = this
 
 -- ---- the reply: composed ONCE, from what is due; what it carried is marked sent -----------------------------------------------------
-Request.lk_dues getter: prop(this.lk_peer, 'dues') or []
+Request.lk_dues getter: ${this.lk_peer}['dues'] or []
 Request.lk_draft getter:
   WHEN this.lk_ready != True: None
-  ELSE WHEN this.lk_dup == True: {'v': 1, 'dup': True, 'epoch': this.lk_epoch, 'n': prop(this.lk_peer, 'out_n') or 0, 'vals': []}
+  ELSE WHEN this.lk_dup == True: {'v': 1, 'dup': True, 'epoch': this.lk_epoch, 'n': ${this.lk_peer}['out_n'] or 0, 'vals': []}
   ELSE WHEN this.lk_full == True: {'v': 1, 'refused': 'too many links (the most is ' + str(this.lk_maxl) + ' per seat)', 'epoch': this.lk_epoch, 'n': 0, 'vals': []}
   ELSE WHEN this.lk_took != True: None
-  ELSE WHEN prop(this.lk_peer, 'cur') != this.eid: {'v': 1, 'superseded': True, 'epoch': this.lk_epoch, 'n': prop(this.lk_peer, 'out_n') or 0, 'vals': []}
-  ELSE WHEN len(this.lk_dues) > 0 or this.lk_now == True or this.lk_hidden or clock - this.lk_at >= this.lk_hold: {'v': 1, 'epoch': this.lk_epoch, 'n': (prop(this.lk_peer, 'out_n') or 0) + (1 if len(this.lk_dues) > 0 else 0), 'resync': prop(this.lk_peer, 'snap') == True, 'reset': this.lk_reset == True, 'vals': [d['row'] for d in this.lk_dues]}
+  ELSE WHEN ${this.lk_peer}['cur'] != this.eid: {'v': 1, 'superseded': True, 'epoch': this.lk_epoch, 'n': ${this.lk_peer}['out_n'] or 0, 'vals': []}
+  ELSE WHEN len(this.lk_dues) > 0 or this.lk_now == True or this.lk_hidden or clock - this.lk_at >= this.lk_hold: {'v': 1, 'epoch': this.lk_epoch, 'n': (${this.lk_peer}['out_n'] or 0) + (1 if len(this.lk_dues) > 0 else 0), 'resync': ${this.lk_peer}['snap'] == True, 'reset': this.lk_reset == True, 'vals': [d['row'] for d in this.lk_dues]}
   ELSE: None
 Request.lk_draft on-setter link-reply:
   WHEN this.lk_draft != None and this.lk_out == None:
     d = this.lk_draft
-    n = prop(d, 'n')
-    FOR x IN (this.lk_dues if (prop(d, 'resync') != None and n > (prop(this.lk_peer, 'out_n') or 0)) else []):
+    n = ${d}['n']
+    FOR x IN (this.lk_dues if (${d}['resync'] != None and n > (${this.lk_peer}['out_n'] or 0)) else []):
       (x['key']).sent_n = n
       (x['key']).sent_sig = x['sig']
     this.lk_out = d
 Request.lk_out on-setter link-count:
-  WHEN this.lk_out != None and this.lk_took == True and prop(this.lk_out, 'n') > (prop(this.lk_peer, 'out_n') or 0):
-    ('LinkPeer:' + this.lk_ns).out_n = prop(this.lk_out, 'n')
+  WHEN this.lk_out != None and this.lk_took == True and ${this.lk_out}['n'] > (${this.lk_peer}['out_n'] or 0):
+    ('LinkPeer:' + this.lk_ns).out_n = ${this.lk_out}['n']
 Request.r_link getter:
   WHEN this.lk_big: {'status': 413, 'body': {'error': {'message': 'a frame is at most ' + str(([b.lk_max_frame for b in instances('Boot')] or [262144])[0]) + ' characters', 'type': 'membrane_error'}}}
   ELSE WHEN not this.lk_shape: {'status': 400, 'body': {'error': {'message': 'a frame needs ns (the page name the seat gave) and n (the page\'s frame counter, from 1)', 'type': 'membrane_error'}}}
@@ -179,7 +179,9 @@ LinkPeer.veto getter:
   ELSE WHEN this.allowed != True: 'refused: not replicated (' + this.sid + ' is not under a prefix of the allow-list, LinkAllow:*)'
   ELSE WHEN this.capped == True: 'refused: too many subscriptions (the most is ' + str(([b.lk_max_subs for b in instances('Boot')] or [200])[0]) + ' per link)'
   ELSE: None
-LinkPeer.val getter: prop(this.sid, this.sprop) if this.sid != None and this.live == True and this.veto == None else None
+-- the entity the page names, as the seat keeps it: the route strips `membrane::`, but a chat or a view is stored UNDER it (`membrane::LogView:<ns>`), and the two spellings are two entities: the prefixed twin is read when only it exists (the door's rule, `mc_r_id` in door_tools.c1f)
+LinkPeer.rid getter: ('membrane::' + this.sid) if this.sid != None and ${'membrane::' + this.sid}['eid'] != None and ${this.sid}['eid'] == None else this.sid
+LinkPeer.val getter: ${this.rid}[this.sprop] if this.sid != None and this.live == True and this.veto == None else None
 LinkPeer.size getter: len(str(this.val)) if this.val != None else 0
 LinkPeer.maxv getter: ([b.lk_max_value for b in instances('Boot')] or [65536])[0]
 LinkPeer.why getter:

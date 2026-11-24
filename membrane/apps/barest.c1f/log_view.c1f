@@ -44,7 +44,7 @@ Nav.active on-setter log-view-draw:
     ('LogTab:main').on = True
     ('LogChat:main').on = True
 
-LogTab.ns getter: prop('Link:page', 'ns')
+LogTab.ns getter: ${'Link:page'}['ns']
 LogTab.text getter: join(this.lines or [], '\n') + (('\n' if this.lines else '') + str(this.note) if this.note else '')
 -- the button shows while there are older lines than the first one shown
 LogTab.more getter: this.first != None and this.first > 0
@@ -63,82 +63,82 @@ LogTab.on on-setter log-view-first:
     ('DomNode:log:text').text = this.text
 -- near the bottom within the chat's own `stick_px` (the owner's number); a pack write of `scroll` (the command 'end', no height) is not a measure; no chat view counts as near
 DomNode.scroll on-setter log-view-scroll:
-  WHEN this.eid == 'DomNode:log:root' and prop(this.scroll, 'height') != None:
-    ('LogTab:main').near = prop('View:chat', 'stick_px') == None or prop(this.scroll, 'height') - prop(this.scroll, 'top') - prop(this.scroll, 'client') < prop('View:chat', 'stick_px')
+  WHEN this.eid == 'DomNode:log:root' and ${this.scroll}['height'] != None:
+    ('LogTab:main').near = ${'View:chat'}['stick_px'] == None or ${this.scroll}['height'] - ${this.scroll}['top'] - ${this.scroll}['client'] < ${'View:chat'}['stick_px']
 -- "Load older lines": the page before the first one shown (200 lines, the seat's page size); the same chain of calls, asked from max(0, first - 200)
 DomNode.clicked on-setter log-view-older-click:
-  WHEN this.eid == 'DomNode:log:older:btn' and not prop('LogTab:main', 'polling') and prop('LogTab:main', 'more') == True:
-    n = (prop('LogTab:main', 'seq') or 0) + 1
+  WHEN this.eid == 'DomNode:log:older:btn' and not ${'LogTab:main'}['polling'] and ${'LogTab:main'}['more'] == True:
+    n = (${'LogTab:main'}['seq'] or 0) + 1
     ('LogTab:main').seq = n
     ('LogTab:main').polling = True
     ('LogTab:main').older_out = True
     ('LogTab:main').holding = True
     ('LogTab:main').step = 'from'
-    ('Fetch:log:from').request = {'timeout_s': 10, 'id': 'log-from-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': prop('LogTab:main', 'ns') + '::LogAsk:main', 'prop': 'from', 'value': max(0, prop('LogTab:main', 'first') - 200)}}})}
+    ('Fetch:log:from').request = {'timeout_s': 10, 'id': 'log-from-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': ${'LogTab:main'}['ns'] + '::LogAsk:main', 'prop': 'from', 'value': max(0, ${'LogTab:main'}['first'] - 200)}}})}
 
 -- the receipt of a call, read once: ok = the seat answered 2xx and the call has no error; `text` is what the door's tool answered
 Fetch.mq getter:
   rq = this.request_result
-  bd = json(str(prop(rq, 'body') or ''))
+  bd = json(str(${rq}['body'] or ''))
   jd = bd if bd is Dict else {}
-  hs = prop(rq, 'http_status')
-  cs = prop(prop(jd, 'result'), 'content') or []
-  er = prop(jd, 'error')
-  {'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not prop(prop(jd, 'result'), 'isError'), 'text': prop(cs[0], 'text') if len(cs) > 0 else None, 'why': (str(prop(er, 'message') if er is Dict else (er or prop(prop(jd, 'result'), 'content'))) if (er or prop(prop(jd, 'result'), 'isError')) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+  hs = ${rq}['http_status']
+  cs = ${${jd}['result']}['content'] or []
+  er = ${jd}['error']
+  {'ok': ${rq}['status'] == 'ok' and hs != None and hs >= 200 and hs < 300 and not er and not ${${jd}['result']}['isError'], 'text': ${cs[0]}['text'] if len(cs) > 0 else None, 'why': (str(${er}['message'] if er is Dict else (er or ${${jd}['result']}['content'])) if (er or ${${jd}['result']}['isError']) else 'the seat answered ' + str(hs)) if ${rq}['status'] == 'ok' else str(${rq}['head'] or 'the request failed')} if rq != None else None
 
 -- an ask starts on the shell's tick, while the tab is in front and none is running; the first one finds the head
 Shell.tick on-setter log-view-poll:
-  WHEN this.open and prop('Nav:log', 'active') == True and prop('LogTab:main', 'ns') != None and not prop('LogTab:main', 'polling') and not prop('Conn:page', 'hidden') and this.tick - (prop('LogTab:main', 'last_poll') or 0) >= this.status_ms / 1000 and prop('LogTab:main', 'phase') == None:
-    n = (prop('LogTab:main', 'seq') or 0) + 1
+  WHEN this.open and ${'Nav:log'}['active'] == True and ${'LogTab:main'}['ns'] != None and not ${'LogTab:main'}['polling'] and not ${'Conn:page'}['hidden'] and this.tick - (${'LogTab:main'}['last_poll'] or 0) >= this.status_ms / 1000 and ${'LogTab:main'}['phase'] == None:
+    n = (${'LogTab:main'}['seq'] or 0) + 1
     ('LogTab:main').seq = n
     ('LogTab:main').polling = True
     ('LogTab:main').phase = 'head'
     ('LogTab:main').step = 'n'
-    ('Fetch:log:n').request = {'timeout_s': 10, 'id': 'log-n-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': prop('LogTab:main', 'ns') + '::LogAsk:main', 'prop': 'n', 'value': n}}})}
-  ELSE WHEN this.open and prop('Nav:log', 'active') == True and prop('LogTab:main', 'ns') != None and not prop('LogTab:main', 'polling') and not prop('Conn:page', 'hidden') and this.tick - (prop('LogTab:main', 'last_poll') or 0) >= this.status_ms / 1000 and prop('LogTab:main', 'phase') == 'follow':
-    n = (prop('LogTab:main', 'seq') or 0) + 1
+    ('Fetch:log:n').request = {'timeout_s': 10, 'id': 'log-n-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': ${'LogTab:main'}['ns'] + '::LogAsk:main', 'prop': 'n', 'value': n}}})}
+  ELSE WHEN this.open and ${'Nav:log'}['active'] == True and ${'LogTab:main'}['ns'] != None and not ${'LogTab:main'}['polling'] and not ${'Conn:page'}['hidden'] and this.tick - (${'LogTab:main'}['last_poll'] or 0) >= this.status_ms / 1000 and ${'LogTab:main'}['phase'] == 'follow':
+    n = (${'LogTab:main'}['seq'] or 0) + 1
     ('LogTab:main').seq = n
     ('LogTab:main').polling = True
     ('LogTab:main').step = 'from'
-    ('Fetch:log:from').request = {'timeout_s': 10, 'id': 'log-from-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': prop('LogTab:main', 'ns') + '::LogAsk:main', 'prop': 'from', 'value': prop('LogTab:main', 'last') + 1}}})}
+    ('Fetch:log:from').request = {'timeout_s': 10, 'id': 'log-from-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': ${'LogTab:main'}['ns'] + '::LogAsk:main', 'prop': 'from', 'value': ${'LogTab:main'}['last'] + 1}}})}
 
 -- the calls of an ask, one after the other, by their receipts
 Fetch.mq on-setter log-view-step:
-  WHEN startswith(this.eid, 'Fetch:log:') and this.mq != None and not prop(this.mq, 'ok'):
-    ('LogTab:main').note = 'the seat did not answer the log tab (' + this.eid + '): ' + str(prop(this.mq, 'why'))
+  WHEN startswith(this.eid, 'Fetch:log:') and this.mq != None and not ${this.mq}['ok']:
+    ('LogTab:main').note = 'the seat did not answer the log tab (' + this.eid + '): ' + str(${this.mq}['why'])
     ('LogTab:main').polling = False
     ('LogTab:main').last_poll = clock
-  ELSE WHEN this.eid == 'Fetch:log:from' and this.mq != None and prop('LogTab:main', 'step') == 'from':
+  ELSE WHEN this.eid == 'Fetch:log:from' and this.mq != None and ${'LogTab:main'}['step'] == 'from':
     ('LogTab:main').step = 'n'
-    ('Fetch:log:n').request = {'timeout_s': 10, 'id': 'log-n-' + str(prop('LogTab:main', 'seq')), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': prop('LogTab:main', 'seq'), 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': prop('LogTab:main', 'ns') + '::LogAsk:main', 'prop': 'n', 'value': prop('LogTab:main', 'seq')}}})}
-  ELSE WHEN this.eid == 'Fetch:log:n' and this.mq != None and prop('LogTab:main', 'step') == 'n':
-    ('LogTab:main').step = 'headread' if prop('LogTab:main', 'phase') == 'head' else 'read'
-    ('Fetch:log:read').request = {'timeout_s': 10, 'id': 'log-read-' + str(prop('LogTab:main', 'seq')), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': prop('LogTab:main', 'seq'), 'method': 'tools/call', 'params': {'name': 'entity_read', 'arguments': {'spec': 'membrane::LogView:' + prop('LogTab:main', 'ns'), 'prop': 'head' if prop('LogTab:main', 'phase') == 'head' else 'rows'}}})}
-  ELSE WHEN this.eid == 'Fetch:log:read' and this.mq != None and prop('LogTab:main', 'step') == 'headread':
-    hd = num(str(prop(this.mq, 'text') or ''))
+    ('Fetch:log:n').request = {'timeout_s': 10, 'id': 'log-n-' + str(${'LogTab:main'}['seq']), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': ${'LogTab:main'}['seq'], 'method': 'tools/call', 'params': {'name': 'entity_write', 'arguments': {'spec': ${'LogTab:main'}['ns'] + '::LogAsk:main', 'prop': 'n', 'value': ${'LogTab:main'}['seq']}}})}
+  ELSE WHEN this.eid == 'Fetch:log:n' and this.mq != None and ${'LogTab:main'}['step'] == 'n':
+    ('LogTab:main').step = 'headread' if ${'LogTab:main'}['phase'] == 'head' else 'read'
+    ('Fetch:log:read').request = {'timeout_s': 10, 'id': 'log-read-' + str(${'LogTab:main'}['seq']), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': ${'LogTab:main'}['seq'], 'method': 'tools/call', 'params': {'name': 'entity_read', 'arguments': {'spec': 'membrane::LogView:' + ${'LogTab:main'}['ns'], 'prop': 'head' if ${'LogTab:main'}['phase'] == 'head' else 'rows'}}})}
+  ELSE WHEN this.eid == 'Fetch:log:read' and this.mq != None and ${'LogTab:main'}['step'] == 'headread':
+    hd = num(str(${this.mq}['text'] or ''))
     ('LogTab:main').last = (max(0, hd - 199) - 1) if hd is Number else -1
     ('LogTab:main').first = (max(0, hd - 199)) if hd is Number else 0
     ('LogTab:main').phase = 'follow'
     ('LogTab:main').note = None
     ('LogTab:main').polling = False
     ('LogTab:main').last_poll = 0
-  ELSE WHEN this.eid == 'Fetch:log:read' and this.mq != None and prop('LogTab:main', 'step') == 'read' and prop('LogTab:main', 'older_out') == True:
-    rs = json(str(prop(this.mq, 'text') or ''))
-    ow = [r for r in (rs if rs is List else []) if prop(r, 'n') < prop('LogTab:main', 'first')]
+  ELSE WHEN this.eid == 'Fetch:log:read' and this.mq != None and ${'LogTab:main'}['step'] == 'read' and ${'LogTab:main'}['older_out'] == True:
+    rs = json(str(${this.mq}['text'] or ''))
+    ow = [r for r in (rs if rs is List else []) if ${r}['n'] < ${'LogTab:main'}['first']]
     ('LogTab:main').older_out = False
-    ('LogTab:main').pages = (prop('LogTab:main', 'pages') or 1) + 1
-    ('LogTab:main').first = min([prop(r, 'n') for r in ow]) if len(ow) > 0 else prop('LogTab:main', 'first')
-    ('LogTab:main').lines = concat([str(prop(r, 'n')) + ' ' + str(prop(r, 'eid')) + '.' + str(prop(r, 'prop')) + ' ' + str(prop(r, 'op')) + ' by ' + str(prop(r, 'writer')) for r in ow], prop('LogTab:main', 'lines') or [])
+    ('LogTab:main').pages = (${'LogTab:main'}['pages'] or 1) + 1
+    ('LogTab:main').first = min([${r}['n'] for r in ow]) if len(ow) > 0 else ${'LogTab:main'}['first']
+    ('LogTab:main').lines = concat([str(${r}['n']) + ' ' + str(${r}['eid']) + '.' + str(${r}['prop']) + ' ' + str(${r}['op']) + ' by ' + str(${r}['writer']) for r in ow], ${'LogTab:main'}['lines'] or [])
     ('LogTab:main').note = None
     ('LogTab:main').polling = False
     ('LogTab:main').last_poll = clock
-  ELSE WHEN this.eid == 'Fetch:log:read' and this.mq != None and prop('LogTab:main', 'step') == 'read':
-    rs = json(str(prop(this.mq, 'text') or ''))
-    rw = [r for r in (rs if rs is List else []) if prop(r, 'n') > (prop('LogTab:main', 'last') if prop('LogTab:main', 'last') != None else -1)]
+  ELSE WHEN this.eid == 'Fetch:log:read' and this.mq != None and ${'LogTab:main'}['step'] == 'read':
+    rs = json(str(${this.mq}['text'] or ''))
+    rw = [r for r in (rs if rs is List else []) if ${r}['n'] > (${'LogTab:main'}['last'] if ${'LogTab:main'}['last'] != None else -1)]
     ('LogTab:main').holding = False
-    nl = tail(concat(prop('LogTab:main', 'lines') or [], [str(prop(r, 'n')) + ' ' + str(prop(r, 'eid')) + '.' + str(prop(r, 'prop')) + ' ' + str(prop(r, 'op')) + ' by ' + str(prop(r, 'writer')) for r in rw]), 200 * (prop('LogTab:main', 'pages') or 1))
-    ('LogTab:main').last = max([prop(r, 'n') for r in rw]) if len(rw) > 0 else prop('LogTab:main', 'last')
-    ('LogTab:main').first = (max([prop(r, 'n') for r in rw]) - len(nl) + 1) if len(rw) > 0 else prop('LogTab:main', 'first')
+    nl = tail(concat(${'LogTab:main'}['lines'] or [], [str(${r}['n']) + ' ' + str(${r}['eid']) + '.' + str(${r}['prop']) + ' ' + str(${r}['op']) + ' by ' + str(${r}['writer']) for r in rw]), 200 * (${'LogTab:main'}['pages'] or 1))
+    ('LogTab:main').last = max([${r}['n'] for r in rw]) if len(rw) > 0 else ${'LogTab:main'}['last']
+    ('LogTab:main').first = (max([${r}['n'] for r in rw]) - len(nl) + 1) if len(rw) > 0 else ${'LogTab:main'}['first']
     ('LogTab:main').lines = nl
     ('LogTab:main').note = None
     ('LogTab:main').polling = False
@@ -147,19 +147,19 @@ Fetch.mq on-setter log-view-step:
 -- THE RAW CHAT WITH THE MODEL, under the log lines: the seat's own `ModelChat:main`, read by the door (`entity_read`, one POST, `Fetch:logchat:read`) on the same tick while the tab is in front. Its own state `LogChat:main`
 -- (`text`, `polling`, `last_poll`, `seq`, `note`) so it never waits on the log's calls; a call that fails is said under the heading.
 Shell.tick on-setter log-view-chat-poll:
-  WHEN this.open and prop('Nav:log', 'active') == True and not prop('LogChat:main', 'polling') and not prop('Conn:page', 'hidden') and this.tick - (prop('LogChat:main', 'last_poll') or 0) >= this.status_ms / 1000:
-    n = (prop('LogChat:main', 'seq') or 0) + 1
+  WHEN this.open and ${'Nav:log'}['active'] == True and not ${'LogChat:main'}['polling'] and not ${'Conn:page'}['hidden'] and this.tick - (${'LogChat:main'}['last_poll'] or 0) >= this.status_ms / 1000:
+    n = (${'LogChat:main'}['seq'] or 0) + 1
     ('LogChat:main').seq = n
     ('LogChat:main').polling = True
     ('Fetch:logchat:read').request = {'timeout_s': 10, 'id': 'log-chat-' + str(n), 'url': '/mcp', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': str({'jsonrpc': '2.0', 'id': n, 'method': 'tools/call', 'params': {'name': 'entity_read', 'arguments': {'spec': 'ModelChat:main', 'prop': 'text'}}})}
 
 Fetch.mq on-setter log-view-chat-step:
-  WHEN this.eid == 'Fetch:logchat:read' and this.mq != None and not prop(this.mq, 'ok'):
-    ('LogChat:main').note = 'the seat did not answer the model chat: ' + str(prop(this.mq, 'why'))
+  WHEN this.eid == 'Fetch:logchat:read' and this.mq != None and not ${this.mq}['ok']:
+    ('LogChat:main').note = 'the seat did not answer the model chat: ' + str(${this.mq}['why'])
     ('LogChat:main').polling = False
     ('LogChat:main').last_poll = clock
   ELSE WHEN this.eid == 'Fetch:logchat:read' and this.mq != None:
-    ('LogChat:main').text = str(prop(this.mq, 'text') or '')
+    ('LogChat:main').text = str(${this.mq}['text'] or '')
     ('LogChat:main').note = None
     ('LogChat:main').polling = False
     ('LogChat:main').last_poll = clock
@@ -167,7 +167,7 @@ Fetch.mq on-setter log-view-chat-step:
 LogChat.shown getter: ('' if (' has no text' in str(this.text or '')) or startswith(str(this.text or ''), 'no such entity') else str(this.text or '')) or '(nothing yet: no model has been asked anything)'
 LogChat.full getter: this.shown + (('\n' + str(this.note)) if this.note else '')
 LogChat.full on-setter log-view-chat-show:
-  WHEN prop('Nav:log', 'filled') == True:
+  WHEN ${'Nav:log'}['filled'] == True:
     ('DomNode:log:chat').text = this.full
 LogChat.on on-setter log-view-chat-first:
   WHEN this.on == True:

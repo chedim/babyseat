@@ -460,3 +460,21 @@ fn the_page_can_follow_who_is_connected_by_its_link() {
     }
     assert_eq!(up, Some(json!([])), "the page is not told who is connected (nobody is: an empty list)");
 }
+
+#[test]
+fn an_entity_the_seat_keeps_under_membrane_is_subscribed_by_that_name_a_virtual_one_too() {
+    // `membrane::LogView:<ns>` is VIRTUAL and stored nowhere under a bare name: the route strips the prefix, so the read must find the prefixed twin (#1143, the log tab reads its view by the link)
+    let run = start(&tmp("twin"), &[]);
+    let ns = snap(run.port)["page"].as_str().unwrap().to_string();
+    tell(run.port, &ns);   // a view appears for a connected page
+    call(run.port, "entity_write", json!({"spec": "LinkAllow:logview", "prop": "prefixes", "value": ["LogView:"]}));
+    call(run.port, "entity_write", json!({"spec": format!("{ns}::LogAsk:main"), "prop": "n", "value": 1}));
+    let view = format!("membrane::LogView:{ns}");
+    let mut want = String::new();
+    for _ in 0..100 { want = call(run.port, "entity_read", json!({"spec": view, "prop": "head"})); if want.parse::<i64>().is_ok() { break; } std::thread::sleep(Duration::from_millis(50)); }
+    assert!(want.parse::<i64>().is_ok(), "the view answers a head: {want}");
+    let (s, r) = frame(run.port, &ns, 1, 0, &[(&view, "head")], &[], false);
+    assert_eq!(s, 200, "{r}");
+    let v = vals(&r);
+    assert_eq!(row(&v, &view, "head").map(|x| x["value"].clone()), Some(json!(want.parse::<i64>().unwrap())), "the head arrives, not a null: {r}");
+}

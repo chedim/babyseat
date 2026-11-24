@@ -34,35 +34,35 @@ IMPORT model_chat 1
 -- ---- which model, which endpoint ---------------------------------------------------------------------------------------------------------------------
 ChatMessage.oai_entry getter:
   WHEN this.over: None
-  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if prop(c, 'name') == this.model_eff and prop(c, 'backend') not in ['claude-agent', 'membrama', 'claude-peer', 'openai-peer', 'anthropic-peer']] or [None])[0]
-ChatMessage.oai_local getter: prop('Model:' + this.model_eff, 'backend') == 'ollama'
+  ELSE: ([c for c in (([b.cloud_models for b in instances('Boot') if b.cloud_models != None] or [[]])[0]) if ${c}['name'] == this.model_eff and ${c}['backend'] not in ['claude-agent', 'membrama', 'claude-peer', 'openai-peer', 'anthropic-peer']] or [None])[0]
+ChatMessage.oai_local getter: ${'Model:' + this.model_eff}['backend'] == 'ollama'
 ChatMessage.oai_base getter:
-  WHEN this.oai_entry != None: str(prop(this.oai_entry, 'base_url') or '')
+  WHEN this.oai_entry != None: str(${this.oai_entry}['base_url'] or '')
   ELSE: ([b.seat_backend for b in instances('Boot') if b.seat_backend != None] or [''])[0]
 ChatMessage.oai_root getter: head(this.oai_base, len(this.oai_base) - 1) if tail(this.oai_base, 1) == '/' else this.oai_base
 ChatMessage.oai_cfg getter:
   WHEN this.over: None
   ELSE WHEN this.oai_entry == None and not this.oai_local: None
   ELSE WHEN this.oai_root == '': {'refuse': 'The model ' + this.model_eff + ' is not a claude rung, and its cloud_models entry names no base_url. Add "base_url": "<the endpoint, e.g. https://api.example.com>" (and "api_key_env": "<the NAME of the environment variable that holds its key>") to the entry in the cloud_models fact, restart the seat, then send the message again.'}
-  ELSE: {'url': this.oai_root + str(prop(this.oai_entry, 'chat_path') or '/v1/chat/completions'), 'model': this.model_eff, 'bearer_env': prop(this.oai_entry, 'api_key_env'), 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
-ChatMessage.oai_plan getter: {'refuse': prop(this.oai_cfg, 'refuse')} if prop(this.oai_cfg, 'refuse') != None else {'start': this.oai_cfg}
+  ELSE: {'url': this.oai_root + str(${this.oai_entry}['chat_path'] or '/v1/chat/completions'), 'model': this.model_eff, 'bearer_env': ${this.oai_entry}['api_key_env'], 'timeout_s': this.turn_timeout_s, 'max_turns': this.max_turns, 'mcp': 'http://127.0.0.1:' + str(this.port) + '/mcp', 'admin_env': 'MEMBRANE_ADMIN_TOKEN' if this.admin_file != None else None}
+ChatMessage.oai_plan getter: {'refuse': ${this.oai_cfg}['refuse']} if ${this.oai_cfg}['refuse'] != None else {'start': this.oai_cfg}
 
 -- ---- start: the door's tool list, then round 1 -------------------------------------------------------------------------------------------------------------
 -- (the peer rung, packs/chat_membrama.c1f, starts the same way: the door tool list first, read by the same Fetch; its own setter opens round 1)
 Chat.plan on-setter oai-start:
-  WHEN prop(this.plan, 'backend') in ['oai', 'peer'] and prop(this.plan, 'start') != None:
-    membrane::Chat[this.cp]:turn.oai = prop(this.plan, 'start')
-    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': prop(prop(this.plan, 'start'), 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': prop(prop(this.plan, 'start'), 'admin_env'), 'timeout_s': prop(prop(this.plan, 'start'), 'timeout_s')}
-ChatMessage.oai_trr getter: prop('Fetch:oai:' + this.cp + ':tools', 'request_result')
-ChatMessage.oai_tj getter: ([j for j in [json(str(prop(this.oai_trr, 'body') or ''))] if j is not Error] or [{}])[0]
-ChatMessage.oai_tlist getter: prop(prop(this.oai_tj, 'result'), 'tools')
+  WHEN ${this.plan}['backend'] in ['oai', 'peer'] and ${this.plan}['start'] != None:
+    membrane::Chat[this.cp]:turn.oai = ${this.plan}['start']
+    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': ${${this.plan}['start']}['mcp'], 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': ${${this.plan}['start']}['admin_env'], 'timeout_s': ${${this.plan}['start']}['timeout_s']}
+ChatMessage.oai_trr getter: ${'Fetch:oai:' + this.cp + ':tools'}['request_result']
+ChatMessage.oai_tj getter: ([j for j in [json(str(${this.oai_trr}['body'] or ''))] if j is not Error] or [{}])[0]
+ChatMessage.oai_tlist getter: ${${this.oai_tj}['result']}['tools']
 ChatMessage.oai_tools getter:
   WHEN this.over or this.oai_trr == None: None
-  ELSE WHEN prop(this.oai_trr, 'rc') != 0 or prop(this.oai_trr, 'http_status') != 200 or not (this.oai_tlist is List): {'fail': 'The door\'s tool list could not be read for the model ' + this.model_eff + ' (' + str(prop(this.oai_trr, 'head')) + '): ' + str(prop(this.oai_trr, 'body') or '')}
-  ELSE: {'tools': [{'type': 'function', 'function': {'name': prop(t, 'name'), 'description': prop(t, 'description'), 'parameters': prop(t, 'inputSchema')}} for t in this.oai_tlist]}
+  ELSE WHEN ${this.oai_trr}['rc'] != 0 or ${this.oai_trr}['http_status'] != 200 or not (this.oai_tlist is List): {'fail': 'The door\'s tool list could not be read for the model ' + this.model_eff + ' (' + str(${this.oai_trr}['head']) + '): ' + str(${this.oai_trr}['body'] or '')}
+  ELSE: {'tools': [{'type': 'function', 'function': {'name': ${t}['name'], 'description': ${t}['description'], 'parameters': ${t}['inputSchema']}} for t in this.oai_tlist]}
 Chat.oai_tools on-setter oai-first:
-  WHEN prop(this.oai_tools, 'tools') != None and not this.over and this.mb_cfg == None:
-    membrane::Chat[this.cp]:turn.oai_tools = prop(this.oai_tools, 'tools')
+  WHEN ${this.oai_tools}['tools'] != None and not this.over and this.mb_cfg == None:
+    membrane::Chat[this.cp]:turn.oai_tools = ${this.oai_tools}['tools']
     membrane::Chat[this.cp]:turn:round[1] = ChatRound(cp: this.cp, n: 1, messages: [{'role': 'system', 'content': join([this.note, this.banner_slot], '\n\n')}, {'role': 'user', 'content': this.text}])
     membrane::Chat[this.cp]:turn:round[1].go = True
     membrane::Chat[this.cp]:turn.round = 1
@@ -72,10 +72,10 @@ Chat.oai_tools on-setter oai-first:
 ChatRound.kind getter: 'round'
 ChatRound.turn_e getter: 'membrane::Chat:' + this.cp + ':turn'
 ChatRound.rq getter: 'Fetch:oai:' + this.cp + ':' + str(this.n)
-ChatRound.cfg getter: prop(this.turn_e, 'oai')
+ChatRound.cfg getter: ${this.turn_e}['oai']
 ChatRound.oai_req getter:
-  WHEN this.go != True or this.messages == None or this.cfg == None or prop(this.turn_e, 'oai_tools') == None: None
-  ELSE: {'id': {'mid': this.cp, 'n': this.n}, 'url': prop(this.cfg, 'url'), 'method': 'POST', 'headers': {'Content-Type': 'application/json', 'Accept': 'text/event-stream'}, 'body': {'model': prop(this.cfg, 'model'), 'messages': this.messages, 'tools': prop(this.turn_e, 'oai_tools'), 'stream': True}, 'stream': True, 'lines': True, 'keep': True, 'bearer_env': prop(this.cfg, 'bearer_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
+  WHEN this.go != True or this.messages == None or this.cfg == None or ${this.turn_e}['oai_tools'] == None: None
+  ELSE: {'id': {'mid': this.cp, 'n': this.n}, 'url': ${this.cfg}['url'], 'method': 'POST', 'headers': {'Content-Type': 'application/json', 'Accept': 'text/event-stream'}, 'body': {'model': ${this.cfg}['model'], 'messages': this.messages, 'tools': ${this.turn_e}['oai_tools'], 'stream': True}, 'stream': True, 'lines': True, 'keep': True, 'bearer_env': ${this.cfg}['bearer_env'], 'timeout_s': ${this.cfg}['timeout_s']}
 Chat.oai_req on-setter oai-send:
   WHEN this.oai_req != None:
     ('Fetch:oai:' + this.cp + ':' + str(this.n)).request = this.oai_req
@@ -86,120 +86,120 @@ Chat.oai_req on-setter oai-send:
 -- while the call runs (`ChatMessage.partial_text`). The ANSWER is not read from it (the accumulator is collected when the call's receipt lands): the call asks for `keep`, so its
 -- receipt carries the whole body, and the round reads the finished stream from there, as the claude turn reads its CLI's stdout.
 -- the turn's live source (packs/chat_turn.c1f, `live_acc`): the accumulator of the current round's call
-ChatMessage.oai_live getter: 'Chunk:Fetch:oai:' + this.cp + ':' + str(prop(this.turn_eid, 'round') or 0) + ':acc'
+ChatMessage.oai_live getter: 'Chunk:Fetch:oai:' + this.cp + ':' + str(${this.turn_eid}['round'] or 0) + ':acc'
 Chunk.oevs getter: [e for e in [json(strip(after(l, 'data:'))) for l in lines(str(this.data or '')) if startswith(l, 'data:')] if e is not Error and e is Dict]
-Chunk.ochs getter: [(prop(e, 'choices') or [None])[0] for e in this.oevs]
+Chunk.ochs getter: [(${e}['choices'] or [None])[0] for e in this.oevs]
 Chunk.oapart getter:
   WHEN this.fetch == None or not startswith(str(this.fetch), 'Fetch:oai:') or this.n == None or this.done == True: None
-  ELSE: {'said': join([str(prop(prop(c, 'delta'), 'content') or '') for c in this.ochs], ''), 'started': join([join([str(prop(prop(tc, 'function'), 'name') or '') for tc in (prop(prop(c, 'delta'), 'tool_calls') or [])], ' ') for c in this.ochs], ' ')}
+  ELSE: {'said': join([str(${${c}['delta']}['content'] or '') for c in this.ochs], ''), 'started': join([join([str(${${tc}['function']}['name'] or '') for tc in (${${c}['delta']}['tool_calls'] or [])], ' ') for c in this.ochs], ' ')}
 Chunk.oacc getter: 'Chunk:' + str(this.fetch) + ':acc'
 Chunk.oapart on-setter oai-in:
   WHEN this.oapart != None:
-    (this.oacc).text = str(prop(this.oacc, 'text') or '') + prop(this.oapart, 'said')
-    (this.oacc).tools = str(prop(this.oacc, 'tools') or '') + ' ' + prop(this.oapart, 'started')
+    (this.oacc).text = str(${this.oacc}['text'] or '') + ${this.oapart}['said']
+    (this.oacc).tools = str(${this.oacc}['tools'] or '') + ' ' + ${this.oapart}['started']
 
 -- ---- what a round said, from its receipt: the calls assembled from their deltas (an index, an id once, the name and the arguments in pieces) ------------------------------------
-ChatRound.rcpt getter: prop(this.rq, 'request_result')
-ChatRound.rbody getter: str(prop(this.rcpt, 'body') or '')
+ChatRound.rcpt getter: ${this.rq}['request_result']
+ChatRound.rbody getter: str(${this.rcpt}['body'] or '')
 ChatRound.revs getter: [e for e in [json(strip(after(l, 'data:'))) for l in lines(this.rbody) if startswith(l, 'data:')] if e is not Error and e is Dict]
-ChatRound.rchs getter: [(prop(e, 'choices') or [None])[0] for e in this.revs]
-ChatRound.tcl getter: [prop(prop(c, 'delta'), 'tool_calls') for c in this.rchs if prop(prop(c, 'delta'), 'tool_calls') != None]
-ChatRound.usage getter: ([prop(e, 'usage') for e in this.revs if prop(e, 'usage') != None] or [None])[-1]
-ChatRound.finish getter: ([prop(c, 'finish_reason') for c in this.rchs if prop(c, 'finish_reason') != None] or [None])[-1]
-ChatRound.err getter: ([str(prop(e, 'error')) for e in this.revs if prop(e, 'error') != None] or [None])[0]
-ChatRound.idxs getter: [num(x) for x in distinct(words(join([join([str(prop(tc, 'index') or 0) for tc in e], ' ') for e in this.tcl], ' ')))]
-ChatRound.calls getter: [{'i': i, 'id': (words(join([join([str(prop(tc, 'id') or '') for tc in e if (prop(tc, 'index') or 0) == i], ' ') for e in this.tcl], ' ')) or ['call_' + str(this.n) + '_' + str(i)])[0], 'name': join([join([str(prop(prop(tc, 'function'), 'name') or '') for tc in e if (prop(tc, 'index') or 0) == i], '') for e in this.tcl], ''), 'args': join([join([str(prop(prop(tc, 'function'), 'arguments') or '') for tc in e if (prop(tc, 'index') or 0) == i], '') for e in this.tcl], '')} for i in this.idxs]
-ChatRound.said getter: join([str(prop(prop(c, 'delta'), 'content') or '') for c in this.rchs], '')
+ChatRound.rchs getter: [(${e}['choices'] or [None])[0] for e in this.revs]
+ChatRound.tcl getter: [${${c}['delta']}['tool_calls'] for c in this.rchs if ${${c}['delta']}['tool_calls'] != None]
+ChatRound.usage getter: ([${e}['usage'] for e in this.revs if ${e}['usage'] != None] or [None])[-1]
+ChatRound.finish getter: ([${c}['finish_reason'] for c in this.rchs if ${c}['finish_reason'] != None] or [None])[-1]
+ChatRound.err getter: ([str(${e}['error']) for e in this.revs if ${e}['error'] != None] or [None])[0]
+ChatRound.idxs getter: [num(x) for x in distinct(words(join([join([str(${tc}['index'] or 0) for tc in e], ' ') for e in this.tcl], ' ')))]
+ChatRound.calls getter: [{'i': i, 'id': (words(join([join([str(${tc}['id'] or '') for tc in e if (${tc}['index'] or 0) == i], ' ') for e in this.tcl], ' ')) or ['call_' + str(this.n) + '_' + str(i)])[0], 'name': join([join([str(${${tc}['function']}['name'] or '') for tc in e if (${tc}['index'] or 0) == i], '') for e in this.tcl], ''), 'args': join([join([str(${${tc}['function']}['arguments'] or '') for tc in e if (${tc}['index'] or 0) == i], '') for e in this.tcl], '')} for i in this.idxs]
+ChatRound.said getter: join([str(${${c}['delta']}['content'] or '') for c in this.rchs], '')
 -- everything the model said over the rounds so far (the words of each round's finished stream, in order): what a turn that ends in an error keeps (the end of the turn below)
-ChatRound.said_all getter: join([x for x in [str(prop(this.prev, 'said_all') or ''), strip(this.said)] if x != ''], '\n\n')
+ChatRound.said_all getter: join([x for x in [str(${this.prev}['said_all'] or ''), strip(this.said)] if x != ''], '\n\n')
 ChatRound.step getter:
   WHEN this.rcpt == None: None
-  ELSE WHEN prop(this.rcpt, 'rc') != 0: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' could not be called (' + str(prop(this.rcpt, 'head')) + ')'}
-  ELSE WHEN prop(this.rcpt, 'http_status') != 200: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' answered HTTP ' + str(prop(this.rcpt, 'http_status')) + ': ' + strip(this.rbody)}
-  ELSE WHEN this.err != None: {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' reported an error: ' + str(this.err)}
-  ELSE WHEN len(this.calls) > 0 and this.n >= prop(this.cfg, 'max_turns'): {'capped': True}
+  ELSE WHEN ${this.rcpt}['rc'] != 0: {'fail': 'The model ' + str(${this.cfg}['model']) + ' could not be called (' + str(${this.rcpt}['head']) + ')'}
+  ELSE WHEN ${this.rcpt}['http_status'] != 200: {'fail': 'The model ' + str(${this.cfg}['model']) + ' answered HTTP ' + str(${this.rcpt}['http_status']) + ': ' + strip(this.rbody)}
+  ELSE WHEN this.err != None: {'fail': 'The model ' + str(${this.cfg}['model']) + ' reported an error: ' + str(this.err)}
+  ELSE WHEN len(this.calls) > 0 and this.n >= ${this.cfg}['max_turns']: {'capped': True}
   ELSE WHEN len(this.calls) > 0: {'calls': True}
-  ELSE WHEN strip(this.said) == '': {'fail': 'The model ' + str(prop(this.cfg, 'model')) + ' answered with no text and no tool call (finish: ' + str(this.finish) + ')'}
+  ELSE WHEN strip(this.said) == '': {'fail': 'The model ' + str(${this.cfg}['model']) + ' answered with no text and no tool call (finish: ' + str(this.finish) + ')'}
   ELSE: {'final': this.said}
 
 -- ---- the round's tool calls: each is an entity (ChatCall) and the door's own `tools/call` -------------------------------------------------------------------------------
 Chat.step on-setter oai-calls:
-  WHEN prop(this.step, 'calls') == True:
+  WHEN ${this.step}['calls'] == True:
     FOR c IN this.calls:
       membrane::Chat[this.cp]:turn:round[str(this.n)]:call[str(c['i'])] = ChatCall(cp: this.cp, n: this.n, i: c['i'], id: c['id'], name: c['name'], args: c['args'])
       membrane::Chat[this.cp]:turn:round[str(this.n)]:call[str(c['i'])].go = True
 ChatCall.kind getter: 'call'
 ChatCall.rq getter: 'Fetch:oai:' + this.cp + ':' + str(this.n) + ':' + str(this.i)
-ChatCall.cfg getter: prop('membrane::Chat:' + this.cp + ':turn', 'oai')
+ChatCall.cfg getter: ${'membrane::Chat:' + this.cp + ':turn'}['oai']
 -- the arguments are JSON text the model wrote: a call whose text is not a JSON object is not sent, and the model is told so as the tool's result
 ChatCall.bad getter: not (json(str(this.args or '') or '{}') is Dict)
 ChatCall.input getter: {} if this.bad else json(str(this.args or '') or '{}')
 ChatCall.creq getter:
   WHEN this.go != True or this.bad or this.cfg == None: None
-  ELSE: {'id': {'mid': this.cp, 'n': this.n, 'i': this.i}, 'url': prop(this.cfg, 'mcp'), 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': this.name, 'arguments': this.input}}, 'bearer_env': prop(this.cfg, 'admin_env'), 'timeout_s': prop(this.cfg, 'timeout_s')}
+  ELSE: {'id': {'mid': this.cp, 'n': this.n, 'i': this.i}, 'url': ${this.cfg}['mcp'], 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': this.name, 'arguments': this.input}}, 'bearer_env': ${this.cfg}['admin_env'], 'timeout_s': ${this.cfg}['timeout_s']}
 Chat.creq on-setter oai-tool-send:
   WHEN this.creq != None:
     (this.rq).request = this.creq
-ChatCall.rr getter: prop(this.rq, 'request_result')
-ChatCall.j getter: ([j for j in [json(str(prop(this.rr, 'body') or ''))] if j is not Error] or [{}])[0]
-ChatCall.door_text getter: prop((prop(prop(this.j, 'result'), 'content') or [None])[0], 'text')
+ChatCall.rr getter: ${this.rq}['request_result']
+ChatCall.j getter: ([j for j in [json(str(${this.rr}['body'] or ''))] if j is not Error] or [{}])[0]
+ChatCall.door_text getter: ${(${${this.j}['result']}['content'] or [None])[0]}['text']
 -- a call's text: the door's reply text (the same text `tools/call` gives the claude CLI), the door's JSON-RPC error message, or what went wrong reaching the door
 ChatCall.text getter:
   WHEN this.bad: 'Error: the arguments of the call are not a JSON object: ' + str(this.args)
   ELSE WHEN this.rr == None: None
-  ELSE WHEN prop(this.rr, 'rc') != 0: 'Error: the door could not be reached for ' + this.name + ' (' + str(prop(this.rr, 'head')) + ')'
+  ELSE WHEN ${this.rr}['rc'] != 0: 'Error: the door could not be reached for ' + this.name + ' (' + str(${this.rr}['head']) + ')'
   ELSE WHEN this.door_text != None: str(this.door_text)
-  ELSE WHEN prop(prop(this.j, 'error'), 'message') != None: 'Error: ' + str(prop(prop(this.j, 'error'), 'message'))
-  ELSE: 'Error: the door answered HTTP ' + str(prop(this.rr, 'http_status')) + ': ' + str(prop(this.rr, 'body') or '')
+  ELSE WHEN ${${this.j}['error']}['message'] != None: 'Error: ' + str(${${this.j}['error']}['message'])
+  ELSE: 'Error: the door answered HTTP ' + str(${this.rr}['http_status']) + ': ' + str(${this.rr}['body'] or '')
 ChatCall.out getter: {'id': this.id, 'name': this.name, 'input': this.input, 'text': this.text} if this.text != None else None
 ChatRound.call_eids getter: ['membrane::Chat:' + this.cp + ':turn:round:' + str(this.n) + ':call:' + str(c['i']) for c in this.calls]
 ChatRound.results getter:
-  WHEN prop(this.step, 'calls') != True: None
-  ELSE: ([r for r in [[prop(e, 'out') for e in this.call_eids]] if len([x for x in r if x == None]) == 0] or [None])[0]
+  WHEN ${this.step}['calls'] != True: None
+  ELSE: ([r for r in [[${e}['out'] for e in this.call_eids]] if len([x for x in r if x == None]) == 0] or [None])[0]
 ChatRound.assistant getter: {'role': 'assistant', 'content': (this.said or None), 'tool_calls': [{'id': c['id'], 'type': 'function', 'function': {'name': c['name'], 'arguments': c['args'] or '{}'}} for c in this.calls]}
 ChatRound.oai_next getter: {'raw': this.raw, 'messages': concat(concat(this.messages, [this.assistant]), [{'role': 'tool', 'tool_call_id': r['id'], 'content': r['text']} for r in this.results])} if this.results != None else None
 Chat.oai_next on-setter oai-next:
   WHEN this.oai_next != None:
-    ('ModelChat:' + before(this.cp, ':message:')).add = prop(this.oai_next, 'raw')
+    ('ModelChat:' + before(this.cp, ':message:')).add = ${this.oai_next}['raw']
     FOR r IN this.results:
       membrane::Chat[this.cp]:turn:tool[r['id']] = ChatTool(name: r['name'], input: r['input'], result: r['text'])
-    membrane::Chat[this.cp]:turn:round[str(this.n + 1)] = ChatRound(cp: this.cp, n: this.n + 1, messages: prop(this.oai_next, 'messages'))
+    membrane::Chat[this.cp]:turn:round[str(this.n + 1)] = ChatRound(cp: this.cp, n: this.n + 1, messages: ${this.oai_next}['messages'])
     membrane::Chat[this.cp]:turn:round[str(this.n + 1)].go = True
     membrane::Chat[this.cp]:turn.round = this.n + 1
 
 -- ---- the raw exchange of the round, for `ModelChat:<chat>` (packs/model_chat.c1f): the prompt (round 1), the reply as the stream said it, each call, each result, the error ----------------------------------------
-ChatRound.raw getter: '── ' + str(this.cp) + ' round ' + str(this.n) + ' ──\n' + (join(['[' + str(m['role']) + ']\n' + str(prop(m, 'content') or '') + '\n' for m in this.messages], '') if this.n == 1 else '') + (('[assistant]\n' + this.said + '\n') if this.said != '' else '') + join(['[call] ' + str(c['name']) + ' ' + str(c['args'] or '{}') + '\n' for c in this.calls], '') + join(['[tool]\n' + str(r['text']) + '\n' for r in (this.results or [])], '') + (('[error]\n' + str(prop(this.step, 'fail')) + '\n') if prop(this.step, 'fail') != None else '')
+ChatRound.raw getter: '── ' + str(this.cp) + ' round ' + str(this.n) + ' ──\n' + (join(['[' + str(m['role']) + ']\n' + str(${m}['content'] or '') + '\n' for m in this.messages], '') if this.n == 1 else '') + (('[assistant]\n' + this.said + '\n') if this.said != '' else '') + join(['[call] ' + str(c['name']) + ' ' + str(c['args'] or '{}') + '\n' for c in this.calls], '') + join(['[tool]\n' + str(r['text']) + '\n' for r in (this.results or [])], '') + (('[error]\n' + str(${this.step}['fail']) + '\n') if ${this.step}['fail'] != None else '')
 
 -- ---- what the turn has used, over its rounds (explicit, round by round) -----------------------------------------------------------------------------------------------
 ChatRound.prev getter: 'membrane::Chat:' + this.cp + ':turn:round:' + str(this.n - 1) if this.n > 1 else None
-ChatRound.ids_before getter: prop(this.prev, 'ids') or []
-ChatRound.names_before getter: prop(this.prev, 'names') or []
+ChatRound.ids_before getter: ${this.prev}['ids'] or []
+ChatRound.names_before getter: ${this.prev}['names'] or []
 ChatRound.ids getter: concat(this.ids_before, [c['id'] for c in this.calls])
 ChatRound.names getter: concat(this.names_before, [c['name'] for c in this.calls])
 -- the endpoint's own numbers, summed over the rounds: `seen` says whether any round reported usage (an endpoint that never does leaves the turn's usage empty)
-ChatRound.cum getter: {'in': (prop(prop(this.prev, 'cum'), 'in') or 0) + (prop(this.usage, 'prompt_tokens') or 0), 'out': (prop(prop(this.prev, 'cum'), 'out') or 0) + (prop(this.usage, 'completion_tokens') or 0), 'seen': prop(prop(this.prev, 'cum'), 'seen') == True or this.usage != None}
-ChatRound.usage_out getter: {'input_tokens': prop(this.cum, 'in'), 'output_tokens': prop(this.cum, 'out')} if prop(this.cum, 'seen') == True else None
+ChatRound.cum getter: {'in': (${${this.prev}['cum']}['in'] or 0) + (${this.usage}['prompt_tokens'] or 0), 'out': (${${this.prev}['cum']}['out'] or 0) + (${this.usage}['completion_tokens'] or 0), 'seen': ${${this.prev}['cum']}['seen'] == True or this.usage != None}
+ChatRound.usage_out getter: {'input_tokens': ${this.cum}['in'], 'output_tokens': ${this.cum}['out']} if ${this.cum}['seen'] == True else None
 
 -- ---- the end of the turn ------------------------------------------------------------------------------------------------------------------------------------------
-ChatMessage.oai_round getter: 'membrane::Chat:' + this.cp + ':turn:round:' + str(prop(this.turn_eid, 'round') or 0)
-ChatMessage.oai_step getter: prop(this.oai_round, 'step')
+ChatMessage.oai_round getter: 'membrane::Chat:' + this.cp + ':turn:round:' + str(${this.turn_eid}['round'] or 0)
+ChatMessage.oai_step getter: ${this.oai_round}['step']
 -- what ended the turn: the cause of a failure, or the answer; then ONE value holds everything the finish writes (a setter reads only the getter that triggers it and what it
 -- depends on: a sibling that reads the trigger would still be the old value when the setter runs)
 ChatMessage.oai_res getter:
   WHEN this.over: None
-  ELSE WHEN prop(this.oai_tools, 'fail') != None: {'fail': prop(this.oai_tools, 'fail')}
-  ELSE WHEN prop(this.oai_step, 'fail') != None: {'fail': prop(this.oai_step, 'fail')}
-  ELSE WHEN prop(this.oai_step, 'final') != None: {'text': prop(this.oai_step, 'final')}
-  ELSE WHEN prop(this.oai_step, 'capped') == True: {'text': prop(this.oai_round, 'said') + '\n\n(stopped at the ceiling of ' + str(this.max_turns) + ' turns)'}
+  ELSE WHEN ${this.oai_tools}['fail'] != None: {'fail': ${this.oai_tools}['fail']}
+  ELSE WHEN ${this.oai_step}['fail'] != None: {'fail': ${this.oai_step}['fail']}
+  ELSE WHEN ${this.oai_step}['final'] != None: {'text': ${this.oai_step}['final']}
+  ELSE WHEN ${this.oai_step}['capped'] == True: {'text': ${this.oai_round}['said'] + '\n\n(stopped at the ceiling of ' + str(this.max_turns) + ' turns)'}
   ELSE: None
 -- WHAT THE MODEL HAD SAID when the turn failed (operator 2026-11-15): the words of the rounds' finished streams, else the words the page showed from the current call (its accumulator)
 ChatMessage.oai_cut getter:
-  WHEN prop(this.oai_res, 'fail') == None: ''
-  ELSE: strip(prop(this.oai_round, 'said_all') or prop(this.live, 'text') or '')
+  WHEN ${this.oai_res}['fail'] == None: ''
+  ELSE: strip(${this.oai_round}['said_all'] or ${this.live}['text'] or '')
 ChatMessage.oai_end getter:
   WHEN this.oai_res == None: None
-  ELSE: {'cut': this.oai_cut, 'fail': prop(this.oai_res, 'fail'), 'text': str(prop(this.oai_res, 'fail') or prop(this.oai_res, 'text') or ''), 'body': (str(prop(this.oai_res, 'text') or '') if prop(this.oai_res, 'fail') == None else (this.oai_cut if this.oai_cut != '' else None)), 'usage': prop(this.oai_round, 'usage_out'), 'calls': prop(this.oai_round, 'n'), 'names': prop(this.oai_round, 'names_before'), 'ids': join(prop(this.oai_round, 'ids_before'), ' '), 'raw': prop(this.oai_round, 'raw')}
+  ELSE: {'cut': this.oai_cut, 'fail': ${this.oai_res}['fail'], 'text': str(${this.oai_res}['fail'] or ${this.oai_res}['text'] or ''), 'body': (str(${this.oai_res}['text'] or '') if ${this.oai_res}['fail'] == None else (this.oai_cut if this.oai_cut != '' else None)), 'usage': ${this.oai_round}['usage_out'], 'calls': ${this.oai_round}['n'], 'names': ${this.oai_round}['names_before'], 'ids': join(${this.oai_round}['ids_before'], ' '), 'raw': ${this.oai_round}['raw']}
 -- the end of the turn is its OUTCOME (packs/chat_turn.c1f, "THE ONE FINISH"): the shared finish there writes the state, the numbers, the response, its body and the ModelChat log
 Chat.oai_end on-setter oai-finish:
-  WHEN this.oai_end != None and not this.over and prop(this.turn_eid, 'message') != None:
+  WHEN this.oai_end != None and not this.over and ${this.turn_eid}['message'] != None:
     membrane::Chat[this.cp]:turn.outcome = this.oai_end

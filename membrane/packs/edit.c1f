@@ -30,9 +30,9 @@ Edit.problem getter:
   ELSE WHEN not this.old: 'old is empty: say the text to replace'
   ELSE WHEN this.new == None: 'no new: say the replacement (an empty text deletes the hunk)'
   ELSE WHEN this.info == None: 'the file is not read yet'
-  ELSE WHEN prop(this.info, 'exists') == False: 'no such file: ' + this.path
+  ELSE WHEN ${this.info}['exists'] == False: 'no such file: ' + this.path
   ELSE WHEN this.text == None: 'the file is not read yet'
-  ELSE WHEN this.base_mtime != None and prop(this.info, 'mtime') != this.base_mtime: 'the file changed since you read it (mtime ' + str(prop(this.info, 'mtime')) + ', you read ' + str(this.base_mtime) + '): read it again'
+  ELSE WHEN this.base_mtime != None and ${this.info}['mtime'] != this.base_mtime: 'the file changed since you read it (mtime ' + str(${this.info}['mtime']) + ', you read ' + str(this.base_mtime) + '): read it again'
   ELSE WHEN this.hits == 0: 'old was not found in ' + this.path
   ELSE WHEN this.hits > 1: 'old matches ' + words(replace(str(this.hits), '.', ' '))[0] + ' times in ' + this.path + ': add context so it matches once'
   ELSE: None
@@ -55,44 +55,44 @@ Edit.status getter:
 -- the file as it was read for the wanted step: ready once both reads (text, stat) of that step's token have landed
 Edit.snap getter:
   w = this.want
-  ready = w != None and prop(w, 'token') == this.seen and this.info != None and this.text != None
-  {'ready': ready, 'op': prop(w, 'op'), 'id': prop(w, 'id'), 'text': this.text, 'problem': this.problem, 'after': this.after, 'revert_problem': this.revert_problem}
+  ready = w != None and ${w}['token'] == this.seen and this.info != None and this.text != None
+  {'ready': ready, 'op': ${w}['op'], 'id': ${w}['id'], 'text': this.text, 'problem': this.problem, 'after': this.after, 'revert_problem': this.revert_problem}
 
 -- step one: ask for a fresh read of the file
 Edit.apply on-setter apply-edit:
   ALWAYS:
-    token = 'apply:' + str(prop(this.apply, 'id')) + ':' + str(clock)
-    this.want = {'op': 'apply', 'id': prop(this.apply, 'id'), 'token': token}
+    token = 'apply:' + str(${this.apply}['id']) + ':' + str(clock)
+    this.want = {'op': 'apply', 'id': ${this.apply}['id'], 'token': token}
     this.seen = token
 Edit.revert on-setter revert-edit:
   ALWAYS:
-    token = 'revert:' + str(prop(this.revert, 'id')) + ':' + str(clock)
-    this.want = {'op': 'revert', 'id': prop(this.revert, 'id'), 'token': token}
+    token = 'revert:' + str(${this.revert}['id']) + ':' + str(clock)
+    this.want = {'op': 'revert', 'id': ${this.revert}['id'], 'token': token}
     this.seen = token
 -- step two: the fresh file is here; check the hunk against it and write, or refuse with the reason. The pre-image is the text that was checked.
 Edit.snap on-setter run-wanted:
-  WHEN prop(this.snap, 'ready') and prop(this.snap, 'op') == 'apply' and prop(this.snap, 'problem') == None:
-    this.pre = prop(this.snap, 'text')
-    this.post = prop(this.snap, 'after')
+  WHEN ${this.snap}['ready'] and ${this.snap}['op'] == 'apply' and ${this.snap}['problem'] == None:
+    this.pre = ${this.snap}['text']
+    this.post = ${this.snap}['after']
     this.applied = True
     this.refused = ''
     this.want = None
     ('File:edit:' + this.eid) = File(path: this.path, edit_eid: this.eid)
-    ('File:edit:' + this.eid).write = {'id': 'apply', 'content': prop(this.snap, 'after')}
-  ELSE WHEN prop(this.snap, 'ready') and prop(this.snap, 'op') == 'apply':
-    this.refused = prop(this.snap, 'problem')
+    ('File:edit:' + this.eid).write = {'id': 'apply', 'content': ${this.snap}['after']}
+  ELSE WHEN ${this.snap}['ready'] and ${this.snap}['op'] == 'apply':
+    this.refused = ${this.snap}['problem']
     this.want = None
-  ELSE WHEN prop(this.snap, 'ready') and prop(this.snap, 'op') == 'revert' and prop(this.snap, 'revert_problem') == None:
+  ELSE WHEN ${this.snap}['ready'] and ${this.snap}['op'] == 'revert' and ${this.snap}['revert_problem'] == None:
     this.applied = False
     this.refused = ''
     this.want = None
     ('File:edit:' + this.eid) = File(path: this.path, edit_eid: this.eid)
     ('File:edit:' + this.eid).write = {'id': 'revert', 'content': this.pre}
-  ELSE WHEN prop(this.snap, 'ready') and prop(this.snap, 'op') == 'revert':
-    this.refused = prop(this.snap, 'revert_problem')
+  ELSE WHEN ${this.snap}['ready'] and ${this.snap}['op'] == 'revert':
+    this.refused = ${this.snap}['revert_problem']
     this.want = None
 -- the receipt of the edit's write wakes the edit: it reads the file again and says how the write went
 File.write_result on-setter edit-landed:
   WHEN this.edit_eid != None:
     (this.edit_eid).landed = this.write_rc
-    (this.edit_eid).seen = prop(this.write_result, 'finished')
+    (this.edit_eid).seen = ${this.write_result}['finished']

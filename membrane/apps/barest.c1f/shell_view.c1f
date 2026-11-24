@@ -11,7 +11,7 @@ IMPORT fetch 1
 --   1. registers itself when the shell opens:  `Shell.open on-setter <name>-register: WHEN this.open:` writes `('Nav:<name>').title = '<Title>'` and `('Nav:<name>').order = <n>`;
 --   2. draws into its slot: the root DomNode of the view has `parent = 'DomNode:shell:slot:<name>'`; it draws when `Nav:<name>.active` first becomes true (a setter on `Nav.active`: lazy), and writes
 --      `('Nav:<name>').filled = True` so the shell's placeholder text goes away;
---   3. stops its own periodic work while `prop('Nav:<name>', 'active') == False` (a view the person is not looking at does not tick).
+--   3. stops its own periodic work while `${'Nav:<name>'}['active'] == False` (a view the person is not looking at does not tick).
 --   (a view pack names its root DomNode after the pack, `DomNode:<name>`, so everything under it goes with it when the pack is unloaded: the page's follower retires `Nav:<name>` and `DomNode:<name>` when a placed pack leaves,
 --   the shell then retires the button and the slot of a view that left and goes back to chat if that view was the one shown.)
 --   4. (optional) opens the shared SLIDE-OVER DETAIL PANEL: `Panel:detail` {owner, title, sub, note, rows, open}. The opener writes `owner` (its name), `title`, `sub`, `rows` (a list of
@@ -114,27 +114,27 @@ Shell.open on-setter shell-draw:
 -- ---- the navigation: one button and one slot per registered view ----
 Shell.nav_all getter: sort_by([{'name': replace(n.eid, 'Nav:', ''), 'title': n.title, 'order': n.order or 50} for n in instances('Nav') if n.title != None], 'order')
 -- each row knows the button after it (the next of a greater `order`), so a view that registers late still lands in its place
-Shell.nav_rows getter: [{'name': prop(r, 'name'), 'title': prop(r, 'title'), 'order': prop(r, 'order'), 'next': ([prop(x, 'name') for x in this.nav_all if prop(x, 'order') > prop(r, 'order')] or [None])[0]} for r in this.nav_all]
+Shell.nav_rows getter: [{'name': ${r}['name'], 'title': ${r}['title'], 'order': ${r}['order'], 'next': ([${x}['name'] for x in this.nav_all if ${x}['order'] > ${r}['order']] or [None])[0]} for r in this.nav_all]
 Shell.nav_rows on-setter shell-nav-draw:
   WHEN this.open:
     FOR r IN this.nav_rows:
-      ('DomNode:shell:nav:' + prop(r, 'name')).parent = 'DomNode:shell:nav'
-      ('DomNode:shell:nav:' + prop(r, 'name')).tag = 'button'
-      ('DomNode:shell:nav:' + prop(r, 'name')).type = 'button'
-      ('DomNode:shell:nav:' + prop(r, 'name')).text = prop(r, 'title')
-      ('DomNode:shell:nav:' + prop(r, 'name')).before = ('DomNode:shell:nav:' + prop(r, 'next')) if prop(r, 'next') != None else None
-      ('DomNode:shell:slot:' + prop(r, 'name')).parent = 'DomNode:shell:views'
-      ('DomNode:shell:slot:' + prop(r, 'name')).tag = 'section'
-      ('DomNode:shell:slot:' + prop(r, 'name')).class = 'slot'
-      ('DomNode:shell:slot:' + prop(r, 'name')).aria-label = prop(r, 'title')
-      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').parent = 'DomNode:shell:slot:' + prop(r, 'name')
-      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').tag = 'p'
-      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').class = 'empty'
-      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').text = prop(r, 'title')
-      ('DomNode:shell:slot:' + prop(r, 'name') + ':empty').hidden = prop('Nav:' + prop(r, 'name'), 'filled') == True
+      ('DomNode:shell:nav:' + ${r}['name']).parent = 'DomNode:shell:nav'
+      ('DomNode:shell:nav:' + ${r}['name']).tag = 'button'
+      ('DomNode:shell:nav:' + ${r}['name']).type = 'button'
+      ('DomNode:shell:nav:' + ${r}['name']).text = ${r}['title']
+      ('DomNode:shell:nav:' + ${r}['name']).before = ('DomNode:shell:nav:' + ${r}['next']) if ${r}['next'] != None else None
+      ('DomNode:shell:slot:' + ${r}['name']).parent = 'DomNode:shell:views'
+      ('DomNode:shell:slot:' + ${r}['name']).tag = 'section'
+      ('DomNode:shell:slot:' + ${r}['name']).class = 'slot'
+      ('DomNode:shell:slot:' + ${r}['name']).aria-label = ${r}['title']
+      ('DomNode:shell:slot:' + ${r}['name'] + ':empty').parent = 'DomNode:shell:slot:' + ${r}['name']
+      ('DomNode:shell:slot:' + ${r}['name'] + ':empty').tag = 'p'
+      ('DomNode:shell:slot:' + ${r}['name'] + ':empty').class = 'empty'
+      ('DomNode:shell:slot:' + ${r}['name'] + ':empty').text = ${r}['title']
+      ('DomNode:shell:slot:' + ${r}['name'] + ':empty').hidden = ${'Nav:' + ${r}['name']}['filled'] == True
 
 -- a view that LEAVES (its `Nav:<name>` was retired: the pack was unloaded) loses its button and its slot, and the page goes back to chat if that view was the one shown
-Shell.nav_names getter: [prop(r, 'name') for r in this.nav_rows]
+Shell.nav_names getter: [${r}['name'] for r in this.nav_rows]
 Shell.nav_names on-setter shell-nav-clean:
   WHEN this.open and this.nav_names != None:
     FOR d IN [x.eid for x in instances('DomNode') if (startswith(x.eid, 'DomNode:shell:nav:') or startswith(x.eid, 'DomNode:shell:slot:')) and not (before(replace(replace(x.eid, 'DomNode:shell:nav:', ''), 'DomNode:shell:slot:', '') + ':', ':') in this.nav_names)]:
@@ -145,8 +145,8 @@ Shell.nav_names on-setter shell-nav-home:
 
 -- a view that registers is active or not at once (the slot is hidden by `active`, nothing else)
 Nav.title on-setter nav-registered:
-  WHEN this.title != None and prop('Shell:main', 'view') != None:
-    (this.eid).active = prop('Shell:main', 'view') == replace(this.eid, 'Nav:', '')
+  WHEN this.title != None and ${'Shell:main'}['view'] != None:
+    (this.eid).active = ${'Shell:main'}['view'] == replace(this.eid, 'Nav:', '')
 
 -- a click on a nav button picks the view; the shell marks every Nav active or not
 DomNode.clicked on-setter shell-nav-click:
@@ -167,15 +167,15 @@ Nav.filled on-setter shell-filled:
 -- the receipt, read once: ok = the call went and the seat said 2xx; `why` what the line says (the seat's own message, else the status, else the network's reason)
 Fetch.sv getter:
   rq = this.request_result
-  bd = json(str(prop(rq, 'body') or ''))
+  bd = json(str(${rq}['body'] or ''))
   jb = {} if bd is Error else bd
   jd = jb if jb is Dict else {}
-  hs = prop(rq, 'http_status')
-  {'rid': prop(rq, 'id'), 'ok': prop(rq, 'status') == 'ok' and hs != None and hs >= 200 and hs < 300, 'busy': 'busy' in str(prop(rq, 'body') or ''), 'why': (str(prop(prop(jd, 'error'), 'message') or prop(jd, 'error')) if (prop(jd, 'error') != None) else 'the seat answered ' + str(hs)) if prop(rq, 'status') == 'ok' else str(prop(rq, 'head') or 'the request failed')} if rq != None else None
+  hs = ${rq}['http_status']
+  {'rid': ${rq}['id'], 'ok': ${rq}['status'] == 'ok' and hs != None and hs >= 200 and hs < 300, 'busy': 'busy' in str(${rq}['body'] or ''), 'why': (str(${${jd}['error']}['message'] or ${jd}['error']) if (${jd}['error'] != None) else 'the seat answered ' + str(hs)) if ${rq}['status'] == 'ok' else str(${rq}['head'] or 'the request failed')} if rq != None else None
 
 -- ---- the status line: the seat answers (connected) or not, and whether a turn is running; a poll of /session/status ----
 Shell.tick on-setter shell-poll:
-  WHEN this.open and not this.polling and not prop('Conn:page', 'hidden') and this.tick - (this.last_poll or 0) >= this.status_ms / 1000:
+  WHEN this.open and not this.polling and not ${'Conn:page'}['hidden'] and this.tick - (this.last_poll or 0) >= this.status_ms / 1000:
     n = (this.seq or 0) + 1
     this.seq = n
     this.polling = True
@@ -184,8 +184,8 @@ Fetch.sv on-setter shell-status-done:
   WHEN this.eid == 'Fetch:status':
     ('Shell:main').polling = False
     ('Shell:main').last_poll = clock
-    ('Shell:main').conn = 'connected' if prop(this.sv, 'ok') else 'the seat is not answering: ' + str(prop(this.sv, 'why'))
-    ('Shell:main').busy_status = prop(this.sv, 'busy') == True and prop(this.sv, 'ok') == True
+    ('Shell:main').conn = 'connected' if ${this.sv}['ok'] else 'the seat is not answering: ' + str(${this.sv}['why'])
+    ('Shell:main').busy_status = ${this.sv}['busy'] == True and ${this.sv}['ok'] == True
 -- a turn the chat view still waits for counts too (the status route lists sessions' turns only; the one chat's are the chat view's rows)
 Shell.working getter: this.busy_status == True or len([r for r in instances('ChatRow') if r.done == False]) > 0
 Shell.line getter: str(this.conn or 'connecting') + (' · a turn is running' if this.working else ' · idle')
@@ -211,7 +211,7 @@ Shell.problem on-setter shell-problem:
 -- ---- the theme: system (the browser's own), light, dark; the page's <html> element is the host's DomNode:page:html ----
 DomNode.clicked on-setter shell-theme-click:
   WHEN this.eid == 'DomNode:shell:theme':
-    ('Shell:main').theme = {'system': 'light', 'light': 'dark', 'dark': 'system'}[prop('Shell:main', 'theme') or 'system']
+    ('Shell:main').theme = {'system': 'light', 'light': 'dark', 'dark': 'system'}[${'Shell:main'}['theme'] or 'system']
 Shell.theme on-setter shell-theme:
   WHEN this.theme != None:
     ('DomNode:page:html').data-theme = None if this.theme == 'system' else this.theme
@@ -240,37 +240,37 @@ Panel.note on-setter shell-panel-note:
     ('DomNode:shell:panelnote').hidden = this.note == ''
     ('DomNode:shell:panelnote').text = this.note
 -- the rows as drawn: a long text is cut unless its key is expanded
-Panel.sorted getter: sort_by([{'key': str(prop(r, 'key')), 'label': prop(r, 'label'), 'head': prop(r, 'head') == True, 'target': prop(r, 'target'), 'long': prop(r, 'head') != True and prop(r, 'target') == None and len(str(prop(r, 'text') or '')) > this.max_chars, 'open': str(prop(r, 'key')) in (this.expanded or []), 'text': (str(prop(r, 'text') or '') if (prop(r, 'head') == True or prop(r, 'target') != None or len(str(prop(r, 'text') or '')) <= this.max_chars or str(prop(r, 'key')) in (this.expanded or [])) else head(str(prop(r, 'text')), this.max_chars - 1) + '…')} for r in (this.rows or [])], 'key') if this.max_chars != None else []
+Panel.sorted getter: sort_by([{'key': str(${r}['key']), 'label': ${r}['label'], 'head': ${r}['head'] == True, 'target': ${r}['target'], 'long': ${r}['head'] != True and ${r}['target'] == None and len(str(${r}['text'] or '')) > this.max_chars, 'open': str(${r}['key']) in (this.expanded or []), 'text': (str(${r}['text'] or '') if (${r}['head'] == True or ${r}['target'] != None or len(str(${r}['text'] or '')) <= this.max_chars or str(${r}['key']) in (this.expanded or [])) else head(str(${r}['text']), this.max_chars - 1) + '…')} for r in (this.rows or [])], 'key') if this.max_chars != None else []
 -- the rows are shown in the order of their keys (an opener names them so: the DOM order of rows that arrive at different times is then the same as of rows that arrive together); each knows the row after it
-Panel.shown getter: [{'key': prop(r, 'key'), 'label': prop(r, 'label'), 'head': prop(r, 'head'), 'target': prop(r, 'target'), 'long': prop(r, 'long'), 'open': prop(r, 'open'), 'text': prop(r, 'text'), 'next': ([prop(x, 'key') for x in this.sorted if prop(x, 'key') > prop(r, 'key')] or [None])[0]} for r in this.sorted]
+Panel.shown getter: [{'key': ${r}['key'], 'label': ${r}['label'], 'head': ${r}['head'], 'target': ${r}['target'], 'long': ${r}['long'], 'open': ${r}['open'], 'text': ${r}['text'], 'next': ([${x}['key'] for x in this.sorted if ${x}['key'] > ${r}['key']] or [None])[0]} for r in this.sorted]
 Panel.shown on-setter shell-panel-rows:
   WHEN this.shown != None:
     FOR r IN this.shown:
-      ('DomNode:shell:panel:r:' + prop(r, 'key')).parent = 'DomNode:shell:panelrows'
-      ('DomNode:shell:panel:r:' + prop(r, 'key')).tag = 'li'
-      ('DomNode:shell:panel:r:' + prop(r, 'key')).class = 'head' if prop(r, 'head') else ('link' if prop(r, 'target') != None else 'prop')
-      ('DomNode:shell:panel:r:' + prop(r, 'key')).target = prop(r, 'target')
-      ('DomNode:shell:panel:r:' + prop(r, 'key')).before = ('DomNode:shell:panel:r:' + prop(r, 'next')) if prop(r, 'next') != None else None
+      ('DomNode:shell:panel:r:' + ${r}['key']).parent = 'DomNode:shell:panelrows'
+      ('DomNode:shell:panel:r:' + ${r}['key']).tag = 'li'
+      ('DomNode:shell:panel:r:' + ${r}['key']).class = 'head' if ${r}['head'] else ('link' if ${r}['target'] != None else 'prop')
+      ('DomNode:shell:panel:r:' + ${r}['key']).target = ${r}['target']
+      ('DomNode:shell:panel:r:' + ${r}['key']).before = ('DomNode:shell:panel:r:' + ${r}['next']) if ${r}['next'] != None else None
     -- (a heading or link is its own text; a property row's text is its children's: writing `text` there would wipe them)
-    FOR r IN [r for r in this.shown if prop(r, 'head') or prop(r, 'target') != None]:
-      ('DomNode:shell:panel:r:' + prop(r, 'key')).text = prop(r, 'text') or prop(r, 'label')
-    FOR r IN [r for r in this.shown if not prop(r, 'head') and prop(r, 'target') == None]:
-      b = 'DomNode:shell:panel:r:' + prop(r, 'key')
-      ('DomNode:shell:panel:kk:' + prop(r, 'key')).parent = b
-      ('DomNode:shell:panel:kk:' + prop(r, 'key')).tag = 'span'
-      ('DomNode:shell:panel:kk:' + prop(r, 'key')).class = 'k'
-      ('DomNode:shell:panel:kk:' + prop(r, 'key')).text = prop(r, 'label')
-      ('DomNode:shell:panel:vv:' + prop(r, 'key')).parent = b
-      ('DomNode:shell:panel:vv:' + prop(r, 'key')).tag = 'pre'
-      ('DomNode:shell:panel:vv:' + prop(r, 'key')).class = 'v'
-      ('DomNode:shell:panel:vv:' + prop(r, 'key')).text = prop(r, 'text')
-      ('DomNode:shell:panel:xx:' + prop(r, 'key')).parent = b
-      ('DomNode:shell:panel:xx:' + prop(r, 'key')).tag = 'button'
-      ('DomNode:shell:panel:xx:' + prop(r, 'key')).type = 'button'
-      ('DomNode:shell:panel:xx:' + prop(r, 'key')).class = 'more'
-      ('DomNode:shell:panel:xx:' + prop(r, 'key')).text = 'Show less' if prop(r, 'open') else 'Show all'
-      ('DomNode:shell:panel:xx:' + prop(r, 'key')).hidden = not prop(r, 'long')
-    own = concat(concat(['DomNode:shell:panel:r:' + prop(r, 'key') for r in this.shown], ['DomNode:shell:panel:kk:' + prop(r, 'key') for r in this.shown]), concat(['DomNode:shell:panel:vv:' + prop(r, 'key') for r in this.shown], ['DomNode:shell:panel:xx:' + prop(r, 'key') for r in this.shown]))
+    FOR r IN [r for r in this.shown if ${r}['head'] or ${r}['target'] != None]:
+      ('DomNode:shell:panel:r:' + ${r}['key']).text = ${r}['text'] or ${r}['label']
+    FOR r IN [r for r in this.shown if not ${r}['head'] and ${r}['target'] == None]:
+      b = 'DomNode:shell:panel:r:' + ${r}['key']
+      ('DomNode:shell:panel:kk:' + ${r}['key']).parent = b
+      ('DomNode:shell:panel:kk:' + ${r}['key']).tag = 'span'
+      ('DomNode:shell:panel:kk:' + ${r}['key']).class = 'k'
+      ('DomNode:shell:panel:kk:' + ${r}['key']).text = ${r}['label']
+      ('DomNode:shell:panel:vv:' + ${r}['key']).parent = b
+      ('DomNode:shell:panel:vv:' + ${r}['key']).tag = 'pre'
+      ('DomNode:shell:panel:vv:' + ${r}['key']).class = 'v'
+      ('DomNode:shell:panel:vv:' + ${r}['key']).text = ${r}['text']
+      ('DomNode:shell:panel:xx:' + ${r}['key']).parent = b
+      ('DomNode:shell:panel:xx:' + ${r}['key']).tag = 'button'
+      ('DomNode:shell:panel:xx:' + ${r}['key']).type = 'button'
+      ('DomNode:shell:panel:xx:' + ${r}['key']).class = 'more'
+      ('DomNode:shell:panel:xx:' + ${r}['key']).text = 'Show less' if ${r}['open'] else 'Show all'
+      ('DomNode:shell:panel:xx:' + ${r}['key']).hidden = not ${r}['long']
+    own = concat(concat(['DomNode:shell:panel:r:' + ${r}['key'] for r in this.shown], ['DomNode:shell:panel:kk:' + ${r}['key'] for r in this.shown]), concat(['DomNode:shell:panel:vv:' + ${r}['key'] for r in this.shown], ['DomNode:shell:panel:xx:' + ${r}['key'] for r in this.shown]))
     FOR x IN [x for x in instances('DomNode') if (startswith(x.eid, 'DomNode:shell:panel:r:') or startswith(x.eid, 'DomNode:shell:panel:kk:') or startswith(x.eid, 'DomNode:shell:panel:vv:') or startswith(x.eid, 'DomNode:shell:panel:xx:')) and not (x.eid in own)]:
       (x.eid).retire = True
 
@@ -280,27 +280,27 @@ DomNode.clicked on-setter shell-panel-click:
     ('Panel:detail').open = False
   ELSE WHEN startswith(this.eid, 'DomNode:shell:panel:xx:'):
     k = replace(this.eid, 'DomNode:shell:panel:xx:', '')
-    cur = prop('Panel:detail', 'expanded') or []
+    cur = ${'Panel:detail'}['expanded'] or []
     ('Panel:detail').expanded = [x for x in cur if x != k] if k in cur else concat(cur, [k])
   ELSE WHEN startswith(this.eid, 'DomNode:shell:panel:r:') and this.target != None:
     ('Panel:detail').picked = this.target
 DomNode.key on-setter shell-panel-esc:
-  WHEN startswith(this.eid, 'DomNode:shell:panel') and prop(this.key, 'key') == 'Escape' and prop('Panel:detail', 'open'):
+  WHEN startswith(this.eid, 'DomNode:shell:panel') and ${this.key}['key'] == 'Escape' and ${'Panel:detail'}['open']:
     ('Panel:detail').open = False
 
 -- ---- SIGN OUT: a small button in the bar, drawn only when the seat says who the page is (`/ui/conf` `who`: a verified cookie or token; a seat with no auth says none, so no button) ----
 -- A click is `POST /ui/logout` (the seat clears the cookie); a 2xx loads the page again (the host's `reload` write), which then starts as the sign-in screen (login_view.c1f) or, on this machine, is given its cookie again.
 Fetch.sv on-setter shell-conf-done:
   WHEN this.eid == 'Fetch:conf' and this.sv != None:
-    cj = json(str(prop(this.request_result, 'body') or ''))
-    ('DomNode:shell:signout').hidden = not (prop(this.sv, 'ok') and cj is Dict and prop(cj, 'who') != None)
+    cj = json(str(${this.request_result}['body'] or ''))
+    ('DomNode:shell:signout').hidden = not (${this.sv}['ok'] and cj is Dict and ${cj}['who'] != None)
 DomNode.clicked on-setter shell-signout-click:
-  WHEN this.eid == 'DomNode:shell:signout' and not prop('Shell:main', 'signing_out'):
+  WHEN this.eid == 'DomNode:shell:signout' and not ${'Shell:main'}['signing_out']:
     ('Shell:main').signing_out = True
     ('Fetch:logout').request = {'timeout_s': 15, 'id': 'logout-1', 'url': '/ui/logout', 'method': 'POST', 'headers': {'content-type': 'application/json'}, 'body': '{}'}
 Fetch.sv on-setter shell-signout-done:
   WHEN this.eid == 'Fetch:logout' and this.sv != None:
     ('Shell:main').signing_out = False
-    ('DomNode:shell:root').reload = True if prop(this.sv, 'ok') else None
-    ('DomNode:shell:error').hidden = prop(this.sv, 'ok') == True
-    ('DomNode:shell:error').text = '' if prop(this.sv, 'ok') else 'Sign out did not work: ' + str(prop(this.sv, 'why'))
+    ('DomNode:shell:root').reload = True if ${this.sv}['ok'] else None
+    ('DomNode:shell:error').hidden = ${this.sv}['ok'] == True
+    ('DomNode:shell:error').text = '' if ${this.sv}['ok'] else 'Sign out did not work: ' + str(${this.sv}['why'])

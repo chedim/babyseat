@@ -400,7 +400,7 @@ Fetch.request_result on-setter vec:
   WHEN this.request_result != None:
     Vector:r.of = 'Body:1'
     Vector:r.start = 17
-    Vector:r.v = json(str(prop(this.request_result, 'body')))
+    Vector:r.v = json(str(${this.request_result}['body']))
 ";
 
 fn fetch_host(file: Option<&str>, effects: bool) -> Host {

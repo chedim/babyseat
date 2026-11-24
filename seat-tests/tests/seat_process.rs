@@ -365,7 +365,7 @@ fn help_topics_are_entities_the_model_lists_and_reads() {
         assert!(!err && text == disk, "Help:{t}.text is the file's text");
     }
     let (whole, _) = call(port, "entity_read", json!({"spec": "Help:c1f"}));
-    assert!(whole.contains("the language of the field"), "a plain read shows the text: {}", &whole[..whole.len().min(200)]);
+    assert!(whole.contains("c1f.md") && !whole.contains("the language of the field"), "a plain read shows what is stored (the file), not the text a getter makes from it: {}", &whole[..whole.len().min(200)]);
     assert!(terminate(&mut run));
 }
 

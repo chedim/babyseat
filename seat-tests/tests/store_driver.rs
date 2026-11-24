@@ -106,7 +106,7 @@ fn arrive(c: &mut Core, f: &mut Fields) {
 }
 
 const TURNS: &str = "PACK t 1\n\
-Chat.turns getter: FOR r IN (sql(\"SELECT body FROM c_events WHERE json_extract(body, '$.d.session') = ? ORDER BY k\", this.session) or []): prop(prop(json(prop(r, 'body')), 'd'), 'text')\n";
+Chat.turns getter: FOR r IN (sql(\"SELECT body FROM c_events WHERE json_extract(body, '$.d.session') = ? ORDER BY k\", this.session) or []): ${${json(${r}['body'])}['d']}['text']\n";
 const RUNAWAY: &str = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) AS c FROM n";
 
 #[test]
@@ -157,7 +157,7 @@ fn a_getter_reads_the_seats_jsonl_files_and_nothing_else() {
     let (p, _w) = db();
     let seat = p.parent().unwrap().parent().unwrap().join("notes.ledger.jsonl");
     std::fs::write(&seat, "{\"conv\": \"s1\", \"text\": \"ship it\", \"ts\": \"2026-11-10T10:00:00Z\"}\nnot json\n{\"conv\": \"s2\", \"text\": \"later\"}\n").unwrap();
-    let pack = "PACK t 1\nChat.said getter: FOR e IN (jsonl(this.file) or []): prop(e, 'text')\n";
+    let pack = "PACK t 1\nChat.said getter: FOR e IN (jsonl(this.file) or []): ${e}['text']\n";
     let (mut c, mut f) = engine(&p, pack);
     put(&mut c, &mut f, "file", json!("notes.ledger.jsonl"));
     arrive(&mut c, &mut f);

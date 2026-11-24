@@ -16,8 +16,8 @@ fn repo() -> PathBuf { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..
 fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
 /// scratch packs on top of the seat: `Box.say` makes a chat body (`Chat:main:message:<id>:body`) with the text, `Box.ask` asks for its vectors (what the chat does), `Box.turn` makes a turn
-const MAKER: &str = "PACK embmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nIMPORT vector 1\nProbe.back getter: [prop(e, 'v') for e in this.eids]\n\
-Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[prop(this.say, 'id')]:body = SemText(text: prop(this.say, 'text'))\n\
+const MAKER: &str = "PACK embmaker 1\nIMPORT semtext 1\nIMPORT chat 1\nIMPORT vector 1\nProbe.back getter: [${e}['v'] for e in this.eids]\n\
+Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[${this.say}['id']]:body = SemText(text: ${this.say}['text'])\n\
 Box.ask on-setter ask:\n  WHEN this.ask != None:\n    membrane::Chat:main:message[this.ask]:body.embed = True\n\
 Box.sturn on-setter sturn:\n  WHEN this.sturn != None:\n    membrane::Chat:session[\'s1\']:message[this.sturn]:turn = ChatTurn(message: 1, queued_at: 1)\n\
 Box.turn on-setter turn:\n  WHEN this.turn != None:\n    membrane::Chat:main:message[this.turn]:turn = ChatTurn(message: 'membrane::Chat:main:message:' + this.turn, queued_at: 1)\n";

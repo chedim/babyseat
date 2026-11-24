@@ -18,7 +18,7 @@ Request.page getter: this.route in ['/', '/index.html', '/membrane'] and not thi
 -- The page cookie is given only when the request's `Host` (lower case, the port cut off, an IPv6 name in brackets) is `localhost`, `127.0.0.1`, `[::1]` or a name the launch fact
 -- `host_names` lists (a JSON list or comma text; no other default). Any other Host, or none, gets NO cookie and the protected routes stay 401. A token in an Authorization header
 -- is not affected: it is checked by the door whatever Host the request names.
-Request.host getter: lower(str(prop(this.headers, 'host') or ''))
+Request.host getter: lower(str(${this.headers}['host'] or ''))
 Request.host_extra getter: ([b.host_names for b in instances('Boot') if b.host_names != None] or [[]])[0]
 Request.host_allowed getter: concat(['localhost', '127.0.0.1', '[::1]'], [lower(strip(x)) for x in (this.host_extra if this.host_extra is List else words(replace(str(this.host_extra), ',', ' ')))])
 Request.host_ok getter: len([a for a in this.host_allowed if a != '' and (this.host == a or startswith(this.host, a + ':'))]) > 0
@@ -29,4 +29,4 @@ Request.admin_ask on-setter admin-mint:
     this.mint = this.admin_ask
 -- the page waits for the receipt (door.c1f `static_reply`); a door with no secret answers rc 2 and the page is served with no cookie
 Request.page_hold getter: True if this.admin_page and this.mint_result == None else None
-Request.page_cookie getter: (this.cookie_name + '=' + str(prop(this.mint_result, 'token')) + '; Path=/; Max-Age=' + str(this.admin_ttl) + '; HttpOnly; SameSite=Strict' + this.secure) if prop(this.mint_result, 'rc') == 0 else None
+Request.page_cookie getter: (this.cookie_name + '=' + str(${this.mint_result}['token']) + '; Path=/; Max-Age=' + str(this.admin_ttl) + '; HttpOnly; SameSite=Strict' + this.secure) if ${this.mint_result}['rc'] == 0 else None

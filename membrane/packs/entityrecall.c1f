@@ -36,7 +36,7 @@ SemText.ent_q getter:
 SemText.ent_bg getter:
   WHEN not (this.ent_q is List): None
   ELSE:
-    bg = prop('FieldBg:all', 'v')
+    bg = ${'FieldBg:all'}['v']
     bg if bg is List and len(bg) == len(this.ent_q) else None
 SemText.ent_qc getter:
   WHEN not (this.ent_q is List): None
@@ -51,16 +51,16 @@ SemText.ent_near_eps getter: near(this.ent_q, 'FieldEpisode', this.ent_over * th
 SemText.ent_cands getter:
   WHEN this.recall_on != True: None
   ELSE:
-    of_s = [prop(h['eid'], 'of') for h in this.ent_near_states] if this.ent_near_states is List else []
-    of_e = [prop(h['eid'], 'of') for h in this.ent_near_eps] if this.ent_near_eps is List else []
-    distinct([e for e in concat(of_s, of_e) if e != None and prop('FieldState:' + e, 'v') is List])
+    of_s = [${h['eid']}['of'] for h in this.ent_near_states] if this.ent_near_states is List else []
+    of_e = [${h['eid']}['of'] for h in this.ent_near_eps] if this.ent_near_eps is List else []
+    distinct([e for e in concat(of_s, of_e) if e != None and ${'FieldState:' + e}['v'] is List])
 -- what each candidate is: old (mature, with an episode) or young; whether its mean is one of its points
 SemText.ent_info getter:
   WHEN this.ent_cands == None: None
   ELSE:
     mat = this.field_mature
     cov = this.ent_cover
-    rows = [{'e': e, 'st': 'FieldState:' + e, 'n': prop('FieldState:' + e, 'n') or 0, 'eps': prop('FieldState:' + e, 'eps') or [], 'rk': prop('FieldState:' + e, 'run_k') or 0} for e in this.ent_cands]
+    rows = [{'e': e, 'st': 'FieldState:' + e, 'n': ${'FieldState:' + e}['n'] or 0, 'eps': ${'FieldState:' + e}['eps'] or [], 'rk': ${'FieldState:' + e}['run_k'] or 0} for e in this.ent_cands]
     [{'e': r['e'], 'st': r['st'], 'n': r['n'], 'eps': r['eps'], 'rk': r['rk'], 'old': r['n'] >= mat and len(r['eps']) > 0, 'mean': not (r['n'] >= mat and len(r['eps']) > 0) or dot([x['n'] for x in r['eps']], [1 for x in r['eps']]) + r['rk'] < cov * r['n']} for r in rows]
 
 -- ---- the means, recomputed for the candidates that need one: the applied mentions (the text's `field_n` is past the sentence), then their sentence vectors ----------------
@@ -71,8 +71,8 @@ SemText.ent_vids getter: ['Vector:of:' + this.skey + ':s:' + str(s['start']) for
 SemText.ent_means getter:
   WHEN this.ent_info == None: None
   ELSE:
-    ms = [{'e': r['e'], 'mi': prop(r['e'], 'mentioned_in') or []} for r in this.ent_info if r['mean']]
-    [x for x in [{'e': r['e'], 'm': vmean(props(pluck(r['mi'], 'text'), pluck(r['mi'], 'sentence'), 'ent_vids'))} for r in ms] if x['m'] is List]
+    ms = [{'e': r['e'], 'mi': ${r['e']}['mentioned_in'] or []} for r in this.ent_info if r['mean']]
+    [x for x in [{'e': r['e'], 'm': vmean(${pluck(r['mi'], 'text')}.ent_vids[pluck(r['mi'], 'sentence')])} for r in ms] if x['m'] is List]
 
 -- ---- the score of each candidate: its best point, centred; the `ent_k` best entities -----------------------------------------------------------------------------------
 SemText.ent_scored getter:
@@ -81,7 +81,7 @@ SemText.ent_scored getter:
     q = this.ent_qc
     bg = this.ent_bg
     means = this.ent_means
-    rows = [{'e': r['e'], 'old': r['old'], 'ep': concat([prop(x['e'], 'v') for x in r['eps']], [prop(r['st'], 'run_acc') / r['rk']] if r['rk'] > 0 and prop(r['st'], 'run_acc') is List else []) if r['old'] else [], 'own': [m['m'] for m in means if m['e'] == r['e']] if r['mean'] else [], 'v': prop(r['st'], 'v')} for r in this.ent_info]
+    rows = [{'e': r['e'], 'old': r['old'], 'ep': concat([${x['e']}['v'] for x in r['eps']], [${r['st']}['run_acc'] / r['rk']] if r['rk'] > 0 and ${r['st']}['run_acc'] is List else []) if r['old'] else [], 'own': [m['m'] for m in means if m['e'] == r['e']] if r['mean'] else [], 'v': ${r['st']}['v']} for r in this.ent_info]
     pts = [{'e': r['e'], 'p': [p for p in (concat(r['ep'], r['own']) if r['old'] else (r['own'] if len(r['own']) > 0 else [r['v']])) if p is List]} for r in rows]
     [{'e': x['e'], 's': max([dot(unit(p - bg) if bg != None else unit(p), q) for p in x['p']])} for x in pts if len(x['p']) > 0]
 SemText.entity_hits getter:
@@ -92,15 +92,15 @@ SemText.entity_hits getter:
 -- (entity, text) pairs: each text of the entity's `mentioned_in` once, the ask left out
 SemText.ent_pairs getter:
   WHEN this.entity_hits == None: None
-  ELSE: fold([], [concat(acc, [{'e': h['e'], 's': h['s'], 't': t} for t in distinct([x['text'] for x in (prop(h['e'], 'mentioned_in') or [])]) if t != this.eid]) for h in this.entity_hits])
+  ELSE: fold([], [concat(acc, [{'e': h['e'], 's': h['s'], 't': t} for t in distinct([x['text'] for x in (${h['e']}['mentioned_in'] or [])]) if t != this.eid]) for h in this.entity_hits])
 -- each move a text made of a hit entity, as its part of the text's score
 SemText.ent_parts getter:
   WHEN this.ent_pairs == None: None
-  ELSE: fold([], [concat(acc, [{'k': p['t'] + '#' + str(r['s']), 't': p['t'], 'n': r['s'], 'w': p['s'] * r['m']} for r in (prop(p['t'], 'field_moves') or []) if r['e'] == p['e'] and r['m'] != None]) for p in this.ent_pairs])
+  ELSE: fold([], [concat(acc, [{'k': p['t'] + '#' + str(r['s']), 't': p['t'], 'n': r['s'], 'w': p['s'] * r['m']} for r in (${p['t']}['field_moves'] or []) if r['e'] == p['e'] and r['m'] != None]) for p in this.ent_pairs])
 SemText.entity_votes getter:
   WHEN this.ent_parts == None: None
   ELSE:
     sents = [{'t': g['rows'][0]['t'], 'n': g['rows'][0]['n'], 'w': dot([x['w'] for x in g['rows']], [1 for x in g['rows']])} for g in group_by(this.ent_parts, 'k')]
     evs = [{'t': g['key'], 'score': dot([x['w'] for x in g['rows']], [1 for x in g['rows']]), 'n': sort_by(sort_by(g['rows'], 'n'), 'w', True)[0]['n']} for g in group_by(sents, 't')]
-    rows = [{'key': x['t'] + '#' + str(prop(prop(x['t'], 'sentences')[x['n']], 'start')), 'of': x['t'], 'text': prop(prop(x['t'], 'sentences')[x['n']], 'text'), 'score': x['score']} for x in evs]
+    rows = [{'key': x['t'] + '#' + str(${${x['t']}['sentences'][x['n']]}['start']), 'of': x['t'], 'text': ${${x['t']}['sentences'][x['n']]}['text'], 'score': x['score']} for x in evs]
     head(sort_by(sort_by(rows, 'key'), 'score', True), this.ent_depth)

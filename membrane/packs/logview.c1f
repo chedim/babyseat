@@ -21,7 +21,7 @@ Boot.started on-setter logview-root:
     ('LogViews:seat').born = clock
 
 -- A view appears when a connected VM ASKS for one: a peer or a page that has written `<ns>::LogAsk:main.n` (a page writes it through the door). No fact names them, and any connected program can ask.
-LogViews.asked getter: [replace(v.eid, 'Vm:', '') for v in instances('Vm') if prop(replace(v.eid, 'Vm:', '') + '::LogAsk:main', 'n') != None]
+LogViews.asked getter: [replace(v.eid, 'Vm:', '') for v in instances('Vm') if ${replace(v.eid, 'Vm:', '') + '::LogAsk:main'}['n'] != None]
 LogViews.asked on-setter logview-births:
   WHEN this.asked != None:
     FOR ns IN this.asked:
@@ -29,8 +29,8 @@ LogViews.asked on-setter logview-births:
     this.views = [membrane::LogView[ns] for ns in this.asked]
 
 LogView.ask getter: this.ns + '::LogAsk:main'
-LogView.from getter: prop(this.ask, 'from') or 0
-LogView.asked getter: prop(this.ask, 'n') or 0
+LogView.from getter: ${this.ask}['from'] or 0
+LogView.asked getter: ${this.ask}['n'] or 0
 LogView.rows getter: sql("SELECT CAST(k AS INTEGER) AS n, json_extract(body,'$.eid') AS eid, json_extract(body,'$.prop') AS prop, CASE WHEN json_extract(body,'$.prop') = 'retire' AND json_extract(body,'$.new') = 1 THEN 'gone' ELSE json_extract(body,'$.op') END AS op, json_extract(body,'$.writer') AS writer, json_extract(body,'$.ts') AS ts, length(json_extract(body,'$.new')) AS size FROM c_journal WHERE CAST(k AS INTEGER) >= ? AND ? >= 0 ORDER BY k LIMIT 200", this.from, this.asked)
 LogView.next getter: this.from + len(this.rows)
 LogView.head getter: (sql("SELECT max(CAST(k AS INTEGER)) AS h FROM c_journal WHERE ? >= 0", this.asked) or [{'h': None}])[0]['h']

@@ -100,7 +100,7 @@ Shell.open on-setter stub-register:
     ('Nav:settings').title = 'Settings'
     ('Nav:settings').order = 90
 Nav.active on-setter stub-draw:
-  WHEN this.eid == 'Nav:settings' and this.active and prop('Stub:x', 'drawn') != True:
+  WHEN this.eid == 'Nav:settings' and this.active and ${'Stub:x'}['drawn'] != True:
     ('DomNode:stub:root').parent = 'DomNode:shell:slot:settings'
     ('DomNode:stub:root').tag = 'div'
     ('DomNode:stub:root').text = 'the settings view'

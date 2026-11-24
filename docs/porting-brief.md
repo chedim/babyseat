@@ -39,7 +39,7 @@ review the diff it prints, then regenerate `membrane/packs/surface.json` with `S
 - A class a shipped pack declares is **owned**: another pack declaring on it must `IMPORT` that pack. Do not declare on `Message`,
   `Chat` or other classes the shipped packs own.
 - A property named `this` is read by every getter (a cycle): never name one `this`. Names of getters appear in expressions as
-  tokens; strings are ignored except the last argument of a call (`prop(row, 'name')`).
+  tokens; strings are ignored except the last argument of a call (`${row}['name']`).
 - A class must be declared by a pack to be mirrored into the engine: give it at least one getter.
 - `x[i]` works on lists/dicts/entities (miss -> none), no slices; `+` on lists is vector addition: use `concat`; no `int()`:
   `words(replace(str(n), '.', ' '))[0]` truncates; `clock` is epoch seconds.

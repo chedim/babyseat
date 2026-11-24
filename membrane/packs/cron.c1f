@@ -89,7 +89,7 @@ Cron.nx getter:
   ELSE: {'at': this.days_all[0]['l']['day_number'] * 86400 + min(this.tod) * 60 + (this.days_all[0]['x'] - (this.days_all[0]['l']['day_number'] * 86400 + this.days_all[0]['l']['hour'] * 3600 + this.days_all[0]['l']['minute'] * 60)), 'base': this.pbase}
 
 Cron.next getter: this.due if this.enabled != False and this.problem == None else None
-Cron.last getter: prop(this.fired, 'at') if this.fired != None else None
+Cron.last getter: ${this.fired}['at'] if this.fired != None else None
 
 -- ---- arming ----------------------------------------------------------------------------------------------------------------------------
 -- a schedule or `enabled` written, or the seat started: plan from now. (A restore runs no setter: the boot's does it for every Cron.)
@@ -106,18 +106,18 @@ Boot.started on-setter cron-boot:
 -- a plan: arm the one timer for it. A plan whose time is already past (the engine was busy longer than a slot) is NOT queued: it is counted in `dropped` (for
 -- `@every` the number of intervals skipped; for cron fields 1 for the late wake) and planned again from now (`late`).
 Cron.nx on-setter cron-arm:
-  WHEN prop(this.nx, 'at') == None:
+  WHEN ${this.nx}['at'] == None:
     this.due = None
-    this.arm = {'id': str(this.eid) + ':off:' + str(prop(this.nx, 'base')), 'at': None}
-  ELSE WHEN prop(this.nx, 'at') <= clock:
-    skipped = (num(before(str((clock - prop(this.nx, 'at') + this.every_s) / this.every_s), '.')) if this.every_s != None else 1)
+    this.arm = {'id': str(this.eid) + ':off:' + str(${this.nx}['base']), 'at': None}
+  ELSE WHEN ${this.nx}['at'] <= clock:
+    skipped = (num(before(str((clock - ${this.nx}['at'] + this.every_s) / this.every_s), '.')) if this.every_s != None else 1)
     this.dropped = (this.dropped or 0) + skipped
-    this.late = {'for': this.base, 'at': (prop(this.nx, 'at') + (skipped - 1) * this.every_s if this.every_s != None else clock)}
+    this.late = {'for': this.base, 'at': (${this.nx}['at'] + (skipped - 1) * this.every_s if this.every_s != None else clock)}
   ELSE:
-    this.due = prop(this.nx, 'at')
-    this.arm = {'id': str(this.eid) + '@' + str(prop(this.nx, 'at')), 'at': prop(this.nx, 'at')}
+    this.due = ${this.nx}['at']
+    this.arm = {'id': str(this.eid) + '@' + str(${this.nx}['at']), 'at': ${this.nx}['at']}
 -- the timer answered: the event, then plan from the slot that fired
 Cron.arm_result on-setter cron-fire:
-  WHEN this.enabled != False and this.problem == None and prop(this.arm_result, 'at') != None:
-    this.fired = {'id': prop(this.arm_result, 'id'), 'at': prop(this.arm_result, 'at')}
-    this.base = prop(this.arm_result, 'at')
+  WHEN this.enabled != False and this.problem == None and ${this.arm_result}['at'] != None:
+    this.fired = {'id': ${this.arm_result}['id'], 'at': ${this.arm_result}['at']}
+    this.base = ${this.arm_result}['at']

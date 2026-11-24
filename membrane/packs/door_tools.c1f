@@ -34,12 +34,12 @@ Pack.state getter: 'removed' if str(this.text or '') == '' else ('error' if this
 Request.mc_rpc getter:
   mr = json(this.body or '')
   None if mr is Error else mr
-Request.mc_ok getter: prop(this.mc_rpc, 'jsonrpc') == '2.0' and prop(this.mc_rpc, 'method') != None
-Request.mc_id getter: prop(this.mc_rpc, 'id')
-Request.mc_method getter: str(prop(this.mc_rpc, 'method') or '')
-Request.mc_params getter: prop(this.mc_rpc, 'params') or {}
-Request.mc_args getter: prop(this.mc_params, 'arguments') or {}
-Request.mc_tool getter: prop(this.mc_params, 'name')
+Request.mc_ok getter: ${this.mc_rpc}['jsonrpc'] == '2.0' and ${this.mc_rpc}['method'] != None
+Request.mc_id getter: ${this.mc_rpc}['id']
+Request.mc_method getter: str(${this.mc_rpc}['method'] or '')
+Request.mc_params getter: ${this.mc_rpc}['params'] or {}
+Request.mc_args getter: ${this.mc_params}['arguments'] or {}
+Request.mc_tool getter: ${this.mc_params}['name']
 -- THE WRITING TOOLS NEED A VERIFIED TOKEN (no users in this release: every verified token is the admin, door.c1f): a call of `entity_write` (a pack is written by it too:
 -- `Pack:<name>.text`) or `run_cliff` with no verified token runs nothing (the door's 401 is the reply; a setter would run whatever the reply is, so the writers read this too).
 Request.mc_anon getter: this.mc_method == 'tools/call' and this.mc_tool in ['entity_write', 'run_cliff'] and not this.entrant
@@ -49,32 +49,32 @@ Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity
 Request.mc_tools getter: [{'name': 'entity_query', 'description': 'enumerate entities. q: kind:<Class>, kind!:<Class> (all but that class) and name~:<eid prefix>, joined with & (empty = all). k = the row cap (default 20, at most 100), offset = rows to skip (paging), props (a list of names) adds only those stored properties to each row (a name a row lacks is left out), full=true adds ALL stored properties (on a class with big rows such as ChatMessage that is hundreds of thousands of characters: use props), count=true gives only the number.', 'inputSchema': {'type': 'object', 'properties': {'q': {'type': 'string', 'description': 'the query line, e.g. kind:Command & name~:Command:b'}, 'k': {'type': 'integer', 'description': 'the row cap (default 20, at most 100)'}, 'offset': {'type': 'integer', 'description': 'rows to skip, for paging'}, 'props': {'type': 'array', 'items': {'type': 'string'}, 'description': 'the stored properties to add to each row, e.g. text, state; a name a row lacks is left out'}, 'full': {'type': 'boolean', 'description': 'add ALL stored properties of each row (hundreds of thousands of characters on big rows such as ChatMessage; prefer props)'}, 'count': {'type': 'boolean', 'description': 'only the count'}}}}, {'name': 'entity_read', 'description': 'read an entity: its stored properties, or with prop one property in full (a getter value too).', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'one property'}}, 'required': ['spec']}}, {'name': 'entity_write', 'description': 'act by writing: set one property. What reacts to the write runs (pack setters, driver verbs such as Command run or File write). The reply carries the receipt of an effect the write started (stdout, stderr, rc), the reactions (what the engine wrote because of this write, each with its reason). wait (seconds) holds the reply until the receipt arrives; with no wait a receipt that is not there yet is named, to read as <prop>_result.', 'inputSchema': {'type': 'object', 'properties': {'spec': {'type': 'string', 'description': 'the entity id'}, 'prop': {'type': 'string', 'description': 'the property'}, 'value': {'description': 'the value (any JSON)'}, 'wait': {'type': 'number', 'description': 'seconds to hold the reply for the receipt of an effect (optional)'}}, 'required': ['spec', 'prop']}}, {'name': 'run_cliff', 'description': 'run a clifflet: a small block of the field language (help entity Help:cliff) in ONE call. Its lines may define locals; the last line is the value, which comes back as text (JSON for a list or dict), so one call can read several entities, filter and join them. A block whose last line is a write (<entity>.<prop> = value) runs its writes instead and answers with their reactions; an effect started that way has its receipt in a later round: read <entity>.<verb>_result. A block that does not load answers with the loader error, one that runs past its step budget answers with that reason.', 'inputSchema': {'type': 'object', 'properties': {'code': {'type': 'string', 'description': 'the block: lines, the last one the value (or a write)'}}, 'required': ['code']}}]
 
 -- ---- entity_write: a write by name (a computed property name) -------------------------------------------------------------------------------
-Request.mc_w_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
-Request.mc_w_prop getter: strip(str(prop(this.mc_args, 'prop') or ''))
+Request.mc_w_spec getter: strip(str(${this.mc_args}['spec'] or ''))
+Request.mc_w_prop getter: strip(str(${this.mc_args}['prop'] or ''))
 -- A bare id names the `membrane::` one when only that exists: the chat's own entities (Chat:main, Banner:admin:main, ...) are spelled with that
 -- namespace in their packs, and a bare spelling of one of them reaches it instead of creating a second entity. An id that already has a row,
 -- or has no `membrane::` twin, is used as written.
-Request.mc_w_id getter: ('membrane::' + this.mc_w_spec) if prop('membrane::' + this.mc_w_spec, 'eid') != None and prop(this.mc_w_spec, 'eid') == None else this.mc_w_spec
+Request.mc_w_id getter: ('membrane::' + this.mc_w_spec) if ${'membrane::' + this.mc_w_spec}['eid'] != None and ${this.mc_w_spec}['eid'] == None else this.mc_w_spec
 -- DEATH BY NULL (operator, 2026-11-14): `entity_write {spec: 'Stop:3', value: null}` with NO prop destroys the entity, the mirror of a birth (`Stop:3 = None`); a Pack unloads. The key
 -- `value` must be there and null: a call that merely forgets the prop is still refused.
-Request.mc_w_kill getter: this.mc_w_prop == '' and 'value' in this.mc_args and prop(this.mc_args, 'value') == None
+Request.mc_w_kill getter: this.mc_w_prop == '' and 'value' in this.mc_args and ${this.mc_args}['value'] == None
 Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop (or value: null with no prop, to remove the entity)' if this.mc_w_spec == '' or (this.mc_w_prop == '' and not this.mc_w_kill) else ('refused: entity_write needs an id of the form <Class>:<key> (got `' + this.mc_w_spec + '`): an id with no colon names no entity, nothing was written' if not (':' in this.mc_w_spec) else ('refused: `parents` is not written by the model: classes are set at birth with a constructor (`x is Class` tests one)' if this.mc_w_prop == 'parents' else None))
-Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': prop(this.mc_args, 'value')} if this.mc_tool == 'entity_write' and this.mc_w_bad == None and not this.mc_anon else None
+Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': ${this.mc_args}['value']} if this.mc_tool == 'entity_write' and this.mc_w_bad == None and not this.mc_anon else None
 Request.mc_write on-setter mcp-write:
   WHEN this.mc_write != None and this.mc_w_kill:
-    (prop(this.mc_write, 'spec')) = None
+    (${this.mc_write}['spec']) = None
     this.mc_done = True
   ELSE WHEN this.mc_write != None:
     this.mc_w_t0 = clock
-    this.mc_w_old = prop(prop(this.mc_write, 'spec'), prop(this.mc_write, 'prop') + '_result')
-    (prop(this.mc_write, 'spec')).[prop(this.mc_write, 'prop')] = prop(this.mc_write, 'value')
+    this.mc_w_old = ${${this.mc_write}['spec']}[${this.mc_write}['prop'] + '_result']
+    (${this.mc_write}['spec']).[${this.mc_write}['prop']] = ${this.mc_write}['value']
     this.mc_done = True
 
 -- THE TURN'S LINK (operator 2026-11-14): the turn's MCP config carries `X-Turn: <the message's id>` (chat_turn.c1f). Every entity says what birthed it (`born_by`, the VM's own): for a thing a call
 -- created, that is the call's Request, and the Request names the message it belongs to here (`mc_message`: the header's value when it names an existing chat message, nothing otherwise).
-Request.mc_turn getter: prop(this.headers, 'x-turn')
+Request.mc_turn getter: ${this.headers}['x-turn']
 Request.mc_message getter:
-  WHEN this.mc_turn != None and startswith(str(this.mc_turn), 'membrane::Chat:') and prop(this.mc_turn, 'eid') != None: this.mc_turn
+  WHEN this.mc_turn != None and startswith(str(this.mc_turn), 'membrane::Chat:') and ${this.mc_turn}['eid'] != None: this.mc_turn
   ELSE: None
 -- Whatever a call creates is charged to the message when there is one (the VM rule `births_to`, docs/cliffvm.md): the new entity's `born_by` is then the message, which outlives the call's Request;
 -- with no message it is the Request. `run_cliff` hands the same to the scratch entity whose setter runs the block (`cl_se`, `cliff-run`).
@@ -85,16 +85,16 @@ Request.births_to getter: this.mc_message or this.eid
 -- there, the REACTIONS (what the engine wrote in the round of this write: `reactions`, told back by the host as a derived write on this Request), and the
 -- (a transient Return entity carries the reply and is collected once it is delivered). `wait` (seconds, optional) holds the reply until the receipt or that time; with none the
 -- reply is made at once and a receipt that is not there says where to read it.
-Request.mc_w_wait getter: num(prop(this.mc_args, 'wait')) or 0
+Request.mc_w_wait getter: num(${this.mc_args}['wait']) or 0
 Request.mc_w_cls getter: (words(replace(replace(this.mc_w_id, 'membrane::', ''), ':', ' ')) or [''])[0]
 Request.mc_w_effect getter: (this.mc_w_cls + '.' + this.mc_w_prop) in ['File.write', 'File.move', 'File.delete', 'Command.run', 'Command.stop', 'Store.run', 'Fetch.request', 'SqlQuery.run']
 Request.mc_w_rprop getter: this.mc_w_prop + '_result'
-Request.mc_w_rec getter: prop(this.mc_w_id, this.mc_w_rprop) if this.mc_done == True and this.mc_w_effect else None
+Request.mc_w_rec getter: ${this.mc_w_id}[this.mc_w_rprop] if this.mc_done == True and this.mc_w_effect else None
 -- the receipt of THIS write: what is there now, unless it is what was there before the write
 Request.mc_w_new getter: this.mc_w_rec if this.mc_w_rec != None and this.mc_w_rec != this.mc_w_old else None
 Request.mc_w_ready getter:
   WHEN this.mc_done != True or this.reactions == None: False
-  ELSE WHEN this.mc_w_cls == 'Memory' and prop(this.mc_w_id, 'in_flight') == True: False
+  ELSE WHEN this.mc_w_cls == 'Memory' and ${this.mc_w_id}['in_flight'] == True: False
   ELSE WHEN not this.mc_w_effect: True
   ELSE WHEN this.mc_w_new != None: True
   ELSE WHEN this.mc_w_wait <= 0: True
@@ -105,7 +105,7 @@ Request.mc_w_ready on-setter mcp-return:
     Return:call[this.mc_w_n] = Return(tool: 'entity_write', target: this.mc_w_id, written: this.mc_w_prop, result_prop: this.mc_w_rprop if this.mc_w_effect else None, reactions: this.reactions)
     this.mc_w_returned = Return:call[this.mc_w_n]
 Return.kind getter: 'return'
-Return.receipt getter: prop(this.target, this.result_prop) if this.result_prop != None else None
+Return.receipt getter: ${this.target}[this.result_prop] if this.result_prop != None else None
 Return.state getter: 'pending' if this.result_prop != None and this.receipt == None else 'done'
 -- THE RETURN ENTITY IS TRANSIENT (operator, 2026-11-13): it carries the reply and is never retired by a write: the Request HOLDS it (`mc_w_returned` is a reference to it, a
 -- `$ref` value), and a Request is held by its open connection until the reply is delivered, so both are collected together (docs/cliffvm.md, "Garbage collection"). The
@@ -116,10 +116,10 @@ Request.mc_w_head getter: ('removed ' + this.mc_w_id) if this.mc_w_kill else ('w
 -- (`stdout`). The FULL text stays on the Command: `Command:x.output` (stdout), `Command:x.errors` (stderr): read it with entity_read or cut it with run_cliff.
 -- (`tail(text, n)` is the mirror of `head`: the language has no slice.)
 Request.mc_w_cap getter: 8192
-Request.mc_w_so getter: str(prop(this.mc_w_new, 'stdout') or '')
-Request.mc_w_se getter: str(prop(this.mc_w_new, 'stderr') or '')
-Request.mc_w_sob getter: prop(this.mc_w_new, 'stdout_bytes') or 0
-Request.mc_w_seb getter: prop(this.mc_w_new, 'stderr_bytes') or 0
+Request.mc_w_so getter: str(${this.mc_w_new}['stdout'] or '')
+Request.mc_w_se getter: str(${this.mc_w_new}['stderr'] or '')
+Request.mc_w_sob getter: ${this.mc_w_new}['stdout_bytes'] or 0
+Request.mc_w_seb getter: ${this.mc_w_new}['stderr_bytes'] or 0
 Request.mc_w_pout getter:
   WHEN this.mc_w_sob == 0: None
   ELSE WHEN this.mc_w_sob <= 2 * this.mc_w_cap: {'stdout': this.mc_w_so}
@@ -130,25 +130,25 @@ Request.mc_w_perr getter:
   ELSE: {'stderr_head': head(this.mc_w_se, this.mc_w_cap), 'stderr_tail': tail(this.mc_w_se, this.mc_w_cap)}
 Request.mc_w_rcpt getter:
   WHEN not this.mc_w_effect: []
-  ELSE WHEN this.mc_w_new != None: concat(concat(concat(concat(concat(concat(['receipt: ' + str({'id': prop(this.mc_w_new, 'id'), 'status': prop(this.mc_w_new, 'status'), 'rc': prop(this.mc_w_new, 'rc'), 'ok': prop(this.mc_w_new, 'status') == 'ok', 'started': prop(this.mc_w_new, 'started'), 'finished': prop(this.mc_w_new, 'finished'), 'ms': prop(this.mc_w_new, 'ms'), 'timeout_s': prop(this.mc_w_new, 'timeout_s'), 'killed': prop(this.mc_w_new, 'killed'), 'stdout_bytes': prop(this.mc_w_new, 'stdout_bytes'), 'stderr_bytes': prop(this.mc_w_new, 'stderr_bytes')})], ['stdout: ' + str(x) for x in [this.mc_w_pout] if x != None]), ['stderr: ' + str(x) for x in [this.mc_w_perr] if x != None]), ['full output: read ' + this.mc_w_id + '.output' for x in [this.mc_w_pout] if x != None and prop(x, 'stdout_head') != None]), ['full stderr: read ' + this.mc_w_id + '.errors' for x in [this.mc_w_perr] if x != None and prop(x, 'stderr_head') != None]), ['error: ' + str(prop(this.mc_w_new, 'head')) for x in [this.mc_w_new] if prop(x, 'status') == 'error' and prop(x, 'stdout_bytes') == None]), ['timeout: ' + str(this.mc_w_id) + ' timed out after ' + str(prop(x, 'timeout_s')) + ' s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}; the partial output is above and in ' + str(this.mc_w_id) + '.partial_output' for x in [this.mc_w_new] if prop(x, 'status') == 'timeout'])
-  ELSE: ['pending: id: ' + str(prop(prop(this.mc_args, 'value'), 'id')) + ', status: running, started: ' + str(prop(prop(this.mc_w_id, 'running'), 'started') or this.mc_w_t0) + ', timeout_s: ' + str(prop(prop(this.mc_w_id, 'running'), 'timeout_s') or prop(this.mc_w_id, 'timeout_default')) + ', left: ' + str((prop(prop(this.mc_w_id, 'running'), 'timeout_s') or prop(this.mc_w_id, 'timeout_default')) + prop(prop(this.mc_w_id, 'running'), 'started') - this.mc_w_t0) + ' s; read ' + this.mc_w_id + '.' + this.mc_w_rprop + ' later']
+  ELSE WHEN this.mc_w_new != None: concat(concat(concat(concat(concat(concat(['receipt: ' + str({'id': ${this.mc_w_new}['id'], 'status': ${this.mc_w_new}['status'], 'rc': ${this.mc_w_new}['rc'], 'ok': ${this.mc_w_new}['status'] == 'ok', 'started': ${this.mc_w_new}['started'], 'finished': ${this.mc_w_new}['finished'], 'ms': ${this.mc_w_new}['ms'], 'timeout_s': ${this.mc_w_new}['timeout_s'], 'killed': ${this.mc_w_new}['killed'], 'stdout_bytes': ${this.mc_w_new}['stdout_bytes'], 'stderr_bytes': ${this.mc_w_new}['stderr_bytes']})], ['stdout: ' + str(x) for x in [this.mc_w_pout] if x != None]), ['stderr: ' + str(x) for x in [this.mc_w_perr] if x != None]), ['full output: read ' + this.mc_w_id + '.output' for x in [this.mc_w_pout] if x != None and ${x}['stdout_head'] != None]), ['full stderr: read ' + this.mc_w_id + '.errors' for x in [this.mc_w_perr] if x != None and ${x}['stderr_head'] != None]), ['error: ' + str(${this.mc_w_new}['head']) for x in [this.mc_w_new] if ${x}['status'] == 'error' and ${x}['stdout_bytes'] == None]), ['timeout: ' + str(this.mc_w_id) + ' timed out after ' + str(${x}['timeout_s']) + ' s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}; the partial output is above and in ' + str(this.mc_w_id) + '.partial_output' for x in [this.mc_w_new] if ${x}['status'] == 'timeout'])
+  ELSE: ['pending: id: ' + str(${${this.mc_args}['value']}['id']) + ', status: running, started: ' + str(${${this.mc_w_id}['running']}['started'] or this.mc_w_t0) + ', timeout_s: ' + str(${${this.mc_w_id}['running']}['timeout_s'] or ${this.mc_w_id}['timeout_default']) + ', left: ' + str((${${this.mc_w_id}['running']}['timeout_s'] or ${this.mc_w_id}['timeout_default']) + ${${this.mc_w_id}['running']}['started'] - this.mc_w_t0) + ' s; read ' + this.mc_w_id + '.' + this.mc_w_rprop + ' later']
 -- THE SIZE OF THE REACTIONS (design B2 of docs/reply-size.md, operator 2026-11-14): the model-facing reply lists IN FULL the reactions on the WRITTEN entity (the write's target)
 -- and its direct children (`<eid>:...`; for run_cliff the ones set by the block's own setter `run`), and every reaction that carries a reason (a null with `why`, an Error: its
 -- `failed` map), whatever the entity; every other reaction is one count per `<Class>.<prop>` (`cls` is the host's exact class field, no values). `reactions` itself is unchanged.
 -- A PACK THE MODEL WROTE SAYS WHETHER IT LOADED (the delivery-route incident, 2026-11-14): the host adds the reaction `Pack:<name>.loaded` (new: loaded or not, why: the engine's error text,
 -- verbatim) for each pack text written in the round; the reply words it on its first lines, after the head, and it is not repeated in the `reactions:` list.
-Request.rx_pack getter: [r for r in (this.reactions or []) if prop(r, 'prop') == 'loaded' and startswith(str(prop(r, 'eid')), 'Pack:')]
-Request.rx_unloaded getter: [('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' unloaded') for r in (this.reactions or []) if prop(r, 'prop') == 'unloaded' and startswith(str(prop(r, 'eid')), 'Pack:')]
-Request.rx_pack_lines getter: concat(this.rx_unloaded, concat([('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' loaded') for r in this.rx_pack if prop(r, 'new') == True], concat([('pack ' + replace(str(prop(r, 'eid')), 'Pack:', '') + ' did not load: ' + str(prop(r, 'why') or 'it waits for something it imports') + '\n' + ('to fix: a layer overrides only what it imports, so IMPORT the pack the error names (the text above says how); ' if 'IMPORT' in str(prop(r, 'why')) else '') + 'read ' + str(prop(r, 'eid')) + '.loaded and ' + str(prop(r, 'eid')) + '.error to check; the old text of this pack, if it had loaded before, still runs') for r in this.rx_pack if prop(r, 'new') != True], [])))
-Request.rx_marked getter: [{'r': r, 'full': (this.mc_tool == 'entity_write' and (prop(r, 'eid') == this.mc_w_id or startswith(str(prop(r, 'eid')), this.mc_w_id + ':'))) or (this.mc_tool == 'run_cliff' and prop(r, 'by') == 'run') or prop(r, 'why') != None or prop(r, 'prop') == 'failed'} for r in (this.reactions or []) if not (prop(r, 'prop') == 'loaded' and startswith(str(prop(r, 'eid')), 'Pack:'))]
+Request.rx_pack getter: [r for r in (this.reactions or []) if ${r}['prop'] == 'loaded' and startswith(str(${r}['eid']), 'Pack:')]
+Request.rx_unloaded getter: [('pack ' + replace(str(${r}['eid']), 'Pack:', '') + ' unloaded') for r in (this.reactions or []) if ${r}['prop'] == 'unloaded' and startswith(str(${r}['eid']), 'Pack:')]
+Request.rx_pack_lines getter: concat(this.rx_unloaded, concat([('pack ' + replace(str(${r}['eid']), 'Pack:', '') + ' loaded') for r in this.rx_pack if ${r}['new'] == True], concat([('pack ' + replace(str(${r}['eid']), 'Pack:', '') + ' did not load: ' + str(${r}['why'] or 'it waits for something it imports') + '\n' + ('to fix: a layer overrides only what it imports, so IMPORT the pack the error names (the text above says how); ' if 'IMPORT' in str(${r}['why']) else '') + 'read ' + str(${r}['eid']) + '.loaded and ' + str(${r}['eid']) + '.error to check; the old text of this pack, if it had loaded before, still runs') for r in this.rx_pack if ${r}['new'] != True], [])))
+Request.rx_marked getter: [{'r': r, 'full': (this.mc_tool == 'entity_write' and (${r}['eid'] == this.mc_w_id or startswith(str(${r}['eid']), this.mc_w_id + ':'))) or (this.mc_tool == 'run_cliff' and ${r}['by'] == 'run') or ${r}['why'] != None or ${r}['prop'] == 'failed'} for r in (this.reactions or []) if not (${r}['prop'] == 'loaded' and startswith(str(${r}['eid']), 'Pack:'))]
 Request.rx_full getter: [m['r'] for m in this.rx_marked if m['full']]
-Request.rx_rest getter: [{'k': str(prop(m['r'], 'cls')) + '.' + str(prop(m['r'], 'prop'))} for m in this.rx_marked if not m['full']]
+Request.rx_rest getter: [{'k': str(${m['r']}['cls']) + '.' + str(${m['r']}['prop'])} for m in this.rx_marked if not m['full']]
 Request.rx_groups getter: [str(g['key']) + ' x' + str(len(g['rows'])) for g in group_by(this.rx_rest, 'k')]
 -- A MEMORYNOTE WRITE answers with what the note reminds of (`Memory.associations`, mentions.c1f), not with the reactions of the round (the spans of its words): only a reaction with a reason stays.
 -- The reply waits while the note's own embedding call is out (`in_flight`, mentions.c1f: the call's own 10 s limit bounds it), so the cosine lane is in the answer.
-Request.rx_why getter: [m['r'] for m in this.rx_marked if prop(m['r'], 'why') != None or prop(m['r'], 'prop') == 'failed']
+Request.rx_why getter: [m['r'] for m in this.rx_marked if ${m['r']}['why'] != None or ${m['r']}['prop'] == 'failed']
 Request.rx_lines getter:
-  WHEN this.mc_tool == 'entity_write' and this.mc_w_cls == 'Memory': concat([a for a in [prop(this.mc_w_id, 'associations')] if a != None], ['reactions: ' + str(this.rx_why) for x in [1] if len(this.rx_why) > 0])
+  WHEN this.mc_tool == 'entity_write' and this.mc_w_cls == 'Memory': concat([a for a in [${this.mc_w_id}['associations']] if a != None], ['reactions: ' + str(this.rx_why) for x in [1] if len(this.rx_why) > 0])
   ELSE: concat(['reactions: ' + str(this.rx_full)], ['other changes: ' + join(this.rx_groups, ', ') for x in [1] if len(this.rx_groups) > 0])
 Request.mc_w_text getter:
   WHEN this.mc_write == None: None
@@ -163,7 +163,7 @@ Request.mc_w_text getter:
 -- born by a write), one whose last line is a write runs as the setter (`go`), and one that loads as neither answers with both loader errors. The answer is read
 -- from the scratch entity, then the packs and the entity are retired: nothing accumulates. The getter runs under the engine's step budget
 -- (docs/c1f-stdlib.md; time limits nothing): a runaway block answers with that reason and the seat stays up. A write's reactions come from the host like entity_write's.
-Request.cl_code getter: str(prop(this.mc_args, 'code') or '')
+Request.cl_code getter: str(${this.mc_args}['code'] or '')
 Request.cl_bad getter: 'run_cliff needs code (a block of lines; the last one is the value)' if this.mc_tool == 'run_cliff' and strip(this.cl_code) == '' else None
 Request.cl_on getter: this.mc_tool == 'run_cliff' and this.cl_bad == None and not this.mc_anon
 Request.cl_n getter: replace(this.eid, 'Request:', '')
@@ -182,8 +182,8 @@ Request.cl_start on-setter cliff-load:
     (this.cl_gp).text = this.cl_gtext
     (this.cl_sp).text = this.cl_stext
     this.cl_loading = True
-Request.cl_gstate getter: prop(this.cl_gp, 'state') if this.cl_loading == True else None
-Request.cl_sstate getter: prop(this.cl_sp, 'state') if this.cl_loading == True else None
+Request.cl_gstate getter: ${this.cl_gp}['state'] if this.cl_loading == True else None
+Request.cl_sstate getter: ${this.cl_sp}['state'] if this.cl_loading == True else None
 Request.cl_mode getter:
   WHEN this.cl_gstate == 'loaded': 'value'
   ELSE WHEN this.cl_gstate == 'error' and this.cl_sstate == 'loaded': 'write'
@@ -196,14 +196,14 @@ Request.cl_mode on-setter cliff-run:
     (this.cl_se).births_to = this.births_to
     (this.cl_se).go = True
     this.mc_done = True
-Request.cl_shown getter: prop(this.cl_ge, 'shown') if this.cl_mode == 'value' else None
+Request.cl_shown getter: ${this.cl_ge}['shown'] if this.cl_mode == 'value' else None
 Request.cl_out getter:
   WHEN this.cl_final != None: this.cl_final
-  ELSE WHEN this.cl_mode == 'error': {'text': 'the block did not load.\nas a value: ' + str(prop(this.cl_gp, 'error')) + '\nas writes: ' + str(prop(this.cl_sp, 'error')), 'err': True}
-  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'failed') == True: {'text': 'Error: ' + str(prop(this.cl_shown, 'why')), 'err': True}
-  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'why') != None: {'text': 'null: ' + str(prop(this.cl_shown, 'why')), 'err': False}
-  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and prop(this.cl_shown, 'v') == None: {'text': 'null', 'err': False}
-  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None: {'text': str(prop(this.cl_shown, 'v')), 'err': False}
+  ELSE WHEN this.cl_mode == 'error': {'text': 'the block did not load.\nas a value: ' + str(${this.cl_gp}['error']) + '\nas writes: ' + str(${this.cl_sp}['error']), 'err': True}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and ${this.cl_shown}['failed'] == True: {'text': 'Error: ' + str(${this.cl_shown}['why']), 'err': True}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and ${this.cl_shown}['why'] != None: {'text': 'null: ' + str(${this.cl_shown}['why']), 'err': False}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and ${this.cl_shown}['v'] == None: {'text': 'null', 'err': False}
+  ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None: {'text': str(${this.cl_shown}['v']), 'err': False}
   ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': join(concat(['ran the writes of the block'], concat(this.rx_pack_lines, this.rx_lines)), '\n') + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}
   ELSE: None
 Request.cl_out on-setter cliff-finish:
@@ -238,7 +238,7 @@ Cliff.ns getter: before(this.tail, ':')
 Cliff.cid getter: after(this.tail, ':')
 Cliff.slug getter: replace(replace(replace(replace(this.tail, ':', 'x'), '-', ''), '_', ''), '.', '')
 Cliff.id_bad getter: replace(replace(replace(replace(this.cid, ':', ''), '-', ''), '_', ''), '.', '') != this.cid
-Cliff.from_peer getter: prop('Vm:' + this.ns, 'kind') == 'peer' and prop('Vm:' + this.ns, 'link') == 'up'
+Cliff.from_peer getter: ${'Vm:' + this.ns}['kind'] == 'peer' and ${'Vm:' + this.ns}['link'] == 'up'
 Cliff.gp getter: 'Pack:cliffpg' + this.slug
 Cliff.sp getter: 'Pack:cliffps' + this.slug
 Cliff.ge getter: 'Cliffpg' + this.slug + ':x'
@@ -265,8 +265,8 @@ Cliff.start on-setter cliff-peer-load:
     (this.gp).text = this.gtext
     (this.sp).text = this.stext
     this.loading = True
-Cliff.gstate getter: prop(this.gp, 'state') if this.loading == True else None
-Cliff.sstate getter: prop(this.sp, 'state') if this.loading == True else None
+Cliff.gstate getter: ${this.gp}['state'] if this.loading == True else None
+Cliff.sstate getter: ${this.sp}['state'] if this.loading == True else None
 Cliff.mode getter:
   WHEN this.gstate == 'loaded': 'value'
   ELSE WHEN this.gstate == 'error' and this.sstate == 'loaded': 'write'
@@ -277,19 +277,19 @@ Cliff.mode on-setter cliff-peer-run:
     (this.ge).seed = True
   ELSE WHEN this.mode == 'write':
     (this.se).go = True
-Cliff.shown getter: prop(this.ge, 'shown') if this.mode == 'value' else None
+Cliff.shown getter: ${this.ge}['shown'] if this.mode == 'value' else None
 Cliff.said getter:
-  WHEN this.mode == 'error': {'error': 'the block did not load.\nas a value: ' + str(prop(this.gp, 'error')) + '\nas writes: ' + str(prop(this.sp, 'error'))}
-  ELSE WHEN this.mode == 'value' and this.shown != None and prop(this.shown, 'failed') == True: {'error': 'Error: ' + str(prop(this.shown, 'why'))}
-  ELSE WHEN this.mode == 'value' and this.shown != None and prop(this.shown, 'v') == None: {'result': 'null'}
-  ELSE WHEN this.mode == 'value' and this.shown != None: {'result': prop(this.shown, 'v')}
-  ELSE WHEN this.mode == 'write' and prop(this.se, 'go') == True: {'result': 'ran the writes of the block'}
+  WHEN this.mode == 'error': {'error': 'the block did not load.\nas a value: ' + str(${this.gp}['error']) + '\nas writes: ' + str(${this.sp}['error'])}
+  ELSE WHEN this.mode == 'value' and this.shown != None and ${this.shown}['failed'] == True: {'error': 'Error: ' + str(${this.shown}['why'])}
+  ELSE WHEN this.mode == 'value' and this.shown != None and ${this.shown}['v'] == None: {'result': 'null'}
+  ELSE WHEN this.mode == 'value' and this.shown != None: {'result': ${this.shown}['v']}
+  ELSE WHEN this.mode == 'write' and ${this.se}['go'] == True: {'result': 'ran the writes of the block'}
   ELSE: None
 Cliff.said on-setter cliff-peer-finish:
   WHEN this.said != None and this.finished != True:
     this.finished = True
-    this.result = prop(this.said, 'result')
-    this.error = prop(this.said, 'error')
+    this.result = ${this.said}['result']
+    this.error = ${this.said}['error']
     (this.ge).retire = True
     (this.se).retire = True
     (this.gp).text = ''
@@ -298,12 +298,12 @@ Cliff.said on-setter cliff-peer-finish:
     (this.sp).retire = True
 
 -- ---- entity_read: the store's row (stored properties, a failed property shown as `Error: <reason>` through the entity's `failed`) or one property through the field ---------------------------------------------------
-Request.mc_r_spec getter: strip(str(prop(this.mc_args, 'spec') or ''))
-Request.mc_r_prop getter: prop(this.mc_args, 'prop')
-Request.mc_r_id getter: ('membrane::' + this.mc_r_spec) if prop('membrane::' + this.mc_r_spec, 'eid') != None and prop(this.mc_r_spec, 'eid') == None else this.mc_r_spec
+Request.mc_r_spec getter: strip(str(${this.mc_args}['spec'] or ''))
+Request.mc_r_prop getter: ${this.mc_args}['prop']
+Request.mc_r_id getter: ('membrane::' + this.mc_r_spec) if ${'membrane::' + this.mc_r_spec}['eid'] != None and ${this.mc_r_spec}['eid'] == None else this.mc_r_spec
 Request.mc_r_bad getter: 'entity_read needs spec (the entity\'s id)' if this.mc_r_spec == '' else None
 Request.mc_r_rows getter: sql('SELECT json_extract(body, \'$.cls\') AS cls, json_patch(json_remove(json_extract(body, \'$.props\'), \'$.failed\', \'$.parents\'), COALESCE((SELECT json_group_object(key, \'Error: \' || value) FROM json_each(json_extract(body, \'$.props.failed\'))), \'{}\')) AS props FROM c_field WHERE k = ?', this.mc_r_id) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop == None else None
-Request.mc_r_val getter: prop(this.mc_r_id, str(this.mc_r_prop)) if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None and this.mc_r_prop != 'parents' else None
+Request.mc_r_val getter: ${this.mc_r_id}[str(this.mc_r_prop)] if this.mc_tool == 'entity_read' and this.mc_r_bad == None and this.mc_r_prop != None and this.mc_r_prop != 'parents' else None
 Request.mc_r_text getter:
   WHEN this.mc_tool != 'entity_read' or this.mc_r_bad != None: None
   ELSE WHEN this.mc_r_prop != None and this.mc_r_val is Error: 'Error: ' + str(why(this.mc_r_val))
@@ -311,10 +311,10 @@ Request.mc_r_text getter:
   ELSE WHEN this.mc_r_prop != None: str(this.mc_r_val)
   ELSE WHEN this.mc_r_rows == None: None
   ELSE WHEN len(this.mc_r_rows) == 0: 'no such entity: ' + this.mc_r_spec
-  ELSE: this.mc_r_id + ' (' + str(prop(this.mc_r_rows[0], 'cls')) + ') ' + str(prop(this.mc_r_rows[0], 'props'))
+  ELSE: this.mc_r_id + ' (' + str(${this.mc_r_rows[0]}['cls']) + ') ' + str(${this.mc_r_rows[0]}['props'])
 
 -- ---- entity_query: the store's rows by kind and eid prefix (a kind is the entity's own class or one of its `parents`, `cls:<kind>`) -----------------------------------------------------------------------------------
-Request.mc_q_terms getter: words(replace(str(prop(this.mc_args, 'q') or ''), '&', ' '))
+Request.mc_q_terms getter: words(replace(str(${this.mc_args}['q'] or ''), '&', ' '))
 Request.mc_q_kinds getter: [after(t, 'kind:') for t in this.mc_q_terms if startswith(t, 'kind:')]
 Request.mc_q_names getter: [after(t, 'name~:') for t in this.mc_q_terms if startswith(t, 'name~:')]
 Request.mc_q_nots getter: [after(t, 'kind!:') for t in this.mc_q_terms if startswith(t, 'kind!:')]
@@ -322,19 +322,19 @@ Request.mc_q_other getter: [t for t in this.mc_q_terms if not startswith(t, 'kin
 Request.mc_q_kind getter: ([x for x in this.mc_q_kinds if x != '*'] or [''])[0]
 Request.mc_q_name getter: (this.mc_q_names or [''])[0]
 Request.mc_q_not getter: (this.mc_q_nots or [''])[0]
-Request.mc_q_off getter: max(num(prop(this.mc_args, 'offset')) or 0, 0)
-Request.mc_q_k getter: min(max(num(prop(this.mc_args, 'k')) or 20, 1), 100)
+Request.mc_q_off getter: max(num(${this.mc_args}['offset']) or 0, 0)
+Request.mc_q_k getter: min(max(num(${this.mc_args}['k']) or 20, 1), 100)
 Request.mc_q_bad getter: 'entity_query: unsupported term ' + this.mc_q_other[0] + ' (kind:<Class>, kind!:<Class> and name~:<eid prefix>, joined with &)' if len(this.mc_q_other) > 0 else None
 Request.mc_q_on getter: this.mc_tool == 'entity_query' and this.mc_q_bad == None
-Request.mc_q_props getter: join([str(x) for x in (prop(this.mc_args, 'props') if prop(this.mc_args, 'props') is List else [prop(this.mc_args, 'props')]) if x != None], '\n')
-Request.mc_q_rows getter: sql('SELECT k, cls, CASE WHEN ? = 1 THEN props WHEN ? != \'\' THEN (SELECT json_group_object(key, CASE WHEN type IN (\'object\', \'array\', \'true\', \'false\') THEN json(value) ELSE value END) FROM json_each(props) WHERE instr(char(10) || ? || char(10), char(10) || key || char(10)) > 0) END AS props FROM (SELECT k, json_extract(body, \'$.cls\') AS cls, CASE WHEN ? = 1 OR ? != \'\' THEN json_patch(json_remove(json_extract(body, \'$.props\'), \'$.failed\', \'$.parents\'), COALESCE((SELECT json_group_object(key, \'Error: \' || value) FROM json_each(json_extract(body, \'$.props.failed\'))), \'{}\')) END AS props FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?) ORDER BY k', (1 if prop(this.mc_args, 'full') == True else 0), this.mc_q_props, this.mc_q_props, (1 if prop(this.mc_args, 'full') == True else 0), this.mc_q_props, this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and prop(this.mc_args, 'count') != True else None
-Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name) if this.mc_q_on and prop(this.mc_args, 'count') == True else None
+Request.mc_q_props getter: join([str(x) for x in (${this.mc_args}['props'] if ${this.mc_args}['props'] is List else [${this.mc_args}['props']]) if x != None], '\n')
+Request.mc_q_rows getter: sql('SELECT k, cls, CASE WHEN ? = 1 THEN props WHEN ? != \'\' THEN (SELECT json_group_object(key, CASE WHEN type IN (\'object\', \'array\', \'true\', \'false\') THEN json(value) ELSE value END) FROM json_each(props) WHERE instr(char(10) || ? || char(10), char(10) || key || char(10)) > 0) END AS props FROM (SELECT k, json_extract(body, \'$.cls\') AS cls, CASE WHEN ? = 1 OR ? != \'\' THEN json_patch(json_remove(json_extract(body, \'$.props\'), \'$.failed\', \'$.parents\'), COALESCE((SELECT json_group_object(key, \'Error: \' || value) FROM json_each(json_extract(body, \'$.props.failed\'))), \'{}\')) END AS props FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?) ORDER BY k', (1 if ${this.mc_args}['full'] == True else 0), this.mc_q_props, this.mc_q_props, (1 if ${this.mc_args}['full'] == True else 0), this.mc_q_props, this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and ${this.mc_args}['count'] != True else None
+Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name) if this.mc_q_on and ${this.mc_args}['count'] == True else None
 Request.mc_q_text getter:
   WHEN not this.mc_q_on: None
-  ELSE WHEN prop(this.mc_args, 'count') == True: (str(prop(this.mc_q_count[0], 'n')) + ' entity(ies)') if this.mc_q_count != None and len(this.mc_q_count) > 0 else None
+  ELSE WHEN ${this.mc_args}['count'] == True: (str(${this.mc_q_count[0]}['n']) + ' entity(ies)') if this.mc_q_count != None and len(this.mc_q_count) > 0 else None
   ELSE WHEN this.mc_q_rows == None: None
   ELSE WHEN len(this.mc_q_rows) == 0: '0 entity(ies)'
-  ELSE: join([prop(r, 'k') + ' (' + str(prop(r, 'cls')) + ')' + ((' ' + str(prop(r, 'props'))) if prop(this.mc_args, 'full') == True or this.mc_q_props != '' else '') for r in this.mc_q_rows], '\n')
+  ELSE: join([${r}['k'] + ' (' + str(${r}['cls']) + ')' + ((' ' + str(${r}['props'])) if ${this.mc_args}['full'] == True or this.mc_q_props != '' else '') for r in this.mc_q_rows], '\n')
 
 -- ---- the tool call's result ---------------------------------------------------------------------------------------------------------------------
 Request.mc_bad getter: (this.mc_w_bad if this.mc_tool == 'entity_write' else (this.mc_r_bad if this.mc_tool == 'entity_read' else (this.cl_bad if this.mc_tool == 'run_cliff' else this.mc_q_bad)))
@@ -343,13 +343,13 @@ Request.mc_text getter:
   ELSE WHEN this.mc_bad != None: this.mc_bad
   ELSE WHEN this.mc_tool == 'entity_write': this.mc_w_text
   ELSE WHEN this.mc_tool == 'entity_read': this.mc_r_text
-  ELSE WHEN this.mc_tool == 'run_cliff': prop(this.cl_out, 'text')
+  ELSE WHEN this.mc_tool == 'run_cliff': ${this.cl_out}['text']
   ELSE: this.mc_q_text
-Request.mc_is_err getter: (not this.mc_known) or this.mc_bad != None or startswith(str(this.mc_text or ''), 'refused') or (this.mc_tool == 'entity_read' and this.mc_r_val is Error) or (this.mc_tool == 'run_cliff' and prop(this.cl_out, 'err') == True)
+Request.mc_is_err getter: (not this.mc_known) or this.mc_bad != None or startswith(str(this.mc_text or ''), 'refused') or (this.mc_tool == 'entity_read' and this.mc_r_val is Error) or (this.mc_tool == 'run_cliff' and ${this.cl_out}['err'] == True)
 Request.mc_call getter: {'content': [{'type': 'text', 'text': this.mc_text}], 'isError': this.mc_is_err} if this.mc_text != None else None
 
 -- ---- the answers ----------------------------------------------------------------------------------------------------------------------------------
-Request.mc_init getter: {'protocolVersion': prop(this.mc_params, 'protocolVersion') or '2025-03-26', 'capabilities': {'tools': {'listChanged': False}}, 'serverInfo': {'name': 'membrane', 'version': str(prop(this.facts, 'seat_version') or '')}}
+Request.mc_init getter: {'protocolVersion': ${this.mc_params}['protocolVersion'] or '2025-03-26', 'capabilities': {'tools': {'listChanged': False}}, 'serverInfo': {'name': 'membrane', 'version': str(${this.facts}['seat_version'] or '')}}
 Request.mc_result getter:
   WHEN this.mc_method == 'initialize': this.mc_init
   ELSE WHEN this.mc_method == 'ping': {}

@@ -137,7 +137,7 @@ Goal.plan on-setter apply-plan:
     card_blocks = fold([], [concat(acc, [['Decision:' + g + ':' + str(c['key']), concat([r[1] for r in refs if r[0] == str(k)], ['Task:' + g + ':' + str(k) if not (':' in str(k)) else str(k)])[0]] for k in (c['blocks'] or [])]) for c in cards])
     edges = concat(concat(after_edges, wait_after), concat(wait_blocks, card_blocks))
     nodes = [r[1] for r in refs]
-    unknown = [e for e in edges if not (e[0] in nodes) and prop(e[0], 'goal') == None]
+    unknown = [e for e in edges if not (e[0] in nodes) and ${e[0]}['goal'] == None]
     -- a cycle is a new edge whose target reaches its source, over the new edges AND the `blocks` the goal's earlier nodes already have (a plan may close a loop through a task an earlier plan made):
     -- the nodes reachable from the target are grown one step per node of the graph, which is as many steps as the longest path can have. The first such edge in plan order is named.
     old_edges = fold([], [concat(acc, [[x.eid, b] for b in (x.blocks or [])]) for x in referencing(this, 'goal')])
@@ -146,20 +146,20 @@ Goal.plan on-setter apply-plan:
     cycle = [e for e in edges if e[0] in fold([e[1]], [distinct(concat(acc, [f[1] for f in all_edges if f[0] in acc])) for q in uni])]
     bad_waits = [w for w in waits if not (w['condition'] != None and ((w['condition']['field'] and w['condition']['prop']) or w['condition']['method']) and ('equals' in keys(w['condition'])) and (w['every_s'] or 0) >= 10 and (w['deadline_min'] or 0) > 0)]
     ok = len(unknown) == 0 and len(cycle) == 0 and len(bad_waits) == 0
-    fresh = [t for t in tasks if ok and prop('Task:' + g + ':' + str(t['key']), 'status') == None]
-    again = [t for t in tasks if ok and (prop('Task:' + g + ':' + str(t['key']), 'status') in ('stuck', 'failed') or (prop('Task:' + g + ':' + str(t['key']), 'status') == 'done' and t['redo']))]
-    fresh_w = [w for w in waits if ok and prop('Wait:' + g + ':' + str(w['key']), 'status') == None]
+    fresh = [t for t in tasks if ok and ${'Task:' + g + ':' + str(t['key'])}['status'] == None]
+    again = [t for t in tasks if ok and (${'Task:' + g + ':' + str(t['key'])}['status'] in ('stuck', 'failed') or (${'Task:' + g + ':' + str(t['key'])}['status'] == 'done' and t['redo']))]
+    fresh_w = [w for w in waits if ok and ${'Wait:' + g + ':' + str(w['key'])}['status'] == None]
     FOR t IN fresh:
       ('Task:' + g + ':' + str(t['key'])) = Task(goal: this.eid, title: str(t['title'] or t['key']), name: str(t['title'] or t['key']), detail: t['detail'] or '', plan_key: str(t['key']), parent: (('Task:' + g + ':' + str(t['parent']) if not (':' in str(t['parent'])) else str(t['parent'])) if t['parent'] else None))
     FOR w IN fresh_w:
       ('Wait:' + g + ':' + str(w['key'])) = Wait(goal: this.eid, title: str(w['title'] or w['key']), name: str(w['title'] or w['key']), condition: w['condition'], every_s: w['every_s'], deadline_min: w['deadline_min'], plan_key: str(w['key']))
-    FOR c IN [c for c in cards if ok and prop('Decision:' + g + ':' + str(c['key']), 'status') == None]:
+    FOR c IN [c for c in cards if ok and ${'Decision:' + g + ':' + str(c['key'])}['status'] == None]:
       ('Decision:' + g + ':' + str(c['key'])) = Decision(goal: this.eid, name: str(c['name'] or c['key']), summary: c['summary'] or '', plan_key: str(c['key']), status: 'open')
     FOR e IN [e for e in edges if ok]:
-      e[0].blocks = concat(prop(e[0], 'blocks') or [], [x for x in [e[1]] if not (x in (prop(e[0], 'blocks') or []))])
+      e[0].blocks = concat(${e[0]}['blocks'] or [], [x for x in [e[1]] if not (x in (${e[0]}['blocks'] or []))])
     FOR t IN again:
-      ('Task:' + g + ':' + str(t['key'])).status = 'owed' if ((prop('Task:' + g + ':' + str(t['key']), 'open_blockers') or 0) + len([e for e in edges if e[1] == ('Task:' + g + ':' + str(t['key'])) and not prop(e[0], 'finished')])) < 0.5 else 'open'
-    FOR k IN [k for k in drops if ok and prop('Task:' + g + ':' + str(k), 'status') != None]:
+      ('Task:' + g + ':' + str(t['key'])).status = 'owed' if ((${'Task:' + g + ':' + str(t['key'])}['open_blockers'] or 0) + len([e for e in edges if e[1] == ('Task:' + g + ':' + str(t['key'])) and not ${e[0]}['finished']])) < 0.5 else 'open'
+    FOR k IN [k for k in drops if ok and ${'Task:' + g + ':' + str(k)}['status'] != None]:
       ('Task:' + g + ':' + str(k)).status = 'dropped'
     this.planned_replan = this.replan if ok else this.planned_replan
     this.planned_ts = clock
@@ -216,7 +216,7 @@ Task.subs_ended on-setter close-split:
     this.status = 'done' if any_done else 'dropped'
 
 -- a task that has not run yet and is given a sub-task is split: its sub-tasks do its work (and it is done when they are)
-Task.splits_parent getter: this.parent != None and prop(this.parent, 'status') in ('open', 'owed')
+Task.splits_parent getter: this.parent != None and ${this.parent}['status'] in ('open', 'owed')
 Task.splits_parent on-setter split-parent:
   WHEN this.splits_parent:
     this.parent.status = 'split'
@@ -241,7 +241,7 @@ Pool.pump on-setter dispatch:
     free = (this.size or 3) - this.busy
     FOR e IN head(owed, 1) if (free > 0 and len(owed) > 0) else []:
       e.take = True
-      e.worker_prompt = prop(e, 'worker_text')
+      e.worker_prompt = ${e}['worker_text']
 
 -- the prompt of the worker lane: the task, its goal, what it waited on
 Task.worker_text getter:
@@ -281,7 +281,7 @@ Wait.check on-setter check-wait:
     now = this.check
     c = this.condition or {}
     by_method = c['method'] != None
-    seen_v = this.method_seen if by_method else prop(c['field'], c['prop'])
+    seen_v = this.method_seen if by_method else ${c['field']}[c['prop']]
     holds = seen_v == c['equals']
     seen = (str(c['method']) if by_method else str(c['field']) + '.' + str(c['prop'])) + ' = ' + str(seen_v)
     late = (now - (this.armed_ts if this.armed_ts != None else (this.armed_since if this.armed_since != None else now))) >= 60 * (this.deadline_min or 0)
@@ -348,7 +348,7 @@ Goal.plan_calls on-setter lane-planner:
     cn = this.chat_name
     this.plan_chat = cn
     membrane::Chat[cn] = Chat(name: cn, goal: this.eid)
-    membrane::Chat[cn]:message[id] = ChatMessage(text: this.plan_prompt, at: clock, pick: (prop('Pool:workers', 'model') or ''))
+    membrane::Chat[cn]:message[id] = ChatMessage(text: this.plan_prompt, at: clock, pick: (${'Pool:workers'}['model'] or ''))
     membrane::Chat[cn]:message[id]:body = SemText(text: this.plan_prompt)
     membrane::Chat[cn]:message[id]:turn = ChatTurn(message: 'membrane::Chat:' + cn + ':message:' + id, queued_at: clock)
     membrane::Chat[cn]:time[id]:main = ChatLine(chat: cn)
@@ -361,7 +361,7 @@ Task.started_ts on-setter lane-worker:
     cn = this.chat_name
     this.worker_chat = cn
     membrane::Chat[cn] = Chat(name: cn, goal: str(this.goal))
-    membrane::Chat[cn]:message[id] = ChatMessage(text: this.worker_prompt, at: clock, pick: (prop('Pool:workers', 'model') or ''))
+    membrane::Chat[cn]:message[id] = ChatMessage(text: this.worker_prompt, at: clock, pick: (${'Pool:workers'}['model'] or ''))
     membrane::Chat[cn]:message[id]:body = SemText(text: this.worker_prompt)
     membrane::Chat[cn]:message[id]:turn = ChatTurn(message: 'membrane::Chat:' + cn + ':message:' + id, queued_at: clock)
     membrane::Chat[cn]:time[id]:main = ChatLine(chat: cn)
@@ -370,11 +370,11 @@ Task.started_ts on-setter lane-worker:
 -- the pump of the pool is the beat: every beat, a lane's answer that has landed is handed on (a reply already handed on is the same value: nothing runs)
 Pool.pump on-setter lane-collect:
   ALWAYS:
-    FOR t IN [t for t in instances('Task') if t.status == 'running' and t.worker_msg != None and prop('membrane::Chat:' + t.reply_chat + ':message:' + t.worker_msg + ':turn:response', 'text') != None]:
-      t.worker_reply = prop('membrane::Chat:' + t.reply_chat + ':message:' + t.worker_msg + ':turn:response', 'text')
+    FOR t IN [t for t in instances('Task') if t.status == 'running' and t.worker_msg != None and ${'membrane::Chat:' + t.reply_chat + ':message:' + t.worker_msg + ':turn:response'}['text'] != None]:
+      t.worker_reply = ${'membrane::Chat:' + t.reply_chat + ':message:' + t.worker_msg + ':turn:response'}['text']
       t.worker_msg = None
-    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and prop('membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response', 'text') != None]:
-      g.planner_reply = prop('membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response', 'text')
+    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and ${'membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response'}['text'] != None]:
+      g.planner_reply = ${'membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response'}['text']
       g.plan_msg = None
     -- a sub-task whose parent was written with the goal's prefix twice (the plan did that before it took an eid as a parent) is attached to the real parent, one prefix a beat
     FOR t IN [t for t in instances('Task') if t.parent != None and startswith(str(t.parent), 'Task:' + replace(str(t.goal), 'Goal:', '') + ':Task:')]:
@@ -384,11 +384,11 @@ Pool.pump on-setter lane-collect:
       t.receipt = 'its sub-tasks are done' if len([s for s in referencing(t, 'parent') if s.status == 'done']) > 0 else 'all its sub-tasks were dropped'
       t.status = 'done' if len([s for s in referencing(t, 'parent') if s.status == 'done']) > 0 else 'dropped'
     -- a planner pass nobody answered for 15 minutes (its turn was lost) is called again; a worker nobody answered for 15 minutes is stuck, which frees its pool slot and asks the planner
-    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and clock - (g.plan_asked_ts or clock) > 900 and prop('membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response', 'text') == None]:
+    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and clock - (g.plan_asked_ts or clock) > 900 and ${'membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response'}['text'] == None]:
       g.plan_msg = None
       g.plan_prompt = g.plan_due
       g.plan_calls = (g.plan_calls or 0) + (1 if g.plan_due != None else 0)
-    FOR t IN [t for t in instances('Task') if t.status == 'running' and clock - (t.started_ts or clock) > 900 and (t.worker_msg == None or prop('membrane::Chat:' + t.reply_chat + ':message:' + t.worker_msg + ':turn:response', 'text') == None)]:
+    FOR t IN [t for t in instances('Task') if t.status == 'running' and clock - (t.started_ts or clock) > 900 and (t.worker_msg == None or ${'membrane::Chat:' + t.reply_chat + ':message:' + t.worker_msg + ':turn:response'}['text'] == None)]:
       t.worker_msg = None
       t.finish = {'verdict': 'stuck', 'detail': 'no answer from the worker in 15 minutes', 'session': ''}
 
@@ -397,7 +397,7 @@ Boot.started on-setter reowe-at-boot:
   WHEN this.started != None:
     FOR t IN [t for t in instances('Task') if t.status == 'running' or t.status == 'owed']:
       t.reowe = this.started
-    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and prop('membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response', 'text') == None]:
+    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and ${'membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response'}['text'] == None]:
       g.plan_msg = None
       g.plan_prompt = g.plan_due
       g.plan_calls = (g.plan_calls or 0) + (1 if g.plan_due != None else 0)
@@ -424,8 +424,8 @@ Wait.method_call on-setter run-method:
   WHEN this.method_call != None and this.method_cmd != None:
     this.method_cmd.run = {'id': replace(this.eid, ':', '_') + '_' + str(this.method_call), 'args': this.condition['args'] or []}
 Wait.method_out getter:
-  WHEN this.method_cmd != None and prop(this.method_cmd, 'run_result') != None:
-    r = prop(this.method_cmd, 'run_result')
+  WHEN this.method_cmd != None and ${this.method_cmd}['run_result'] != None:
+    r = ${this.method_cmd}['run_result']
     ('(failed rc ' + str(r['rc']) + ')') if r['rc'] != 0 else strip(str(r['stdout']))
 Wait.method_out on-setter method-seen:
   WHEN this.method_out != None:

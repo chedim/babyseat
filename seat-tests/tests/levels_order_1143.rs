@@ -1,4 +1,4 @@
-//! #1143: getters are ordered by what they read, class-aware. A getter reading `prop(x, 'text')` (x's class unknown) used to
+//! #1143: getters are ordered by what they read, class-aware. A getter reading `${x}['text']` (x's class unknown) used to
 //! be ordered after EVERY getter named `text`, whatever its class, which closed false cycles and left a getter computing from
 //! a stale input. Also: levels stay cheap (they are computed at every pack load).
 use cliffvm::fields::{levels, levels_by_name, Fields, Getter};
@@ -17,7 +17,7 @@ impl Host for H {
 
 /// Lamp.text (another class) reads Box.plan, and Box.src_text reads a field NAMED text off an entity of unknown class.
 const COLLIDE: &str = "PACK collide 1\n\
-Box.src_text getter: str(prop(this.src, 'text') or '')\n\
+Box.src_text getter: str(${this.src}['text'] or '')\n\
 Box.src_name getter: str(this.src['text'] or '')\n\
 Box.plan getter: this.src_text + '!'\n\
 Box.plan2 getter: this.plan + this.src_name\n\
@@ -137,12 +137,12 @@ fn levels_stay_cheap_on_the_shipped_packs_and_on_a_2000_getter_pack() {
 
 #[test]
 fn the_intents_pack_written_with_prop_and_attribute_reads_still_orders_its_plan_last() {
-    // the form the pack had before its subscript workaround (cc73e00): `prop(this.intend, 'text')` and `g.text`
+    // the form the pack had before its subscript workaround (cc73e00): `${this.intend}['text']` and `g.text`
     let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../membrane/packs/intents.c1f")).unwrap()
-        .replace("this.intend['text']", "prop(this.intend, 'text')").replace("this.intend['by']", "prop(this.intend, 'by')")
+        .replace("this.intend['text']", "${this.intend}['text']").replace("this.intend['by']", "${this.intend}['by']")
         .replace("g['text'] or g['name']", "g.text or g.name")
-        .replace("this.fulfill['spec']", "prop(this.fulfill, 'spec')");
-    assert!(src.contains("prop(this.intend, 'text')") && src.contains("g.text or g.name"));
+        .replace("this.fulfill['spec']", "${this.fulfill}['spec']");
+    assert!(src.contains("${this.intend}['text']") && src.contains("g.text or g.name"));
     let mut all: Vec<Getter> = shipped_getters().into_iter().filter(|x| x.cls != "Intent").collect();
     all.extend(gs(&src));
     let lv = |p: &str| lv_of(&all, "Intent", p);

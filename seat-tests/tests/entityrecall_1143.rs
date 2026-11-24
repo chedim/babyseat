@@ -11,9 +11,9 @@ fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
 /// `Box.say` makes a mentioned chat body (what the chat does); `Box.q` makes a text that is NOT mentioned (the ask: it moves nothing); `Probe` reads vectors back
 const MAKER: &str = "PACK ermaker 1\nIMPORT semtext 1\nIMPORT mentions 1\nIMPORT chat 1\nIMPORT vector 1\n\
-Probe.back getter: [prop(e, 'v') for e in this.eids]\n\
-Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[prop(this.say, 'id')]:body = SemText(text: prop(this.say, 'text'))\n    membrane::Chat:main:message[prop(this.say, 'id')]:body.mention = True\n\
-Box.q on-setter q:\n  WHEN this.q != None:\n    Leaf:x[prop(this.q, 'id')]:body = SemText(text: prop(this.q, 'text'))\n";
+Probe.back getter: [${e}['v'] for e in this.eids]\n\
+Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[${this.say}['id']]:body = SemText(text: ${this.say}['text'])\n    membrane::Chat:main:message[${this.say}['id']]:body.mention = True\n\
+Box.q on-setter q:\n  WHEN this.q != None:\n    Leaf:x[${this.q}['id']]:body = SemText(text: ${this.q}['text'])\n";
 
 fn load(h: &Host, layer: Option<&str>) {
     let r = repo();
