@@ -54,7 +54,7 @@ SemText.field_land getter:
 SemText.field_rows getter:
   WHEN this.field_land == None: None
   ELSE:
-    rows = [{'e': str(m), 'w': startswith(str(m), 'Word:'), 't': str(prop(m, 'lemma') or prop(m, 'name') or prop(m, 'path')), 'L': [x['sentence'] for x in (prop(m, 'mentioned_in') or []) if x['text'] == this.eid and x['sentence'] >= this.field_from and x['sentence'] < this.field_upto]} for m in this.mentions]
+    rows = [{'e': str(m), 'w': startswith(str(m), 'Word:'), 't': str(${m}['lemma'] or ${m}['name'] or ${m}['path']), 'L': [x['sentence'] for x in (${m}['mentioned_in'] or []) if x['text'] == this.eid and x['sentence'] >= this.field_from and x['sentence'] < this.field_upto]} for m in this.mentions]
     [r for r in rows if len(r['L']) > 0 and not (r['w'] and len(r['t']) < this.field_word_min)]
 -- the mode of each: live (it has a state), mat (it gets one now: a specific kind, or a word whose waiting mentions reach field_k_mat, AND its seed is there),
 -- wait (it waits in `field_pend`: a word in the nursery, or an entity whose seed is still being fetched). A text never waits for a seed: its mentions wait on the
@@ -63,7 +63,7 @@ SemText.field_rows getter:
 SemText.field_modes getter:
   WHEN this.field_rows == None: None
   ELSE:
-    rows = [{'e': r['e'], 'w': r['w'], 't': r['t'], 'L': r['L'], 'live': prop('FieldState:' + r['e'], 'v') is List, 'seed': prop('FieldSeed:' + r['e'], 'v') is List, 'pend': [p for p in (prop(r['e'], 'field_pend') or []) if not (p['t'] == this.eid and p['s'] >= this.field_from)]} for r in this.field_rows]
+    rows = [{'e': r['e'], 'w': r['w'], 't': r['t'], 'L': r['L'], 'live': ${'FieldState:' + r['e']}['v'] is List, 'seed': ${'FieldSeed:' + r['e']}['v'] is List, 'pend': [p for p in (${r['e']}['field_pend'] or []) if not (p['t'] == this.eid and p['s'] >= this.field_from)]} for r in this.field_rows]
     [{'e': r['e'], 'w': r['w'], 't': r['t'], 'L': r['L'], 'pend': r['pend'], 'due': (not r['live']) and ((not r['w']) or len(r['pend']) + len(r['L']) >= this.field_k_mat), 'mode': 'live' if r['live'] else ('mat' if r['seed'] and ((not r['w']) or len(r['pend']) + len(r['L']) >= this.field_k_mat) else 'wait')} for r in rows]
 -- the seeds still missing for the entities that are due to materialise
 SemText.field_need getter:
@@ -82,7 +82,7 @@ FieldTerm.vec_todo getter: [{'eid': this.eid, 'skey': this.skey, 'start': 0, 'te
 -- texts that made them and `field_n` 1 marks it done (the same steps and the same apply as a text's landing).
 FieldTerm.field_land getter: [] if (this.emb_n or 0) >= 1 and (this.field_n or 0) < 1 else None
 FieldTerm.field_rows getter:
-  WHEN this.field_land == None or prop('FieldState:' + this.term, 'v') is List or len(prop(this.term, 'field_pend') or []) == 0: None
+  WHEN this.field_land == None or ${'FieldState:' + this.term}['v'] is List or len(${this.term}['field_pend'] or []) == 0: None
   ELSE: [{'e': this.term, 'w': startswith(this.term, 'Word:'), 't': this.text, 'L': []}]
 
 -- ---- the plan: the steps of this landing (waits until every seed it needs is there) ---------------------------------------------------------------------------------
@@ -99,23 +99,23 @@ SemText.field_plan on-setter field-steps:
       used = r['pend'] if r['mode'] == 'mat' else []
       chain = concat(used, [{'t': this.eid, 's': s, 'x': vid[s - from], 'o': len(used) + len([y for y in r['L'] if y < s])} for s in r['L']])
       FOR c IN chain:
-        ('FieldStep:' + this.skey + ':' + r['e'] + ':' + str(c['o'])) = FieldStep(of: this.eid, e: r['e'], t: c['t'], s: c['s'], x: c['x'], o: c['o'], prev: ('FieldStep:' + this.skey + ':' + r['e'] + ':' + str(c['o'] - 1)) if c['o'] > 0 else None, src: st if r['mode'] == 'live' else 'FieldSeed:' + r['e'], n0: (prop(st, 'n') or 0) if r['mode'] == 'live' else 0, k0: (prop(st, 'run_k') or 0) if r['mode'] == 'live' else 0, a0: prop(st, 'run_acc') if r['mode'] == 'live' else None, spec: not r['w'], mat: r['mode'] == 'mat')
+        ('FieldStep:' + this.skey + ':' + r['e'] + ':' + str(c['o'])) = FieldStep(of: this.eid, e: r['e'], t: c['t'], s: c['s'], x: c['x'], o: c['o'], prev: ('FieldStep:' + this.skey + ':' + r['e'] + ':' + str(c['o'] - 1)) if c['o'] > 0 else None, src: st if r['mode'] == 'live' else 'FieldSeed:' + r['e'], n0: (${st}['n'] or 0) if r['mode'] == 'live' else 0, k0: (${st}['run_k'] or 0) if r['mode'] == 'live' else 0, a0: ${st}['run_acc'] if r['mode'] == 'live' else None, spec: not r['w'], mat: r['mode'] == 'mat')
     FOR s IN (this.field_land or []):
       o = len([y for y in this.field_land if y['start'] < s['start']])
-      ('FieldStep:' + this.skey + ':bg:' + str(o)) = FieldStep(of: this.eid, e: 'FieldBg:all', x: vid[o], o: o, prev: ('FieldStep:' + this.skey + ':bg:' + str(o - 1)) if o > 0 else None, src: 'FieldBg:all' if prop('FieldBg:all', 'v') is List else None, n0: prop('FieldBg:all', 'n') or 0, mean: True)
+      ('FieldStep:' + this.skey + ':bg:' + str(o)) = FieldStep(of: this.eid, e: 'FieldBg:all', x: vid[o], o: o, prev: ('FieldStep:' + this.skey + ':bg:' + str(o - 1)) if o > 0 else None, src: 'FieldBg:all' if ${'FieldBg:all'}['v'] is List else None, n0: ${'FieldBg:all'}['n'] or 0, mean: True)
     this.field_steps = concat([('FieldStep:' + this.skey + ':' + r['e'] + ':' + str(len(r['pend'] if r['mode'] == 'mat' else []) + len(r['L']) - 1)) for r in this.field_plan if r['mode'] != 'wait'], ['FieldStep:' + this.skey + ':bg:' + str(len(this.field_land) - 1)] if len(this.field_land) > 0 else [])
     this.field_go = this.field_upto
 
 -- ---- ONE STEP: an entity's walk through one mention (`after` = the state after it; `move` = how far it moved) -------------------------------------------------------
 -- the sentence vector and the seed are read as unit vectors (as the old field did); the background is a mean, read as it is
-FieldStep.xv getter: unit(prop(this.x, 'v')) if prop(this.x, 'v') is List else None
-FieldStep.gain getter: prop(this.of, 'field_gain')
+FieldStep.xv getter: unit(${this.x}['v']) if ${this.x}['v'] is List else None
+FieldStep.gain getter: ${this.of}['field_gain']
 FieldStep.n getter: this.n0 + this.o + 1
 FieldStep.base getter:
-  WHEN this.src == None or not (prop(this.src, 'v') is List): None
-  ELSE WHEN this.mean == True: prop(this.src, 'v')
-  ELSE: unit(prop(this.src, 'v'))
-FieldStep.before getter: prop(this.prev, 'after') if this.prev != None else this.base
+  WHEN this.src == None or not (${this.src}['v'] is List): None
+  ELSE WHEN this.mean == True: ${this.src}['v']
+  ELSE: unit(${this.src}['v'])
+FieldStep.before getter: ${this.prev}['after'] if this.prev != None else this.base
 FieldStep.after getter:
   WHEN not (this.xv is List): None
   ELSE WHEN this.mean == True and this.prev == None and this.src == None: this.xv
@@ -124,29 +124,29 @@ FieldStep.after getter:
   ELSE: unit(this.before + this.gain * (this.xv - this.before))
 FieldStep.move getter: this.gain * norm(this.xv - this.before) if this.mean != True and this.xv is List and this.before is List else None
 -- the open run of episodes (specific kinds, from the mature-th mention on): k mentions summed in acc; a run of field_ep_run closes as an episode (its centroid `ep`)
-FieldStep.kin getter: prop(this.prev, 'kout') if this.prev != None else this.k0
-FieldStep.ain getter: prop(this.prev, 'aout') if this.prev != None else this.a0
-FieldStep.joins getter: this.spec == True and this.n >= prop(this.of, 'field_mature')
+FieldStep.kin getter: ${this.prev}['kout'] if this.prev != None else this.k0
+FieldStep.ain getter: ${this.prev}['aout'] if this.prev != None else this.a0
+FieldStep.joins getter: this.spec == True and this.n >= ${this.of}['field_mature']
 FieldStep.k getter: this.kin + 1 if this.joins else this.kin
 FieldStep.acc getter:
   WHEN not this.joins: this.ain
   ELSE WHEN this.kin == 0 or not (this.ain is List): this.xv
   ELSE: this.ain + this.xv
-FieldStep.closes getter: this.joins and this.k >= prop(this.of, 'field_ep_run')
+FieldStep.closes getter: this.joins and this.k >= ${this.of}['field_ep_run']
 FieldStep.ep getter: this.acc / this.k if this.closes and this.acc is List else None
 FieldStep.kout getter: 0 if this.closes else this.k
 FieldStep.aout getter: None if this.closes else this.acc
 -- a step is ready when its walk is computed; the LAST step of each chain is listed in `field_steps` and reads its chain back through `prev`
-FieldStep.ready getter: this.after is List and (this.prev == None or prop(this.prev, 'ready') == True)
+FieldStep.ready getter: this.after is List and (this.prev == None or ${this.prev}['ready'] == True)
 FieldStep.rows getter:
   WHEN this.ready != True: None
-  ELSE: concat(prop(this.prev, 'rows') if this.prev != None else [], [{'e': this.e, 't': this.t, 's': this.s, 'o': this.o, 'm': this.move, 'n': this.n, 'ep': this.ep, 'closes': this.closes}])
+  ELSE: concat(${this.prev}['rows'] if this.prev != None else [], [{'e': this.e, 't': this.t, 's': this.s, 'o': this.o, 'm': this.move, 'n': this.n, 'ep': this.ep, 'closes': this.closes}])
 
 -- ---- APPLY: when every chain is computed, one write per entity and per text -------------------------------------------------------------------------------------------
 SemText.field_ready getter:
   WHEN this.field_go == None or this.field_from >= this.field_go or this.field_steps == None: None
-  ELSE WHEN len([s for s in this.field_steps if prop(s, 'ready') != True]) > 0: None
-  ELSE: [{'step': s, 'e': prop(s, 'e'), 'after': prop(s, 'after'), 'n': prop(s, 'n'), 'kout': prop(s, 'kout'), 'aout': prop(s, 'aout'), 'rows': prop(s, 'rows'), 'mat': prop(s, 'mat')} for s in this.field_steps]
+  ELSE WHEN len([s for s in this.field_steps if ${s}['ready'] != True]) > 0: None
+  ELSE: [{'step': s, 'e': ${s}['e'], 'after': ${s}['after'], 'n': ${s}['n'], 'kout': ${s}['kout'], 'aout': ${s}['aout'], 'rows': ${s}['rows'], 'mat': ${s}['mat']} for s in this.field_steps]
 -- the chains, and their moves grouped by the text that made them (the waiting mentions of a word that materialises are earlier texts): one write per text
 SemText.field_done getter:
   WHEN this.field_ready == None: None
@@ -168,12 +168,12 @@ SemText.field_done on-setter field-apply:
       (st).n = d['n']
       (st).run_k = d['kout']
       (st).run_acc = d['aout']
-      FOR p IN ([1] if d['mat'] == True and len(prop(d['e'], 'field_pend') or []) > 0 else []):
+      FOR p IN ([1] if d['mat'] == True and len(${d['e']}['field_pend'] or []) > 0 else []):
         (d['e']).field_pend = []
       closed = [r for r in d['rows'] if r['closes'] == True]
-      seq0 = prop(st, 'ep_seq') or 0
+      seq0 = ${st}['ep_seq'] or 0
       news = [{'e': 'FieldEpisode:' + d['e'] + ':' + str(seq0 + len([y for y in closed if y['o'] < r['o']])), 'n': ep_run, 'i': seq0 + len([y for y in closed if y['o'] < r['o']]), 'v': r['ep'], 'new': True} for r in closed]
-      old = [{'e': x['e'], 'n': x['n'], 'i': x['i'], 'v': prop(x['e'], 'v'), 'new': False} for x in (prop(st, 'eps') or [])] if len(closed) > 0 else []
+      old = [{'e': x['e'], 'n': x['n'], 'i': x['i'], 'v': ${x['e']}['v'], 'new': False} for x in (${st}['eps'] or [])] if len(closed) > 0 else []
       eps = concat(old, news)
       pairs = [{'a': a, 'b': sort_by([y for y in eps if y['i'] > a['i']], 'i')[0]} for a in eps if len([y for y in eps if y['i'] > a['i']]) > 0] if len(eps) > ep_max else []
       best = sort_by([{'a': p['a'], 'b': p['b'], 'c': dot(unit(p['a']['v']), unit(p['b']['v']))} for p in pairs], 'c', True)[0] if len(pairs) > 0 else None
@@ -194,5 +194,5 @@ SemText.field_done on-setter field-apply:
         (st).ep_seq = seq0 + len(closed)
         (st).eps = [{'e': x['e'], 'n': kn if x['e'] == keep else x['n'], 'i': x['i']} for x in eps if x['e'] != gone]
     FOR g IN this.field_done['mv']:
-      (g['key']).field_moves = concat(prop(g['key'], 'field_moves') or [], [{'e': r['e'], 's': r['s'], 'm': r['m']} for r in g['rows']])
+      (g['key']).field_moves = concat(${g['key']}['field_moves'] or [], [{'e': r['e'], 's': r['s'], 'm': r['m']} for r in g['rows']])
     this.field_n = this.field_go

@@ -6,7 +6,7 @@ IMPORT door_auth 1
 -- An ownerless session belongs to the admin (`Person:admin`); no request makes it any more (no users), so it stays an unmade reference.
 LegacySeat.owners on-setter legacy-persons:
   WHEN this.owners != None:
-    FOR o IN [p for p in this.owners if prop('Person:' + p[0], 'sub') == None]:
+    FOR o IN [p for p in this.owners if ${'Person:' + p[0]}['sub'] == None]:
       ('Person:' + o[0]).sub = o[0]
       ('Person:' + o[0]).name = o[1]
       ('Person:' + o[0]).imported = True

@@ -175,7 +175,7 @@ A `VIRTUAL` entity is collected as soon as NOTHING HOLDS IT: at the end of the r
 - a REFERENCE: a live entity has it as a value, which is stored as `{"$ref": "<id>"}`. Write an entity as a value (`this.keep = Req:made`, or inside a list or dict) and it holds; write the value away and it is released. A stored entity is always live; two virtual entities that only hold each other are collected together;
 - an IN-FLIGHT driver: a request's open connection (until its reply is sent, an event stream until `end`), an effect running on it, a command's chunks while the command runs.
 
-A plain read holds nothing (`prop(x, 'k')`, a getter that peeks, an entity literal). A read of a collected entity is a null with a reason, `collected: nothing held it`. Only virtual classes are collected: a stored entity keeps its `retire` write, and a stored one that is not touched for a while may leave the engine (the VM decides, nothing to write: docs/cliffvm.md).
+A plain read holds nothing (`${x}['k']`, a getter that peeks, an entity literal). A read of a collected entity is a null with a reason, `collected: nothing held it`. Only virtual classes are collected: a stored entity keeps its `retire` write, and a stored one that is not touched for a while may leave the engine (the VM decides, nothing to write: docs/cliffvm.md).
 
 ### Answering a message without a model
 

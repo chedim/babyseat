@@ -62,7 +62,7 @@ fn a_finished_message_holds_none_of_the_prompt_props_and_an_unfinished_one_still
 #[test]
 fn a_banner_change_recomputes_no_finished_message() {
     let file = tmpfile("banner");
-    let pack = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'n=' + str(prop('Note:x', 'n'))\n";
+    let pack = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'n=' + str(${'Note:x'}['n'])\n";
     let h = seat(Some(&file), |h| { for n in 0..50 { message(h, n, Some("done")); } message(h, 50, None); h.born("Note:x", "Note", json!({"n": 0}).as_object().unwrap().clone(), "person"); });
     h.load_pack("mine", pack).unwrap(); h.rebuild(); h.pump();
     let db = Connection::open(&file).unwrap();

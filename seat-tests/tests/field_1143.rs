@@ -14,9 +14,9 @@ fn props(v: J) -> Map<String, J> { v.as_object().unwrap().clone() }
 
 /// scratch pack: `Box.say` makes a chat body with the text, mentions it and asks for its vectors (what the chat does); `Probe` reads numbers back
 const MAKER: &str = "PACK fieldmaker 1\nIMPORT semtext 1\nIMPORT mentions 1\nIMPORT chat 1\nIMPORT vector 1\n\
-Probe.back getter: [prop(e, 'v') for e in this.eids]\n\
+Probe.back getter: [${e}['v'] for e in this.eids]\n\
 Probe.near getter: near(this.q, 'Vector', 50)\n\
-Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[prop(this.say, 'id')]:body = SemText(text: prop(this.say, 'text'))\n    membrane::Chat:main:message[prop(this.say, 'id')]:body.mention = True\n\
+Box.say on-setter say:\n  WHEN this.say != None:\n    membrane::Chat:main:message[${this.say}['id']]:body = SemText(text: ${this.say}['text'])\n    membrane::Chat:main:message[${this.say}['id']]:body.mention = True\n\
 Box.ask on-setter ask:\n  WHEN this.ask != None:\n    membrane::Chat:main:message[this.ask]:body.embed = True\n";
 
 fn load(h: &Host, layer: Option<&str>) {

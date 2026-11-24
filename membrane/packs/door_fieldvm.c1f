@@ -26,7 +26,7 @@ Boot.started on-setter fv-start:
       ('FvDir:' + d).path = d
 
 FvDir.entries getter: listdir(this.path)
-FvDir.files getter: [[prop(e, 'name'), this.path + '/' + prop(e, 'name')] for e in this.entries if tail(prop(e, 'name'), 4) == '.c1f' and prop(e, 'kind') == 'file'] if this.entries != None else None
+FvDir.files getter: [[${e}['name'], this.path + '/' + ${e}['name']] for e in this.entries if tail(${e}['name'], 4) == '.c1f' and ${e}['kind'] == 'file'] if this.entries != None else None
 
 FvFile.text getter: read(this.path)
 FvFile.stem getter: replace(this.file, '.c1f', '')
@@ -56,9 +56,9 @@ FieldVm.rows getter: sql("SELECT json_group_object(json_extract(value, '$[0]'), 
 -- default, the value the old chat.js had, stands).
 FieldVm.snapshot getter:
   WHEN this.rows != None and len(this.rows) > 0:
-    pk = json(prop(this.rows[0], 'packs'))
+    pk = json(${this.rows[0]}['packs'])
     bt = ([b for b in instances('Boot')] or [None])[0]
-    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': prop(bt, 'chat_page_size'), 'chat_poll_size': prop(bt, 'chat_poll_size'), 'chat_list_poll_ms': prop(bt, 'chat_list_poll_ms'), 'chat_active_poll_ms': prop(bt, 'chat_active_poll_ms'), 'chat_stick_px': prop(bt, 'chat_stick_px'), 'chat_tool_chars': prop(bt, 'chat_tool_chars'), 'field_window': prop('Setting:map.window', 'current') or prop(bt, 'field_window'), 'field_poll_ms': prop('Setting:map.poll_ms', 'current') or prop(bt, 'field_poll_ms'), 'chat_poll_timeout_s': prop(bt, 'chat_poll_timeout_s'), 'shell_status_ms': prop(bt, 'shell_status_ms'), 'shell_panel_chars': prop(bt, 'shell_panel_chars')}}]}
+    {'packs': ({} if pk is Error else (pk or {})), 'entities': [{'eid': 'Boot:seat', 'cls': 'Boot', 'props': {'chat_page_size': ${bt}['chat_page_size'], 'chat_poll_size': ${bt}['chat_poll_size'], 'chat_list_poll_ms': ${bt}['chat_list_poll_ms'], 'chat_active_poll_ms': ${bt}['chat_active_poll_ms'], 'chat_stick_px': ${bt}['chat_stick_px'], 'chat_tool_chars': ${bt}['chat_tool_chars'], 'field_window': ${'Setting:map.window'}['current'] or ${bt}['field_window'], 'field_poll_ms': ${'Setting:map.poll_ms'}['current'] or ${bt}['field_poll_ms'], 'chat_poll_timeout_s': ${bt}['chat_poll_timeout_s'], 'shell_status_ms': ${bt}['shell_status_ms'], 'shell_panel_chars': ${bt}['shell_panel_chars']}}]}
   ELSE: None
 
 Request.o_fieldvm getter: this.route in ['/ui/fieldvm', '/ui/fieldvm/active', '/ui/fieldvm/edges', '/ui/fieldvm/entity']
@@ -68,28 +68,28 @@ Request.fv_seat getter: ([s for s in instances('FieldVm') if s.eid == 'FieldVm:s
 -- the namespace must be a plain word for the lexer, so no hyphen) and the entity `Link:page` {ns, build} (`build` is the seat's `build_id`, the text `/ui/conf` says), which the page's link pack
 -- (apps/barest.c1f/link_view.c1f) reads. The page cannot name itself. The bytes are SQLite's (`randomblob`): a receipt like any `sql()`, asked for this route only.
 Request.fv_rows getter: sql("SELECT 'p' || lower(hex(randomblob(4))) AS p") if this.route == '/ui/fieldvm' and this.fv_seat != None and this.fv_seat.snapshot != None else None
-Request.fv_page getter: prop(this.fv_rows[0], 'p') if this.fv_rows != None and len(this.fv_rows) > 0 else None
-Request.fv_body getter: {'packs': prop(this.fv_seat.snapshot, 'packs'), 'entities': concat(prop(this.fv_seat.snapshot, 'entities'), [{'eid': 'Link:page', 'cls': 'Link', 'props': {'ns': this.fv_page, 'build': this.c_build}}]), 'page': this.fv_page} if this.fv_seat != None and this.fv_seat.snapshot != None and this.fv_page != None else None
+Request.fv_page getter: ${this.fv_rows[0]}['p'] if this.fv_rows != None and len(this.fv_rows) > 0 else None
+Request.fv_body getter: {'packs': ${this.fv_seat.snapshot}['packs'], 'entities': concat(${this.fv_seat.snapshot}['entities'], [{'eid': 'Link:page', 'cls': 'Link', 'props': {'ns': this.fv_page, 'build': this.c_build}}]), 'page': this.fv_page} if this.fv_seat != None and this.fv_seat.snapshot != None and this.fv_page != None else None
 -- THE ACTIVE WINDOW (#1143, the field view pack apps/field.c1f/field_view.c1f, operator 2026-11-14): `GET /ui/fieldvm/active?m=<n>` answers
 -- `{nodes: [{id, cls, updated, parent}], n_total, hidden, m}`: the `m` entities written most recently (the `updated` column, newest first) whose class is not hidden, and how many there are in all.
 -- It reads the COLUMNS `k`, `cls`, `updated` of `c_field` and never a body, so an entity nobody loaded stays unloaded. `parent` is the nearest colon-prefix owner that is in the window too
 -- (null otherwise): the ownership edge. `m` named but not a number of at least 1 is a 400; a request that names none gets `Setting:map.window` (default 150); the page names it from `field_window`, and the setting (packs/settings.c1f), the live owner of that number (the launch fact `field_window` is its default). The hidden classes are the live setting `Setting:map.hidden` (default: the launch fact
 -- `map_hidden` (a JSON list, or comma-separated text); without it: Message, SemText, Span, Request, DomNode, View, Fetch, Setting (operator 2026-11-14).
 Request.fa_m_q getter: num(concat([r[1] for r in this.qpairs if r[0] == 'm'], [''])[0])
-Request.fa_m getter: this.fa_m_q if len([r for r in this.qpairs if r[0] == 'm']) > 0 else num(prop('Setting:map.window', 'current'))
-Request.fa_hide_fact getter: prop(this.facts, 'map_hidden')
-Request.fa_hidden getter: [strip(x) for x in prop('Setting:map.hidden', 'current')] if prop('Setting:map.hidden', 'current') is List else ([strip(x) for x in this.fa_hide_fact] if this.fa_hide_fact is List else words(replace(str(this.fa_hide_fact), ',', ' '))) if this.fa_hide_fact != None else ['Message', 'SemText', 'Span', 'Request', 'DomNode', 'View', 'Fetch', 'Setting']
+Request.fa_m getter: this.fa_m_q if len([r for r in this.qpairs if r[0] == 'm']) > 0 else num(${'Setting:map.window'}['current'])
+Request.fa_hide_fact getter: ${this.facts}['map_hidden']
+Request.fa_hidden getter: [strip(x) for x in ${'Setting:map.hidden'}['current']] if ${'Setting:map.hidden'}['current'] is List else ([strip(x) for x in this.fa_hide_fact] if this.fa_hide_fact is List else words(replace(str(this.fa_hide_fact), ',', ' '))) if this.fa_hide_fact != None else ['Message', 'SemText', 'Span', 'Request', 'DomNode', 'View', 'Fetch', 'Setting']
 -- the hidden EID PREFIXES (the launch fact `map_hidden_prefix`, a JSON list or comma text; default `Chat:message:`, `Chat:session:`, `Chat:main` (operator 2026-11-14 and 11-14 later: a session header is not an entity of the field either)): a chat message and its body have `cls = Chat` (the eid's class),
 -- so the class list cannot hide them; the prefix is matched on the `k` column, never a body, and also behind any leading `<name>::` namespace (the chat packs write `membrane::Chat:message:<id>...`: a store holds both forms)
-Request.fa_pre_fact getter: prop(this.facts, 'map_hidden_prefix')
-Request.fa_prefixes getter: [strip(x) for x in prop('Setting:map.hidden_prefix', 'current')] if prop('Setting:map.hidden_prefix', 'current') is List else ([strip(x) for x in this.fa_pre_fact] if this.fa_pre_fact is List else words(replace(str(this.fa_pre_fact), ',', ' '))) if this.fa_pre_fact != None else ['Chat:message:', 'Chat:session:', 'Chat:main']
+Request.fa_pre_fact getter: ${this.facts}['map_hidden_prefix']
+Request.fa_prefixes getter: [strip(x) for x in ${'Setting:map.hidden_prefix'}['current']] if ${'Setting:map.hidden_prefix'}['current'] is List else ([strip(x) for x in this.fa_pre_fact] if this.fa_pre_fact is List else words(replace(str(this.fa_pre_fact), ',', ' '))) if this.fa_pre_fact != None else ['Chat:message:', 'Chat:session:', 'Chat:main']
 Request.fa_ok getter: this.fa_m != None and this.fa_m >= 1
 Request.fa_rows getter: sql("WITH w AS (SELECT k, cls, updated FROM c_field WHERE cls NOT IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM json_each(?) WHERE substr(k, 1 + (CASE WHEN instr(k, '::') > 1 AND instr(substr(k, 1, instr(k, '::') - 1), ':') = 0 THEN instr(k, '::') + 1 ELSE 0 END), length(value)) = value) ORDER BY updated DESC, k LIMIT ?) SELECT w.k AS id, w.cls AS cls, w.updated AS updated, (SELECT p.k FROM w p WHERE p.k != w.k AND substr(w.k, 1, length(p.k) + 1) = p.k || ':' ORDER BY length(p.k) DESC LIMIT 1) AS parent FROM w ORDER BY w.updated DESC, w.k", this.fa_hidden, this.fa_prefixes, this.fa_m) if this.fa_ok else None
 Request.fa_total getter: sql("SELECT count(*) AS n FROM c_field WHERE cls NOT IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM json_each(?) WHERE substr(k, 1 + (CASE WHEN instr(k, '::') > 1 AND instr(substr(k, 1, instr(k, '::') - 1), ':') = 0 THEN instr(k, '::') + 1 ELSE 0 END), length(value)) = value)", this.fa_hidden, this.fa_prefixes) if this.fa_ok else None
 Request.fa_answer getter:
   WHEN not this.fa_ok: {'status': 400, 'body': {'error': {'message': 'm (the number of entities, at least 1) is required', 'type': 'membrane_error'}}}
   ELSE WHEN this.fa_rows == None or this.fa_total == None: None
-  ELSE: {'status': 200, 'body': {'nodes': this.fa_rows, 'n_total': prop(this.fa_total[0], 'n'), 'hidden': this.fa_hidden, 'hidden_prefixes': this.fa_prefixes, 'm': this.fa_m}}
+  ELSE: {'status': 200, 'body': {'nodes': this.fa_rows, 'n_total': ${this.fa_total[0]}['n'], 'hidden': this.fa_hidden, 'hidden_prefixes': this.fa_prefixes, 'm': this.fa_m}}
 
 -- THE EDGE LIST OF ONE ENTITY (operator 2026-11-14: the card's "near" is replaced by the edges): `GET /ui/fieldvm/edges?eid=<eid>&n=<cap>` answers `{eid, owner, children, refs}`: the owner (the nearest colon-prefix
 -- ancestor that exists: the key column), the direct children (the key column's range; at most `n`, the view's window), and the entities this one points at by a `$ref` value (the ONE row's body; a ref to an entity
@@ -114,7 +114,7 @@ Request.fn_answer getter:
   WHEN this.fn_eid == '': {'status': 400, 'body': {'error': {'message': 'eid is required', 'type': 'membrane_error'}}}
   ELSE WHEN this.fn_row == None or this.fn_props == None: None
   ELSE WHEN len(this.fn_row) == 0: {'status': 404, 'body': {'error': {'message': 'no such entity', 'type': 'membrane_error'}}}
-  ELSE: {'status': 200, 'body': {'eid': this.fn_eid, 'cls': prop(this.fn_row[0], 'cls'), 'props': this.fn_props}}
+  ELSE: {'status': 200, 'body': {'eid': this.fn_eid, 'cls': ${this.fn_row[0]}['cls'], 'props': this.fn_props}}
 
 Request.r_fieldvm getter:
   WHEN this.route == '/ui/fieldvm/entity': this.fn_answer

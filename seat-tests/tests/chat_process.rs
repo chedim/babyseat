@@ -429,7 +429,7 @@ fn a_failed_runs_whole_stderr_reaches_the_response_and_the_next_banner() {
 #[test]
 fn a_banner_without_text_still_runs_the_turn_and_the_system_prompt_shows_the_banner_error() {
     // the model's pack leaves Banner.text null (it reads an entity that is not there): the message must not sit queued
-    let pack = "PACK nulltext 1\nIMPORT default_banner 1\nBanner.text getter: prop('Missing:one', 'text')\n";
+    let pack = "PACK nulltext 1\nIMPORT default_banner 1\nBanner.text getter: ${'Missing:one'}['text']\n";
     let (mut run, port, dir) = fake_seat_with("bannernull", &[], &[("nulltext.c1f", pack)]);
     let id = send(port, "still there");
     let sys = banner_of(&dir, "still there");
@@ -879,7 +879,7 @@ fn a_clifflet_reads_and_joins_several_entities_in_one_call_and_its_errors_say_wh
     let (mut run, port) = start("cliff1", MCP_PACKS, &[]);
     for (n, v) in [("a", 3), ("b", 4), ("c", 5)] { put(port, &format!("Note:{n}"), "n", json!(v)); }
     put(port, "Tag:x", "of", json!("Note:b"));
-    let (t, e) = cliff(port, "ns = [e.n for e in instances('Note')]\nbig = [e.eid for e in instances('Note') if e.n > 3]\n{'count': len(ns), 'sum_big': len(big), 'big': big, 'tagged': [prop(prop(g.of, 'eid'), 'n') for g in instances('Tag')]}");
+    let (t, e) = cliff(port, "ns = [e.n for e in instances('Note')]\nbig = [e.eid for e in instances('Note') if e.n > 3]\n{'count': len(ns), 'sum_big': len(big), 'big': big, 'tagged': [${${g.of}['eid']}['n'] for g in instances('Tag')]}");
     assert!(!e, "{t}");
     let v: J = serde_json::from_str(&t).unwrap_or_else(|e| panic!("{e}: {t}"));
     assert_eq!((v["count"].clone(), v["big"].clone()), (json!(3), json!(["Note:b", "Note:c"])), "{t}");
@@ -973,7 +973,7 @@ fn a_command_run_again_with_the_same_id_runs_and_its_receipt_is_new_by_its_times
 
 #[test]
 fn a_banner_change_returns_reactions_that_do_not_grow_with_the_finished_messages() {
-    let pack = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'n=' + str(prop('Note:x', 'n'))\n";
+    let pack = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'n=' + str(${'Note:x'}['n'])\n";
     let (mut run, port, _dir) = fake_seat_with("reactfinished", &[], &[("mine.c1f", pack)]);
     put(port, "Note:x", "n", json!(0));
     let size = |port: u16, n: i64| -> (usize, String) { let (t, e) = put(port, "Note:x", "n", json!(n)); assert!(!e, "{t}"); (t.len(), t) };
@@ -1493,18 +1493,18 @@ fn a_timed_out_commands_result_props_are_errors_that_tell_the_remedy_and_the_par
     put_wait(port, "Command:t2", "run", json!({"id": "t2", "cmd": ["sh", "-c", "echo partial-line; sleep 62.5"], "timeout_s": 1}), 30.0);
     let want = "Command:t2 timed out after 1 s (killed); start it again with a bigger timeout_s, e.g. run = {id, cmd, timeout_s: 600}";
     for p in ["output", "ok", "rc"] {
-        let (t, e) = cliff(port, &format!("prop('Command:t2', '{p}')"));
+        let (t, e) = cliff(port, &format!("${{'Command:t2'}}['{p}']"));
         assert!(e && t == format!("Error: {want}"), "{p}: {t}");
     }
     // entity_read shows the kind too, and says it is an error
     let (t, e) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "output"}));
     assert!(e && t == format!("Error: {want}"), "entity_read: {t}");
     // a model-style getter over it keeps the Error and the reason
-    let pack = "PACK shx 1\nSh.out getter: prop('Command:t2', 'output')\nSh.len getter: this.out + '!'\n";
+    let pack = "PACK shx 1\nSh.out getter: ${'Command:t2'}['output']\nSh.len getter: this.out + '!'\n";
     put(port, "Pack:shx", "text", json!(pack));
     wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:shx", "prop": "state"})).0 == "loaded").then_some(()));
     put(port, "Sh:a", "x", json!(1));
-    let (t, e) = cliff(port, "prop('Sh:a', 'len')");
+    let (t, e) = cliff(port, "${'Sh:a'}['len']");
     assert!(e && t.contains(want), "the null passes through the getters: {t}");
     let (p, _) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "partial_output"}));
     assert!(p.contains("partial-line"), "{p}");
@@ -1519,8 +1519,8 @@ fn a_command_that_finishes_in_time_is_untouched_by_its_timeout() {
     let r = receipt_of(&t);
     assert_eq!((r["status"].clone(), r["rc"].clone(), r["ok"].clone(), r["timeout_s"].clone()), (json!("ok"), json!(0), json!(true), json!(30)), "{t}");
     assert!(r["killed"].is_null() || r["killed"] == json!(false), "{t}");
-    assert_eq!(cliff(port, "prop('Command:t3', 'output')").0.trim(), "fine");
-    assert_eq!(cliff(port, "prop('Command:t3', 'ok')").0, "True");
+    assert_eq!(cliff(port, "${'Command:t3'}['output']").0.trim(), "fine");
+    assert_eq!(cliff(port, "${'Command:t3'}['ok']").0, "True");
     assert!(terminate(&mut run));
 }
 
@@ -1617,7 +1617,7 @@ fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_
     assert!(!e, "{t}");
     let rel = wait("the related rows", || { let t = call(port, "entity_read", json!({"spec": &body, "prop": "related"})).0; if t.contains(&rbody) { Some(t) } else { None } });
     assert!(rel.contains("\"shared\":6") && rel.contains("Final answer to"), "{rel}");
-    let (t, e) = call(port, "run_cliff", json!({"code": format!("[r['semtext'] for r in prop('{body}', 'related')]")}));
+    let (t, e) = call(port, "run_cliff", json!({"code": format!("[r['semtext'] for r in ${{'{body}'}}['related']]")}));
     assert!(!e && t.contains(&rbody), "{t}");
     // a tool's result is NOT tokenized: the only SemTexts of the message are the two bodies
     let (q, _) = call(port, "entity_query", json!({"q": "kind:SemText & name~:membrane::Chat:main:message:"}));
@@ -1871,7 +1871,7 @@ fn an_unknown_chat_auth_is_refused_with_the_two_values_and_runs_nothing() {
 // ---- the size of an entity_write reply, design B2 of docs/reply-size.md (#1143, operator 2026-11-14) ---------------------------------------
 // The byte bounds below are TEST-ONLY generous bounds from the measured B2 numbers of the doc (Keep with 10 running turns about 1.2 KB, mention about 2.3-2.7 KB);
 // they are not a budget the product enforces.
-const KEEP_PACK: &str = "PACK mine 1\nIMPORT default_banner 1\nKeep.summary getter: 'keep: ' + head(str(this.line), 40)\nKeep.chars getter: len(str(this.line))\nBanner.keeps getter: [prop('Keep:x', 'line')]\nBanner.text getter: 'keeps: ' + str(prop('Keep:x', 'line'))\nBanner.alert getter: None('no alert for ' + head(str(prop('Keep:x', 'line')), 6))\n";
+const KEEP_PACK: &str = "PACK mine 1\nIMPORT default_banner 1\nKeep.summary getter: 'keep: ' + head(str(this.line), 40)\nKeep.chars getter: len(str(this.line))\nBanner.keeps getter: [${'Keep:x'}['line']]\nBanner.text getter: 'keeps: ' + str(${'Keep:x'}['line'])\nBanner.alert getter: None('no alert for ' + head(str(${'Keep:x'}['line']), 6))\n";
 
 /// the reply of one write on the lines it has: -> (reactions array, the `other changes` line, the whole text)
 fn rx_lines(t: &str) -> (Vec<J>, Option<String>) {

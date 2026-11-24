@@ -212,8 +212,8 @@ binding `cliffvm:src/web.rs`) and runs in the babyseat client (`membrane/apps/ba
     the FOR is reached (it sees what the writes above it made); nested blocks; an item that is an entity binds as
     one (`FOR t IN referencing(this, 'server'):` then `t.listed = ...`); None runs zero times; anything else that is
     not a list stops the setter with a `refused` receipt;
-  - in any expression, a list: `FOR b IN this.listed: prop(b, 'title')` is `[prop(b, 'title') for b in this.listed]`.
-- **`prop(x, name)`** reads a dict's key and follows an entity's id (`prop(this.server, 'state')`), tracked like
+  - in any expression, a list: `FOR b IN this.listed: ${b}['title']` is `[${b}['title'] for b in this.listed]`.
+- **`${x}[name]`** reads a dict's key and follows an entity's id (`${this.server}['state']`), tracked like
   `x.name`; `this.eid` is an entity's id (a reference is written as an id, never as an entity).
 - **`x[i]`** (2026-11-12): a list by position (`xs[0]`, `xs[-1]` from the end), a dict by key (`d['a']`), an entity by property
   name (`e['name']`, the same as `e.name`). A miss is none, never an error, and a none base stays none. No slices (use

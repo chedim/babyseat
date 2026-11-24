@@ -25,12 +25,12 @@ Watchdog.alert_line getter:
   al = [a.text for a in instances('Alert') if a.ack != True and (a.text or '') != '']
   'CONTINUITY ALERT (Alert:x.ack = true when handled): ' + join(al, ' | ') if len(al) > 0 else ''
 -- the previous turn is the one the chat names (`last_turn`, written by chat_turn.c1f when a turn ends); its message and its response are read by reference
-Watchdog.last_turn getter: prop('membrane::Chat:' + str(this.chat or 'main'), 'last_turn')
+Watchdog.last_turn getter: ${'membrane::Chat:' + str(this.chat or 'main')}['last_turn']
 Watchdog.last_exchange getter:
   t = this.last_turn
   m = replace(t, ':turn', '')
-  u = prop(m, 'text')
-  a = prop(t + ':response', 'text')
+  u = ${m}['text']
+  a = ${t + ':response'}['text']
   'LAST EXCHANGE: user said "' + head(u or '?', 300) + '" / I answered "' + head(a or '(no answer: that turn ended without one)', 300) + '"' if t != None else ''
 Watchdog.banner getter: join([l for l in [this.alert_line, this.pin_line, this.last_exchange] if (l or '') != ''], '\n')
 
@@ -38,30 +38,30 @@ Watchdog.banner getter: join([l for l in [this.alert_line, this.pin_line, this.l
 Watchdog.checkpoint on-setter snap:
   ALWAYS:
     prev = this.last_snap
-    old_pins = prop(prev, 'pins') or []
-    old_words = prop(prev, 'words') or ''
-    new_words = prop(Banner:work, 'words') or ''
-    gone = [p for p in old_pins if prop(p, 'text') == None and prop(p, 'done') != True]
+    old_pins = ${prev}['pins'] or []
+    old_words = ${prev}['words'] or ''
+    new_words = ${Banner:work}['words'] or ''
+    gone = [p for p in old_pins if ${p}['text'] == None and ${p}['done'] != True]
     FOR p IN gone:
       ('Alert:vanished-' + replace(replace(p, ':', '_'), '/', '_')).ack = False
       ('Alert:vanished-' + replace(replace(p, ':', '_'), '/', '_')).text = 'pin vanished without done: ' + p
-    wipe_old = prop(Alert:wipe, 'text') or ''
+    wipe_old = ${Alert:wipe}['text'] or ''
     wipe_text = ('banner notes shrank from ' + str(len(old_words)) + ' to ' + str(len(new_words)) + ' chars; the old notes are ' + str(prev) + '.words') if (len(old_words) > 80 and len(new_words) * 2 < len(old_words)) else wipe_old
     -- a new text is a new loss: it is raised again even if the last one was acked
-    Alert:wipe.ack = False if wipe_text != wipe_old else (prop(Alert:wipe, 'ack') or False)
+    Alert:wipe.ack = False if wipe_text != wipe_old else (${Alert:wipe}['ack'] or False)
     Alert:wipe.text = wipe_text
     ('Snap:s' + str(this.checkpoint)) = Snap(at: this.checkpoint, pins: [p.eid for p in instances('Pin') if p.done != True and p.text != None], words: new_words, prev: prev)
     this.last_snap = 'Snap:s' + str(this.checkpoint)
     this.beat = this.checkpoint
     -- the snapshot three back goes (the new one, the last one and the one before it stay)
-    stale = [s for s in [prop(prop(prev, 'prev'), 'prev')] if s != None]
+    stale = [s for s in [${${prev}['prev']}['prev']] if s != None]
     FOR s IN stale:
       ('' + s) = None
       this.pruned = s
 
 -- the beat: one schedule of its own, seeded once at start (a schedule that was set is kept)
 Boot.started on-setter seed-watchdog:
-  WHEN prop('Cron:watchdog', 'schedule') == None:
+  WHEN ${'Cron:watchdog'}['schedule'] == None:
     Cron:watchdog = Cron(schedule: '@every 10m', job: 'watchdog')
 Cron.fired on-setter watchdog-beat:
   WHEN this.job == 'watchdog':

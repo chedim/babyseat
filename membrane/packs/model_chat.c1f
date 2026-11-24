@@ -22,7 +22,7 @@ ModelChat.add on-setter model-chat-add:
     cap = ([b.mc_cap for b in instances('Boot')] or [65536])[0]
     mark = '[…earlier text dropped]\n'
     now = clock
-    stamp = '[at ' + prop(localtime(now), 'clock') + (', ' + clip(str(now - this.last_at), 7) + 's after the entry before' if this.last_at != None else '') + ']\n'
+    stamp = '[at ' + ${localtime(now)}['clock'] + (', ' + clip(str(now - this.last_at), 7) + 's after the entry before' if this.last_at != None else '') + ']\n'
     this.last_at = now
     whole = str(this.text or '') + stamp + str(this.add)
     bare = len(str({'t': ''}))

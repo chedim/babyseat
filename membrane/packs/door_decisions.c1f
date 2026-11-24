@@ -129,7 +129,7 @@ Request.dm_found getter: [e for e in concat(instances('Decision'), instances('Go
 -- the two tables are the Python seat's (a store made by cliffvm has neither): the query of a missing table fails and the request would wait for ever, so the
 -- tables are asked for first and a store without them has an empty history (the 0.7 Python rows are not migrated: only the chat history is)
 Request.dm_tabs getter: sql("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('c_entity_deltas', 'c_relations')") if this.dm_route in ['history', 'chat_of'] and this.dm_spec != '' else None
-Request.dm_tab_names getter: [prop(r, 'name') for r in this.dm_tabs] if this.dm_tabs != None else None
+Request.dm_tab_names getter: [${r}['name'] for r in this.dm_tabs] if this.dm_tabs != None else None
 Request.dm_hist_q getter:
   WHEN this.dm_route != 'history' or this.dm_spec == '': None
   ELSE WHEN this.dm_tab_names == None: None
@@ -144,10 +144,10 @@ Request.dm_hist getter:
   WHEN this.dm_spec == '': {'ok': False, 'error': 'no entity matches ' + "''"}
   ELSE WHEN this.dm_hist_q == None or this.dm_rel_q == None: None
   ELSE WHEN len(this.dm_found) == 0 and len(this.dm_hist_q) == 0 and len(this.dm_rel_q) == 0: {'ok': False, 'error': 'no entity matches ' + "'" + this.dm_spec + "'"}
-  ELSE: {'ok': True, 'eid': this.dm_spec, 'cls': ([e.cls for e in this.dm_found] or [None])[0], 'properties': {}, 'changes': [(None if j is Error else j) for j in [json(prop(r, 'd')) for r in this.dm_hist_q]], 'relations': this.dm_rels}
+  ELSE: {'ok': True, 'eid': this.dm_spec, 'cls': ([e.cls for e in this.dm_found] or [None])[0], 'properties': {}, 'changes': [(None if j is Error else j) for j in [json(${r}['d']) for r in this.dm_hist_q]], 'relations': this.dm_rels}
 
 -- an item's chat: the Messages whose refers-to relation names the item
-Request.dm_rels getter: [(None if j is Error else j) for j in [json(prop(r, 'd')) for r in (this.dm_rel_q or [])]]
+Request.dm_rels getter: [(None if j is Error else j) for j in [json(${r}['d']) for r in (this.dm_rel_q or [])]]
 Request.dm_msg_ids getter: [x['subj'] for x in this.dm_rels if x['obj'] == this.dm_spec and x['rel'] == 'refers-to' and x['superseded'] != True]
 Request.dm_chat getter:
   WHEN this.dm_spec == '': {'ok': False, 'error': 'no entity matches ' + "''"}
@@ -161,18 +161,18 @@ Request.dm_body getter:
     None if db is Error else db
   ELSE: None
 Request.dm_obj getter: this.dm_body != None and startswith(str(this.dm_body), '{')
-Request.dm_card_id getter: str(prop(this.dm_body, 'card') or '') if this.dm_obj else ''
+Request.dm_card_id getter: str(${this.dm_body}['card'] or '') if this.dm_obj else ''
 Request.dm_c getter: ([d for d in instances('Decision') if d.eid == this.dm_card_id] or [None])[0]
-Request.dm_v getter: prop(this.dm_body, 'value')
-Request.dm_conv getter: str(prop(this.dm_body, 'conv') or '') or None
-Request.dm_msg getter: str(prop(this.dm_body, 'message') or '') or None
-Request.dm_work getter: prop(this.dm_body, 'work') if str(prop(this.dm_body, 'work')) in ['True', 'False', 'true', 'false'] else None
+Request.dm_v getter: ${this.dm_body}['value']
+Request.dm_conv getter: str(${this.dm_body}['conv'] or '') or None
+Request.dm_msg getter: str(${this.dm_body}['message'] or '') or None
+Request.dm_work getter: ${this.dm_body}['work'] if str(${this.dm_body}['work']) in ['True', 'False', 'true', 'false'] else None
 -- what is refused before anything is written
 Request.dm_refused getter:
   WHEN this.dm_write and this.authed != True: this.unauthorized
   ELSE WHEN this.dm_write and not this.dm_obj: {'status': 400, 'body': {'error': 'a JSON object body is required'}}
   ELSE WHEN this.dm_write and this.dm_c == None: {'status': 400, 'body': {'error': 'no Decision card ' + "'" + this.dm_card_id + "'"}}
-  ELSE WHEN this.dm_route == 'chat' and strip(str(prop(this.dm_body, 'chat') or '')) == '': {'status': 400, 'body': {'error': 'chat required'}}
+  ELSE WHEN this.dm_route == 'chat' and strip(str(${this.dm_body}['chat'] or '')) == '': {'status': 400, 'body': {'error': 'chat required'}}
   ELSE: None
 -- one id per request (a restart restarts the Request numbers; the card's log outlives it)
 Request.dm_ask getter: True if this.dm_write and this.dm_refused == None else None
@@ -183,31 +183,31 @@ Request.dm_plan getter:
   WHEN this.dm_ask != True or this.dm_rid == None: None
   ELSE WHEN this.dm_route == 'answer': {'card': this.dm_card_id, 'prop': 'answer', 'value': {'id': this.dm_rid, 'by': this.sub, 'value': this.dm_v, 'conv': this.dm_conv, 'message': this.dm_msg, 'work': this.dm_work}}
   ELSE WHEN this.dm_route == 'drop': {'card': this.dm_card_id, 'prop': 'drop', 'value': {'id': this.dm_rid, 'by': this.sub}}
-  ELSE WHEN not this.dm_cchat: {'card': this.dm_card_id, 'prop': 'chat', 'value': strip(str(prop(this.dm_body, 'chat')))}
+  ELSE WHEN not this.dm_cchat: {'card': this.dm_card_id, 'prop': 'chat', 'value': strip(str(${this.dm_body}['chat']))}
   ELSE: {'card': this.dm_card_id, 'prop': None}
 Request.dm_plan on-setter dm-answer:
-  WHEN prop(this.dm_plan, 'prop') == 'answer' and this.dm_sent == None:
+  WHEN ${this.dm_plan}['prop'] == 'answer' and this.dm_sent == None:
     this.dm_sent = True
-    (prop(this.dm_plan, 'card')).answer = prop(this.dm_plan, 'value')
+    (${this.dm_plan}['card']).answer = ${this.dm_plan}['value']
 Request.dm_plan on-setter dm-drop:
-  WHEN prop(this.dm_plan, 'prop') == 'drop' and this.dm_sent == None:
+  WHEN ${this.dm_plan}['prop'] == 'drop' and this.dm_sent == None:
     this.dm_sent = True
-    (prop(this.dm_plan, 'card')).drop = prop(this.dm_plan, 'value')
+    (${this.dm_plan}['card']).drop = ${this.dm_plan}['value']
 Request.dm_plan on-setter dm-chat:
-  WHEN prop(this.dm_plan, 'prop') == 'chat' and this.dm_sent == None:
+  WHEN ${this.dm_plan}['prop'] == 'chat' and this.dm_sent == None:
     this.dm_sent = True
-    (prop(this.dm_plan, 'card')).chat = prop(this.dm_plan, 'value')
+    (${this.dm_plan}['card']).chat = ${this.dm_plan}['value']
 
 -- the receipt: the card's own log, this request's id
 Request.dm_got getter:
   WHEN this.dm_rid == None or this.dm_c == None: None
-  ELSE WHEN this.dm_route == 'drop': ([r for r in (this.dm_c.drop_log or []) if prop(r, 'id') == this.dm_rid] or [None])[0]
-  ELSE: ([r for r in (this.dm_c.answer_log or []) if prop(r, 'id') == this.dm_rid] or [None])[0]
+  ELSE WHEN this.dm_route == 'drop': ([r for r in (this.dm_c.drop_log or []) if ${r}['id'] == this.dm_rid] or [None])[0]
+  ELSE: ([r for r in (this.dm_c.answer_log or []) if ${r}['id'] == this.dm_rid] or [None])[0]
 Request.dm_receipt getter:
   WHEN this.dm_got == None: None
-  ELSE WHEN prop(this.dm_got, 'ok') != True: {'status': 409 if prop(this.dm_got, 'conflict') == True else 400, 'body': {'error': prop(this.dm_got, 'error')}}
+  ELSE WHEN ${this.dm_got}['ok'] != True: {'status': 409 if ${this.dm_got}['conflict'] == True else 400, 'body': {'error': ${this.dm_got}['error']}}
   ELSE WHEN this.dm_route == 'drop': {'status': 200, 'body': {'ok': True, 'card': this.dm_c.dm_card}}
-  ELSE: {'status': 200, 'body': {'id': prop(this.dm_got, 'id'), 'ok': True, 'value': prop(this.dm_got, 'value'), 'card': this.dm_c.dm_card}}
+  ELSE: {'status': 200, 'body': {'id': ${this.dm_got}['id'], 'ok': True, 'value': ${this.dm_got}['value'], 'card': this.dm_c.dm_card}}
 Request.dm_cchat getter: this.dm_c.chat if this.dm_c != None else None
 Request.dm_chat_reply getter:
   WHEN not this.dm_cchat: None

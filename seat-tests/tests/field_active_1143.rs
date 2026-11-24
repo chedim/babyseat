@@ -100,7 +100,10 @@ fn a_write_between_the_two_reads_does_not_break_the_newest_four_check() {
     let (_, a) = active(run.port, "?m=4");
     put(run.port, "Env:bg"); // what the seat's background entities do between the two requests
     let (_, all) = active(run.port, "?m=100");
-    assert_eq!(ids(&all)[0], "Env:bg", "{all}");
+    // the write is recent: it comes before every row this test left untouched (a background entity of the seat, such as the components scan's Command, may have been written after it)
+    let order = ids(&all);
+    let at = order.iter().position(|x| x == "Env:bg").unwrap_or_else(|| panic!("Env:bg is listed: {all}"));
+    assert!(order.iter().enumerate().all(|(i, x)| !x.starts_with("Zed:") || i > at), "Env:bg is newer than the untouched Zed rows: {all}");
     newest_four_hold(&a, &all);
 }
 

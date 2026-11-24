@@ -25,24 +25,24 @@ Request.o_state getter: this.route in ['/membrane/seat', '/membrane/seat/pause',
 
 -- ---- the presence entity's facts ------------------------------------------------------------------------------------------------
 Request.st_seat getter: ([s for s in instances('Seat') if s.eid == 'membrane::presence'] or [None])[0]
-Request.st_state getter: prop(this.st_seat, 'state') or {}
-Request.st_events getter: prop(this.st_seat, 'events') or []
-Request.st_self getter: prop(this.st_state, 'self') or {}
+Request.st_state getter: ${this.st_seat}['state'] or {}
+Request.st_events getter: ${this.st_seat}['events'] or []
+Request.st_self getter: ${this.st_state}['self'] or {}
 Request.st_off getter: ([b.nerve_pause_off for b in this.boots] or [False])[0] == True
-Request.st_paused getter: prop(this.st_state, 'paused') == True and not this.st_off
+Request.st_paused getter: ${this.st_state}['paused'] == True and not this.st_off
 
 -- ---- the answers --------------------------------------------------------------------------------------------------------------------
 Request.st_seat_body getter: {'state': this.st_state, 'events': this.st_events, 'controls': ['paused', 'loops_max', 'self', 'accept', 'self_name']} if this.st_seat != None else {}
 Request.st_pause_body getter: {'paused': this.st_paused, 'enabled': not this.st_off}
 Request.st_state_body getter: {'mode': 'DEV', 'paused': this.st_paused, 'seat': this.st_state}
-Request.st_card_mode getter: prop(this.st_self, 'mode') or 'off'
-Request.st_asleep getter: prop(this.st_self, 'asleep') == True
-Request.st_energy getter: prop(this.st_self, 'energy')
-Request.st_pull getter: prop(this.st_self, 'pull')
-Request.st_limiting getter: prop(this.st_self, 'limiting')
-Request.st_cap getter: prop(this.st_self, 'record_cap')
+Request.st_card_mode getter: ${this.st_self}['mode'] or 'off'
+Request.st_asleep getter: ${this.st_self}['asleep'] == True
+Request.st_energy getter: ${this.st_self}['energy']
+Request.st_pull getter: ${this.st_self}['pull']
+Request.st_limiting getter: ${this.st_self}['limiting']
+Request.st_cap getter: ${this.st_self}['record_cap']
 Request.st_awake getter: this.st_card_mode != 'off' and not this.st_asleep
-Request.st_name getter: prop(this.st_state, 'self_name') or 'Blurp'
+Request.st_name getter: ${this.st_state}['self_name'] or 'Blurp'
 Request.st_card_body getter: {'name': this.st_name, 'level': 0, 'rung_name': '', 'next': [], 'mode': this.st_card_mode, 'awake': this.st_awake, 'last_activity': None, 'generated': clock, 'energy': this.st_energy, 'asleep': this.st_asleep, 'pull': this.st_pull, 'limiting': this.st_limiting, 'record_cap': this.st_cap}
 
 -- the allowed methods (the door answers 405 + allow); the not-ported routes answer 501 whatever the method (None: the family answers)
@@ -53,8 +53,8 @@ Request.m_state getter:
   ELSE: ['GET']
 
 -- ---- the control writes: validate, then record the ask on the presence entity ----------------------------------------------------------
-Request.st_pause_ok getter: this.route == '/membrane/seat/pause' and (prop(this.jbody, 'paused') == True or prop(this.jbody, 'paused') == False)
-Request.st_ctl_ok getter: this.route == '/membrane/seat/control' and len([k for k in ['paused', 'loops_max', 'self', 'accept', 'self_name'] if prop(this.jbody, k) != None]) > 0
+Request.st_pause_ok getter: this.route == '/membrane/seat/pause' and (${this.jbody}['paused'] == True or ${this.jbody}['paused'] == False)
+Request.st_ctl_ok getter: this.route == '/membrane/seat/control' and len([k for k in ['paused', 'loops_max', 'self', 'accept', 'self_name'] if ${this.jbody}[k] != None]) > 0
 Request.st_by getter: 'user:' + str(this.sub)
 Request.st_ask getter: {'id': this.eid, 'by': this.st_by, 'body': this.jbody} if this.method == 'POST' and this.authed == True and this.st_seat != None and (this.st_pause_ok or this.st_ctl_ok) else None
 Request.st_ask on-setter st-control:
@@ -78,10 +78,10 @@ Request.st_quota_body getter: {'now': clock, 'paused': [], 'probe_s': this.st_pr
 Request.st_zero getter: {'calls': 0, 'input': 0, 'output': 0}
 Request.st_win getter: {'total': this.st_zero, 'minds': {}, 'models': {}}
 Request.st_split getter: {'cache_read': 0, 'cache_write': 0, 'input': 0, 'output': 0, 'effective': 0}
-Request.st_stats_body getter: {'now': clock, 'midnight': clock - 3600 * prop(localtime(clock), 'hour') - 60 * prop(localtime(clock), 'minute'), 'today': this.st_win, 'hour': this.st_win, 'claude': {'answers': 0, 'steps': 0, 'total': this.st_split, 'per_answer': this.st_split, 'first_step': this.st_split, 'later_step': this.st_split}, 'paused': []}
+Request.st_stats_body getter: {'now': clock, 'midnight': clock - 3600 * ${localtime(clock)}['hour'] - 60 * ${localtime(clock)}['minute'], 'today': this.st_win, 'hour': this.st_win, 'claude': {'answers': 0, 'steps': 0, 'total': this.st_split, 'per_answer': this.st_split, 'first_step': this.st_split, 'later_step': this.st_split}, 'paused': []}
 -- MINDS (fieldpulse.minds(), the orbs' chat views): no loop session, no thinker log, no dream (lanes.py: the answer of a seat with no pulse)
 Request.st_minds_body getter: {'loops': {}, 'thinker': [], 'dreamer': []}
-Request.st_resume_model getter: strip(str(prop(this.jbody, 'model') or ''))
+Request.st_resume_model getter: strip(str(${this.jbody}['model'] or ''))
 Request.r_state getter:
   WHEN this.route == '/membrane/quota': {'status': 200, 'body': this.st_quota_body}
   ELSE WHEN this.route == '/membrane/stats': {'status': 200, 'body': this.st_stats_body}

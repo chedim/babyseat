@@ -46,15 +46,15 @@ ChatMessage.auth_env getter:
   ELSE: ['env', '-u', 'ANTHROPIC_API_KEY', '-u', 'ANTHROPIC_AUTH_TOKEN', '-u', 'CLAUDE_CODE_USE_BEDROCK', '-u', 'CLAUDE_CODE_USE_VERTEX', '-u', 'CLAUDE_CODE_USE_FOUNDRY'] if this.auth == 'login' else ['env', '-u', 'ANTHROPIC_AUTH_TOKEN', '-u', 'CLAUDE_CODE_USE_BEDROCK', '-u', 'CLAUDE_CODE_USE_VERTEX', '-u', 'CLAUDE_CODE_USE_FOUNDRY', '-u', 'CLAUDE_CODE_OAUTH_TOKEN']
 ChatMessage.max_turns getter:
   WHEN this.over: None
-  ELSE: prop('Setting:chat.max_steps', 'current') or ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
+  ELSE: ${'Setting:chat.max_steps'}['current'] or ([b.chat_max_turns for b in instances('Boot') if b.chat_max_turns != None] or [2048])[0]
 -- THE TURN HAS ITS OWN LIMIT (#1143): the default of a Command run (`command_timeout_s`, 120 s) is for a model's shell commands, not for a chat turn (its ceiling is
 -- `chat_max_turns`); the turn's run states `timeout_s` = the boot fact `chat_turn_timeout_s`, default 21600 (6 h; a threshold flagged for the operator).
 ChatMessage.turn_timeout_s getter:
   WHEN this.over: None
-  ELSE: prop('Setting:chat.timeout', 'current') or ([b.chat_turn_timeout_s for b in instances('Boot') if b.chat_turn_timeout_s != None] or [21600])[0]
+  ELSE: ${'Setting:chat.timeout'}['current'] or ([b.chat_turn_timeout_s for b in instances('Boot') if b.chat_turn_timeout_s != None] or [21600])[0]
 ChatMessage.port getter:
   WHEN this.over: None
-  ELSE: ([prop(h.listen_result, 'port') for h in instances('Http') if prop(h.listen_result, 'port') != None] or [None])[0]
+  ELSE: ([${h.listen_result}['port'] for h in instances('Http') if ${h.listen_result}['port'] != None] or [None])[0]
 -- THE ADMIN'S TOKEN (docs/auth.md): a seat with a door secret refuses a caller with no token, loopback too, so the turn's CLI carries the admin's token
 -- (the file `Boot:seat.admin_token_file` names, written by the launcher at every boot). The token is NOT here: the config names the variable
 -- `${MEMBRANE_ADMIN_TOKEN}` as the CLI's MCP `headers` take it, and the run's `env_from` hands the launcher's own value to the child's environment,
@@ -67,7 +67,7 @@ ChatMessage.admin_file getter:
 -- A specific IPv6 address is written in brackets.
 ChatMessage.mcp_host getter:
   WHEN this.over: None
-  ELSE: ([prop(h.listen_result, 'host') for h in instances('Http') if prop(h.listen_result, 'host') != None] or ['127.0.0.1'])[0]
+  ELSE: ([${h.listen_result}['host'] for h in instances('Http') if ${h.listen_result}['host'] != None] or ['127.0.0.1'])[0]
 ChatMessage.mcp_url getter:
   WHEN this.over or this.port == None: None
   ELSE WHEN this.mcp_host == '' or this.mcp_host == '0.0.0.0' or this.mcp_host == '::': 'http://127.0.0.1:' + str(this.port) + '/mcp'
@@ -92,10 +92,10 @@ ChatMessage.mcp_json getter:
 -- (unchanged text stays in front, so the model server's prompt cache holds). A main banner with no text is the banner error, shown by banner_slot.
 ChatMessage.banner_main getter:
   WHEN this.over: None
-  ELSE: prop('membrane::Banner:admin:main', 'text')
+  ELSE: ${'membrane::Banner:admin:main'}['text']
 ChatMessage.banner_more getter:
   WHEN this.over: None
-  ELSE: [prop(r, 'words') for r in sort_by([{'eid': b.eid, 'updated': b.updated or 0, 'words': b.words} for b in instances('Banner') if b.eid != 'membrane::Banner:admin:main' and strip(str(b.words or ''))], 'updated')]
+  ELSE: [${r}['words'] for r in sort_by([{'eid': b.eid, 'updated': b.updated or 0, 'words': b.words} for b in instances('Banner') if b.eid != 'membrane::Banner:admin:main' and strip(str(b.words or ''))], 'updated')]
 ChatMessage.banner_text getter:
   WHEN this.over: None
   ELSE WHEN this.banner_main == None or this.banner_main is Error: this.banner_main
@@ -104,7 +104,7 @@ ChatMessage.banner_text getter:
 -- the doctrine also says to work with the user to choose one and how to save it (`entity_write {spec: "Setting:chat.name", prop: "set", value: <name>}`); once it is anything else it is only "Your name is <name>.".
 ChatMessage.seat_name getter:
   WHEN this.over: None
-  ELSE: str(prop('Setting:chat.name', 'current') or 'Bob')
+  ELSE: str(${'Setting:chat.name'}['current'] or 'Bob')
 ChatMessage.note getter:
   WHEN this.over: None
   ELSE: 'Your name is ' + this.seat_name + '. You are the graph: requests come and go, the graph stays. What is on it is what you remember, and nobody else keeps it up. It is programmable: use cliffhanger to maintain it as your memory and to interact with the environment. Modify your banner to help you maintain continuity. Keep it fresh: when you see junk or outdated information in it, remove it. Use Help entities for help. Editing the graph and your banner is yours to do: change them whenever it helps you remember and serve the user better, without asking for confirmation. Fetching a page, running a command or reading a file are writes to Fetch, Command and File entities: write the request and read the result (Help:c1f). Process updates on the graph and react to them. Your whole chat history is on the graph as ChatMessage entities: the user\'s words are in text, your answers in response. Every message continues the conversation on the graph. Before you say you do not know or do not remember, search the ChatMessage entities. Do not guess: if you find nothing, say so, unless the user asks you to guess.' + (' Bob is only the default name: work with the user to choose yours, and save it with entity_write {spec: "Setting:chat.name", prop: "set", value: "<the name>"}.' if this.seat_name == 'Bob' else '')
@@ -134,7 +134,7 @@ ChatMessage.stdin getter:
 -- is refused in the turn with the reason, the CLI never starts.
 ChatMessage.pick_default getter: (this.pick or '') in ['', 'membrane']
 ChatMessage.model_eff getter: this.seat_model if this.pick_default else this.pick
-ChatMessage.pick_ok getter: this.model_eff == this.seat_base or prop('Model:' + this.model_eff, 'backend') == 'claude-agent' or this.oai_cfg != None
+ChatMessage.pick_ok getter: this.model_eff == this.seat_base or ${'Model:' + this.model_eff}['backend'] == 'claude-agent' or this.oai_cfg != None
 ChatMessage.sdk_model getter: tail(this.model_eff, len(this.model_eff) - len('claude-agent:')) if startswith(this.model_eff, 'claude-agent:') else ('' if this.model_eff == this.seat_base or this.model_eff == 'claude' else this.model_eff)
 ChatMessage.model_args getter: ['--model', this.sdk_model] if this.sdk_model != '' else []
 ChatMessage.argv getter:
@@ -146,9 +146,9 @@ ChatMessage.argv getter:
 -- THE TURN WAITS FOR ITS OWN ASK'S EMBEDDING (operator 2026-11-14): the recall part of the banner (apps/barest.c1f/recall.c1f) is `ready` when its ask's vector has arrived or cannot come and the chat's window of texts has been read (the recall of the ask's body, packs/mentions.c1f). This message waits only while the part
 -- tracks it (`waiting`) and either an earlier message is the ask or the part says it is not ready. No part, or a part whose reading is null or an Error: no wait, a turn never waits on a broken part.
 ChatMessage.recall_wait getter:
-  held = prop('membrane::Banner:recall', 'waiting')
-  asked = prop('membrane::Banner:recall', 'ask_msg')
-  ready = prop('membrane::Banner:recall', 'ready')
+  held = ${'membrane::Banner:recall'}['waiting']
+  asked = ${'membrane::Banner:recall'}['ask_msg']
+  ready = ${'membrane::Banner:recall'}['ready']
   False if (held is Error or asked is Error or ready is Error or held == None or ready == None) else (this.eid in held and (asked != this.eid or ready == False))
 -- what the answer says while no model is chosen: how to pick one, and, when the local Ollama has told no chat model (not running, or nothing pulled), how to get one
 ChatMessage.listed_chat getter: [m.name for m in instances('Model') if m.listed == True and m.chat_ok == True and m.rung != True]
@@ -174,8 +174,8 @@ ChatMessage.backend_plan getter:
 -- (`state`, `started`, `backend`); then the backend's own start setter (`<backend>-start`, WHEN the plan's backend is its name) does only its effect.
 ChatMessage.plan getter:
   WHEN this.queued != True or this.tstate != 'queued' or this.text == None or this.recall_wait == True or this.backend_plan == None: None
-  ELSE WHEN prop(this.backend_plan, 'refuse') != None: {'backend': this.backend, 'refuse': prop(this.backend_plan, 'refuse')}
-  ELSE WHEN prop(this.backend_plan, 'start') != None: {'backend': this.backend, 'start': prop(this.backend_plan, 'start')}
+  ELSE WHEN ${this.backend_plan}['refuse'] != None: {'backend': this.backend, 'refuse': ${this.backend_plan}['refuse']}
+  ELSE WHEN ${this.backend_plan}['start'] != None: {'backend': this.backend, 'start': ${this.backend_plan}['start']}
   ELSE: None
 -- the claude CLI's plan: its checks (the binary, the way it is authenticated, the key, the model), then the argv and the message on stdin
 ChatMessage.claude_plan getter:
@@ -191,43 +191,43 @@ ChatMessage.claude_plan getter:
 -- graph. Routing back is the same switch changed (`Minds:seat.chat = ''`; the next message goes to the rungs; a turn the brain already has stays its).
 -- The turn of such a message is `running` with `turn.brain` = the namespace (the page shows "Working on it"; pending, not an error). Its answer is the brain's write of the text of `...:turn:response` (a ChatResponse made
 -- empty at the start): the finish below is what a rung's finish writes (state done, ended, the body SemText). The brain not up (`Vm:<ns>.link` is not `up`, a peer that never came is the same) is an error turn that says so.
-ChatMessage.brain getter: str(prop('Minds:seat', 'chat') or '')
-ChatMessage.brain_up getter: prop('Vm:' + this.brain, 'link') == 'up'
+ChatMessage.brain getter: str(${'Minds:seat'}['chat'] or '')
+ChatMessage.brain_up getter: ${'Vm:' + this.brain}['link'] == 'up'
 ChatMessage.brain_plan getter:
   WHEN this.brain_up: {'start': {'ns': this.brain}}
   ELSE: {'refuse': 'The chat is taken by the brain peer ' + this.brain + ', and it is not up (its link is not up), so nothing can answer this message. Start it, then send the message again.'}
 Chat.plan on-setter brain-start:
-  WHEN prop(this.plan, 'backend') == 'brain' and prop(this.plan, 'start') != None:
-    membrane::Chat[this.cp]:turn.brain = prop(prop(this.plan, 'start'), 'ns')
+  WHEN ${this.plan}['backend'] == 'brain' and ${this.plan}['start'] != None:
+    membrane::Chat[this.cp]:turn.brain = ${${this.plan}['start']}['ns']
     membrane::Chat[this.cp]:turn:response = ChatResponse(error: False)
 -- the brain's answer: its write of `...:turn:response.text` while the turn is the brain's and running (a text that is empty says nothing)
-ChatMessage.brain_turn getter: prop(this.turn_eid, 'brain') != None and this.tstate == 'running'
-ChatMessage.brain_said getter: prop(this.resp_eid, 'text') if this.brain_turn else None
+ChatMessage.brain_turn getter: ${this.turn_eid}['brain'] != None and this.tstate == 'running'
+ChatMessage.brain_said getter: ${this.resp_eid}['text'] if this.brain_turn else None
 Chat.brain_said on-setter brain-answer:
   WHEN this.brain_said != None and strip(str(this.brain_said)) != '':
     membrane::Chat[this.cp]:turn.outcome = {'text': str(this.brain_said), 'body': str(this.brain_said)}
 -- the brain DECLINES: it resolves a turn without answering by writing `...:turn:response` property `declined` = the reason (a text): the turn finishes as done and the page shows `Declined: <reason>`
-ChatMessage.declined getter: prop(this.resp_eid, 'declined') if this.brain_turn else None
+ChatMessage.declined getter: ${this.resp_eid}['declined'] if this.brain_turn else None
 Chat.declined on-setter brain-decline:
   WHEN this.declined != None and strip(str(this.declined)) != '':
     membrane::Chat[this.cp]:turn.outcome = {'text': 'Declined: ' + str(this.declined)}
 -- STOP of a turn the brain has: nobody else will end it
 Chat.aborted on-setter brain-abort:
-  WHEN this.aborted == True and prop(this.turn_eid, 'brain') != None and prop(this.turn_eid, 'state') == 'running':
+  WHEN this.aborted == True and ${this.turn_eid}['brain'] != None and ${this.turn_eid}['state'] == 'running':
     membrane::Chat[this.cp]:turn.outcome = {'text': 'The turn was stopped before the brain answered.', 'fail': 'stopped'}
 
 Chat.plan on-setter turn-start:
-  WHEN prop(this.plan, 'refuse') != None:
-    membrane::Chat[this.cp]:turn.outcome = {'text': prop(this.plan, 'refuse'), 'fail': prop(this.plan, 'refuse')}
-  ELSE WHEN prop(this.plan, 'start') != None:
+  WHEN ${this.plan}['refuse'] != None:
+    membrane::Chat[this.cp]:turn.outcome = {'text': ${this.plan}['refuse'], 'fail': ${this.plan}['refuse']}
+  ELSE WHEN ${this.plan}['start'] != None:
     membrane::Chat[this.cp]:turn.state = 'running'
     membrane::Chat[this.cp]:turn.started = clock
-    membrane::Chat[this.cp]:turn.backend = prop(this.plan, 'backend')
+    membrane::Chat[this.cp]:turn.backend = ${this.plan}['backend']
 -- the claude CLI's start: the CLI is one Command, its message on stdin
 Chat.plan on-setter claude-start:
-  WHEN prop(this.plan, 'backend') == 'claude' and prop(this.plan, 'start') != None:
-    membrane::Command:chat[this.cp] = Command(cmd: prop(prop(this.plan, 'start'), 'argv'), env_from: this.admin_env)
-    membrane::Command:chat[this.cp].run = {'id': this.cp, 'args': [], 'stdin': prop(prop(this.plan, 'start'), 'stdin'), 'partial': True, 'timeout_s': this.turn_timeout_s}
+  WHEN ${this.plan}['backend'] == 'claude' and ${this.plan}['start'] != None:
+    membrane::Command:chat[this.cp] = Command(cmd: ${${this.plan}['start']}['argv'], env_from: this.admin_env)
+    membrane::Command:chat[this.cp].run = {'id': this.cp, 'args': [], 'stdin': ${${this.plan}['start']}['stdin'], 'partial': True, 'timeout_s': this.turn_timeout_s}
 
 -- ---- while it runs: the lines as they arrive ----------------------------------------------------------------------------------------------
 -- `partial: True` makes the Command driver push what each read of stdout brings (whole lines) as an entity `Chunk:<command>:<n>` ({cmd, id, n, data});
@@ -236,93 +236,93 @@ Chat.plan on-setter claude-start:
 -- them (docs/cliffvm.md, "Garbage collection"): while the command runs its in-flight effect holds them, and when its receipt is taken they are held by nothing.
 ChatMessage.cmd_eid getter: 'membrane::Command:chat:' + this.cp
 -- each chunk parses its OWN lines once (getters cached on the chunk) and hands what it said to the accumulator below, so a new chunk costs one parse, not a re-parse of everything before it
-Chunk.sevs getter: [prop(e, 'event') for e in [json(l) for l in lines(str(this.data or ''))] if e is not Error and prop(e, 'type') == 'stream_event']
-Chunk.said getter: join([prop(prop(v, 'delta'), 'text') for v in this.sevs if prop(v, 'type') == 'content_block_delta' and prop(prop(v, 'delta'), 'type') == 'text_delta'], '')
-Chunk.started getter: join([replace(str(prop(prop(v, 'content_block'), 'name')), 'mcp__membrane__', '') for v in this.sevs if prop(v, 'type') == 'content_block_start' and prop(prop(v, 'content_block'), 'type') == 'tool_use'], ' ')
+Chunk.sevs getter: [${e}['event'] for e in [json(l) for l in lines(str(this.data or ''))] if e is not Error and ${e}['type'] == 'stream_event']
+Chunk.said getter: join([${${v}['delta']}['text'] for v in this.sevs if ${v}['type'] == 'content_block_delta' and ${${v}['delta']}['type'] == 'text_delta'], '')
+Chunk.started getter: join([replace(str(${${v}['content_block']}['name']), 'mcp__membrane__', '') for v in this.sevs if ${v}['type'] == 'content_block_start' and ${${v}['content_block']}['type'] == 'tool_use'], ' ')
 -- ONE SOURCE OF LIVE PROGRESS (#1143): what a running turn has said so far and the tools it has started come from ONE accumulator, the one of the backend the turn records
 -- (`turn.backend`, written by `turn-start`). Each backend that streams names its own, `<backend>_live`: `claude_live` (here, the CLI command's) and `oai_live` (packs/chat_oai.c1f, the
 -- current round's call). A peer sends its answer whole and a brain writes its answer itself, so they have none, and neither has a turn that records no backend. `live` is
 -- `{text, tools}` read from it; the page (`partial_text`, `partial_tools`), the door's session events (packs/door_session.c1f) and the words kept when a turn fails all read it.
 ChatMessage.claude_live getter: 'Chunk:' + this.cmd_eid + ':acc'
 ChatMessage.live_acc getter:
-  WHEN prop(this.turn_eid, 'backend') == 'claude': this.claude_live
-  ELSE WHEN prop(this.turn_eid, 'backend') == 'oai': this.oai_live
+  WHEN ${this.turn_eid}['backend'] == 'claude': this.claude_live
+  ELSE WHEN ${this.turn_eid}['backend'] == 'oai': this.oai_live
   ELSE: None
-ChatMessage.live getter: {'text': str(prop(this.live_acc, 'text') or ''), 'tools': words(str(prop(this.live_acc, 'tools') or ''))}
-ChatMessage.partial_text getter: '' if this.over else prop(this.live, 'text')
-ChatMessage.partial_tools getter: [] if this.over else prop(this.live, 'tools')
+ChatMessage.live getter: {'text': str(${this.live_acc}['text'] or ''), 'tools': words(str(${this.live_acc}['tools'] or ''))}
+ChatMessage.partial_text getter: '' if this.over else ${this.live}['text']
+ChatMessage.partial_tools getter: [] if this.over else ${this.live}['tools']
 -- THE PARTIAL ANSWER IS ACCUMULATED, NOT RE-JOINED (w28): the message used to list every live chunk at every birth (a scan of all the chunks, a dict and a sort per chunk, a join of all
 -- their text), so a turn of N chunks cost N squared (the burst: 80% of the CPU). Now each chunk, when it has parsed its own lines, appends what it said and the tools it started to ONE
 -- accumulator, `Chunk:<command>:acc` (a chunk of the same command, so it lives and is collected with the others: the running effect holds it); a birth costs the same however many came before.
 Chunk.part getter: {'said': this.said, 'started': this.started} if this.cmd != None else None
 Chunk.part on-setter partial-in:
   WHEN this.part != None and this.n != None:
-    ('Chunk:' + this.cmd + ':acc').text = str(prop('Chunk:' + this.cmd + ':acc', 'text') or '') + str(prop(this.part, 'said') or '')
-    ('Chunk:' + this.cmd + ':acc').tools = (str(prop('Chunk:' + this.cmd + ':acc', 'tools') or '') + ' ' + str(prop(this.part, 'started') or '')) if prop(this.part, 'started') != '' else str(prop('Chunk:' + this.cmd + ':acc', 'tools') or '')
+    ('Chunk:' + this.cmd + ':acc').text = str(${'Chunk:' + this.cmd + ':acc'}['text'] or '') + str(${this.part}['said'] or '')
+    ('Chunk:' + this.cmd + ':acc').tools = (str(${'Chunk:' + this.cmd + ':acc'}['tools'] or '') + ' ' + str(${this.part}['started'] or '')) if ${this.part}['started'] != '' else str(${'Chunk:' + this.cmd + ':acc'}['tools'] or '')
 
 -- ---- finish: the receipt is read as stream-json lines ------------------------------------------------------------------------------------
-ChatMessage.rr getter: prop('membrane::Command:chat:' + this.cp, 'run_result')
-ChatMessage.rc getter: prop(this.rr, 'rc')
+ChatMessage.rr getter: ${'membrane::Command:chat:' + this.cp}['run_result']
+ChatMessage.rc getter: ${this.rr}['rc']
 -- THE STREAM IS READ IN SMALL EVALUATIONS (#1143, a live turn that ended `error` with no cause): a long turn's stdout is a megabyte of lines, and one getter that parsed them all
 -- cost 11 ms against the old 10 ms self-time allowance (a Trip: its Error flowed on into `fail_why`; time no longer decides a value, but the stream is still read in small steps). The result line is read on its own (`rlines`, `finals`: one line parsed), and `evs` skips the
 -- `stream_event` partials (the bulk, 90% of the bytes: they were the live text, the finished messages say the same). `evl` is `evs` or an empty list: a stream that could not be read costs
 -- the tools and the spoken text, never the answer the result line gave.
-ChatMessage.rlines getter: [l for l in lines(str(prop(this.rr, 'stdout') or '')) if '"result"' in l]
-ChatMessage.evs getter: [e for e in [json(l) for l in lines(str(prop(this.rr, 'stdout') or '')) if not (startswith(l, '{"type":"stream_event"') or startswith(l, '{"type": "stream_event"'))] if e is not Error and prop(e, 'type') != None]
+ChatMessage.rlines getter: [l for l in lines(str(${this.rr}['stdout'] or '')) if '"result"' in l]
+ChatMessage.evs getter: [e for e in [json(l) for l in lines(str(${this.rr}['stdout'] or '')) if not (startswith(l, '{"type":"stream_event"') or startswith(l, '{"type": "stream_event"'))] if e is not Error and ${e}['type'] != None]
 ChatMessage.evl getter: this.evs if this.evs is List else []
-ChatMessage.finals getter: [e for e in [json(l) for l in this.rlines] if e is not Error and prop(e, 'type') == 'result']
+ChatMessage.finals getter: [e for e in [json(l) for l in this.rlines] if e is not Error and ${e}['type'] == 'result']
 ChatMessage.final getter: this.finals[-1]
-ChatMessage.texts getter: [join([prop(b, 'text') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'text'], '') for e in this.evl if prop(e, 'type') == 'assistant']
+ChatMessage.texts getter: [join([${b}['text'] for b in (${${e}['message']}['content'] or []) if ${b}['type'] == 'text'], '') for e in this.evl if ${e}['type'] == 'assistant']
 ChatMessage.spoken getter: strip(join([t for t in this.texts if t != ''], '\n\n'))
-ChatMessage.capped getter: str(prop(this.final, 'subtype') or '') == 'error_max_turns'
+ChatMessage.capped getter: str(${this.final}['subtype'] or '') == 'error_max_turns'
 ChatMessage.fail_why getter:
   WHEN this.rr == None: None
-  ELSE WHEN this.final == None and this.rc == -1: 'claude ended without an exit code (killed by a signal, or it never started) (rc -1): ' + strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or ''))
-  ELSE WHEN this.final == None and this.rc != 0: 'claude failed (rc ' + str(this.rc) + '): ' + strip(str(prop(this.rr, 'stderr') or prop(this.rr, 'head') or ''))
+  ELSE WHEN this.final == None and this.rc == -1: 'claude ended without an exit code (killed by a signal, or it never started) (rc -1): ' + strip(str(${this.rr}['stderr'] or ${this.rr}['head'] or ''))
+  ELSE WHEN this.final == None and this.rc != 0: 'claude failed (rc ' + str(this.rc) + '): ' + strip(str(${this.rr}['stderr'] or ${this.rr}['head'] or ''))
   ELSE WHEN this.final == None and this.evs is Error: 'claude ended with no result line and its output could not be read (' + (why(this.evs) or 'unreadable') + ')'
   ELSE WHEN this.final == None and this.spoken == '': 'claude ended with no answer at all (rc ' + str(this.rc) + ': no result line, no text)'
-  ELSE WHEN prop(this.final, 'is_error') == True: 'claude reported an error: ' + str(prop(this.final, 'result') or prop(this.final, 'subtype') or 'no reason given')
+  ELSE WHEN ${this.final}['is_error'] == True: 'claude reported an error: ' + str(${this.final}['result'] or ${this.final}['subtype'] or 'no reason given')
   ELSE: None
 -- WHAT THE MODEL HAD SAID WHEN THE TURN ENDED IN AN ERROR (operator 2026-11-15): the words streamed so far (the accumulator the page showed), else the finished messages' text. Empty when the
 -- turn did not fail, when the person stopped it (`answer` keeps those words with its stopped line) or when nothing was said. The finish below keeps it as the response's body, marked interrupted.
 ChatMessage.cut_text getter:
   WHEN this.fail_why == None or this.aborted == True: ''
-  ELSE: strip(prop(this.live, 'text') or this.spoken)
+  ELSE: strip(${this.live}['text'] or this.spoken)
 ChatMessage.answer getter:
   WHEN this.rr == None: None
   -- a turn the person STOPPED (chat.c1f, the abort route): what was said so far (`kept`, the partial answer taken at the stop; else the finished messages' text) and a stopped line
   ELSE WHEN this.aborted == True: strip(str(this.kept or this.spoken or '') + '\n\n(stopped from the page)')
   ELSE WHEN this.fail_why != None: this.fail_why
   ELSE WHEN this.capped: this.spoken + '\n\n(stopped at the ceiling of ' + str(this.max_turns) + ' turns)'
-  ELSE WHEN strip(str(prop(this.final, 'result') or '')) != '': str(prop(this.final, 'result'))
+  ELSE WHEN strip(str(${this.final}['result'] or '')) != '': str(${this.final}['result'])
   ELSE: this.spoken
 -- the numbers of the result line, kept on the turn (the receipt is slimmed after the turn): `usage` {input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens}, `cost` (USD), `calls` (the CLI's num_turns) and `duration` (ms)
-ChatMessage.tokens getter: prop(this.final, 'usage')
-ChatMessage.cost getter: prop(this.final, 'total_cost_usd')
-ChatMessage.calls getter: prop(this.final, 'num_turns')
-ChatMessage.took getter: prop(this.final, 'duration_ms')
+ChatMessage.tokens getter: ${this.final}['usage']
+ChatMessage.cost getter: ${this.final}['total_cost_usd']
+ChatMessage.calls getter: ${this.final}['num_turns']
+ChatMessage.took getter: ${this.final}['duration_ms']
 -- the raw exchange of the CLI's run, for `ModelChat:<chat>` (packs/model_chat.c1f): the prompt it was given, then the stream's finished messages in order (its thinking, its text, each call with its input, each result); written once, when the run is over
-ChatMessage.raw_events getter: join([join([('[thinking]\n' + str(prop(b, 'thinking')) + '\n') if prop(b, 'type') == 'thinking' else (('[assistant]\n' + str(prop(b, 'text')) + '\n') if prop(b, 'type') == 'text' else (('[call] ' + replace(str(prop(b, 'name')), 'mcp__membrane__', '') + ' ' + str(prop(b, 'input')) + '\n') if prop(b, 'type') == 'tool_use' else (('[tool]\n' + (join([str(prop(x, 'text')) for x in prop(b, 'content')], '') if prop(b, 'content') is List else str(prop(b, 'content'))) + '\n') if prop(b, 'type') == 'tool_result' else ''))) for b in (prop(prop(e, 'message'), 'content') if prop(prop(e, 'message'), 'content') is List else []) if b is Dict], '') for e in this.evl], '')
+ChatMessage.raw_events getter: join([join([('[thinking]\n' + str(${b}['thinking']) + '\n') if ${b}['type'] == 'thinking' else (('[assistant]\n' + str(${b}['text']) + '\n') if ${b}['type'] == 'text' else (('[call] ' + replace(str(${b}['name']), 'mcp__membrane__', '') + ' ' + str(${b}['input']) + '\n') if ${b}['type'] == 'tool_use' else (('[tool]\n' + (join([str(${x}['text']) for x in ${b}['content']], '') if ${b}['content'] is List else str(${b}['content'])) + '\n') if ${b}['type'] == 'tool_result' else ''))) for b in (${${e}['message']}['content'] if ${${e}['message']}['content'] is List else []) if b is Dict], '') for e in this.evl], '')
 ChatMessage.raw_head getter: '── ' + str(this.cp) + ' ──\n[system]\n' + str(this.sys or '') + '\n[user]\n' + str(this.banner_block or '') + '\n' + str(this.text or '') + '\n'
 ChatMessage.raw_err getter: ('[error]\n' + str(this.fail_why) + '\n') if this.fail_why != None else ''
-ChatMessage.tools_names getter: words(join([join([replace(str(prop(b, 'name')), 'mcp__membrane__', '') for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evl if prop(e, 'type') == 'assistant'], ' '))
+ChatMessage.tools_names getter: words(join([join([replace(str(${b}['name']), 'mcp__membrane__', '') for b in (${${e}['message']}['content'] or []) if ${b}['type'] == 'tool_use'], ' ') for e in this.evl if ${e}['type'] == 'assistant'], ' '))
 -- the ids of the tools in the order they were called (the stream's order): the page reads each tool entity by `...:turn:tool:<id>` in this order
-ChatMessage.tools_idlist getter: join([join([str(prop(b, 'id')) for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use'], ' ') for e in this.evl if prop(e, 'type') == 'assistant'], ' ')
+ChatMessage.tools_idlist getter: join([join([str(${b}['id']) for b in (${${e}['message']}['content'] or []) if ${b}['type'] == 'tool_use'], ' ') for e in this.evl if ${e}['type'] == 'assistant'], ' ')
 -- the turn is over once its state is done or error. The finish below runs only while it is not: the answer is derived from the receipt, and the slimming
 -- below changes the receipt, so a finished turn keeps the response it wrote.
 ChatMessage.over getter: this.tstate == 'done' or this.tstate == 'error'
 -- the tools the model called and their results, in the stream's order: the ChatTool rows of the outcome (`tools`, `results`)
-ChatMessage.asst_evs getter: [e for e in this.evl if prop(e, 'type') == 'assistant']
-ChatMessage.user_evs getter: [e for e in this.evl if prop(e, 'type') == 'user']
-ChatMessage.tool_uses getter: fold([], [concat(acc, [{'id': prop(b, 'id'), 'name': prop(b, 'name'), 'input': prop(b, 'input')} for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_use']) for e in this.asst_evs])
-ChatMessage.tool_results getter: fold([], [concat(acc, [{'id': prop(b, 'tool_use_id'), 'result': prop(b, 'content') if prop(b, 'content') is Text else join([prop(c, 'text') for c in (prop(b, 'content') if prop(b, 'content') is List else [])], '\n')} for b in (prop(prop(e, 'message'), 'content') or []) if prop(b, 'type') == 'tool_result']) for e in this.user_evs])
+ChatMessage.asst_evs getter: [e for e in this.evl if ${e}['type'] == 'assistant']
+ChatMessage.user_evs getter: [e for e in this.evl if ${e}['type'] == 'user']
+ChatMessage.tool_uses getter: fold([], [concat(acc, [{'id': ${b}['id'], 'name': ${b}['name'], 'input': ${b}['input']} for b in (${${e}['message']}['content'] or []) if ${b}['type'] == 'tool_use']) for e in this.asst_evs])
+ChatMessage.tool_results getter: fold([], [concat(acc, [{'id': ${b}['tool_use_id'], 'result': ${b}['content'] if ${b}['content'] is Text else join([${c}['text'] for c in (${b}['content'] if ${b}['content'] is List else [])], '\n')} for b in (${${e}['message']}['content'] or []) if ${b}['type'] == 'tool_result']) for e in this.user_evs])
 -- what the CLI's run ended with, as the turn's OUTCOME (below): the answer or the cause, the words said before a failure, the numbers of the result line, the raw exchange and the tools.
 -- It is its OWN getter, which is what the setter listens to (a sibling the trigger does not read would still be its old value then).
 ChatMessage.claude_outcome getter:
-  WHEN this.answer == None or this.over or prop(this.turn_eid, 'message') == None: None
+  WHEN this.answer == None or this.over or ${this.turn_eid}['message'] == None: None
   ELSE: {'text': this.answer, 'fail': this.fail_why, 'cut': this.cut_text, 'body': (this.answer if this.fail_why == None else (this.cut_text if this.cut_text != '' else None)), 'rc': this.rc, 'usage': this.tokens, 'cost': this.cost, 'calls': this.calls, 'duration': this.took, 'raw': this.raw_head + this.raw_events + this.raw_err, 'names': this.tools_names, 'ids': this.tools_idlist, 'tools': this.tool_uses, 'results': this.tool_results}
 Chat.claude_outcome on-setter turn-finish:
-  WHEN this.claude_outcome != None and not this.over and prop(this.turn_eid, 'message') != None:
+  WHEN this.claude_outcome != None and not this.over and ${this.turn_eid}['message'] != None:
     membrane::Chat[this.cp]:turn.outcome = this.claude_outcome
 
 -- ---- THE ONE FINISH (the outcome contract, #1143): every backend ends a turn by writing ONE value on the turn, `<message>:turn.outcome` ------------------------------------------
@@ -342,34 +342,34 @@ Chat.claude_outcome on-setter turn-finish:
 -- `state` is written LAST (`over` ends what the backends' getters say). Then the outcome is cut down to {fail, taken: True}: the raw text and the tools are in ModelChat and the ChatTool rows, not stored twice.
 ChatTurn.tcp getter: replace(head(this.eid, len(this.eid) - 5), 'membrane::Chat:', '')
 Chat.outcome on-setter turn-outcome:
-  WHEN this.kind == 'turn' and this.outcome is Dict and prop(this.outcome, 'taken') != True and this.state not in ['done', 'error']:
+  WHEN this.kind == 'turn' and this.outcome is Dict and ${this.outcome}['taken'] != True and this.state not in ['done', 'error']:
     o = this.outcome
-    f = prop(o, 'fail')
-    cut = str(prop(o, 'cut') or '')
-    FOR r IN [x for x in [prop(o, 'raw')] if x != None and str(x) != '']:
+    f = ${o}['fail']
+    cut = str(${o}['cut'] or '')
+    FOR r IN [x for x in [${o}['raw']] if x != None and str(x) != '']:
       ('ModelChat:' + before(this.tcp, ':message:')).add = r
     this.ended = clock
     this.error = f
-    this.usage = prop(o, 'usage')
-    this.cost = prop(o, 'cost')
-    this.calls = prop(o, 'calls')
-    this.duration = prop(o, 'duration')
-    FOR n IN [x for x in [prop(o, 'names')] if x != None]:
+    this.usage = ${o}['usage']
+    this.cost = ${o}['cost']
+    this.calls = ${o}['calls']
+    this.duration = ${o}['duration']
+    FOR n IN [x for x in [${o}['names']] if x != None]:
       membrane::Chat[this.tcp].tools_run = n
-    FOR i IN [x for x in [prop(o, 'ids')] if x != None]:
+    FOR i IN [x for x in [${o}['ids']] if x != None]:
       membrane::Chat[this.tcp].tool_ids = i
-    FOR e IN [x for x in [prop(this.eid + ':response', 'error')] if x == None]:
-      membrane::Chat[this.tcp]:turn:response = ChatResponse(text: prop(o, 'text'), error: f != None, rc: prop(o, 'rc'), interrupted: (True if cut != '' else None), reason: (f if cut != '' else None))
-    FOR e IN [x for x in [prop(this.eid + ':response', 'error')] if x != None]:
-      membrane::Chat[this.tcp]:turn:response.text = prop(o, 'text')
+    FOR e IN [x for x in [${this.eid + ':response'}['error']] if x == None]:
+      membrane::Chat[this.tcp]:turn:response = ChatResponse(text: ${o}['text'], error: f != None, rc: ${o}['rc'], interrupted: (True if cut != '' else None), reason: (f if cut != '' else None))
+    FOR e IN [x for x in [${this.eid + ':response'}['error']] if x != None]:
+      membrane::Chat[this.tcp]:turn:response.text = ${o}['text']
       membrane::Chat[this.tcp]:turn:response.error = f != None
-    FOR t IN [x for x in [prop(o, 'body')] if x != None and str(x) != '']:
+    FOR t IN [x for x in [${o}['body']] if x != None and str(x) != '']:
       membrane::Chat[this.tcp]:turn:response:body = SemText(text: str(t))
       membrane::Chat[this.tcp]:turn:response:body.mention = True
-    FOR b IN (prop(o, 'tools') or []):
-      membrane::Chat[this.tcp]:turn:tool[prop(b, 'id')] = ChatTool(name: prop(b, 'name'), input: prop(b, 'input'))
-    FOR r IN (prop(o, 'results') or []):
-      membrane::Chat[this.tcp]:turn:tool[prop(r, 'id')].result = prop(r, 'result')
+    FOR b IN (${o}['tools'] or []):
+      membrane::Chat[this.tcp]:turn:tool[${b}['id']] = ChatTool(name: ${b}['name'], input: ${b}['input'])
+    FOR r IN (${o}['results'] or []):
+      membrane::Chat[this.tcp]:turn:tool[${r}['id']].result = ${r}['result']
     this.state = 'error' if f != None else 'done'
     this.outcome = {'fail': f, 'taken': True}
 
@@ -379,10 +379,10 @@ Chat.outcome on-setter turn-outcome:
 -- hundreds of KB, stored again and again. Once the turn is over and its answer, tools and numbers are entities, the receipt is replaced by what
 -- is useful: the id, the status, the rc and the stderr (the same replay-safe derived clearing the request collector does). The journal keeps
 -- the partial chunks it was given (docs/cliffvm.md, "Resource hygiene").
-ChatMessage.spent getter: this.over and this.rr != None and prop(this.rr, 'stdout') != None and this.said != None
+ChatMessage.spent getter: this.over and this.rr != None and ${this.rr}['stdout'] != None and this.said != None
 Chat.spent on-setter slim-run:
   WHEN this.spent == True:
-    membrane::Command:chat[this.cp].run_result = {'id': prop(this.rr, 'id'), 'status': prop(this.rr, 'status'), 'rc': this.rc, 'stderr': prop(this.rr, 'stderr')}
+    membrane::Command:chat[this.cp].run_result = {'id': ${this.rr}['id'], 'status': ${this.rr}['status'], 'rc': this.rc, 'stderr': ${this.rr}['stderr']}
 
 -- ---- the chat names its last finished turn -----------------------------------------------------------------------------------------------
 -- Any turn that ends (done or error: the answer, a refusal, an interruption) writes its eid to `last_turn` of its chat (`membrane::Chat:main`): the banner's
@@ -395,7 +395,7 @@ Chat.state on-setter last-turn:
 -- A turn whose state is `running` and that started before this run's start (`Boot.started`) lost its CLI with the old process (its Command never got a
 -- receipt, and a restore runs no setter): it becomes an error with a response that says so. A turn of this run started after `started`, so it is never listed.
 -- (the turns are a LAZY class: the store is asked, not the engine's `instances`, which lists only what is loaded.)
-Boot.interrupted getter: [head(replace(prop(r, 'k'), 'membrane::Chat:', ''), len(replace(prop(r, 'k'), 'membrane::Chat:', '')) - 5) for r in sql('SELECT k, json_extract(body, \'$.props.started\') AS started FROM c_field WHERE cls = \'Chat\' AND k LIKE \'membrane::Chat:%:message:%:turn\' AND json_extract(body, \'$.props.state\') = \'running\'') if prop(r, 'started') != None and prop(r, 'started') < this.started] if this.started != None else []
+Boot.interrupted getter: [head(replace(${r}['k'], 'membrane::Chat:', ''), len(replace(${r}['k'], 'membrane::Chat:', '')) - 5) for r in sql('SELECT k, json_extract(body, \'$.props.started\') AS started FROM c_field WHERE cls = \'Chat\' AND k LIKE \'membrane::Chat:%:message:%:turn\' AND json_extract(body, \'$.props.state\') = \'running\'') if ${r}['started'] != None and ${r}['started'] < this.started] if this.started != None else []
 Boot.interrupted on-setter turn-interrupted:
   WHEN len(this.interrupted) > 0:
     FOR i IN this.interrupted:
@@ -406,7 +406,7 @@ Boot.interrupted on-setter turn-interrupted:
 Request.ab1_turns on-setter chat-stop:
   WHEN this.ab1_turns != None:
     FOR mid IN this.ab1_turns:
-      membrane::Chat[mid].kept = prop('membrane::Chat:' + mid, 'partial_text')
+      membrane::Chat[mid].kept = ${'membrane::Chat:' + mid}['partial_text']
       membrane::Chat[mid].aborted = True
       membrane::Command:chat[mid].stop = {'id': 'abort-' + this.eid}
     this.ab1_done = True

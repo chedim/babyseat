@@ -320,7 +320,9 @@ fn no_row_holds_or_shows_a_secret_only_the_names_of_environment_variables() {
     let secret = std::fs::read_to_string(dir.0.join("door.secret")).unwrap();
     let (_, all) = rpc(run.port, Some(&own), "entity_query", json!({"q": "kind:Setting", "full": true, "k": 100}));
     for s in [KEY, secret.trim(), own.as_str(), "hunter2pw"] { assert!(!all.contains(s), "a setting shows a secret ({}...)", &s[..6]); }
-    assert!(all.contains("OTHER_PROVIDER_KEY"), "the variable's NAME is shown: {all}");
+    let cloud = rpc(run.port, Some(&own), "entity_read", json!({"spec": "Setting:model.cloud", "prop": "current"})).1;
+    assert!(cloud.contains("OTHER_PROVIDER_KEY"), "the variable's NAME is shown: {cloud}");
+    for s in [KEY, secret.trim(), own.as_str(), "hunter2pw"] { assert!(!cloud.contains(s), "the cloud setting shows a secret ({}...)", &s[..6]); }
     assert_eq!(rpc(run.port, Some(&own), "entity_read", json!({"spec": "Setting:model.signin", "prop": "current"})).1, "api_key");
     let f = rpc(run.port, Some(&own), "entity_read", json!({"spec": "Setting:access.token_file", "prop": "current"})).1;
     assert!(f.contains("admin.token") && f != own, "the token file's PATH only: {f}");

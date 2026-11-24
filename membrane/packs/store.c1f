@@ -11,5 +11,5 @@ RESIDENT Store
 --   A store that came from the 0.7 Python seat has tables of its own (`c_events`, `c_sessions`, `c_messages`, `c_entities`, ... with body = {"o": <order>, "d": {...the document...}}):
 --   it is read through a `SqlSource` (packs/sql.c1f), never as this store. json_extract(body, '$.d.<field>') reads one field of such a row.
 
-Store.tables getter: FOR r IN sql("SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 2) = 'c_' ORDER BY name"): prop(r, 'name')
-Store.events getter: max([prop(r, 'n') for r in sql("SELECT count(*) AS n FROM c_events")]) if this.counted else None
+Store.tables getter: FOR r IN sql("SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 2) = 'c_' ORDER BY name"): ${r}['name']
+Store.events getter: max([${r}['n'] for r in sql("SELECT count(*) AS n FROM c_events")]) if this.counted else None

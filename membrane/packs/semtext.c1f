@@ -34,16 +34,16 @@ SemText.numbers getter: spans(this.text, 'number')
 SemText.skey getter: replace(this.eid, '::', '/')
 SemText.attach on-setter attach-span:
   WHEN this.attach != None:
-    layer = str(prop(this.attach, 'layer'))
+    layer = str(${this.attach}['layer'])
     plural = {'sentence': 'sentences', 'word': 'words', 'identifier': 'identifiers', 'path': 'paths', 'url': 'urls', 'number': 'numbers'}[layer]
     letter = {'sentence': 's', 'word': 'w', 'identifier': 'i', 'path': 'p', 'url': 'u', 'number': 'n'}[layer]
-    start = prop(this.attach, 'start')
-    FOR row IN [r for r in prop(this.eid, plural) if r['start'] == start]:
+    start = ${this.attach}['start']
+    FOR row IN [r for r in ${this.eid}[plural] if r['start'] == start]:
       Span:of[this.skey][letter][start] = Span(of: this, layer: layer, start: start, end: row['end'])
       Span:of[this.skey][letter][start].armed = True
       this.attach_result = Span:of[this.skey][letter][start]
 
-Span.text getter: head(tail(prop(this.of, 'text'), len(prop(this.of, 'text')) - this.start), this.end - this.start)
+Span.text getter: head(tail(${this.of}['text'], len(${this.of}['text']) - this.start), this.end - this.start)
 -- the lemma of a span: the form a word is counted under. Lowercase only, no stemming (operator decision); a CLASS of the span changes it
 -- (mentions.c1f: `SemPlural.lemma`), nearest class first.
 Span.lemma getter: lower(this.text)

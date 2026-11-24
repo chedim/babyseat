@@ -394,7 +394,7 @@ fn wait_until(what: &str, secs: u64, f: impl Fn() -> bool) {
 
 /// a test pack that holds the sweep of the last run's roots (`Boot.old_vms`) back until `Gate:sweep.open`: a peer is a program of its own and may say hello before or after the sweep reads the store
 /// (it did after, on the seat that lost its claude peer), so the test makes the late order the only one
-const SWEEP_GATE: &str = "PACK sweepgate 1\nIMPORT boot 1\nIMPORT link 1\nGate.kind getter: 'gate'\nBoot.old_vms getter:\n  WHEN prop('Gate:sweep', 'open') != True: None\n";
+const SWEEP_GATE: &str = "PACK sweepgate 1\nIMPORT boot 1\nIMPORT link 1\nGate.kind getter: 'gate'\nBoot.old_vms getter:\n  WHEN ${'Gate:sweep'}['open'] != True: None\n";
 
 #[test]
 fn a_restart_does_not_retire_the_root_of_a_peer_that_connected_before_the_sweep_of_the_last_runs_roots() {

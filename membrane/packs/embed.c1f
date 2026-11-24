@@ -33,12 +33,12 @@ EmbedAsk.kind getter: 'ask'
 SemText.text on-setter embed-ask:
   WHEN this.text != None and strip(str(this.text)) != '' and this.embedded != True:
     membrane::Embed:ask[this.skey] = EmbedAsk(of: this.eid, state: 'pending', at: clock)
-    membrane::Embed:queue.asked = (prop('membrane::Embed:queue', 'asked') or 0) + 1
+    membrane::Embed:queue.asked = (${'membrane::Embed:queue'}['asked'] or 0) + 1
 -- a text that BECOMES a SemText after its text was written (a `Memory` note: its class list is written in answer to the text) is heard when its SemText getters arrive
 SemText.skey on-setter embed-ask-late:
   WHEN this.text != None and strip(str(this.text)) != '' and this.embedded != True:
     membrane::Embed:ask[this.skey] = EmbedAsk(of: this.eid, state: 'pending', at: clock)
-    membrane::Embed:queue.asked = (prop('membrane::Embed:queue', 'asked') or 0) + 1
+    membrane::Embed:queue.asked = (${'membrane::Embed:queue'}['asked'] or 0) + 1
 
 -- ---- what a text still needs: its sentences from the `emb_n`-th on, at most 64 (the batch) ------------------------------------------------------------
 SemText.emb_rest getter: tail(this.sentences, max(0, len(this.sentences) - (this.emb_n or 0)))
@@ -60,38 +60,38 @@ EmbedTurn.kind getter: 'turn'
 ChatTurn.state on-setter embed-turn:
   ALWAYS:
     FOR a IN ([1] if this.state == 'running' else []):
-      ('membrane::Embed:turn:' + replace(this.eid, '::', '/')) = EmbedTurn(of: this.eid, run: prop('membrane::Embed:queue', 'run'))
-    FOR a IN ([1] if this.state != 'running' and prop('membrane::Embed:turn:' + replace(this.eid, '::', '/'), 'of') != None else []):
+      ('membrane::Embed:turn:' + replace(this.eid, '::', '/')) = EmbedTurn(of: this.eid, run: ${'membrane::Embed:queue'}['run'])
+    FOR a IN ([1] if this.state != 'running' and ${'membrane::Embed:turn:' + replace(this.eid, '::', '/')}['of'] != None else []):
       ('membrane::Embed:turn:' + replace(this.eid, '::', '/')).retire = True
 EmbedQueue.busy getter: len([t for t in instances('Embed') if t.kind == 'turn' and t.run == this.run]) > 0
 -- what a held queue waits to see change: the last chat event, and how many asks are pending
 EmbedQueue.run getter: ([b.started for b in instances('Boot') if b.started != None] or [0])[0]
-EmbedQueue.sig getter: str(this.run) + '/' + str(prop('Doorbell:chat', 'at')) + '/' + str(len(this.asks))
+EmbedQueue.sig getter: str(this.run) + '/' + str(${'Doorbell:chat'}['at']) + '/' + str(len(this.asks))
 
 -- ---- the work: asks first (oldest first), then the backlog page (oldest first): the vectors land in text order, so the field (packs/field.c1f) moves its entities in that order ----
-EmbedQueue.asks getter: [prop(a, 'of') for a in sort_by([{'of': x.of, 'at': x.at or 0} for x in instances('Embed') if x.kind == 'ask' and x.state == 'pending'], 'at')]
-EmbedQueue.page_rows getter: sql("SELECT k, sk, row_number() OVER (ORDER BY sk) AS n FROM (SELECT k, substr(k, instr(k, ':message:') + 9) AS sk FROM c_field WHERE cls = 'Chat' AND k LIKE '%:body' AND instr(k, ':message:') > 0 AND json_extract(body, '$.props.text') IS NOT NULL AND json_extract(body, '$.props.embedded') IS NULL) WHERE sk > ?1 AND (?2 = ?2 OR ?2 IS NULL) AND (?3 = ?3 OR ?3 IS NULL) ORDER BY sk LIMIT 64", this.after or '', prop('membrane::Legacy:seat', 'tick'), prop('Doorbell:chat', 'at'))
+EmbedQueue.asks getter: [${a}['of'] for a in sort_by([{'of': x.of, 'at': x.at or 0} for x in instances('Embed') if x.kind == 'ask' and x.state == 'pending'], 'at')]
+EmbedQueue.page_rows getter: sql("SELECT k, sk, row_number() OVER (ORDER BY sk) AS n FROM (SELECT k, substr(k, instr(k, ':message:') + 9) AS sk FROM c_field WHERE cls = 'Chat' AND k LIKE '%:body' AND instr(k, ':message:') > 0 AND json_extract(body, '$.props.text') IS NOT NULL AND json_extract(body, '$.props.embedded') IS NULL) WHERE sk > ?1 AND (?2 = ?2 OR ?2 IS NULL) AND (?3 = ?3 OR ?3 IS NULL) ORDER BY sk LIMIT 64", this.after or '', ${'membrane::Legacy:seat'}['tick'], ${'Doorbell:chat'}['at'])
 -- (no model or no server address: the backlog is not looked at, so reading it loads no stored text)
 EmbedQueue.page getter: this.page_rows if this.page_rows is List and this.model != None and this.backend != None else []
-EmbedQueue.texts getter: distinct(concat(head(this.asks, 64), [prop(r, 'k') for r in this.page]))
+EmbedQueue.texts getter: distinct(concat(head(this.asks, 64), [${r}['k'] for r in this.page]))
 -- a stored text that is not loaded yet reads `vec_todo` as none: that is `not known`, never `nothing to do` (the first text not known yet makes the queue wait for it, so the order holds)
 -- (a text whose own recall call is out, packs/mentions.c1f `in_flight`, waits: that call may make its vectors, `embed-ask-vectors` below; so does the body of a message queued for its turn,
 -- whose recall call is about to be made (the banner asks it); once the turn starts or ends it is the queue's again)
-EmbedQueue.open getter: [t for t in this.texts if prop(t, 'in_flight') != True and not (tail(t, 5) == ':body' and prop(head(t, len(t) - 5), 'queued') == True and prop(head(t, len(t) - 5), 'tstate') == 'queued') and (not (prop(t, 'vec_todo') is List) or len(prop(t, 'vec_todo')) > 0)]
-EmbedQueue.cur getter: this.open[0] if len(this.open) > 0 and prop(this.open[0], 'vec_todo') is List else None
-EmbedQueue.todo getter: prop(this.cur, 'vec_todo') if this.cur != None else []
+EmbedQueue.open getter: [t for t in this.texts if ${t}['in_flight'] != True and not (tail(t, 5) == ':body' and ${head(t, len(t) - 5)}['queued'] == True and ${head(t, len(t) - 5)}['tstate'] == 'queued') and (not (${t}['vec_todo'] is List) or len(${t}['vec_todo']) > 0)]
+EmbedQueue.cur getter: this.open[0] if len(this.open) > 0 and ${this.open[0]}['vec_todo'] is List else None
+EmbedQueue.todo getter: ${this.cur}['vec_todo'] if this.cur != None else []
 
 -- ---- a text with nothing left to embed is settled: marked, its ask retired, the cursor moves past the done front of the page --------------------------------
-EmbedQueue.settled getter: [t for t in this.texts if prop(t, 'vec_todo') is List and len(prop(t, 'vec_todo')) == 0 and prop(t, 'embedded') != True]
-EmbedQueue.first_open getter: min([r['n'] for r in this.page if not (prop(r['k'], 'vec_todo') is List) or len(prop(r['k'], 'vec_todo')) > 0] or [len(this.page) + 1])
+EmbedQueue.settled getter: [t for t in this.texts if ${t}['vec_todo'] is List and len(${t}['vec_todo']) == 0 and ${t}['embedded'] != True]
+EmbedQueue.first_open getter: min([r['n'] for r in this.page if not (${r['k']}['vec_todo'] is List) or len(${r['k']}['vec_todo']) > 0] or [len(this.page) + 1])
 -- the cursor moves only when the whole page is done (one query a page, not one a text: a `sql` holds the engine while it runs)
 EmbedQueue.cut getter: this.page[-1]['sk'] if len(this.page) > 0 and this.first_open > len(this.page) else None
 EmbedQueue.settled on-setter embed-settle:
   WHEN len(this.settled) > 0:
     FOR t IN this.settled:
       (t).embedded = True
-      FOR a IN ([1] if prop('membrane::Embed:ask:' + prop(t, 'skey'), 'of') != None else []):
-        ('membrane::Embed:ask:' + prop(t, 'skey')).retire = True
+      FOR a IN ([1] if ${'membrane::Embed:ask:' + ${t}['skey']}['of'] != None else []):
+        ('membrane::Embed:ask:' + ${t}['skey']).retire = True
     this.made = (this.made or 0) + len(this.settled)
     FOR c IN ([this.cut] if this.cut != None else []):
       this.after = c
@@ -102,8 +102,8 @@ EmbedQueue.counts getter: this.counts_rows[0] if this.counts_rows is List and le
 -- THE NUMBERS are counted in memory from one start snapshot (the store's own count at the start: a count asked of the store after each text would lag by the cascade that wrote the last mark, and the store is
 -- held while it is asked): done = the texts that had their vectors at the start + the texts this run settled; total = what the start found + the texts asked since. While a history import runs the total is
 -- approximate: it never shows less than done plus the texts known to be waiting (the next start counts exactly).
-EmbedQueue.done_n getter: (prop(this.counts, 'ndone') or 0) + (this.made or 0)
-EmbedQueue.total_n getter: max((prop(this.counts, 'ndone') or 0) + (prop(this.counts, 'nleft') or 0) + (this.asked or 0), this.done_n + len(this.open))
+EmbedQueue.done_n getter: (${this.counts}['ndone'] or 0) + (this.made or 0)
+EmbedQueue.total_n getter: max((${this.counts}['ndone'] or 0) + (${this.counts}['nleft'] or 0) + (this.asked or 0), this.done_n + len(this.open))
 EmbedQueue.progress getter: str(this.done_n) + ' of ' + str(this.total_n) + ' texts have sentence vectors'
 
 -- ---- the state, as a word and as a sentence --------------------------------------------------------------------------------------------------------
@@ -129,15 +129,15 @@ EmbedQueue.ctexts getter: [c[0] for c in (this.cache or [])]
 EmbedQueue.unc getter: [x for x in this.todo if not (x['text'] in this.ctexts)]
 EmbedQueue.job getter:
   WHEN len(this.todo) == 0: None
-  ELSE: {'eid': this.cur, 'upto': (prop(this.cur, 'emb_n') or 0) + len(this.todo), 'url': str(this.backend) + '/api/embed', 'model': this.model, 'n': len(this.todo), 'hit': [{'eid': x['eid'], 'start': x['start'], 'veid': x['veid'], 'src': [c[1] for c in this.cache if c[0] == x['text']][0]} for x in this.todo if x['text'] in this.ctexts], 'unc': [{'eid': x['eid'], 'start': x['start'], 'veid': x['veid'], 'text': x['text'], 'r': len([y for y in this.unc if y['o'] < x['o']])} for x in this.unc]}
+  ELSE: {'eid': this.cur, 'upto': (${this.cur}['emb_n'] or 0) + len(this.todo), 'url': str(this.backend) + '/api/embed', 'model': this.model, 'n': len(this.todo), 'hit': [{'eid': x['eid'], 'start': x['start'], 'veid': x['veid'], 'src': [c[1] for c in this.cache if c[0] == x['text']][0]} for x in this.todo if x['text'] in this.ctexts], 'unc': [{'eid': x['eid'], 'start': x['start'], 'veid': x['veid'], 'text': x['text'], 'r': len([y for y in this.unc if y['o'] < x['o']])} for x in this.unc]}
 -- a request is in flight from the send until its receipt is taken: the queue never clears `inflight` (a property is written once in a cascade, and the receipt's cascade goes on to the next send); `landed` names the last request whose receipt was taken
-EmbedQueue.flying getter: this.inflight != None and prop(this.inflight, 'run') == this.run and this.landed != prop(this.inflight, 'id')
+EmbedQueue.flying getter: this.inflight != None and ${this.inflight}['run'] == this.run and this.landed != ${this.inflight}['id']
 EmbedQueue.ready getter: not this.flying and not this.busy and this.backend != None and this.model != None and this.hold != this.sig
 EmbedQueue.go getter: this.job if this.ready and this.job != None else None
 EmbedQueue.go on-setter embed-send:
   WHEN this.go != None:
     FOR h IN this.go['hit']:
-      (h['veid']) = Vector(of: h['eid'], start: h['start'], v: prop(h['src'], 'v'))
+      (h['veid']) = Vector(of: h['eid'], start: h['start'], v: ${h['src']}['v'])
     FOR c IN ([1] if len(this.go['unc']) == 0 else []):
       (this.go['eid']).emb_n = this.go['upto']
     FOR c IN ([1] if len(this.go['unc']) > 0 else []):
@@ -146,23 +146,23 @@ EmbedQueue.go on-setter embed-send:
       this.seq = (this.seq or 0) + 1
 
 -- ---- the receipt -------------------------------------------------------------------------------------------------------------------------------------
-Fetch.em_job getter: prop('membrane::Embed:queue', 'inflight')
-Fetch.em_mine getter: startswith(str(prop(this.request_result, 'id') or ''), 'embed:') and prop(this.em_job, 'id') == prop(this.request_result, 'id')
-Fetch.em_body getter: json(str(prop(this.request_result, 'body') or '')) if this.em_mine else None
-Fetch.em_vecs getter: (None if this.em_body is Error else prop(this.em_body, 'embeddings')) if this.em_mine else None
+Fetch.em_job getter: ${'membrane::Embed:queue'}['inflight']
+Fetch.em_mine getter: startswith(str(${this.request_result}['id'] or ''), 'embed:') and ${this.em_job}['id'] == ${this.request_result}['id']
+Fetch.em_body getter: json(str(${this.request_result}['body'] or '')) if this.em_mine else None
+Fetch.em_vecs getter: (None if this.em_body is Error else ${this.em_body}['embeddings']) if this.em_mine else None
 Fetch.em_why getter:
   WHEN not this.em_mine: None
-  ELSE WHEN prop(this.request_result, 'status') != 'ok': 'the model server did not answer at ' + str(prop(this.em_job, 'url')) + ' (' + str(prop(this.request_result, 'head')) + '). Is it running?'
-  ELSE WHEN prop(this.request_result, 'http_status') != 200: 'the model server answered ' + str(prop(this.request_result, 'http_status')) + ' for the model ' + str(prop(this.em_job, 'model')) + ': ' + str((None if this.em_body is Error else prop(this.em_body, 'error')) or prop(this.request_result, 'head')) + ' (a model that is not installed is installed with: ollama pull ' + str(prop(this.em_job, 'model')) + ')'
-  ELSE WHEN not (this.em_vecs is List) or len(this.em_vecs) != len(prop(this.em_job, 'unc')) or len([v for v in this.em_vecs if not (v is List) or len(v) == 0]) > 0: 'the model server gave a wrong answer: expected ' + str(len(prop(this.em_job, 'unc'))) + ' vectors in embeddings'
+  ELSE WHEN ${this.request_result}['status'] != 'ok': 'the model server did not answer at ' + str(${this.em_job}['url']) + ' (' + str(${this.request_result}['head']) + '). Is it running?'
+  ELSE WHEN ${this.request_result}['http_status'] != 200: 'the model server answered ' + str(${this.request_result}['http_status']) + ' for the model ' + str(${this.em_job}['model']) + ': ' + str((None if this.em_body is Error else ${this.em_body}['error']) or ${this.request_result}['head']) + ' (a model that is not installed is installed with: ollama pull ' + str(${this.em_job}['model']) + ')'
+  ELSE WHEN not (this.em_vecs is List) or len(this.em_vecs) != len(${this.em_job}['unc']) or len([v for v in this.em_vecs if not (v is List) or len(v) == 0]) > 0: 'the model server gave a wrong answer: expected ' + str(len(${this.em_job}['unc'])) + ' vectors in embeddings'
   ELSE: None
-Fetch.em_ok getter: prop(this.request_result, 'id') if this.em_mine and this.em_why == None else None
+Fetch.em_ok getter: ${this.request_result}['id'] if this.em_mine and this.em_why == None else None
 
 Fetch.em_why on-setter embed-failed:
   WHEN this.em_why != None:
     membrane::Embed:queue.fail = this.em_why
-    membrane::Embed:queue.hold = prop('membrane::Embed:queue', 'sig')
-    membrane::Embed:queue.landed = prop(this.em_job, 'id')
+    membrane::Embed:queue.hold = ${'membrane::Embed:queue'}['sig']
+    membrane::Embed:queue.landed = ${this.em_job}['id']
 
 Fetch.em_ok on-setter embed-landed:
   WHEN this.em_ok != None:
@@ -170,16 +170,16 @@ Fetch.em_ok on-setter embed-landed:
       (it['veid']) = Vector(of: it['eid'], start: it['start'], v: this.em_vecs[it['r']])
     (this.em_job['eid']).emb_n = this.em_job['upto']
     FOR q IN ['membrane::Embed:queue']:
-      (q).cache = [] if (prop(q, 'pass_n') or 0) + this.em_job['n'] >= 256 else tail(concat(prop(q, 'cache') or [], [[x['text'], x['veid']] for x in this.em_job['unc']]), 64)
-      (q).pass_n = 0 if (prop(q, 'pass_n') or 0) + this.em_job['n'] >= 256 else (prop(q, 'pass_n') or 0) + this.em_job['n']
-      (q).landed = prop(this.em_job, 'id')
+      (q).cache = [] if (${q}['pass_n'] or 0) + this.em_job['n'] >= 256 else tail(concat(${q}['cache'] or [], [[x['text'], x['veid']] for x in this.em_job['unc']]), 64)
+      (q).pass_n = 0 if (${q}['pass_n'] or 0) + this.em_job['n'] >= 256 else (${q}['pass_n'] or 0) + this.em_job['n']
+      (q).landed = ${this.em_job}['id']
       (q).fail = None
 
 -- ---- a recall ask's own call that embedded the text's SENTENCES (packs/mentions.c1f `ask_input` a list: a Memory note) is this pipeline's request for them -----------------------
 -- (operator 2026-11-15): its vectors are written as the sentence vectors and `emb_n` counts them, so the queue settles the text (`embedded`, its ask retired) and never sends it again.
 SemText.ask_vecs on-setter embed-ask-vectors:
-  WHEN this.ask_vecs != None and prop(prop(this.ask_rr, 'id'), 'starts') != None:
-    sts = prop(prop(this.ask_rr, 'id'), 'starts')
+  WHEN this.ask_vecs != None and ${${this.ask_rr}['id']}['starts'] != None:
+    sts = ${${this.ask_rr}['id']}['starts']
     FOR it IN [{'start': st, 'v': this.ask_vecs[len([y for y in sts if y < st])]} for st in sts]:
       ('Vector:of:' + this.skey + ':s:' + str(it['start'])) = Vector(of: this.eid, start: it['start'], v: it['v'])
     this.emb_n = max(this.emb_n or 0, len(sts))

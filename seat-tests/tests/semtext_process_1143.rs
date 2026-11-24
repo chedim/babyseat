@@ -85,9 +85,9 @@ fn entity_read_shows_the_layers_of_a_semtext_a_pack_of_the_model_made_and_a_text
     write(port, "Lamp:a", "say", json!("Open my_fn now. Then stop."));
     let words = wait("the words of the body", || { let t = read(port, "Lamp:a:body", "words"); if t.contains("Open") { Some(t) } else { None } });
     assert!(words.contains("my_fn") && words.contains("\"start\""), "{words}");
-    let whole = wait("the whole read", || { let t = call(port, "entity_read", json!({"spec": "Lamp:a:body"})).0; if t.contains("sentences") { Some(t) } else { None } });
-    for k in ["text", "sentences", "words", "identifiers", "paths"] { assert!(whole.contains(&format!("\"{k}\"")), "entity_read lacks {k}: {whole}"); }
-    assert!(whole.contains("Then stop."), "{whole}");
+    // the layers are getters: read one by one (a whole read shows what is stored)
+    for k in ["text", "sentences", "words", "identifiers", "paths"] { let v = wait(&format!("the layer {k}"), || { let t = read(port, "Lamp:a:body", k); if t.is_empty() || t.contains(" has no ") { None } else { Some(t) } }); assert!(!v.is_empty(), "{k}"); }
+    assert!(read(port, "Lamp:a:body", "sentences").contains("Then stop."));
     write(port, "Lamp:a:body", "text", json!("Only one."));
     wait("the recomputed sentences", || { let t = read(port, "Lamp:a:body", "sentences"); if t.contains("Only one.") && !t.contains("Then stop.") { Some(t) } else { None } });
 }

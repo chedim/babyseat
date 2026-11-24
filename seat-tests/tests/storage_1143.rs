@@ -274,7 +274,7 @@ fn an_old_store_gets_the_columns_and_a_backfill_from_the_journal_once() {
 // ---- LAZY LOAD and the WARM BOOT: the packs and the RESIDENT rows at start, the rest on first reference and in the background, newest first --------------------------
 const LAZY: &str = "PACK l 1
 RESIDENT Peek
-Peek.val getter: prop(this.target, 'n')
+Peek.val getter: ${this.target}['n']
 Box.double getter: this.n * 2
 Box.go on-setter bump:
   WHEN this.go == True:

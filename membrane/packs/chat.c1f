@@ -41,9 +41,9 @@ ChatTurn.state on-setter chat-bell-turn:
 Chat.title getter: 'main'
 -- the model of the seat's own pick (the launcher's `minds.seat_default`; NONE ('') unless the developer mode names `claude`): a session or a message with no pick of its own runs on it
 -- (the launch fact `seat_default` is the same word for a seat that runs no launcher pack: tests and tools that start the bare packs)
-Chat.seat_base getter: prop('Minds:seat', 'seat_default') or ([b.seat_default for b in instances('Boot') if b.seat_default != None] or [''])[0]
+Chat.seat_base getter: ${'Minds:seat'}['seat_default'] or ([b.seat_default for b in instances('Boot') if b.seat_default != None] or [''])[0]
 -- the seat-wide pick (the page's "Which model?" form and the gear window post `loops`, packs/door_models.c1f: one runner, the chat's default too) wins over the launcher's
-Chat.seat_model getter: prop('Minds:seat', 'loops') or this.seat_base
+Chat.seat_model getter: ${'Minds:seat'}['loops'] or this.seat_base
 -- `mid` = the id inside its chat (`<ms>-<n>`, what the pages show); `cp` = the key below `membrane::Chat:` (`main:message:<id>` / `session:<sid>:message:<id>`): the handle that names the message
 -- everywhere else (`membrane::Chat[this.cp]:turn...`, `Command:chat:<cp>`). `sid` is the session it is in (None for the main chat): read from the key, never stored.
 ChatMessage.cp getter: replace(this.eid, 'membrane::Chat:', '')
@@ -51,14 +51,14 @@ ChatMessage.mid getter: after(this.eid, ':message:')
 ChatMessage.sid getter: before(replace(this.eid, 'membrane::Chat:session:', ''), ':message:') if startswith(this.eid, 'membrane::Chat:session:') else None
 ChatLine.kind getter: 'line'
 ChatMessage.turn_eid getter: this.eid + ':turn'
-ChatMessage.tstate getter: prop(this.turn_eid, 'status')
+ChatMessage.tstate getter: ${this.turn_eid}['status']
 ChatMessage.resp_eid getter: this.turn_eid + ':response'
-ChatMessage.said getter: prop(this.resp_eid, 'text')
+ChatMessage.said getter: ${this.resp_eid}['text']
 -- a turn that ended in an error after the model had said something keeps those words as the response's body and marks the response `interrupted` (with the error's `reason`): `cut` is that reason,
 -- `kept` the words (chat_turn.c1f); both none for any other turn
-ChatMessage.cut getter: prop(this.resp_eid, 'reason') if prop(this.resp_eid, 'interrupted') == True else None
-ChatMessage.kept_words getter: prop(this.resp_eid + ':body', 'text') if prop(this.resp_eid, 'interrupted') == True else None
-ChatMessage.turn_view getter: {'state': this.tstate, 'started': prop(this.turn_eid, 'started'), 'ended': prop(this.turn_eid, 'ended'), 'usage': prop(this.turn_eid, 'usage'), 'cost': prop(this.turn_eid, 'cost'), 'calls': prop(this.turn_eid, 'calls'), 'duration': prop(this.turn_eid, 'duration')}
+ChatMessage.cut getter: ${this.resp_eid}['reason'] if ${this.resp_eid}['interrupted'] == True else None
+ChatMessage.kept_words getter: ${this.resp_eid + ':body'}['text'] if ${this.resp_eid}['interrupted'] == True else None
+ChatMessage.turn_view getter: {'state': this.tstate, 'started': ${this.turn_eid}['started'], 'ended': ${this.turn_eid}['ended'], 'usage': ${this.turn_eid}['usage'], 'cost': ${this.turn_eid}['cost'], 'calls': ${this.turn_eid}['calls'], 'duration': ${this.turn_eid}['duration']}
 ChatMessage.view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view}
 -- what the event stream sends: the view, but while the turn runs `response` is the partial answer (chat_turn.c1f `partial_text`, null until a word is out)
 -- and `tools` the names of the tool blocks started so far; once the turn has finished they are the final ones
@@ -70,10 +70,10 @@ ChatMessage.stream_view getter: {'id': this.mid, 'text': this.text, 'state': thi
 -- are the stored `...:turn:tool:*` rows in the order they were written (`updated`, then the id). Each tool is READ by its eid, so an unloaded one loads.
 ChatMessage.tool_keys getter:
   WHEN this.tool_ids != None: [this.turn_eid + ':tool:' + i for i in words(this.tool_ids)]
-  ELSE WHEN this.tstate in ['done', 'error']: [prop(r, 'k') for r in (sql('SELECT k FROM c_field WHERE k LIKE ? ORDER BY updated, k', this.turn_eid + ':tool:%') or [])]
+  ELSE WHEN this.tstate in ['done', 'error']: [${r}['k'] for r in (sql('SELECT k FROM c_field WHERE k LIKE ? ORDER BY updated, k', this.turn_eid + ':tool:%') or [])]
   ELSE: []
 -- `id` is the call's own entity key (distinct per call), so a page keys its rows by it: two identical calls are two lines
-ChatMessage.tool_rows getter: [{'id': k, 'name': replace(str(prop(k, 'name')), 'mcp__membrane__', ''), 'input': prop(k, 'input'), 'result': prop(k, 'result')} for k in this.tool_keys]
+ChatMessage.tool_rows getter: [{'id': k, 'name': replace(str(${k}['name']), 'mcp__membrane__', ''), 'input': ${k}['input'], 'result': ${k}['result']} for k in this.tool_keys]
 ChatMessage.history_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'tool_calls': this.tool_rows, 'interrupted': this.cut, 'kept': this.kept_words}
 -- THE PAGE'S VIEW: history_view with each tool as {id, name, input} only (the page shows no result; a result can be megabytes). The route sends this one; `history_view` keeps the whole result for other adapters.
 ChatMessage.page_view getter: {'id': this.mid, 'text': this.text, 'state': this.tstate or 'queued', 'response': this.said, 'tools': this.tools_run or [], 'turn': this.turn_view, 'sent_by': this.sent_by, 'interrupted': this.cut, 'kept': this.kept_words, 'tool_calls': [{'id': t['id'], 'name': t['name'], 'input': t['input']} for t in this.tool_rows]}
@@ -89,13 +89,13 @@ Request.o_session getter: this.route == '/membrane/chat/message' or this.route =
 Request.m_session getter: ['POST'] if (this.route == '/membrane/chat/message' or this.ab1_on) else ['GET']
 
 -- ---- POST: the message --------------------------------------------------------------------------------------------------------------
-Request.cm_text getter: strip(str(prop(this.jbody, 'text') or ''))
+Request.cm_text getter: strip(str(${this.jbody}['text'] or ''))
 Request.cm_go getter: this.entrant and this.method == 'POST' and this.route == '/membrane/chat/message' and this.cm_text != ''
 Request.cm_go on-setter chat-stamp:
   WHEN this.cm_go:
     this.cm_at = clock
 -- an optional `sid` in the body names a session (packs/door_session.c1f, the page's session switcher): the message is born under it, `membrane::Chat:session:<sid>:message:<id>`
-Request.cm_sid getter: strip(str(prop(this.jbody, 'sid') or ''))
+Request.cm_sid getter: strip(str(${this.jbody}['sid'] or ''))
 Request.cm_sid_bad getter: replace(this.cm_sid, ':', '') != this.cm_sid
 -- the id: the arrival time in milliseconds, `-`, the request's number padded to 8 digits (so the key order is the time order)
 Request.cm_at on-setter chat-message-sid:
@@ -132,8 +132,8 @@ Request.cm_post getter:
 Request.ab1_on getter: startswith(this.route, '/membrane/chat/message/') and tail(this.route, 6) == '/abort'
 Request.ab1_gid getter: replace(replace(this.route, '/membrane/chat/message/', ''), '/abort', '')
 Request.ab1_cp getter: ('session:' + this.cm_qsid + ':message:' + this.ab1_gid if this.cm_qsid != '' else 'main:message:' + this.ab1_gid) if replace(this.cm_qsid + this.ab1_gid, ':', '') == this.cm_qsid + this.ab1_gid else None
-Request.ab1_view getter: prop('membrane::Chat:' + this.ab1_cp, 'view') if this.ab1_on and this.ab1_cp != None else None
-Request.ab1_live getter: this.entrant and this.ab1_on and this.method == 'POST' and this.ab1_view != None and prop(this.ab1_view, 'state') == 'running'
+Request.ab1_view getter: ${'membrane::Chat:' + this.ab1_cp}['view'] if this.ab1_on and this.ab1_cp != None else None
+Request.ab1_live getter: this.entrant and this.ab1_on and this.method == 'POST' and this.ab1_view != None and ${this.ab1_view}['state'] == 'running'
 Request.ab1_turns getter: [this.ab1_cp] if this.ab1_live == True else None
 -- (the setter that stops the CLI is in chat_turn.c1f: only a pack that imports `proc` may write a Command's verb)
 Request.ab1_reply getter:
@@ -147,16 +147,16 @@ Request.cm_gid getter: replace(replace(this.route, '/membrane/chat/message/', ''
 Request.cm_events getter: startswith(this.route, '/membrane/chat/message/') and replace(this.route, '/events', '') != this.route
 Request.cm_qsid getter: ([q[1] for q in this.qpairs if q[0] == 'sid'] or [''])[0]
 Request.cm_eid getter: ('membrane::Chat:session:' + this.cm_qsid + ':message:' + this.cm_gid if this.cm_qsid != '' else 'membrane::Chat:main:message:' + this.cm_gid) if replace(this.cm_qsid + this.cm_gid, ':', '') == this.cm_qsid + this.cm_gid else None
-Request.cm_view getter: prop(this.cm_eid, 'view') if this.cm_eid != None else None
+Request.cm_view getter: ${this.cm_eid}['view'] if this.cm_eid != None else None
 Request.cm_get getter: {'status': 200, 'body': this.cm_view} if this.cm_view != None else {'status': 404, 'body': {'error': 'no such message'}}
 
 -- the stream: an unknown message is a 404 like the poll route; a known one opens the stream (the door's `answer-stream` setter writes `stream`)
 Request.cm_stream getter: {'status': 200, 'stream': True} if this.cm_view != None else {'status': 404, 'body': {'error': 'no such message'}}
 -- the head is out (`stream_rc` 0) -> every change of the message's `stream_view` is one `message` event; the last one is followed by the close.
 -- `send` and `end` are written in this order in ONE setter, so the close never overtakes the last event.
-Request.ev_snap getter: prop(this.cm_eid, 'stream_view') if this.cm_events and this.cm_eid != None and this.stream_rc == 0 else None
+Request.ev_snap getter: ${this.cm_eid}['stream_view'] if this.cm_events and this.cm_eid != None and this.stream_rc == 0 else None
 Request.ev_snap on-setter ev-send:
-  WHEN this.ev_snap != None and prop(this.ev_snap, 'state') in ['done', 'error']:
+  WHEN this.ev_snap != None and ${this.ev_snap}['state'] in ['done', 'error']:
     this.send = {'id': 'event', 'event': 'message', 'data': this.ev_snap}
     this.end = {'id': 'end'}
   ELSE WHEN this.ev_snap != None:
@@ -197,14 +197,14 @@ Request.hs_cut_lo getter: this.hs_prefix + this.hs_before + (':' if this.hs_sid 
 Request.hs_cut_hi getter: this.hs_prefix + this.hs_before + (';' if this.hs_sid == None else ':')
 Request.hs_cut getter: sql('SELECT k FROM c_field WHERE cls = \'Chat\' AND k >= ?1 AND k < ?2 AND (?3 = 1 OR k = ?1) LIMIT 1', this.hs_cut_lo, this.hs_cut_hi, 1 if this.hs_sid == None else 0) if this.hs_on and this.hs_before != None and not this.hs_bad else []
 -- a message range gives the message key; a time range names the chat in its `<where>` (`main` or `session:<sid>`)
-Request.hs_ids getter: [{'eid': (prop(r, 'k') if this.hs_sid != None else 'membrane::Chat:' + after(replace(prop(r, 'k'), this.hs_prefix, ''), ':') + ':message:' + before(replace(prop(r, 'k'), this.hs_prefix, ''), ':')), 'id': before(replace(prop(r, 'k'), this.hs_prefix, ''), ':')} for r in head(this.hs_rows, this.hs_limit)] if this.hs_rows != None else None
+Request.hs_ids getter: [{'eid': (${r}['k'] if this.hs_sid != None else 'membrane::Chat:' + after(replace(${r}['k'], this.hs_prefix, ''), ':') + ':message:' + before(replace(${r}['k'], this.hs_prefix, ''), ':')), 'id': before(replace(${r}['k'], this.hs_prefix, ''), ':')} for r in head(this.hs_rows, this.hs_limit)] if this.hs_rows != None else None
 Request.hs_page getter: sort_by(this.hs_ids, 'id')
 Request.hs_more getter: len(this.hs_rows) > this.hs_limit
 Request.hs_get getter:
   WHEN this.hs_bad: {'status': 400, 'body': {'error': 'sid and before must not contain a colon'}}
   ELSE WHEN this.hs_rows == None or this.hs_cut == None: None
   ELSE WHEN this.hs_before != None and len(this.hs_cut) == 0: {'status': 404, 'body': {'error': 'no such message'}}
-  ELSE: {'status': 200, 'body': {'messages': [prop(r['eid'], 'page_view') for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None, 'import': prop('membrane::Legacy:cutover', 'line')}}
+  ELSE: {'status': 200, 'body': {'messages': [${r['eid']}['page_view'] for r in this.hs_page], 'more': this.hs_more, 'next': this.hs_page[0]['id'] if this.hs_more else None, 'import': ${'membrane::Legacy:cutover'}['line']}}
 
 Request.r_session getter:
   WHEN this.route == '/membrane/chat/message': this.cm_post

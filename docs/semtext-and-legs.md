@@ -84,7 +84,7 @@ What landed, where, and what it changed against the design above. Packs: `membra
 
 - **`SemText` is a CLASS**, made by a constructor (`<owner>:body = SemText(text: ...)`); its `text` is the one stored string; `sentences words identifiers paths
   urls numbers` are getters over `spans(this.text, <layer>)`, recomputed when `text` changes. Storage: the default (lazy: stored, loaded on reference). RESIDENT would
-  load every text ever said at start. (Each layer is a cached getter value, so a stored body also holds its layers' rows: the cost of an eager layer; see "Cost".)
+  load every text ever said at start. (Each layer is a getter value held in memory, never stored (#1143, operator 2026-11-24): a stored body holds its text only; the layers are computed when the body loads.)
 - **Spans are VIRTUAL entities, attached by one explicit write.** `<semtext>.attach = {layer: 'word', start: 5}` makes `Span:of:<key>:<letter>:<start>` (letters
   s w i p u n; the key is the text's eid with `::` written `/`, because the storage mode follows the eid's class and an eid that began with the text's class, `Chat`, would
   be a stored entity). `Span` is VIRTUAL; it has `of` (a `$ref` to the text), `layer`, `start`, `end`; its `text` is a getter that cuts the parent's string, so nothing

@@ -10,7 +10,6 @@ Builtins added since 0.7.53 (`Help:c1f` has each in its place):
 - `vsum(vectors, weights)`: the sum of a list of vectors, each times its weight (the weights are optional);
 - `fold(start, [step for x in xs if keep])`: carries `acc` across a list;
 - `log(x)`: the natural log of a positive number;
-- `props(ids, 'name')`: one property of every entity of a list, in one step (`props(ids, at, 'name')` takes element `at[i]` of each value);
 - `vmean(ids)`: the mean of the unit vectors `v` of a list of entities (an id with no vector is skipped);
 - `group_by(rows, key, ['col'])`: the third argument totals each named column per group.
 
@@ -29,7 +28,7 @@ P.nearest getter: pluck(near([0.0, 1.0], 'Vector', 1), 'eid')
 P.added getter: vsum([[1, 0], [0, 1]], [2, 0.5])
 P.total getter: fold(0, [acc + x for x in [1, 2, 3]])
 P.ln getter: log(1)
-P.dims getter: props(this.ids, 'dim')
+P.dims getter: [${i}['dim'] for i in this.ids]
 P.mid getter: vmean(this.ids)
 P.per_key getter: pluck(group_by(this.rows, 'k', ['n']), 'n')
 ```
