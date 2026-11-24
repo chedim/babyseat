@@ -68,6 +68,13 @@ Goal.replan_lost on-setter replan-lost:
     this.plan_calls = (this.plan_calls or 0) + 1
     this.plan_prompt = this.plan_due
 
+-- ONE CHAT PER GOAL: the planner and the workers of a goal talk in the chat `goal-<name>` (Goal:x -> Chat:goal-x), so the goal's whole story is in one place and every turn sees the earlier ones.
+-- The chat a lane message went to is kept on the goal (plan_chat) or the task (worker_chat), so an answer is read from where it was asked; none kept (a message made before this change) is the old chat `gg`.
+Goal.chat_name getter: 'goal-' + replace(replace(this.eid, 'Goal:', ''), ':', '-')
+Task.chat_name getter: 'goal-' + replace(replace(str(this.goal), 'Goal:', ''), ':', '-')
+Goal.reply_chat getter: this.plan_chat or 'gg'
+Task.reply_chat getter: this.worker_chat or 'gg'
+
 -- the goal's graph as lines: tasks, waits, cards, each with its state, what it waits on and its receipt
 Goal.planner_graph getter:
   mine = referencing(this, 'goal')
@@ -338,32 +345,36 @@ Goal.plan_calls on-setter lane-planner:
     id = words(replace(str(clock * 1000000), '.', ' '))[0] + '-' + tail('00000000' + str(this.plan_calls), 8)
     this.plan_msg = id
     this.plan_asked_ts = clock
-    membrane::Chat:gg = Chat(name: 'gg')
-    membrane::Chat:gg:message[id] = ChatMessage(text: this.plan_prompt, at: clock, pick: (${'Pool:workers'}['model'] or ''))
-    membrane::Chat:gg:message[id]:body = SemText(text: this.plan_prompt)
-    membrane::Chat:gg:message[id]:turn = ChatTurn(message: 'membrane::Chat:gg:message:' + id, queued_at: clock)
-    membrane::Chat:gg:time[id]:main = ChatLine(chat: 'gg')
-    membrane::Chat:gg:message[id].queued = True
+    cn = this.chat_name
+    this.plan_chat = cn
+    membrane::Chat[cn] = Chat(name: cn, goal: this.eid)
+    membrane::Chat[cn]:message[id] = ChatMessage(text: this.plan_prompt, at: clock, pick: (${'Pool:workers'}['model'] or ''))
+    membrane::Chat[cn]:message[id]:body = SemText(text: this.plan_prompt)
+    membrane::Chat[cn]:message[id]:turn = ChatTurn(message: 'membrane::Chat:' + cn + ':message:' + id, queued_at: clock)
+    membrane::Chat[cn]:time[id]:main = ChatLine(chat: cn)
+    membrane::Chat[cn]:message[id].queued = True
 
 Task.started_ts on-setter lane-worker:
   WHEN this.worker_prompt != None and this.status == 'running':
     id = words(replace(str(clock * 1000000), '.', ' '))[0] + '-' + tail('00000000' + str((this.runs or 0) + 1 + (this.continues or 0) * 100), 8)
     this.worker_msg = id
-    membrane::Chat:gg = Chat(name: 'gg')
-    membrane::Chat:gg:message[id] = ChatMessage(text: this.worker_prompt, at: clock, pick: (${'Pool:workers'}['model'] or ''))
-    membrane::Chat:gg:message[id]:body = SemText(text: this.worker_prompt)
-    membrane::Chat:gg:message[id]:turn = ChatTurn(message: 'membrane::Chat:gg:message:' + id, queued_at: clock)
-    membrane::Chat:gg:time[id]:main = ChatLine(chat: 'gg')
-    membrane::Chat:gg:message[id].queued = True
+    cn = this.chat_name
+    this.worker_chat = cn
+    membrane::Chat[cn] = Chat(name: cn, goal: str(this.goal))
+    membrane::Chat[cn]:message[id] = ChatMessage(text: this.worker_prompt, at: clock, pick: (${'Pool:workers'}['model'] or ''))
+    membrane::Chat[cn]:message[id]:body = SemText(text: this.worker_prompt)
+    membrane::Chat[cn]:message[id]:turn = ChatTurn(message: 'membrane::Chat:' + cn + ':message:' + id, queued_at: clock)
+    membrane::Chat[cn]:time[id]:main = ChatLine(chat: cn)
+    membrane::Chat[cn]:message[id].queued = True
 
 -- the pump of the pool is the beat: every beat, a lane's answer that has landed is handed on (a reply already handed on is the same value: nothing runs)
 Pool.pump on-setter lane-collect:
   ALWAYS:
-    FOR t IN [t for t in instances('Task') if t.status == 'running' and t.worker_msg != None and ${'membrane::Chat:gg:message:' + t.worker_msg + ':turn:response'}['text'] != None]:
-      t.worker_reply = ${'membrane::Chat:gg:message:' + t.worker_msg + ':turn:response'}['text']
+    FOR t IN [t for t in instances('Task') if t.status == 'running' and t.worker_msg != None and ${'membrane::Chat:' + t.reply_chat + ':message:' + t.worker_msg + ':turn:response'}['text'] != None]:
+      t.worker_reply = ${'membrane::Chat:' + t.reply_chat + ':message:' + t.worker_msg + ':turn:response'}['text']
       t.worker_msg = None
-    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and ${'membrane::Chat:gg:message:' + g.plan_msg + ':turn:response'}['text'] != None]:
-      g.planner_reply = ${'membrane::Chat:gg:message:' + g.plan_msg + ':turn:response'}['text']
+    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and ${'membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response'}['text'] != None]:
+      g.planner_reply = ${'membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response'}['text']
       g.plan_msg = None
     -- a sub-task whose parent was written with the goal's prefix twice (the plan did that before it took an eid as a parent) is attached to the real parent, one prefix a beat
     FOR t IN [t for t in instances('Task') if t.parent != None and startswith(str(t.parent), 'Task:' + replace(str(t.goal), 'Goal:', '') + ':Task:')]:
@@ -373,11 +384,11 @@ Pool.pump on-setter lane-collect:
       t.receipt = 'its sub-tasks are done' if len([s for s in referencing(t, 'parent') if s.status == 'done']) > 0 else 'all its sub-tasks were dropped'
       t.status = 'done' if len([s for s in referencing(t, 'parent') if s.status == 'done']) > 0 else 'dropped'
     -- a planner pass nobody answered for 15 minutes (its turn was lost) is called again; a worker nobody answered for 15 minutes is stuck, which frees its pool slot and asks the planner
-    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and clock - (g.plan_asked_ts or clock) > 900 and ${'membrane::Chat:gg:message:' + g.plan_msg + ':turn:response'}['text'] == None]:
+    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and clock - (g.plan_asked_ts or clock) > 900 and ${'membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response'}['text'] == None]:
       g.plan_msg = None
       g.plan_prompt = g.plan_due
       g.plan_calls = (g.plan_calls or 0) + (1 if g.plan_due != None else 0)
-    FOR t IN [t for t in instances('Task') if t.status == 'running' and clock - (t.started_ts or clock) > 900 and (t.worker_msg == None or ${'membrane::Chat:gg:message:' + t.worker_msg + ':turn:response'}['text'] == None)]:
+    FOR t IN [t for t in instances('Task') if t.status == 'running' and clock - (t.started_ts or clock) > 900 and (t.worker_msg == None or ${'membrane::Chat:' + t.reply_chat + ':message:' + t.worker_msg + ':turn:response'}['text'] == None)]:
       t.worker_msg = None
       t.finish = {'verdict': 'stuck', 'detail': 'no answer from the worker in 15 minutes', 'session': ''}
 
@@ -386,7 +397,7 @@ Boot.started on-setter reowe-at-boot:
   WHEN this.started != None:
     FOR t IN [t for t in instances('Task') if t.status == 'running' or t.status == 'owed']:
       t.reowe = this.started
-    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and ${'membrane::Chat:gg:message:' + g.plan_msg + ':turn:response'}['text'] == None]:
+    FOR g IN [g for g in instances('Goal') if g.plan_msg != None and ${'membrane::Chat:' + g.reply_chat + ':message:' + g.plan_msg + ':turn:response'}['text'] == None]:
       g.plan_msg = None
       g.plan_prompt = g.plan_due
       g.plan_calls = (g.plan_calls or 0) + (1 if g.plan_due != None else 0)

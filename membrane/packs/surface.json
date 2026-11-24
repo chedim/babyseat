@@ -923,15 +923,15 @@
       "Task",
       "Wait"
     ],
-    "members": 50,
+    "members": 54,
     "writes": [
       "Task:*.status",
       "membrane:*.queued",
+      "membrane:*=Chat()",
       "membrane:*=ChatLine()",
       "membrane:*=ChatMessage()",
       "membrane:*=ChatTurn()",
       "membrane:*=SemText()",
-      "membrane::Chat:gg=Chat()",
       "membrane::Chat:main=Chat()",
       "ref(goal).replan",
       "ref(goal).tell",
