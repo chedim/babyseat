@@ -53,7 +53,7 @@ fn start_ex(dir: &std::path::Path, facts: &[String], without: &[&str]) -> Run {
 }
 fn read(run: &Run, spec: &str, prop: &str) -> String {
     let token = std::fs::read_to_string(run.dir.join("admin.token")).unwrap();
-    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_read", "arguments": {"spec": spec, "prop": prop}}}).to_string();
+    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "run_cliff", "arguments": {"code": format!("${{'{}'}}['{}']", spec, prop)}}}).to_string();
     let mut s = TcpStream::connect(("127.0.0.1", run.port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     s.write_all(format!("POST /mcp HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", token.trim(), body.len()).as_bytes()).unwrap();
@@ -241,7 +241,7 @@ fn routing_back_to_a_rung_is_the_same_switch_changed() {
     let id = send(&run, "now a rung");
     let v = state_is(&run, &id, "error", 30);
     assert_eq!(v["state"], "error", "no brain: the default routing answers (here it refuses, no model is chosen): {v}");
-    assert!(read(&run, &eid(&id, ":turn"), "brain").contains("has no"), "no brain on the turn");
+    assert!(read(&run, &eid(&id, ":turn"), "brain").starts_with("null"), "no brain on the turn");
 }
 
 // ---- the clifflet runner for peers -----------------------------------------------------------------------------------------------------------------------
@@ -251,7 +251,7 @@ fn a_peer_writes_code_and_gets_the_value_back_on_the_same_node() {
     let (run, _n, mut peer) = seat_with_grants("lc-cliff", Some(json!(["*"])), &[]);
     assert_eq!(ask(&mut peer, "membrane::Cliff:kitchen:one", "code", json!("1 + 2 * 3")), None);
     assert!(wait_for(&run, "membrane::Cliff:kitchen:one", "result", "7", 60).contains('7'), "{}", read(&run, "membrane::Cliff:kitchen:one", "error"));
-    assert!(read(&run, "membrane::Cliff:kitchen:one", "error").contains("has no"), "a value has no error");
+    assert!(read(&run, "membrane::Cliff:kitchen:one", "error").starts_with("null"), "a value has no error");
 }
 
 #[test]
@@ -260,7 +260,7 @@ fn a_block_that_fails_writes_error_text_not_a_result() {
     assert_eq!(ask(&mut peer, "membrane::Cliff:kitchen:bad", "code", json!("this is not a block ((")), None);
     let e = wait_for(&run, "membrane::Cliff:kitchen:bad", "error", "did not load", 60);
     assert!(e.contains("did not load"), "{e}");
-    assert!(read(&run, "membrane::Cliff:kitchen:bad", "result").contains("has no"));
+    assert!(read(&run, "membrane::Cliff:kitchen:bad", "result").starts_with("null"));
 }
 
 #[test]
@@ -269,7 +269,7 @@ fn code_on_a_node_of_a_namespace_that_is_no_peer_up_is_not_run() {
     // a person's write (the door) of a Cliff node that names no connected peer: the runner is for peers only
     put(&run, "membrane::Cliff:nobody:one", "code", json!("1 + 1"));
     std::thread::sleep(Duration::from_secs(4));
-    assert!(read(&run, "membrane::Cliff:nobody:one", "result").contains("has no"), "{}", read(&run, "membrane::Cliff:nobody:one", "result"));
+    assert!(read(&run, "membrane::Cliff:nobody:one", "result").starts_with("null"), "{}", read(&run, "membrane::Cliff:nobody:one", "result"));
 }
 
 // ---- a refused node ANSWERS (a peer must never wait on a silence) ---------------------------------------------------------------------------------------
@@ -280,7 +280,7 @@ fn a_bad_id_answers_error_in_plain_words() {
     assert_eq!(ask(&mut peer, "membrane::Cliff:kitchen:call_2_2_0", "code", json!("1 + 1")), None);
     let e = wait_for(&run, "membrane::Cliff:kitchen:call_2_2_0", "error", "refused", 60);
     assert!(e.contains("refused") && e.contains("letters and digits"), "{e}");
-    assert!(read(&run, "membrane::Cliff:kitchen:call_2_2_0", "result").contains("has no"));
+    assert!(read(&run, "membrane::Cliff:kitchen:call_2_2_0", "result").starts_with("null"), "a refused block has no result");
 }
 
 #[test]

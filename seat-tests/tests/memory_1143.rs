@@ -70,7 +70,7 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
     }
 }
 
-fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})).0 }
+fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)})).0 }
 fn write(port: u16, spec: &str, prop: &str, v: J) { let (t, e) = call(port, "entity_write", json!({"spec": spec, "prop": prop, "value": v})); assert!(!e, "{t}"); }
 fn read_until(port: u16, spec: &str, prop: &str, want: &str) -> String {
     wait(&format!("{spec}.{prop} = {want}"), || { let t = read(port, spec, prop); if t == want { Some(t) } else { None } })

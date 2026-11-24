@@ -68,7 +68,7 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
     }
 }
 
-fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})).0 }
+fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)})).0 }
 fn write(port: u16, spec: &str, prop: &str, v: J) { let (t, e) = call(port, "entity_write", json!({"spec": spec, "prop": prop, "value": v})); assert!(!e, "{t}"); }
 fn read_until(port: u16, spec: &str, prop: &str, want: &str) -> String {
     wait(&format!("{spec}.{prop} = {want}"), || { let t = read(port, spec, prop); if t == want { Some(t) } else { None } })
@@ -119,7 +119,7 @@ fn the_model_writes_a_pack_entity_and_its_getters_and_setters_run_reload_and_ref
     // 6. a good text clears the error
     write(port, "Pack:mine", "text", json!(lamps("three")));
     read_until(port, "Pack:mine", "state", "loaded");
-    assert_eq!(read(port, "Pack:mine", "error"), "Pack:mine has no error");
+    assert!(read(port, "Pack:mine", "error").starts_with("null"), "a loaded pack has no error");
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn the_tools_write_and_create_an_entity_of_a_class_the_model_pack_owns_directly(
     write(port, "Pack:thief", "text", json!("PACK thief 1\nSpy.go on-setter s:\n  ALWAYS: Pack:thief.privileged = True\n"));
     write(port, "Spy:s", "go", json!(2));
     read_until_has(port, "Spy:s", "refused", "can't grant");
-    assert_eq!(read(port, "Pack:thief", "privileged"), "Pack:thief has no privileged");
+    assert!(read(port, "Pack:thief", "privileged").starts_with("null"), "the pack was not promoted");
 }
 
 fn wtext(port: u16, spec: &str, prop: &str, v: J) -> String { let (t, e) = call(port, "entity_write", json!({"spec": spec, "prop": prop, "value": v})); assert!(!e, "{t}"); t }

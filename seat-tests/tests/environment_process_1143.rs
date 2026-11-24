@@ -33,9 +33,12 @@ fn text(reply: &str) -> String {
     let r: J = serde_json::from_str(b).unwrap_or_else(|e| panic!("{e}: {b}"));
     r["result"]["content"][0]["text"].as_str().unwrap_or_else(|| panic!("{r}")).to_string()
 }
+/// every property of `Environment:host` with its value: the names from `meta`, each value read (a whole `entity_read` is the index of names, #1143)
+const ENV_DUMP: &str = "[[k, ${'Environment:host'}[k]] for k in meta('Environment:host')['properties']]";
 fn environment(port: u16) -> J {
-    let t = text(&mcp(port, "entity_read", json!({"spec": "Environment:host"})));   // `Environment:host (Environment) {json}`
-    serde_json::from_str(&t[t.find('{').expect("a property list")..]).unwrap_or_else(|e| panic!("{e}: {t}"))
+    let t = text(&mcp(port, "run_cliff", json!({"code": ENV_DUMP})));
+    let pairs: Vec<J> = serde_json::from_str(&t).unwrap_or_else(|e| panic!("{e}: {t}"));
+    J::Object(pairs.into_iter().map(|p| (p[0].as_str().unwrap().to_string(), p[1].clone())).collect())
 }
 
 fn start(dir: &std::path::Path, env: &[(&str, &str)], facts: &[&str]) -> Seat {
@@ -80,8 +83,8 @@ fn a_seat_with_secrets_in_its_environment_shows_the_allowed_names_and_the_secret
     assert!(e.get("PATH").is_none() && e.get("EDITOR").is_none(), "not on the list: absent");
     // every route's reply
     let mut replies = vec![
-        mcp(s.port, "entity_read", json!({"spec": "Environment:host"})), mcp(s.port, "entity_read", json!({"spec": "Boot:seat"})), mcp(s.port, "entity_query", json!({"q": "", "k": 100, "full": true})),
-        mcp(s.port, "entity_query", json!({"q": "kind:Environment", "full": true})), mcp(s.port, "run_cliff", json!({"code": "Environment:host.env_present"})),
+        mcp(s.port, "run_cliff", json!({"code": ENV_DUMP})), mcp(s.port, "entity_read", json!({"spec": "Boot:seat"})), mcp(s.port, "entity_query", json!({"q": "", "k": 100})),
+        mcp(s.port, "entity_query", json!({"q": "kind:Environment"})), mcp(s.port, "run_cliff", json!({"code": "Environment:host.env_present"})),
         get(s.port, "/"), get(s.port, "/global/health"), get(s.port, "/ui/fieldvm"), get(s.port, "/membrane/state"),
     ];
     // the process listing (argv and, on this platform, whatever `ps` shows of it)
@@ -105,7 +108,7 @@ fn a_secret_name_asked_for_by_env_allow_is_refused_with_the_reason_and_its_value
     let d = dir("refused");
     let mut s = start(&d, &[("FOO_TOKEN", "xyz-w115")], &["env_allow=FOO_TOKEN"]);
     assert_eq!(environment(s.port)["FOO_TOKEN"], json!("set"));
-    assert!(!mcp(s.port, "entity_read", json!({"spec": "Environment:host"})).contains("xyz-w115"));
+    assert!(!mcp(s.port, "run_cliff", json!({"code": ENV_DUMP})).contains("xyz-w115"));
     s.stop();
     let err = std::fs::read_to_string(&s.stderr).unwrap();
     assert!(err.contains("FOO_TOKEN") && err.contains("refused") && err.contains("SECRET"), "the refusal is said with the reason: {err}");

@@ -62,7 +62,7 @@ fn call(port: u16, tool: &str, args: J) -> String {
 
 fn snap(port: u16) -> J { let (s, b) = http(port, "GET", "/ui/fieldvm", ""); assert_eq!(s, 200, "{b}"); serde_json::from_str(&b).unwrap() }
 fn is_ns(s: &str) -> bool { s.len() == 9 && s.starts_with('p') && s[1..].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) }
-fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})) }
+fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)})) }
 fn caps() -> J { json!({"protocol": 1, "encodings": ["json"], "provides": [{"pack": "dom", "major": 1}], "limits": {"subscriptions": "none yet"}}) }
 fn report() -> J { json!({"view": "chat", "hidden": false, "load_errors": {}, "packs": {"shell_view": 1234}}) }
 fn tell(port: u16, ns: &str) {
@@ -471,7 +471,7 @@ fn an_entity_the_seat_keeps_under_membrane_is_subscribed_by_that_name_a_virtual_
     call(run.port, "entity_write", json!({"spec": format!("{ns}::LogAsk:main"), "prop": "n", "value": 1}));
     let view = format!("membrane::LogView:{ns}");
     let mut want = String::new();
-    for _ in 0..100 { want = call(run.port, "entity_read", json!({"spec": view, "prop": "head"})); if want.parse::<i64>().is_ok() { break; } std::thread::sleep(Duration::from_millis(50)); }
+    for _ in 0..100 { want = call(run.port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", view, "head")})); if want.parse::<i64>().is_ok() { break; } std::thread::sleep(Duration::from_millis(50)); }
     assert!(want.parse::<i64>().is_ok(), "the view answers a head: {want}");
     let (s, r) = frame(run.port, &ns, 1, 0, &[(&view, "head")], &[], false);
     assert_eq!(s, 200, "{r}");

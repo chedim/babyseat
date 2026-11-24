@@ -84,9 +84,9 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
 }
 /// one property of an entity, as JSON (a text that is not JSON comes back as a string)
 fn get(port: u16, eid: &str, prop: &str) -> J {
-    let (st, t) = rpc(port, None, "entity_read", json!({"spec": eid, "prop": prop}));
+    let (st, t) = rpc(port, None, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", eid, prop)}));
     assert_eq!(st, 200, "{t}");
-    if t.ends_with(&format!(" has no {prop}")) { return J::Null; }   // a property nobody wrote (a getter with no value reads the same)
+    if t.ends_with(&format!(" has no {prop}")) || t == "null" || t.starts_with("null: ") { return J::Null; }   // a property nobody wrote (a getter with no value reads the same)
     serde_json::from_str(&t).unwrap_or(J::String(t))
 }
 /// the window's write: ONE entity_write of `Setting:<id>.set`
@@ -232,8 +232,8 @@ fn a_chat_turn_picks_up_a_new_step_limit_and_time_limit_without_a_restart() {
     set(run.port, "chat.timeout", json!(99));
     say("second");
     assert_eq!(after(&argv("second"), "--max-turns"), "7", "the next turn runs with the new step limit");
-    let t = wait("the second turn's command", || { let (_, t) = rpc(run.port, None, "entity_query", json!({"q": "kind:Command & name~:membrane::Command:chat:", "full": true, "k": 100})); (t.matches("\"timeout_s\":99").count() >= 1).then_some(t) });
-    assert!(t.matches("\"timeout_s\":111").count() >= 1 && t.matches("\"timeout_s\":99").count() == 1, "the first turn kept its 111 s, the second ran with 99 s: {t}");
+    let t = wait("the second turn's command", || { let (_, rows) = rpc(run.port, None, "entity_query", json!({"q": "kind:Command & name~:membrane::Command:chat:", "k": 100})); let ids: Vec<String> = rows.lines().filter_map(|l| l.split(' ').next()).map(|e| format!("'{e}'")).collect(); let (_, t) = rpc(run.port, None, "run_cliff", json!({"code": format!("[r['timeout_s'] for r in ${{[{}]}}['running'] if r != None]", ids.join(", "))})); let v: Vec<f64> = serde_json::from_str::<Vec<J>>(&t).unwrap_or_default().iter().filter_map(|x| x.as_f64()).collect(); (v.iter().filter(|x| **x == 99.0).count() >= 1).then_some(v) });
+    assert!(t.iter().filter(|x| **x == 111.0).count() >= 1 && t.iter().filter(|x| **x == 99.0).count() == 1, "the first turn kept its 111 s, the second ran with 99 s: {t:?}");
 }
 
 #[test]
@@ -301,7 +301,7 @@ fn a_token_with_any_sub_writes_a_setting_it_is_the_admin() {
     let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_write", "arguments": {"spec": "Setting:chat.timeout", "prop": "set", "value": 5}}}).to_string();
     let (st, b) = http(run.port, "POST", "/mcp", Some(&ann), &body);
     assert_eq!(st, 200, "ann is the admin: {b}");
-    let rd = |tok: &str| rpc(run.port, Some(tok), "entity_read", json!({"spec": "Setting:chat.timeout", "prop": "current"})).1;
+    let rd = |tok: &str| rpc(run.port, Some(tok), "run_cliff", json!({"code": "${'Setting:chat.timeout'}['current']"})).1;
     assert_eq!(rd(&ann), "5", "ann's write is in force");
     let body2 = body.replace("\"value\":5", "\"value\":7");
     assert_ne!(body, body2);
@@ -320,11 +320,11 @@ fn no_row_holds_or_shows_a_secret_only_the_names_of_environment_variables() {
     let secret = std::fs::read_to_string(dir.0.join("door.secret")).unwrap();
     let (_, all) = rpc(run.port, Some(&own), "entity_query", json!({"q": "kind:Setting", "full": true, "k": 100}));
     for s in [KEY, secret.trim(), own.as_str(), "hunter2pw"] { assert!(!all.contains(s), "a setting shows a secret ({}...)", &s[..6]); }
-    let cloud = rpc(run.port, Some(&own), "entity_read", json!({"spec": "Setting:model.cloud", "prop": "current"})).1;
+    let cloud = rpc(run.port, Some(&own), "run_cliff", json!({"code": "${'Setting:model.cloud'}['current']"})).1;
     assert!(cloud.contains("OTHER_PROVIDER_KEY"), "the variable's NAME is shown: {cloud}");
     for s in [KEY, secret.trim(), own.as_str(), "hunter2pw"] { assert!(!cloud.contains(s), "the cloud setting shows a secret ({}...)", &s[..6]); }
-    assert_eq!(rpc(run.port, Some(&own), "entity_read", json!({"spec": "Setting:model.signin", "prop": "current"})).1, "api_key");
-    let f = rpc(run.port, Some(&own), "entity_read", json!({"spec": "Setting:access.token_file", "prop": "current"})).1;
+    assert_eq!(rpc(run.port, Some(&own), "run_cliff", json!({"code": "${'Setting:model.signin'}['current']"})).1, "api_key");
+    let f = rpc(run.port, Some(&own), "run_cliff", json!({"code": "${'Setting:access.token_file'}['current']"})).1;
     assert!(f.contains("admin.token") && f != own, "the token file's PATH only: {f}");
 }
 

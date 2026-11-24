@@ -115,9 +115,8 @@ fn the_path_is_a_fact_of_the_boot_and_the_token_is_nowhere_in_the_field() {
     let (_run, port) = launch_secret(&dir, &[]);
     let tok = token_of(&dir);
     let read = |spec: &str, prop: Option<&str>| -> String {
-        let mut args = json!({"spec": spec});
-        if let Some(p) = prop { args["prop"] = json!(p); }
-        let (st, _, body) = http(port, "POST", "/mcp", &bearer(&tok), &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_read", "arguments": args}}).to_string());
+        let (name, args) = match prop { Some(p) => ("run_cliff", json!({"code": format!("${{'{spec}'}}['{p}']")})), None => ("entity_read", json!({"spec": spec})) };
+        let (st, _, body) = http(port, "POST", "/mcp", &bearer(&tok), &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}).to_string());
         assert_eq!(st, 200, "{body}");
         body
     };

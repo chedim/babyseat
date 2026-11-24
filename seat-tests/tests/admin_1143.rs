@@ -68,10 +68,10 @@ fn call(port: u16, tok: &str, tool: &str, args: J) -> (u16, J) {
 }
 fn text_of(r: &J) -> String { r["result"]["content"][0]["text"].as_str().unwrap_or("").to_string() }
 fn read_prop(port: u16, tok: &str, spec: &str, prop: &str) -> J {
-    let (st, r) = call(port, tok, "entity_read", json!({"spec": spec, "prop": prop}));
+    let (st, r) = call(port, tok, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)}));
     assert_eq!(st, 200, "{r}");
     let t = text_of(&r);
-    if t.contains(" has no ") { return J::Null; }   // the read tool's words for a property the entity does not have
+    if t.contains(" has no ") || t == "null" || t.starts_with("null: ") { return J::Null; }   // the read tool's words for a property the entity does not have
     serde_json::from_str(&t).unwrap_or(json!(t))
 }
 

@@ -3,7 +3,7 @@
 A pack is a text of getters and setters over entities. A getter is a cached value that recomputes when what it read changes. A
 setter runs when its property is written. Acting is writing. Every code block below is loaded and run by a test, so it is real.
 
-The help is a set of entities, one per topic: `entity_query` `kind:Help` lists them and `entity_read {spec: "Help:<topic>"}` reads one. `Help:start` is the first minutes (what to read on arrival, when to act and when to ask), `Help:c1f` (this page) is the language, `Help:packs` writing and loading a pack, `Help:banner` your banner, `Help:cliff` a block of the language run in one call (the `run_cliff` tool), `Help:semtext` a text read by its sentences, words and the things it mentions, `Help:sql` a second SQLite file read and written as entities, `Help:legacy` the previous store kept as a read-only source, `Help:ha` the house through Home Assistant (calls, the allow-list, the catalog), `Help:settings` the settings of the seat (what is shown, what is changed by one write), `Help:environment` the environment variables of the seat, `Help:page` the page the person talks through, `Help:edit` a change to a file by a hunk (apply, revert), `Help:peers` the programs and seats linked to this one (how they show up, how to read their nodes), `Help:brain` answering a person when a brain program has the chat (which change is a person, the one write that answers), `Help:chat-backends` which program answers a message and how its turn goes (the backend, the plan, the live text, the one finish), `Help:upgrade` what is new. The tools you hold are entity_query (find entities: `kind:<Class>`, `kind!:<Class>` and `name~:<eid prefix>`, joined with `&`; "Finding entities" below), entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect); `run_cliff` (one call: a small block of the language that reads, filters, joins and may write; `Help:cliff`); everything else is an entity you make and write to.
+The help is a set of entities, one per topic: `entity_query` `kind:Help` lists them and `run_cliff {code: "Help:<topic>.text"}` reads one (`entity_read {spec: "Help:<topic>"}` says what it holds, without a value). `Help:start` is the first minutes (what to read on arrival, when to act and when to ask), `Help:c1f` (this page) is the language, `Help:packs` writing and loading a pack, `Help:banner` your banner, `Help:cliff` a block of the language run in one call (the `run_cliff` tool), `Help:semtext` a text read by its sentences, words and the things it mentions, `Help:sql` a second SQLite file read and written as entities, `Help:legacy` the previous store kept as a read-only source, `Help:ha` the house through Home Assistant (calls, the allow-list, the catalog), `Help:settings` the settings of the seat (what is shown, what is changed by one write), `Help:environment` the environment variables of the seat, `Help:page` the page the person talks through, `Help:edit` a change to a file by a hunk (apply, revert), `Help:peers` the programs and seats linked to this one (how they show up, how to read their nodes), `Help:brain` answering a person when a brain program has the chat (which change is a person, the one write that answers), `Help:chat-backends` which program answers a message and how its turn goes (the backend, the plan, the live text, the one finish), `Help:upgrade` what is new. The tools you hold are entity_query (find entities: `kind:<Class>`, `kind!:<Class>` and `name~:<eid prefix>`, joined with `&`; "Finding entities" below), entity_read (one entity, its getters included) and entity_write (write a property: the write is the effect); `run_cliff` (one call: a small block of the language that reads, filters, joins and may write; `Help:cliff`); everything else is an entity you make and write to.
 
 ## Getters
 
@@ -352,8 +352,7 @@ Cron.fired on-setter nightly-note:
 The previous seat's store is kept as the read-only source `legacy`; `Help:legacy` says what it holds and how to look things up in it and bring a piece into the field.
 
 What `entity_write` returns: the line `wrote <entity>.<prop>`, then for a write that starts an effect the `receipt:` JSON line (`id`, `status`, `rc`, `ok`, `started`, `finished` as epoch
-seconds, `ms`, `stdout_bytes`, `stderr_bytes`) with a `stdout:` and a `stderr:` line (the whole text as `stdout`, or, past 16 KB, `stdout_head` and `stdout_tail` = the first and last 8192 characters
-with `full output: read Command:x.output`; the whole stderr is `Command:x.errors`), or, while the run is in flight, `pending: id: <id>, status: running, started: <seconds>, timeout_s: <limit>, left: <seconds>; read <entity>.<verb>_result later`;
+seconds, `ms`, `stdout_bytes`, `stderr_bytes`) with a `stdout:` and a `stderr:` line (the whole text; it is also `Command:x.output` and `Command:x.errors`), or, while the run is in flight, `pending: id: <id>, status: running, started: <seconds>, timeout_s: <limit>, left: <seconds>; read <entity>.<verb>_result later`;
 then the `reactions:` (every REAL change the engine made in the
 round of your write ON THE ENTITY YOU WROTE AND ITS CHILDREN `<eid>:...`: a setter that fired, a getter that recomputed, each with `by`, its `cls` and, for a null, its `why`; any change that carries a reason is listed in full on any entity) and an `other changes:` line that counts the changes on every other entity as `Class.prop xN` (no values: read the entity for one). The receipt always lives on the
 entity as `<verb>_result`. Add `wait` (seconds) to `entity_write` to hold the reply until the receipt arrives or that time has passed:
@@ -362,7 +361,7 @@ side with your other calls.
 
 ## Finding entities: the query line of entity_query
 
-`entity_query {q, k, offset, props, full, count}` reads the store, so it finds every stored entity, loaded or not (a `VIRTUAL` class is in memory only and is read with `instances` instead). The line `q` holds terms
+`entity_query {q, k, offset, count}` reads the store, so it finds every stored entity, loaded or not (a `VIRTUAL` class is in memory only and is read with `instances` instead). The line `q` holds terms
 joined with `&`; an empty `q` (or `kind:*`) is every entity. The terms:
 
 - `kind:<Class>`: the entities whose class is `<Class>` or that carry it on their `parents` list (`kind:ChatMessage` finds the messages, whose id names the class `Chat`);
@@ -370,17 +369,17 @@ joined with `&`; an empty `q` (or `kind:*`) is every entity. The terms:
 - `name~:<eid prefix>`: the entities whose id starts with that text (a prefix, letter for letter).
 
 The first term of each form counts. Any other term is answered with `entity_query: unsupported term <the term> (...)` and the forms. The rows come in id order, one line each, `<eid> (<class>)`; `k` is the
-number of rows (20 unless you say, at most 100), `offset` skips that many (the next page), `props: ["text", "state"]` adds just those stored properties to each row (a name that is missing from a row is left out of it, with no error; stored values: a getter's value is read with `entity_read` and `prop`), `full: true` adds ALL the stored properties (a row can be big: on a class such as ChatMessage, whole turns, 10 rows can come back as hundreds of thousands of characters and the reply is not usable; use `props` instead), `count: true` answers only the number (`12 entity(ies)`).
+number of rows (20 unless you say, at most 100), `offset` skips that many (the next page), a row is only its id and its class, never a value: a value is read with `run_cliff` (`<entity>[name]`, and `${ids}[name]` reads one property of many rows), and `entity_read {spec}` names what an entity holds (its class, parents, properties, getters and setters) without a value, `count: true` answers only the number (`12 entity(ies)`).
 
 ```
 entity_query {q: "kind:Note"}                                      every Note
 entity_query {q: "kind:Note & kind!:Error"}                        the Notes with no failed property
 entity_query {q: "name~:Stop:"}                                    the ids that start with Stop:
-entity_query {q: "kind:ChatMessage", k: 50, offset: 50, props: ["text", "state"]}   the second page of 50 messages, with those two properties
+entity_query {q: "kind:ChatMessage", k: 50, offset: 50}              the second page of 50 messages
 entity_query {q: "kind:Memory", count: true}                       how many notes you keep
 ```
 
 ## Where things live
 
 - A pack text: `Help:packs`. What changed lately and a SQL / Vue / JS lookup table: `Help:upgrade`.
-- Read an entity with entity_read (`Help:c1f`), list the topics with entity_query `kind:Help`.
+- Name what an entity holds with entity_read and read a value with run_cliff (`Help:c1f`), list the topics with entity_query `kind:Help`.

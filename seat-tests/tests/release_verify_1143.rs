@@ -160,7 +160,7 @@ fn mcp_call(s: &Seat, tok: &str, tool: &str, args: J) -> Resp {
     send(s, "POST", "/mcp", Some(tok), &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}).to_string())
 }
 fn mcp_text(r: &Resp) -> String { r.json()["result"]["content"][0]["text"].as_str().unwrap_or("").to_string() }
-fn read_prop(s: &Seat, tok: &str, spec: &str, prop: &str) -> String { mcp_text(&mcp_call(s, tok, "entity_read", json!({"spec": spec, "prop": prop}))) }
+fn read_prop(s: &Seat, tok: &str, spec: &str, prop: &str) -> String { mcp_text(&mcp_call(s, tok, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)}))) }
 /// every entity of the seat, whole, page after page (the admin's tool)
 fn all_entities(s: &Seat, tok: &str) -> String {
     let mut all = String::new();
@@ -799,7 +799,7 @@ fn a_token_with_any_sub_reads_and_writes_everything_the_admin_does_and_a_tokenle
         }
     }
     assert_eq!(keys(&s, &own).iter().filter(|k| !before.contains(k)).collect::<Vec<_>>(), Vec::<&String>::new(), "a tokenless request made an entity");
-    assert!(read_prop(&s, &own, "Note:nobody", "text").contains(" has no "), "and wrote nothing");
+    assert!(read_prop(&s, &own, "Note:nobody", "text").starts_with("null"), "and wrote nothing");
 }
 
 #[test]

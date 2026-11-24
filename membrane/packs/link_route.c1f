@@ -27,10 +27,17 @@ Boot.started on-setter link-allow-seed:
     ('LinkAllow:seed').done = True
     ('LinkAllow:setting').prefixes = ['Setting:']
     ('LinkAllow:doorbell').prefixes = ['Doorbell:']
--- who is connected: a tab that comes and goes with its peer follows `Peers:seat` (packs/link.c1f). The log view's rows are read by the door (`entity_read`), a page's `Fetch`: the view is virtual, and a link does not carry a virtual entity's values
+-- who is connected: a tab that comes and goes with its peer follows `Peers:seat` (packs/link.c1f). A VIRTUAL entity's values are carried like any other (the Log tab subscribes to `membrane::LogView:<ns>`, a virtual view; below).
 Boot.started on-setter link-allow-log:
   WHEN ${'LinkAllow:log'}['prefixes'] == None:
     ('LinkAllow:log').prefixes = ['Peers:']
+-- the Log tab reads the seat's boundary-log view and the raw model chat by the link (apps/barest.c1f/log_view.c1f; operator 2026-11-24): the view of the page's own namespace appears when the page asks for it
+Boot.started on-setter link-allow-logview:
+  WHEN ${'LinkAllow:logview'}['prefixes'] == None:
+    ('LinkAllow:logview').prefixes = ['LogView:']
+Boot.started on-setter link-allow-modelchat:
+  WHEN ${'LinkAllow:modelchat'}['prefixes'] == None:
+    ('LinkAllow:modelchat').prefixes = ['ModelChat:']
 -- the packs placed on a page (`Placed:<ns>`: packs/placement.c1f): the page follows them by its link; a store seeded before this had no such row
 Boot.started on-setter link-allow-placed:
   WHEN ${'LinkAllow:placed'}['prefixes'] == None:

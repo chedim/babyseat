@@ -83,9 +83,9 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
 }
 /// one property of an entity, as JSON (a text that is not JSON comes back as a string)
 fn get(port: u16, eid: &str, prop: &str) -> J {
-    let (st, t) = rpc(port, None, "entity_read", json!({"spec": eid, "prop": prop}));
+    let (st, t) = rpc(port, None, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", eid, prop)}));
     assert_eq!(st, 200, "{t}");
-    if t.ends_with(&format!(" has no {prop}")) { return J::Null; }   // a property nobody wrote (a getter with no value reads the same)
+    if t.ends_with(&format!(" has no {prop}")) || t == "null" || t.starts_with("null: ") { return J::Null; }   // a property nobody wrote (a getter with no value reads the same)
     serde_json::from_str(&t).unwrap_or(J::String(t))
 }
 /// the window's write: ONE entity_write of `Setting:<id>.set`

@@ -147,7 +147,7 @@ try {
   assert.equal(await b.ev(textOf(K('chat.max_steps', 'now'))), 'In force: 2048 steps', 'read');
   await b.fill(K('chat.max_steps', 'in'), '41'); await b.enter();
   await b.until(`${textOf(K('chat.max_steps', 'state'))} === 'Applied.' && ${textOf(K('chat.max_steps', 'now'))} === 'In force: 41 steps'`, 'the write applied');
-  assert.equal(await rpc(A, admin(A), 'entity_read', { spec: 'Setting:chat.max_steps', prop: 'current' }), '41', 'the seat holds it');
+  assert.equal(await rpc(A, admin(A), 'run_cliff', { code: "${'" + 'Setting:chat.max_steps' + "'}['current']" }), '41', 'the seat holds it');
   const html = await b.ev(`document.documentElement.outerHTML + ' ' + document.body.innerText`);
   for (const s of [admin(A), secret(A), ck.value]) assert.ok(!html.includes(s), 'the page shows no token and no secret');
   assert.deepEqual(b.errors, [], 'no script error (loopback)');
@@ -220,7 +220,7 @@ try {
     assert.equal(await b.ev(textOf(K('chat.max_steps', 'now'))), 'In force: 2048 steps');
     await b.fill(K('chat.max_steps', 'in'), '9'); await b.enter();
     await b.until(`${textOf(K('chat.max_steps', 'state'))} === 'Applied.'`, 'the write is applied, nothing refuses bob');
-    assert.equal(await rpc(B, admin(B), 'entity_read', { spec: 'Setting:chat.max_steps', prop: 'current' }), '9', 'the seat holds it: bob is the admin');
+    assert.equal(await rpc(B, admin(B), 'run_cliff', { code: "${'" + 'Setting:chat.max_steps' + "'}['current']" }), '9', 'the seat holds it: bob is the admin');
   }
   for (const g of gaps) console.log(`release verify: GAP: ${g}`);
   console.log('release verify: ok');

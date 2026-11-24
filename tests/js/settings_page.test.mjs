@@ -112,7 +112,7 @@ try {
   await b.until(`${textOf(K('chat.max_steps', 'state'))} === 'Applied.' && ${textOf(K('chat.max_steps', 'now'))} === 'In force: 25 steps'`, 'applied, and in force');
   assert.equal(await b.ev(`${Q(K('chat.max_steps', 'state'))}.getAttribute('data-kind')`), 'ok');
   assert.equal((await feedRow('chat.max_steps')).current, 25, 'the seat holds it');
-  assert.equal(await rpc('entity_read', { spec: 'Setting:chat.max_steps', prop: 'current' }), '25');
+  assert.equal(await rpc('run_cliff', { code: "${'" + 'Setting:chat.max_steps' + "'}['current']" }), '25');
   const posts = b.requests.filter((r) => r.startsWith('POST /mcp') && r.includes('"spec":"Setting:'));   // the page's own link reports (slice 1: link_view.c1f) are POSTs to the same door: not the write
   assert.equal(posts.length, 1, 'ONE POST for the write'); assert.match(posts[0], /"entity_write".*"Setting:chat\.max_steps".*"set".*25/);
 
@@ -133,7 +133,7 @@ try {
   await b.ev(`(() => { const e = document.querySelector(${JSON.stringify(K('model.chat', 'in'))}); e.value = 'gpt'; e.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await b.press(K('model.chat', 'save'));
   await b.until(`${textOf(K('model.chat', 'state'))} === 'Applied.' && ${textOf(K('model.chat', 'now'))} === 'In force: gpt'`, 'the model applied');
-  assert.equal(await rpc('entity_read', { spec: 'Minds:seat', prop: 'loops' }), 'gpt', 'the chat\'s own reader holds it');
+  assert.equal(await rpc('run_cliff', { code: "${'" + 'Minds:seat' + "'}['loops']" }), 'gpt', 'the chat\'s own reader holds it');
 
   // 5. the allow-list editor
   await b.press(K('home.allow', 'add'));
@@ -141,8 +141,8 @@ try {
   await b.fill(K('home.allow', 'en1:a'), 'kitchen'); await b.fill(K('home.allow', 'en1:b'), 'light.turn_on, light.turn_off'); await b.fill(K('home.allow', 'en1:c'), 'light.kitchen');
   await b.press(K('home.allow', 'save'));
   await b.until(`${textOf(K('home.allow', 'state'))} === 'Applied.' && /kitchen/.test(${textOf(K('home.allow', 'now'))})`, 'the entry applied');
-  assert.equal(await rpc('entity_read', { spec: 'HaAllow:kitchen', prop: 'services' }), '["light.turn_on","light.turn_off"]');
-  assert.equal(await rpc('entity_read', { spec: 'HaAllow:kitchen', prop: 'entities' }), '["light.kitchen"]');
+  assert.equal(await rpc('run_cliff', { code: "${'" + 'HaAllow:kitchen' + "'}['services']" }), '["light.turn_on","light.turn_off"]');
+  assert.equal(await rpc('run_cliff', { code: "${'" + 'HaAllow:kitchen' + "'}['entities']" }), '["light.kitchen"]');
   assert.equal(await b.ev(`document.querySelectorAll('.setview ${K('home.allow', 'lines')} .setentry').length`), 1, 'the applied entry is drawn again INSIDE its editor (the whole page holds one entry editor)');
   assert.equal(await b.ev(`document.querySelectorAll('.setentry').length`), 1);
   await b.shot('settings-allowlist');

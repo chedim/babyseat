@@ -944,7 +944,7 @@
   ]
  },
  {
-  "name": "entity_read of one property gives its value as text",
+  "name": "entity_read gives the index of an entity: its class, parents and the names of its properties, getters and setters, and no value",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/fs.c1f",
@@ -977,7 +977,7 @@
      "headers": {
       "content-type": "application/json"
      },
-     "body": "{\"jsonrpc\": \"2.0\", \"id\": 10, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_read\", \"arguments\": {\"spec\": \"Scratch:a\", \"prop\": \"n\"}}}",
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 10, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_read\", \"arguments\": {\"spec\": \"Scratch:a\"}}}",
      "peer": "127.0.0.1:5",
      "authed": true,
      "sub": "owner",
@@ -1004,12 +1004,12 @@
    {
     "eid": "Request:1",
     "prop": "reply.body.result.content.0.text",
-    "equals": "42"
+    "equals": "Scratch:a {\"class\":\"Scratch\",\"parents\":[\"Scratch\"],\"properties\":[\"n\"],\"getters\":[],\"setters\":[]}"
    }
   ]
  },
  {
-  "name": "entity_read of a property that is not there says so",
+  "name": "entity_read of an entity that is not there says so",
   "packs": [
    "membrane/packs/boot.c1f",
    "membrane/packs/fs.c1f",
@@ -1042,7 +1042,7 @@
      "headers": {
       "content-type": "application/json"
      },
-     "body": "{\"jsonrpc\": \"2.0\", \"id\": 11, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_read\", \"arguments\": {\"spec\": \"Scratch:a\", \"prop\": \"zz\"}}}",
+     "body": "{\"jsonrpc\": \"2.0\", \"id\": 11, \"method\": \"tools/call\", \"params\": {\"name\": \"entity_read\", \"arguments\": {\"spec\": \"Scratch:zz\"}}}",
      "peer": "127.0.0.1:5",
      "authed": true,
      "sub": "owner",
@@ -1064,7 +1064,7 @@
    {
     "eid": "Request:1",
     "prop": "reply.body.result.content.0.text",
-    "equals": "Scratch:a has no zz"
+    "equals": "no such entity: Scratch:zz"
    }
   ]
  }

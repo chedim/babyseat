@@ -92,7 +92,7 @@ class CliffvmSeat:
         spec, prop, wprop = ARM_READS[arm]; spec = spec.format(eid=eid)
         try:
             if wprop: self.m.call(self.port, "entity_write", {"spec": eid, "prop": wprop, "value": k_rows})
-            t, _, _ = self.m.call(self.port, "entity_read", {"spec": spec, "prop": prop})
+            t, _, _ = self.m.call(self.port, "run_cliff", {"code": "${'" + str(spec) + "'}['" + str(prop) + "']"})
             rows = json.loads(t)
         except Exception as e: raise self.NA(f"{arm}: {e}")
         if not isinstance(rows, list): raise self.NA(f"{arm}: the read did not return a list")

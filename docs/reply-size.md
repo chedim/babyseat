@@ -7,7 +7,7 @@
 The reply is the head `wrote <id>.<prop>` (or `removed <id>`), then:
 
 1. Pack lines, for a written `Pack:<name>.text`: `pack <name> loaded`, or `did not load: <the loader's error>` with a hint, from the host's reaction `Pack:<name>.loaded` (kept out of `reactions:`).
-2. For a write that starts an effect, the receipt lines (`receipt:`, `stdout:` / `stderr:` whole up to twice 8192 characters, else head and tail; `pending:` while it runs).
+2. For a write that starts an effect, the receipt lines (`receipt:`, `stdout:` / `stderr:` whole (the cut for the Claude CLI is graphlink-claude's, #1143 operator 2026-11-24); `pending:` while it runs).
 3. `reactions: [...]`: in FULL the reactions on the written entity (the target) and its direct children (`<eid>:...`; for `run_cliff` the ones set by the block's own setter), and every reaction that carries a reason (a null with `why`, an Error's `failed`), on any entity.
 4. `other changes: Banner.text x1, Chat.argv x10`: every other reaction counted as `<Class>.<prop> xN`, with no values. A model that wants one reads that entity.
 

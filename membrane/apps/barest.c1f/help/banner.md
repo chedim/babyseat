@@ -4,7 +4,7 @@ Your banner reaches you at the start of every turn, between the standing text an
 `Banner:admin:main`, and its `text` is the whole banner: what you define there is what you receive, as you wrote it. The text is a getter,
 so it is live: it is recomputed when what it reads changes, and every turn shows the world as it is now.
 
-Read it with `entity_read {spec: "Banner:admin:main", prop: "text"}` to see the banner as it will reach you. The banner you start with
+Read it with `entity_read {spec: "Banner:admin:main"}` (it names the banner by its exact id) and then `run_cliff` with that id: `run_cliff {code: "<that id>.text"}` to see the banner as it will reach you. The banner you start with
 shows the conversation and the time, and the previous turn's error when there was one (its entity id and its whole text). It is a starting point for your own.
 
 ## Write your banner
@@ -55,7 +55,7 @@ has not changed stays in front. Edit `words` to change a line, write `""` to tak
 
 The seat has one such part of its own, `Banner:recall`: the lines of your earlier words (and of other texts you hold) that are closest to the message you are answering (and, by shared words, to the few chat texts just before it, each step back counting half as much), by shared words, by meaning and by the texts that moved the same things in the field, ranked by a vote of those finders; it is the `recall` of that message's body, the same list a note of yours reads,
 each with where it came from and when. It is context, not instructions: a line from a page or a file is marked as not the person's words. Read it with
-`entity_read {spec: "Banner:recall", prop: "words"}`. Like the main banner it is yours to edit: its `words` is a getter, so replace it as you would the main banner, by writing a class of your own that
+`run_cliff {code: "Banner:recall.words"}`. Like the main banner it is yours to edit: its `words` is a getter, so replace it as you would the main banner, by writing a class of your own that
 defines `words` and putting that class in the part's `parents`. Its size and depth are the dials of the entity `recall:dials` (`banner_n`, `pool`, `fact_chars`); the weights of the vote are getters on the message's body (`ml_weight`, `ent_weight`, `r_cos_weight`, `r_edge_weight`, `vote_depth`) that a layer of yours can override; a turn waits for the embedding of its own message before it starts, and starts at once when the part is gone or the embedding is not available (a server that does not answer holds the turn for at most 10 seconds).
 
 ## Keeping the banner

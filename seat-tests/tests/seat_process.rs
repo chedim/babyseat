@@ -212,8 +212,11 @@ fn a_message_posted_to_the_chat_is_answered_by_the_fake_and_found_through_the_mc
     assert!(no_req.lines().count() >= 4 && !no_req.lines().any(|l| l.ends_with("(Request)")), "{no_req}");
     let (n_all, _) = call(port, "entity_query", json!({"q": "kind!:Request & name~:membrane::", "count": true}));
     assert_eq!(n_all, format!("{} entity(ies)", rows.len()));
-    let (full, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:main:message:", "k": 100, "full": true}));
-    assert!(full.contains(":response (Chat) {") && full.contains("Seat answer to: hello seat"), "{full}");
+    let (rows_chat, _) = call(port, "entity_query", json!({"q": "name~:membrane::Chat:main:message:", "k": 100}));
+    assert!(rows_chat.contains(":response (Chat)") && !rows_chat.contains('{'), "a row is its id and its class, no value: {rows_chat}");
+    let resp = rows_chat.lines().find(|l| l.contains(":response (Chat)")).unwrap().split(' ').next().unwrap().to_string();
+    let (said, _) = call(port, "run_cliff", json!({"code": format!("${{'{resp}'}}['text']")}));
+    assert!(said.contains("Seat answer to: hello seat"), "a value is read with run_cliff: {said}");
     assert!(terminate(&mut run));
 }
 
@@ -307,31 +310,12 @@ fn a_request_is_collected_as_soon_as_it_is_answered_and_the_door_still_serves() 
 }
 
 #[test]
-fn an_entity_query_without_full_returns_a_small_reply_for_an_entity_with_large_state() {
+fn an_entity_query_returns_a_small_reply_for_an_entity_with_large_state() {
     let (mut run, port) = seat("small", true);
     let big = "x".repeat(200_000);
     call(port, "entity_write", json!({"spec": "Heavy:one", "prop": "blob", "value": big}));
     let (r, _) = wait("the entity stored", || { let (r, e) = call(port, "entity_query", json!({"q": "kind:Heavy"})); r.contains("Heavy:one").then_some((r, e)) });
     assert!(r.len() < 200, "a query without full lists the entity only: {} bytes", r.len());
-    let (full, _) = call(port, "entity_query", json!({"q": "kind:Heavy", "full": true}));
-    assert!(full.len() > 200_000, "full adds the stored properties: {} bytes", full.len());
-    assert!(terminate(&mut run));
-}
-
-#[test]
-fn an_entity_query_with_props_returns_only_those_properties_of_each_row() {
-    let (mut run, port) = seat("props", true);
-    let big = "x".repeat(200_000);
-    call(port, "entity_write", json!({"spec": "Heavy:one", "prop": "blob", "value": big}));
-    call(port, "entity_write", json!({"spec": "Heavy:one", "prop": "state", "value": "done"}));
-    call(port, "entity_write", json!({"spec": "Heavy:two", "prop": "blob", "value": "small"}));
-    wait("the entities stored", || { let (r, _) = call(port, "entity_query", json!({"q": "kind:Heavy"})); (r.contains("Heavy:one") && r.contains("Heavy:two")).then_some(()) });
-    let (r, e) = call(port, "entity_query", json!({"q": "kind:Heavy", "props": ["state", "nope"]}));
-    assert!(!e, "{r}");
-    assert!(r.len() < 400, "props keeps the reply small: {} bytes", r.len());
-    assert!(r.contains("Heavy:one (Heavy)") && r.contains("Heavy:two (Heavy)"), "every row still lists eid and class: {r}");
-    assert!(r.contains("state") && r.contains("done"), "the asked property is there: {r}");
-    assert!(!r.contains("blob") && !r.contains("nope"), "a property not asked, or a name the row lacks, is absent: {r}");
     assert!(terminate(&mut run));
 }
 
@@ -361,16 +345,16 @@ fn help_topics_are_entities_the_model_lists_and_reads() {
     for t in ["start", "c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment", "edit", "peers", "brain"] { assert!(list.contains(&format!("Help:{t} (Help)")), "{list}"); }
     for t in ["start", "c1f", "packs", "upgrade", "banner", "cliff", "semtext", "sql", "legacy", "ha", "settings", "page", "environment", "edit", "peers", "brain"] {
         let disk = std::fs::read_to_string(repo().join(format!("membrane/apps/barest.c1f/help/{t}.md"))).unwrap();
-        let (text, err) = wait("the topic's text", || { let (x, e) = call(port, "entity_read", json!({"spec": format!("Help:{t}"), "prop": "text"})); (x.len() > 100).then_some((x, e)) });
+        let (text, err) = wait("the topic's text", || { let (x, e) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("Help:{t}"), "text")})); (x.len() > 100).then_some((x, e)) });
         assert!(!err && text == disk, "Help:{t}.text is the file's text");
     }
     let (whole, _) = call(port, "entity_read", json!({"spec": "Help:c1f"}));
-    assert!(whole.contains("c1f.md") && !whole.contains("the language of the field"), "a plain read shows what is stored (the file), not the text a getter makes from it: {}", &whole[..whole.len().min(200)]);
+    assert!(whole.contains("\"file\"") && whole.contains("\"text\"") && !whole.contains("the language of the field"), "the index names the stored `file` and the getter `text`, and holds no value: {}", &whole[..whole.len().min(200)]);
     assert!(terminate(&mut run));
 }
 
 // ---- the banner is the model's (#1143) ---------------------------------------------------------------------------------------------------
-fn banner(port: u16) -> String { call(port, "entity_read", json!({"spec": "membrane::Banner:admin:main", "prop": "text"})).0 }
+fn banner(port: u16) -> String { call(port, "run_cliff", json!({"code": "${'membrane::Banner:admin:main'}['text']"})).0 }
 const MINE: &str = "PACK mine 1\nIMPORT default_banner 1\nBanner.text getter: 'stops done: ' + str(len([s for s in instances('Stop') if s.done == True]))\n";
 
 #[test]
@@ -392,7 +376,7 @@ fn a_pack_the_model_loads_through_entity_write_replaces_the_banner_completely_an
     call(port, "entity_write", json!({"spec": "Stop:a", "prop": "done", "value": false}));
     let (r, e) = call(port, "entity_write", json!({"spec": "Pack:mine", "prop": "text", "value": MINE}));
     assert!(!e, "{r}");
-    let (st, _) = wait("the pack state", || { let (s, _) = call(port, "entity_read", json!({"spec": "Pack:mine", "prop": "state"})); (s != "waiting").then_some((s, ())) });
+    let (st, _) = wait("the pack state", || { let (s, _) = call(port, "run_cliff", json!({"code": "${'Pack:mine'}['state']"})); (s != "waiting").then_some((s, ())) });
     assert_eq!(st, "loaded");
     let b = wait("the model's text", || { let b = banner(port); b.contains("stops done: 0").then_some(b) });
     assert_eq!(b, "stops done: 0", "the whole banner is the model's: nothing of the default is left, nothing is added");
@@ -405,11 +389,11 @@ fn a_pack_the_model_loads_through_entity_write_replaces_the_banner_completely_an
 fn a_bare_entity_id_names_the_membrane_one_when_only_that_exists() {
     let (mut run, port) = seat("bareid", true);
     wait("the banner", || banner(port).contains("CONVERSATION: main").then_some(()));
-    let (t, _) = call(port, "entity_read", json!({"spec": "Banner:admin:main", "prop": "text"}));
-    assert!(t.contains("CONVERSATION: main"), "{t}");
+    let (t, _) = call(port, "entity_read", json!({"spec": "Banner:admin:main"}));
+    assert!(t.starts_with("membrane::Banner:admin:main "), "the bare id names the membrane:: entity in the index: {t}");
     let (w, e) = call(port, "entity_write", json!({"spec": "Banner:admin:main", "prop": "note", "value": "x"}));
     assert!(!e, "{w}");
-    let (n, _) = call(port, "entity_read", json!({"spec": "membrane::Banner:admin:main", "prop": "note"}));
+    let (n, _) = call(port, "run_cliff", json!({"code": "${'membrane::Banner:admin:main'}['note']"}));
     assert_eq!(n, "x", "the write landed on the membrane:: entity");
     let (q, _) = call(port, "entity_query", json!({"q": "name~:Banner:admin"}));
     assert_eq!(q, "0 entity(ies)", "no second Banner:admin:main was made: {q}");
@@ -445,7 +429,7 @@ fn a_restart_restores_the_models_entities_and_still_sweeps_old_requests() {
     let (mut run2, port2) = seat_at(dir, true, &["request_keep_s=100000"]);
     let b = wait("the model's banner is back", || { let b = banner(port2); b.contains("stops done").then_some(b) });
     assert_eq!(b, "stops done: 1", "the model's pack survived the restart and still replaces the default");
-    let (n, _) = call(port2, "entity_read", json!({"spec": "Note:keep", "prop": "a"}));
+    let (n, _) = call(port2, "run_cliff", json!({"code": "${'Note:keep'}['a']"}));
     assert_eq!(n, "7", "the note is back");
     let (q, _) = call(port2, "entity_query", json!({"q": "kind:Banner"}));
     assert_eq!(q.lines().filter(|l| l.contains("membrane::Banner:admin:main (Banner)")).count(), 1, "the default banner entity was born once: {q}");
@@ -475,7 +459,7 @@ fn the_previous_turns_error_is_still_in_the_banner_after_a_restart_with_the_warm
 
 // ---- an entity of two extra classes (#1143) -----------------------------------------------------------------------------------------------
 const TWO: &str = "PACK two 1\nAlpha.sa getter: 'alpha:' + str(this.n)\nBeta.sb getter: 'beta:' + str(this.n)\nAlpha.go_a on-setter run-a:\n  WHEN this.go_a == True:\n    this.did_a = True\nBeta.go_b on-setter run-b:\n  WHEN this.go_b == True:\n    this.did_b = True\n";
-fn read(port: u16, eid: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": eid, "prop": prop})).0 }
+fn read(port: u16, eid: &str, prop: &str) -> String { call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", eid, prop)})).0 }
 fn w(port: u16, eid: &str, prop: &str, v: J) { let (r, e) = call(port, "entity_write", json!({"spec": eid, "prop": prop, "value": v})); assert!(!e, "{r}"); }
 
 #[test]
@@ -529,10 +513,10 @@ fn a_turn_is_an_entity_that_owns_its_answer_and_tools_and_retiring_it_retires_th
     let (q, _) = call(port, "entity_query", json!({"q": format!("name~:{msg}"), "k": 100}));
     for e in [msg.clone(), turn.clone(), format!("{turn}:response"), format!("{turn}:tool:tu1")] { assert!(q.lines().any(|l| l.starts_with(&format!("{e} "))), "{e} in {q}"); }
     assert!(!q.contains(&format!("{msg}:response")) && !q.contains(&format!("{msg}:tool:")), "the answer and the tools live under the turn: {q}");
-    let (st, _) = call(port, "entity_read", json!({"spec": turn, "prop": "status"}));
+    let (st, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", turn, "status")}));
     assert_eq!(st, "done");
-    assert!(!call(port, "entity_read", json!({"spec": turn, "prop": "refused"})).0.contains("loop"), "no refused write on the turn");
-    let (m, _) = call(port, "entity_read", json!({"spec": turn, "prop": "message"}));
+    assert!(!call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", turn, "refused")})).0.contains("loop"), "no refused write on the turn");
+    let (m, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", turn, "message")}));
     assert_eq!(m, msg);
     // retiring the turn retires what it owns (the answer's body too); the message and its body stay
     call(port, "entity_write", json!({"spec": turn, "prop": "retire", "value": true}));
@@ -640,10 +624,10 @@ fn a_pack_setter_may_rewrite_the_property_a_door_write_fired_and_the_door_is_not
     let pack = "PACK selfw 1\nProbe4.kind getter: 'probe4'\nProbe4.a on-setter fix:\n  WHEN this.a == 'open':\n    this.a = 'owed'\n";
     let (r, e) = call(port, "entity_write", json!({"spec": "Pack:selfw", "prop": "text", "value": pack}));
     assert!(!e, "{r}");
-    wait("the pack", || { let (s, _) = call(port, "entity_read", json!({"spec": "Pack:selfw", "prop": "state"})); (s == "loaded").then_some(()) });
+    wait("the pack", || { let (s, _) = call(port, "run_cliff", json!({"code": "${'Pack:selfw'}['state']"})); (s == "loaded").then_some(()) });
     call(port, "entity_write", json!({"spec": "Probe4:y", "prop": "a", "value": "idle"}));
     call(port, "entity_write", json!({"spec": "Probe4:y", "prop": "a", "value": "open"}));
-    let a = wait("the rewrite", || { let (a, _) = call(port, "entity_read", json!({"spec": "Probe4:y", "prop": "a"})); (a == "owed").then_some(a) });
+    let a = wait("the rewrite", || { let (a, _) = call(port, "run_cliff", json!({"code": "${'Probe4:y'}['a']"})); (a == "owed").then_some(a) });
     assert_eq!(a, "owed");
     assert!(terminate(&mut run));
 }

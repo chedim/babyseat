@@ -49,7 +49,7 @@ for c in convs:
         if not ev: continue
         eid = "Loq:c%d:%d" % (c, i)
         mk(eid, q["question"])
-        t0 = time.time(); m.call(port, "entity_write", {"spec": eid, "prop": "related_n", "value": K_ROWS}); t, ms, n = m.call(port, "entity_read", {"spec": eid, "prop": "related"}); lat.append((time.time() - t0) * 1000)
+        t0 = time.time(); m.call(port, "entity_write", {"spec": eid, "prop": "related_n", "value": K_ROWS}); t, ms, n = m.call(port, "run_cliff", {"code": "${'" + str(eid) + "'}['" + str("related") + "']"}); lat.append((time.time() - t0) * 1000)
         try: rows = [r for r in json.loads(t) if not r["semtext"].split("::")[-1].startswith("Loq")]
         except Exception: rows = []
         order = []

@@ -255,34 +255,6 @@ fn a_thousand_failing_and_recovering_entities_cost_what_a_plain_null_costs() {
     assert!(eb < nb * 4 + Duration::from_millis(500), "the birth with Errors {eb:?} vs plain nulls {nb:?}");
 }
 
-/// Whole-entity `entity_read` (door_tools.c1f `mc_r_rows`): the stored row through the overlay, a failed property as `Error: <reason>`, every other field as it is. The test runs the
-/// pack's own query text against the store.
-#[test]
-fn a_whole_entity_read_shows_failed_properties_as_error_and_the_rest_normally() {
-    let tools = std::fs::read_to_string(repo().join("membrane/packs/door_tools.c1f")).unwrap();
-    let line = tools.lines().find(|l| l.starts_with("Request.mc_r_rows getter: sql(")).expect("the whole-read query");
-    let lit = &line["Request.mc_r_rows getter: sql(".len()..line.find(", this.mc_r_id)").unwrap()];
-    let file = std::env::temp_dir().join(format!("errclass-read-{}-{}.sqlite3", std::process::id(), common::unique())).to_string_lossy().to_string();
-    let h = Host::open(Options::new(Some(file.clone()))).unwrap();
-    h.load_pack("entity", &entity_text()).unwrap();
-    h.load_pack("er", &format!("{Q}Dash.rows getter: sql({lit}, 'Box:a')\nDash.plain getter: sql({lit}, 'Box:b')\n")).unwrap();
-    h.rebuild();
-    born(&h, "Box:a", json!({"note": "kept"}));
-    born(&h, "Box:b", json!({"price": 3}));
-    born(&h, "Dash:d", json!({}));
-    for _ in 0..4 { h.pump(); std::thread::sleep(Duration::from_millis(50)); }
-    let rows = h.get("Dash:d", "rows");
-    let parse = |r: &J| -> J { serde_json::from_str(r[0]["props"].as_str().unwrap()).unwrap() };
-    let p = &parse(&rows);
-    assert_eq!(p["q"], json!("Error: no price; set price"), "{rows}");
-    assert_eq!(p["note"], json!("kept"));
-    assert!(p.get("failed").is_none(), "the dict itself is not shown twice: {rows}");
-    let plain = &parse(&h.get("Dash:d", "plain"));
-    assert_eq!(plain["price"], json!(3));
-    assert!(plain.get("q").is_none(), "a getter's value is not stored, so a plain row has no `q` (#1143, operator 2026-11-24): {plain}");
-    let _ = std::fs::remove_file(&file);
-}
-
 /// `failed` is the class Error's property: a shipped pack that declared a getter of that name on another class would fight the VM for the property (the first run of this
 /// change found `ChatMessage.failed`, now `fail_why`, ping-ponging with the dict).
 #[test]

@@ -111,7 +111,7 @@ fn a_plain_turn_is_answered_by_the_local_model_through_membrama() {
 
 /// how many entities of a class the seat has (`entity_query` says `0 entity(ies)` for none and lists one entity a line otherwise)
 /// the nodes of the rung are VIRTUAL (not rows: `entity_query` does not list them), so each is read by its id; a collected or retired one reads as no `kind`
-fn kind_of(port: u16, eid: &str) -> String { call(port, "entity_read", json!({"spec": eid, "prop": "kind"})) }
+fn kind_of(port: u16, eid: &str) -> String { call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", eid, "kind")})) }
 fn wait_until(what: &str, mut f: impl FnMut() -> bool) { let t = Instant::now(); while !f() { assert!(t.elapsed() < Duration::from_secs(60), "timed out waiting for {what}"); std::thread::sleep(Duration::from_millis(200)); } }
 
 #[test]
@@ -140,7 +140,7 @@ fn a_tool_call_runs_through_the_doors_own_tool_logic_and_the_model_answers_from_
     assert!(v["response"].as_str().unwrap_or("").contains("zebra-42"), "the answer should come from the tool's result: {v}");
 }
 
-fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})) }
+fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)})) }
 
 #[test]
 fn a_turn_whose_peer_is_gone_fails_and_says_membrama_is_not_up() {
