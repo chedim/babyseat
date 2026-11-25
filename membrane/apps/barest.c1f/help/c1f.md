@@ -177,6 +177,8 @@ P.picked getter: ${this.ids}.tags[this.at]
 P.names getter: meta('Lamp:a')['properties']
 ```
 
+An id with no `::` that no entity holds reads the entity of that name under the seat's own prefix: `entity_query` lists ids with the prefix (`<prefix>::Lamp:a`), and `Lamp:a` reads the same entity. An entity that holds the bare id wins; an id with another namespace in front is never mapped; an id found nowhere is absent. A write names the id you give it.
+
 A long list is cheaper in one builtin than in a comprehension (a builtin is one step, a comprehension pays per item): `vmean(ids)` is the mean of the unit vectors `v`
 of a list of entities (an id with no vector is skipped), and `group_by(rows, key, ['col'])` also totals each named column per group:
 
