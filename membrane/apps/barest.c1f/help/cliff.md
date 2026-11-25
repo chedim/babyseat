@@ -80,7 +80,7 @@ A block that runs past its step budget answers with that reason (`Error: budget 
 entity_read('Help:c1f')
 ```
 
-Inside a block, read a class with `instances('<Class>')`, an entity's property with `x.prop` or `${x}['prop']` (also when the id is text you built), and one property of many entities with `props`:
+Inside a block, read a class with `instances('<Class>')`, an entity's property with `x.prop` or `${x}['prop']` (also when the id is text you built), and one property of many entities with `${ids}['prop']`:
 
 ```cliff
 -- given Lamp:desk {"watts": 40}

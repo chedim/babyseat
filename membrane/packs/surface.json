@@ -694,7 +694,7 @@
       "Request",
       "Return"
     ],
-    "members": 119,
+    "members": 115,
     "writes": [
       "*.[]",
       "*.births_to",
@@ -1209,6 +1209,8 @@
       "*.wid",
       "LinkAllow:doorbell.prefixes",
       "LinkAllow:log.prefixes",
+      "LinkAllow:logview.prefixes",
+      "LinkAllow:modelchat.prefixes",
       "LinkAllow:placed.prefixes",
       "LinkAllow:seed.done",
       "LinkAllow:setting.prefixes",

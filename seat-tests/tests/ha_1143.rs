@@ -113,7 +113,7 @@ fn write(port: u16, tok: &str, spec: &str, prop: &str, value: J) -> String {
 }
 /// one property as the model reads it (entity_read): the text of the reply
 fn read(port: u16, tok: &str, spec: &str, prop: &str) -> String {
-    let (st, b) = j(port, "POST", "/mcp", tok, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_read", "arguments": {"spec": spec, "prop": prop}}}));
+    let (st, b) = j(port, "POST", "/mcp", tok, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "run_cliff", "arguments": {"code": format!("${{'{}'}}['{}']", spec, prop)}}}));
     assert_eq!(st, 200, "{b}");
     b["result"]["content"][0]["text"].as_str().unwrap_or("").to_string()
 }
@@ -214,7 +214,7 @@ fn every_ha_route_needs_a_verified_token_no_token_is_a_401_and_any_sub_is_the_ad
         assert_eq!(st, 401, "{m} {p}: a bad token: {b}");
     }
     assert_eq!(state(port, &own, "g1"), "pending", "a refused claim claimed nothing");
-    assert!(read(port, &own, "HaCatalog:ha", "entities").contains("has no"), "a refused catalog wrote nothing");
+    assert!(read(port, &own, "HaCatalog:ha", "entities").starts_with("null"), "a refused catalog wrote nothing");
     // a token with sub `bob` (or `ha`) is the admin: the same routes answer it as they answer the boot's token
     for sub in ["bob", "ha"] {
         let t = person_token(&dir, sub);

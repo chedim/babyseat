@@ -68,7 +68,7 @@ fn call(port: u16, tool: &str, args: J) -> String {
     let r: J = serde_json::from_str(&body).unwrap();
     r["result"]["content"][0]["text"].as_str().unwrap_or_else(|| panic!("{r}")).to_string()
 }
-fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})) }
+fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)})) }
 
 fn decl(name: &str) -> String { decl_caps(name, 1024) }
 

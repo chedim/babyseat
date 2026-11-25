@@ -25,7 +25,7 @@ for s, t in keeps.items():
 def ask(n, q):
     eid = "Qry:q%d" % n; mk(eid, q)
     m.call(port, "entity_write", {"spec": eid, "prop": "related_n", "value": 20})
-    t, ms, _ = m.call(port, "entity_read", {"spec": eid, "prop": "related"})
+    t, ms, _ = m.call(port, "run_cliff", {"code": "${'" + str(eid) + "'}['" + str("related") + "']"})
     try: rows = json.loads(t)
     except Exception: rows = []
     order = []; keep = []

@@ -6,7 +6,7 @@ and the page writes what it is into the seat's field. Every open tab is its own 
 - `entity_query` `kind:Vm` lists the pages (`Vm:<name>`, one row each). A restart forgets them: a tab that was open then tells again only when it is loaded again.
 - `Vm:<name>` holds `caps` (what this page can do, written once), `seen` and `connected_at` (the seat's own time), `state` (`connected`, or `stale` when nothing was heard for the fact `link_stale_s` seconds: "not heard", not "gone"), `kind` (`page`).
 - `<name>::Page:main` holds `report`, written again whenever one of its parts changes: `packs` (each pack the page runs and its size), `load_errors` (a pack that did not load: the page's own message, empty when all did), `view` (the screen in front), `hidden` (the tab is in the background), `width` (`narrow` or `wide`), `build` (the seat's build), `host_version` (the page's engine).
-  Read the report with a `prop`: `entity_read {spec: '<name>::Page:main', prop: 'report'}`.
+  Read the report with a `prop`: `run_cliff {code: "${'<name>::Page:main'}['report']"}`.
 
 `caps` is the answer to "what can this page do?": `protocol`, `encodings`, `frames` (the ways it can talk: a write request over the door, a poll), `dom` (the tags and attributes a pack may draw with, and a hash of the list),
 `provides` (the packs it runs, each as `{pack, major}`, with its `requires`: the packs it imports, and all they import in turn), `classes` (what its engine can evaluate), `limits`, `device` (`mobile` or `desktop`).

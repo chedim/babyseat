@@ -68,7 +68,7 @@ fn call(port: u16, tool: &str, args: J) -> String {
     let r: J = serde_json::from_str(&body).unwrap();
     r["result"]["content"][0]["text"].as_str().unwrap_or_else(|| panic!("{r}")).to_string()
 }
-fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})) }
+fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)})) }
 
 fn decl(name: &str) -> String { decl_caps(name, 1024) }
 
@@ -498,7 +498,7 @@ fn membrama_turn_caps(dir: &std::path::Path, val_cap: u32) -> (Run, Names, PeerE
     let peer = PeerEnd::open(&name, "membrama");
     // a turn starts only on a peer whose root the seat has made: the peer's own end opening is not that (the seat reads the hello a moment later)
     let end = Instant::now() + Duration::from_secs(60);
-    while call(run.port, "entity_read", json!({"spec": "Vm:membrama", "prop": "link"})) != "up" { assert!(Instant::now() < end, "the root of the peer never came up"); std::thread::sleep(Duration::from_millis(50)); }
+    while call(run.port, "run_cliff", json!({"code": "${'Vm:membrama'}['link']"})) != "up" { assert!(Instant::now() < end, "the root of the peer never came up"); std::thread::sleep(Duration::from_millis(50)); }
     (run, names, peer, mine)
 }
 /// send a message and wait until the seat asks the peer for the reply of its first round: that is the reply's node id
@@ -566,7 +566,7 @@ fn a_message_is_one_node_for_the_whole_turn_a_later_round_writes_only_its_new_me
     let chunk = reply.replace("membrama::Reply:", "membrama::Chunk:") + ":0";
     for (k, v) in [("", json!(true)), ("text", json!(""))] { mine.put(&key(&chunk, k), 1.0, &v).unwrap(); }
     for (k, v) in [("", json!(true)), ("state", json!("done")), ("finish", json!("tool_calls")), ("chunks", json!(1)),
-                   ("tool_calls", json!([{"name": "entity_read", "arguments": {"spec": "Lamp:x", "prop": "power"}}]))] { mine.put(&key(&reply, k), 1.0, &v).unwrap(); }
+                   ("tool_calls", json!([{"name": "run_cliff", "arguments": {"code": "${'Lamp:x'}['power']"}}]))] { mine.put(&key(&reply, k), 1.0, &v).unwrap(); }
     let second = |ev: &[Event]| ev.iter().find_map(|e| if let Event::Op(Op::Sub { target: Target::Id(i), .. }) = e { (i.starts_with("membrama::Reply:") && *i != reply).then(|| i.clone()) } else { None });
     assert!(peer.until(60_000, |ev| second(ev).is_some()), "round 2 never asked for its reply: {:?}", peer.events);
     assert_eq!(messages_of(run.port, &turn), 4, "round 2 wrote its whole list again as new nodes");

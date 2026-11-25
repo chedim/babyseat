@@ -237,7 +237,7 @@ fn a_tool_call_runs_through_the_doors_own_tool_logic_and_its_result_goes_back_to
     assert_eq!(v["response"], "It is written.");
     assert_eq!(v["tools"], json!(["entity_write"]));
     assert_eq!(fake.calls(), 2);
-    let (t, e) = call(port, "entity_read", json!({"spec": "Thing:probe", "prop": "x"}));
+    let (t, e) = call(port, "run_cliff", json!({"code": "${'Thing:probe'}['x']"}));
     assert!(!e && t == "5", "the write reached the field: {t}");
     // round two: the conversation so far, the assistant's call, the door's own text as the tool result
     let m = fake.body(1)["messages"].clone();
@@ -251,9 +251,9 @@ fn a_tool_call_runs_through_the_doors_own_tool_logic_and_its_result_goes_back_to
     assert!(m[3]["content"].as_str().unwrap().starts_with("wrote Thing:probe.x"), "the same reply text as /mcp tools/call gives: {m:?}");
     let told = m[3]["content"].as_str().unwrap().to_string();
     // the tool is an entity under the turn, like the claude turn's
-    let (n, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn:tool:call_a1"), "prop": "name"}));
+    let (n, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("membrane::Chat:main:message:{id}:turn:tool:call_a1"), "name")}));
     assert_eq!(n, "entity_write");
-    let (r, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn:tool:call_a1"), "prop": "result"}));
+    let (r, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("membrane::Chat:main:message:{id}:turn:tool:call_a1"), "result")}));
     assert_eq!(r, told, "the tool entity holds the very text the model got");
     assert!(terminate(&mut run));
 }
@@ -305,9 +305,9 @@ fn an_endpoint_that_is_down_or_refuses_is_a_failed_turn_whose_cause_is_stored() 
     assert_eq!(v["state"], "error", "{v}");
     let cause = v["response"].as_str().unwrap();
     assert!(cause.contains("gpt-fake") && cause.contains("connect") && cause.contains("127.0.0.1:1"), "the cause names the model and what failed: {cause}");
-    let (e, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn"), "prop": "error"}));
+    let (e, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("membrane::Chat:main:message:{id}:turn"), "error")}));
     assert_eq!(e, cause, "the turn stores the cause");
-    let (r, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn:response"), "prop": "error"}));
+    let (r, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("membrane::Chat:main:message:{id}:turn:response"), "error")}));
     assert_eq!(r, "True");
     assert!(terminate(&mut run));
     // the endpoint answers 500
@@ -373,10 +373,7 @@ fn the_key_comes_from_the_environment_and_is_in_no_row_journal_log_route_or_answ
         let (_, b) = http(port, "GET", &p, "");
         assert!(!b.contains(KEY), "the key is in the reply of {p}: {b}");
     }
-    for q in ["kind:Fetch", "kind:Boot", "kind:ChatMessage", "kind:Chat", "kind:ChatRound", "kind:ChatTurn", "kind:Model"] {
-        let (t, _) = call(port, "entity_query", json!({"q": q, "full": true}));
-        assert!(!t.contains(KEY), "the key is in {q}: {t}");
-    }
+    // the rows of the store are scanned on disk below (`assert_nowhere_on_disk`): a query lists ids and classes only (#1143)
     for spec in [format!("membrane::Chat:main:message:{id2}:turn"), "Boot:seat".to_string(), format!("Fetch:oai:{id}:1")] {
         let (t, _) = call(port, "entity_read", json!({"spec": spec}));
         assert!(!t.contains(KEY), "the key is in {spec}: {t}");
@@ -407,7 +404,7 @@ fn the_packs_this_rung_runs_on_are_all_in_the_shipped_pack_list() {
 
 // ---- the raw exchange of every turn is in ONE entity per chat, `ModelChat:<chat>` (packs/model_chat.c1f) -----------------------------------------------
 
-fn model_chat(port: u16) -> String { call(port, "entity_read", json!({"spec": "ModelChat:main", "prop": "text"})).0 }
+fn model_chat(port: u16) -> String { call(port, "run_cliff", json!({"code": "${'ModelChat:main'}['text']"})).0 }
 
 #[test]
 fn the_raw_exchange_of_a_turn_is_in_the_model_chat_entity_prompt_reply_with_its_thinking_call_and_result_in_order() {

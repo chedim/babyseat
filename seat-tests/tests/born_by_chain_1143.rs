@@ -82,9 +82,9 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
 }
 /// one property of an entity, as JSON (a text that is not JSON comes back as a string)
 fn get(port: u16, eid: &str, prop: &str) -> J {
-    let (st, t) = rpc(port, None, "entity_read", json!({"spec": eid, "prop": prop}));
+    let (st, t) = rpc(port, None, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", eid, prop)}));
     assert_eq!(st, 200, "{t}");
-    if t.ends_with(&format!(" has no {prop}")) { return J::Null; }   // a property nobody wrote (a getter with no value reads the same)
+    if t.ends_with(&format!(" has no {prop}")) || t == "null" || t.starts_with("null: ") { return J::Null; }   // a property nobody wrote (a getter with no value reads the same)
     serde_json::from_str(&t).unwrap_or(J::String(t))
 }
 
@@ -103,10 +103,10 @@ fn rpc_x(port: u16, turn: Option<&str>, tool: &str, args: J) -> String {
     let (_, body) = http_x(port, "POST", "/mcp", None, &extra, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}).to_string());
     serde_json::from_str::<J>(&body).ok().and_then(|r| r["result"]["content"][0]["text"].as_str().map(String::from)).unwrap_or(body)
 }
-fn read(port: u16, spec: &str, prop: &str) -> String { rpc_x(port, None, "entity_read", json!({"spec": spec, "prop": prop})) }
+fn read(port: u16, spec: &str, prop: &str) -> String { rpc_x(port, None, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)})) }
 const MSG: &str = "membrane::Chat:main:message:t1";
 
-fn cause_of(port: u16, e: &str) -> String { wait("the entity names its cause", || { let r = read(port, e, "born_by"); (!r.contains("has no born_by")).then_some(r) }) }
+fn cause_of(port: u16, e: &str) -> String { wait("the entity names its cause", || { let r = read(port, e, "born_by"); (!r.contains("has no born_by") && !r.starts_with("null")).then_some(r) }) }
 
 #[test]
 fn what_a_call_creates_says_the_message_of_the_turn_and_keeps_saying_it_after_the_request_is_collected() {

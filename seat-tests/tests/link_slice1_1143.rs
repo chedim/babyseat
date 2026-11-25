@@ -61,7 +61,7 @@ fn call(port: u16, tool: &str, args: J) -> String {
 
 fn snap(port: u16) -> J { let (s, b) = http(port, "GET", "/ui/fieldvm", ""); assert_eq!(s, 200, "{b}"); serde_json::from_str(&b).unwrap() }
 fn is_ns(s: &str) -> bool { s.len() == 9 && s.starts_with('p') && s[1..].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) }
-fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "entity_read", json!({"spec": spec, "prop": prop})) }
+fn read(port: u16, spec: &str, prop: &str) -> String { call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)})) }
 fn caps() -> J { json!({"protocol": 1, "encodings": ["json"], "provides": [{"pack": "dom", "major": 1}], "limits": {"subscriptions": "none yet"}}) }
 fn report() -> J { json!({"view": "chat", "hidden": false, "load_errors": {}, "packs": {"shell_view": 1234}}) }
 fn tell(port: u16, ns: &str) {
@@ -96,7 +96,9 @@ fn what_the_page_tells_is_readable_by_the_model_and_the_seat_stamps_the_time() {
     let rep = read(run.port, &format!("{ns}::Page:main"), "report");
     assert!(rep.contains("shell_view") && rep.contains("chat"), "{rep}");
     let whole = call(run.port, "entity_read", json!({"spec": format!("Vm:{ns}")}));
-    assert!(whole.contains("caps") && whole.contains("provides"), "the Vm row lists what the page can do: {whole}");
+    assert!(whole.contains("caps"), "the Vm index names the property that holds what the page can do: {whole}");
+    let caps = read(run.port, &format!("Vm:{ns}"), "caps");
+    assert!(caps.contains("provides"), "and its value lists what the page can do: {caps}");
 }
 
 #[test]
@@ -132,7 +134,7 @@ fn a_restart_sweeps_the_page_roots() {
 #[test]
 fn the_help_topic_tells_a_model_how_to_read_the_page() {
     let run = start(&tmp("h"), &[]);
-    let t = call(run.port, "entity_read", json!({"spec": "Help:page", "prop": "text"}));
+    let t = call(run.port, "run_cliff", json!({"code": "${'Help:page'}['text']"}));
     assert!(t.contains("entity_query") && t.contains("kind:Vm") && t.contains("caps"), "{t}");
 }
 

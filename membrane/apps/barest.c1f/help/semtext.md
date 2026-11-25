@@ -20,7 +20,7 @@ The layers are `sentences`, `words`, `identifiers`, `paths`, `urls` and `numbers
 Your own legs are SemTexts too: a command's output, a file's content when it changes, a page you fetched, your plan. Each gets the
 same properties, and each can be mentioned (below). The chat makes one for every message you receive (`<message>:body`, a message is `Chat:main:message:<id>` or `Chat:session:<sid>:message:<id>`) and one for
 every answer you give (`<message>:turn:response:body`); a tool's result is plain text.
-Your earlier answers are entities you can read: `entity_read` of `<message>:turn:response`, property `text`. List the message ids with `entity_query`
+Your earlier answers are entities you can read: `run_cliff` reads the `text` of `<message>:turn:response`. List the message ids with `entity_query`
 `q: kind:ChatMessage` (in id order, which inside one chat is oldest first; `offset` pages).
 
 ## A part of a text as an entity
@@ -115,8 +115,8 @@ There are two ways to look back, and they answer different questions:
 - RECALL (`Banner:recall` for the message you answer, the reply of a `Memory` write and its `associations`, `recall` of any SemText) is RANKED: the sentences closest to the ask, best first, found
   by shared words and things, by meaning and by the texts that moved the same things in the field, each line with the id of the text it came from and when that text last changed. Use it to find
   what you did not know to look for.
-- A DIRECT SEARCH reads the entities themselves: `entity_query {q: "kind:ChatMessage", props: ["text"]}` lists the messages with their `text` (`Help:c1f`, "Finding entities"), `entity_read`
-  reads one, and a clifflet filters what is loaded. It is EXACT: it gives what is stored, in id order, and a word is found where it is written.
+- A DIRECT SEARCH reads the entities themselves: `entity_query {q: "kind:ChatMessage"}` lists the messages and `run_cliff` reads their `text` (`${ids}['text']`; `Help:c1f`, "Finding entities"), a single
+  `run_cliff {code: "${'<message>'}['text']"}` reads one, and a clifflet filters what is loaded. It is EXACT: it gives what is stored, in id order, and a word is found where it is written.
 
 Recall lines are context, not facts: a line may be old, cut short or from someone else's text. Before you rely on one, read the text it names (its id is on the line) and check it.
 

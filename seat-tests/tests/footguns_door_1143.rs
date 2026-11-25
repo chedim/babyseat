@@ -82,9 +82,9 @@ fn wait<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
 }
 /// one property of an entity, as JSON (a text that is not JSON comes back as a string)
 fn get(port: u16, eid: &str, prop: &str) -> J {
-    let (st, t) = rpc(port, None, "entity_read", json!({"spec": eid, "prop": prop}));
+    let (st, t) = rpc(port, None, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", eid, prop)}));
     assert_eq!(st, 200, "{t}");
-    if t.ends_with(&format!(" has no {prop}")) { return J::Null; }   // a property nobody wrote (a getter with no value reads the same)
+    if t.ends_with(&format!(" has no {prop}")) || t == "null" || t.starts_with("null: ") { return J::Null; }   // a property nobody wrote (a getter with no value reads the same)
     serde_json::from_str(&t).unwrap_or(J::String(t))
 }
 
@@ -103,7 +103,7 @@ fn rpc_x(port: u16, turn: Option<&str>, tool: &str, args: J) -> String {
     let (_, body) = http_x(port, "POST", "/mcp", None, &extra, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}).to_string());
     serde_json::from_str::<J>(&body).ok().and_then(|r| r["result"]["content"][0]["text"].as_str().map(String::from)).unwrap_or(body)
 }
-fn read(port: u16, spec: &str, prop: &str) -> String { rpc_x(port, None, "entity_read", json!({"spec": spec, "prop": prop})) }
+fn read(port: u16, spec: &str, prop: &str) -> String { rpc_x(port, None, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)})) }
 
 fn write(port: u16, spec: &str, prop: &str, v: J) -> String { rpc_x(port, None, "entity_write", json!({"spec": spec, "prop": prop, "value": v})) }
 
@@ -121,7 +121,7 @@ fn the_door_refuses_what_it_used_to_accept_silently_and_says_why() {
         let t = write(port, "Thing:fg1", p, json!("x"));
         assert!(t.starts_with("refused") && t.contains(p) && t.contains("read-only"), "{p}: {t}");
     }
-    assert_eq!(rpc_x(port, None, "entity_read", json!({"spec": "Thing:fg1", "prop": "cls"})), "Thing");
+    assert_eq!(rpc_x(port, None, "run_cliff", json!({"code": "${'Thing:fg1'}['cls']"})), "Thing");
     // the host's status props of a Pack, the seat's start, a request's identity
     for (spec, p) in [("Pack:fgp", "loaded"), ("Pack:fgp", "error"), ("Pack:fgp", "state"), ("Pack:fgp", "granted_by"), ("Boot:seat", "started"), ("Request:99999", "authed"), ("Request:99999", "sub"), ("Request:99999", "claims")] {
         let t = write(port, spec, p, json!("x"));

@@ -85,11 +85,11 @@ try {
   const w = await seen(2); await sleep(700);
   assert.deepEqual(a.writes().map((x) => `${x.spec} ${x.prop}`).sort(), [`${ns}::Page:main report`, `Vm:${ns} caps`].sort(), 'the load: one caps write and one report write');
   assert.equal(a.posts.length, 2, 'no other POST of any kind');
-  const caps = await call(seat, 'entity_read', { spec: `Vm:${ns}`, prop: 'caps' });
+  const caps = await call(seat, 'run_cliff', { code: "${'" + `Vm:${ns}` + "'}['caps']" });
   for (const must of ['shell_view', 'chat_view', 'settings_view', 'link_view', 'dom', 'fetch', 'closure', 'button', 'svgTags', 'hash', 'protocol', 'json', 'desktop', 'write-request', 'subscriptions']) assert.ok(caps.includes(must), `caps tell ${must}: ${caps.slice(0, 300)}`);
-  const rep = await call(seat, 'entity_read', { spec: `${ns}::Page:main`, prop: 'report' });
+  const rep = await call(seat, 'run_cliff', { code: "${'" + `${ns}::Page:main` + "'}['report']" });
   assert.ok(/chat/.test(rep) && /cliffvm-/.test(rep) && /shell_view/.test(rep) && /wide/.test(rep), `the report: ${rep.slice(0, 300)}`);
-  assert.equal(await call(seat, 'entity_read', { spec: `Vm:${ns}`, prop: 'state' }), 'connected');
+  assert.equal(await call(seat, 'run_cliff', { code: "${'" + `Vm:${ns}` + "'}['state']" }), 'connected');
   const reportOf = (n) => a.writes().filter((x) => x.prop === 'report')[n].value;
   assert.deepEqual(reportOf(0).load_errors, {}, 'nothing failed to load');
   assert.equal(reportOf(0).view, 'chat'); assert.equal(reportOf(0).hidden, false);
@@ -107,7 +107,7 @@ try {
   await a.ev(`Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))`);
   await seen(4); await sleep(500);
   assert.equal(a.writes().length, 4); assert.equal(reportOf(2).hidden, true, 'a hidden tab reports hidden');
-  assert.match(await call(seat, 'entity_read', { spec: `${ns}::Page:main`, prop: 'report' }), /hidden['"]?: ?(true|True)/);
+  assert.match(await call(seat, 'run_cliff', { code: "${'" + `${ns}::Page:main` + "'}['report']" }), /hidden['"]?: ?(true|True)/);
   await a.ev(`Object.defineProperty(document, 'hidden', {value: false, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))`);
   await seen(5); await sleep(500);
   assert.equal(a.writes().length, 5); assert.equal(reportOf(3).hidden, false);
@@ -134,7 +134,7 @@ try {
   const ns3 = await c.until(`(window.MEMBRANE_PAGE && window.MEMBRANE_PAGE.get('Link:page') || {}).ns`, 'the page of the second seat');
   for (let i = 0; i < 100 && c.writes().length < 2; i++) await sleep(100);
   await sleep(500);
-  const rep3 = await call(seat2, 'entity_read', { spec: `${ns3}::Page:main`, prop: 'report' });
+  const rep3 = await call(seat2, 'run_cliff', { code: "${'" + `${ns3}::Page:main` + "'}['report']" });
   assert.ok(rep3.includes('broken_view'), `the load error names the pack: ${rep3.slice(0, 400)}`);
   const lerr = c.writes().find((x) => x.prop === 'report').value.load_errors;
   assert.deepEqual(Object.keys(lerr), ['broken_view']); assert.ok(String(lerr.broken_view).length > 0, 'with the loader\'s own message');

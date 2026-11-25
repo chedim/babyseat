@@ -32,7 +32,7 @@ res["query_Keep"] = timeit(lambda: (lambda r: (r[0], r[1]))(m.call(port, "entity
 res["query_ChatMessage"] = timeit(lambda: (lambda r: (r[0], r[1]))(m.call(port, "entity_query", {"q": "kind:ChatMessage", "k": 100})), 20)
 big = "membrane::Chat:message:1794624629305-2"
 res["read_big_whole"] = timeit(lambda: (lambda r: (r[0], r[1]))(m.call(port, "entity_read", {"spec": big})), 5)
-res["read_big_text"] = timeit(lambda: (lambda r: (r[0], r[1]))(m.call(port, "entity_read", {"spec": big, "prop": "text"})), 5)
+res["read_big_text"] = timeit(lambda: (lambda r: (r[0], r[1]))(m.call(port, "run_cliff", {"code": "${'" + str(big) + "'}['" + str("text") + "']"})), 5)
 # 3 related on 20 real SemTexts (bodies stored in the copy)
 import sqlite3
 db = sqlite3.connect("file:%s?mode=ro" % src, uri=True)
@@ -41,9 +41,9 @@ rel = []
 for k in keys:
     m.call(port, "entity_write", {"spec": "Stats:eval", "prop": "reset", "value": True}); time.sleep(1.5)
     t, ms, n = m.call(port, "entity_write", {"spec": k, "prop": "related_n", "value": 5})
-    t2, ms2, n2 = m.call(port, "entity_read", {"spec": k, "prop": "related"})
+    t2, ms2, n2 = m.call(port, "run_cliff", {"code": "${'" + str(k) + "'}['" + str("related") + "']"})
     time.sleep(1.5)
-    top, _, _ = m.call(port, "entity_read", {"spec": "Stats:eval", "prop": "top"})
+    top, _, _ = m.call(port, "run_cliff", {"code": "${'" + str("Stats:eval") + "'}['" + str("top") + "']"})
     try: rows = [r for r in json.loads(top) if r["prop"] == "related"]
     except Exception: rows = []
     try: nrel = len(json.loads(t2))
@@ -63,7 +63,7 @@ res["mention_write"] = dict(bytes=n, ms=ms, words=len(TXT.split()))
 t, ms, n = m.call(port, "entity_write", {"spec": "Keep:w61k", "prop": "line", "value": "- [fact] measurement probe line."})
 res["keep_write_idle"] = dict(bytes=n, ms=ms)
 # 5 idle CPU and evaluations per minute (window 1 s kept; read the lifetime counters)
-def life(): return json.loads(m.call(port, "entity_read", {"spec": "Stats:eval", "prop": "life_calls"})[0])
+def life(): return json.loads(m.call(port, "run_cliff", {"code": "${'" + str("Stats:eval") + "'}['" + str("life_calls") + "']"})[0])
 def cpu(): return float(os.popen(f"ps -o time= -p {p.pid}").read().strip().split(":")[-1].replace(",", "."))  # mm:ss.cc -> seconds part only
 def cpu_s():
     t = os.popen(f"ps -o time= -p {p.pid}").read().strip(); mm, ss = t.split(":"); return int(mm) * 60 + float(ss)

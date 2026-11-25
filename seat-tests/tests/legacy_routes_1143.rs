@@ -149,9 +149,9 @@ fn mcp(port: u16, tool: &str, args: J) -> J {
     b
 }
 fn read_prop(port: u16, spec: &str, prop: &str) -> J {
-    let r = mcp(port, "entity_read", json!({"spec": spec, "prop": prop}));
+    let r = mcp(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", spec, prop)}));
     let t = r["result"]["content"][0]["text"].as_str().unwrap_or("").to_string();
-    if t.contains(" has no ") { return J::Null; }
+    if t.contains(" has no ") || t == "null" || t.starts_with("null: ") { return J::Null; }
     serde_json::from_str(&t).unwrap_or(json!(t))
 }
 
@@ -164,7 +164,7 @@ fn an_imported_session_answers_the_session_routes_like_a_native_one_and_no_model
     let (_run, port, dir) = seat_facts("legacy-routes", NEVER, false, &[&fact]);
     let w = mcp(port, "entity_write", json!({"spec": "Legacy:seat", "prop": "import", "value": {"id": "r1", "sessions": "all", "page": 2}}));
     assert!(w["result"].is_object(), "{w}");
-    wait("the import to end", || (read_prop(port, "Legacy:seat", "running") == json!("False") && read_prop(port, "Legacy:session:ses_a", "state") == json!("done") && read_prop(port, "Legacy:session:xcl_d", "state") == json!("done")).then_some(()));
+    wait("the import to end", || (read_prop(port, "membrane::Legacy:seat", "running") == json!("False") && read_prop(port, "membrane::Legacy:session:ses_a", "state") == json!("done") && read_prop(port, "membrane::Legacy:session:xcl_d", "state") == json!("done")).then_some(()));
     // the list: all four sessions, oldest first, in the golden shape
     let (st, l) = api(port, "GET", "/session", J::Null);
     same_shape("session_list", st, &l);
@@ -241,16 +241,16 @@ fn measure_the_import_of_every_session_of_a_real_store_read_only() {
     mcp(port, "entity_write", json!({"spec": "Legacy:seat", "prop": "import", "value": {"id": "m1", "sessions": "all", "page": page}}));
     let mut tick = Instant::now();
     loop {
-        let running = read_prop(port, "Legacy:seat", "running");
-        let cur = read_prop(port, "Legacy:seat", "cur");
-        if tick.elapsed() > Duration::from_secs(10) { tick = Instant::now(); eprintln!("PROGRESS {:.0}s cur={cur} after={} done={} err={} refused={}", t1.elapsed().as_secs_f64(), read_prop(port, "Legacy:seat", "after"), read_prop(port, "Legacy:seat", "run_done"), read_prop(port, "Legacy:seat", "run_error"), read_prop(port, "Legacy:seat", "refused")); }
-        if running == json!("False") && read_prop(port, "Legacy:seat", "run_total") != J::Null && cur.is_null() { break; }
+        let running = read_prop(port, "membrane::Legacy:seat", "running");
+        let cur = read_prop(port, "membrane::Legacy:seat", "cur");
+        if tick.elapsed() > Duration::from_secs(10) { tick = Instant::now(); eprintln!("PROGRESS {:.0}s cur={cur} after={} done={} err={} refused={}", t1.elapsed().as_secs_f64(), read_prop(port, "membrane::Legacy:seat", "after"), read_prop(port, "membrane::Legacy:seat", "run_done"), read_prop(port, "membrane::Legacy:seat", "run_error"), read_prop(port, "membrane::Legacy:seat", "refused")); }
+        if running == json!("False") && read_prop(port, "membrane::Legacy:seat", "run_total") != J::Null && cur.is_null() { break; }
         assert!(t1.elapsed() < Duration::from_secs(3000), "the import did not end in 50 minutes");
         std::thread::sleep(Duration::from_millis(500));
     }
     let t_import = t1.elapsed();
-    let done = read_prop(port, "Legacy:seat", "run_done");
-    let errs = read_prop(port, "Legacy:seat", "run_error");
+    let done = read_prop(port, "membrane::Legacy:seat", "run_done");
+    let errs = read_prop(port, "membrane::Legacy:seat", "run_error");
     let (_, list) = api(port, "GET", "/session", J::Null);
     let mut msgs = 0usize;
     let mut bytes = 0usize;
@@ -300,11 +300,11 @@ fn a_session_open_never_waits_on_an_import_and_the_lazy_open_fact_no_longer_exis
     let fact = format!("sql_sources=[{{\"name\": \"legacy\", \"path\": \"{}\", \"mode\": \"ro\"}}]", old.display());
     let (_run, port, _dir) = seat_facts("legacy-nolazy", NEVER, false, &[&fact, "legacy_page=2"]);
     mcp(port, "entity_write", json!({"spec": "Legacy:seat", "prop": "list", "value": {"id": "h1"}}));
-    wait("the headers", || (read_prop(port, "Legacy:session:xcl_d", "state") == json!("pending")).then_some(()));
+    wait("the headers", || (read_prop(port, "membrane::Legacy:session:xcl_d", "state") == json!("pending")).then_some(()));
     let (st, rows) = api(port, "GET", "/session/ses_a/message", J::Null);
     assert_eq!((st, rows), (200, json!([])), "an open does not import");
-    assert_eq!(read_prop(port, "Legacy:session:ses_a", "state"), json!("pending"));
-    assert!(read_prop(port, "Legacy:session:ses_a", "open").is_null(), "an open writes no mark on the ledger");
+    assert_eq!(read_prop(port, "membrane::Legacy:session:ses_a", "state"), json!("pending"));
+    assert!(read_prop(port, "membrane::Legacy:session:ses_a", "open").is_null(), "an open writes no mark on the ledger");
 }
 
 #[test]
@@ -333,6 +333,6 @@ fn the_cutover_shows_its_line_on_the_history_route_while_it_runs_the_newest_turn
     assert!(counts.windows(2).all(|w| w[0] <= w[1]), "turns only appear, none goes away: {counts:?}");
     assert_eq!(first_newest.as_deref(), last["messages"][202]["id"].as_str(), "the first turns the page showed already held the newest one");
     assert!(last["import"].is_null(), "the line is gone when the import is done");
-    assert_eq!(read_prop(port, "Legacy:cutover", "state"), json!("done"));
+    assert_eq!(read_prop(port, "membrane::Legacy:cutover", "state"), json!("done"));
     assert!(!dir.join("claude-was-run").exists());
 }

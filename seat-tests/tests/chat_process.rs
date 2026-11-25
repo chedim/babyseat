@@ -112,7 +112,7 @@ fn the_mcp_door_speaks_the_handshake_lists_the_field_tools_and_runs_them() {
     assert!(!e, "{t}");
     let (t, e) = call(port, "entity_write", json!({"spec": "Command:echo1", "prop": "run", "value": {"id": "r1", "args": ["there"]}}));
     assert!(!e, "{t}");
-    let out = wait("the run's receipt", || { let (t, _) = call(port, "entity_read", json!({"spec": "Command:echo1", "prop": "output"})); if t.contains("hi there") { Some(t) } else { None } });
+    let out = wait("the run's receipt", || { let (t, _) = call(port, "run_cliff", json!({"code": "${'Command:echo1'}['output']"})); if t.contains("hi there") { Some(t) } else { None } });
     assert!(out.contains("hi there"), "{out}");
     // the store's rows: a query by kind and a whole read (the host journals and stores each write)
     let q = wait("the Command in the store", || { let (t, _) = call(port, "entity_query", json!({"q": "kind:Command"})); if t.contains("Command:echo1") { Some(t) } else { None } });
@@ -122,7 +122,7 @@ fn the_mcp_door_speaks_the_handshake_lists_the_field_tools_and_runs_them() {
     let (t, e) = call(port, "entity_query", json!({"q": "status:open"}));
     assert!(e && t.contains("unsupported term status:open"), "{t}");
     let whole = wait("the whole read", || { let (t, _) = call(port, "entity_read", json!({"spec": "Command:echo1"})); if t.contains("\"cmd\"") { Some(t) } else { None } });
-    assert!(whole.starts_with("Command:echo1 (Command) "), "{whole}");
+    assert!(whole.starts_with("Command:echo1 {"), "{whole}");
     let (t, _) = call(port, "entity_read", json!({"spec": "Command:nothing"}));
     assert_eq!(t, "no such entity: Command:nothing");
     assert!(terminate(&mut run));
@@ -176,7 +176,7 @@ for _ in range(300):
 w = rpc("tools/call", {"name": "entity_write", "arguments": {"spec": "Command:probe", "prop": "cmd", "value": ["echo", "x"]}}, 3)["content"][0]["text"]
 out({"type": "assistant", "message": {"content": [{"type": "text", "text": "Listing " + ",".join(names)}, {"type": "tool_use", "id": "tu1", "name": "mcp__membrane__entity_write", "input": {"spec": "Command:probe", "prop": "cmd", "value": ["echo", "x"]}}]}})
 out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu1", "content": [{"type": "text", "text": w}]}]}})
-r = rpc("tools/call", {"name": "entity_read", "arguments": {"spec": "Command:probe", "prop": "cmd"}}, 4)["content"][0]["text"]
+r = rpc("tools/call", {"name": "run_cliff", "arguments": {"code": "${'Command:probe'}['cmd']"}}, 4)["content"][0]["text"]
 out({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "tu2", "name": "mcp__membrane__entity_read", "input": {"spec": "Command:probe", "prop": "cmd"}}]}})
 out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "tu2", "content": r}]}})
 if os.path.exists(errp):
@@ -298,11 +298,11 @@ fn a_message_is_answered_by_one_fake_cli_run_that_uses_the_mcp_door_and_no_histo
     assert!(!args.iter().any(|x| x == "--bare" || x == "--resume" || x == "--continue"), "{args:?}");
 
     // the tools it ran are entities under the message, and the write it made through the door is in the field
-    let (n, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn:tool:tu1"), "prop": "name"}));
+    let (n, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("membrane::Chat:main:message:{id}:turn:tool:tu1"), "name")}));
     assert_eq!(n, "mcp__membrane__entity_write");
-    let (n, _) = wait("the tool result", || { let r = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn:tool:tu2"), "prop": "result"})); if r.0.contains("echo") { Some(r) } else { None } });
+    let (n, _) = wait("the tool result", || { let r = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("membrane::Chat:main:message:{id}:turn:tool:tu2"), "result")})); if r.0.contains("echo") { Some(r) } else { None } });
     assert!(n.contains("echo") && n.contains("x"), "{n}");
-    let (c, _) = call(port, "entity_read", json!({"spec": "Command:probe", "prop": "cmd"}));
+    let (c, _) = call(port, "run_cliff", json!({"code": "${'Command:probe'}['cmd']"}));
     assert!(c.contains("echo"), "{c}");
 
     // a second message: NO history, the first message's words are nowhere in its argv
@@ -328,7 +328,7 @@ fn the_claude_cli_runs_raw_exchange_is_in_the_model_chat_entity_prompt_reply_cal
     assert_eq!(v["state"], "done", "{v}");
     let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let t = loop {
-        let t = call(port, "entity_read", json!({"spec": "ModelChat:main", "prop": "text"})).0;
+        let t = call(port, "run_cliff", json!({"code": "${'ModelChat:main'}['text']"})).0;
         if t.contains("[tool]") && t.contains("[call] entity_read") { break t; }
         assert!(std::time::Instant::now() < end, "the model chat never held the whole run: {t}");
         std::thread::sleep(std::time::Duration::from_millis(250));
@@ -613,7 +613,8 @@ fn a_client_that_leaves_early_leaves_nothing_stuck_and_the_turn_completes() {
 
 // ---- resource hygiene (#1143): a finished turn keeps what matters, not the raw output ------------------------------------------------------
 /// the whole stored row of an entity as the door reads it (its length is the row's size)
-fn row_text(port: u16, eid: &str) -> String { call(port, "entity_read", json!({"spec": eid})).0 }
+/// what the entity holds (its stored properties, each with its value): the names from `meta`, each value read (a whole `entity_read` is the index of names, #1143)
+fn row_text(port: u16, eid: &str) -> String { call(port, "run_cliff", json!({"code": format!("join([k + ': ' + str(${{'{eid}'}}[k]) for k in meta('{eid}')['properties']], '\\n')")})).0 }
 /// the stored bodies of the seat's store file: (rows, bytes of c_field, journal lines, bytes of c_journal)
 fn store_sizes(dir: &std::path::Path) -> (i64, i64, i64, i64) {
     let db = rusqlite::Connection::open_with_flags(dir.join("field.sqlite3"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
@@ -644,14 +645,14 @@ fn a_finished_turn_keeps_its_answer_tools_and_usage_but_not_the_raw_output_and_s
         (c.len() < ROW_BOUND && m.len() < ROW_BOUND).then_some((c, m))
     });
     assert!(!c.contains("pad 199") && !m.contains("pad 199"), "the raw stream is not kept");
-    assert!(c.contains("\"rc\":0") || c.contains("\"rc\": 0"), "the rc stays: {c}");
+    assert_eq!(call(port, "run_cliff", json!({"code": format!("${{'{cmd}'}}['rc']")})).0, "0", "the rc stays: {c}");
     // what matters is in the view, the tool entities and the turn
     let check = |port: u16| {
         let v = view(port, &id);
         assert_eq!((v["state"].clone(), v["response"].clone(), v["tools"].clone()), (json!("done"), json!("Final answer to: big output"), json!(["entity_write", "entity_read"])), "{v}");
-        let (n, _) = call(port, "entity_read", json!({"spec": format!("{msg}:turn:tool:tu1"), "prop": "name"}));
+        let (n, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("{msg}:turn:tool:tu1"), "name")}));
         assert_eq!(n, "mcp__membrane__entity_write");
-        let (r, _) = call(port, "entity_read", json!({"spec": format!("{msg}:turn:tool:tu2"), "prop": "result"}));
+        let (r, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("{msg}:turn:tool:tu2"), "result")}));
         assert!(r.contains("echo"), "the tool result is kept: {r}");
     };
     check(port);
@@ -683,7 +684,7 @@ fn a_write_that_starts_an_effect_returns_its_receipt_when_it_waits_and_names_it_
     assert_eq!((rc["rc"].clone(), rc["ok"].clone(), reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().trim().to_string()), (json!(0), json!(true), "hi there".to_string()), "{t}");
     assert_eq!(rc["stderr_bytes"], json!(0));
     assert!(!t.contains("Return:"), "the Return entity is a carrier, the reply does not name it: {t}");
-    let (r, _) = call(port, "entity_read", json!({"spec": "Command:e1", "prop": "run_result"}));
+    let (r, _) = call(port, "run_cliff", json!({"code": "${'Command:e1'}['run_result']"}));
     assert!(r.contains("hi there"), "the receipt stays on the entity: {r}");
     // no wait: a slow command answers at once, naming the receipt; the Return entity shows it when it lands
     put(port, "Command:slow", "cmd", json!(["sh", "-c", "sleep 2; echo late"]));
@@ -692,7 +693,7 @@ fn a_write_that_starts_an_effect_returns_its_receipt_when_it_waits_and_names_it_
     assert!(t0.elapsed() < Duration::from_millis(1800), "no wait, no holding: {:?}", t0.elapsed());
     assert!(t.contains("status: running") && t.contains("read Command:slow.run_result later"), "{t}");
     assert!(!t.contains("Return:"), "{t}");
-    let r = wait("the late receipt on the entity", || { let (r, _) = call(port, "entity_read", json!({"spec": "Command:slow", "prop": "run_result"})); r.contains("late").then_some(r) });
+    let r = wait("the late receipt on the entity", || { let (r, _) = call(port, "run_cliff", json!({"code": "${'Command:slow'}['run_result']"})); r.contains("late").then_some(r) });
     assert!(r.contains("late"), "{r}");
     // a wait that is too short answers pending
     put(port, "Command:slow2", "cmd", json!(["sh", "-c", "sleep 4; echo x"]));
@@ -711,7 +712,7 @@ fn a_write_returns_the_reactions_of_its_round_with_the_reason_of_a_null() {
     let (mut run, port) = start("react", MCP_PACKS, &[]);
     let (r, e) = put(port, "Pack:boxes", "text", json!(BOXES));
     assert!(!e, "{r}");
-    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:boxes", "prop": "state"})).0 == "loaded").then_some(()));
+    wait("the pack", || (call(port, "run_cliff", json!({"code": "${'Pack:boxes'}['state']"})).0 == "loaded").then_some(()));
     let (t, e) = put(port, "Box:1", "n", json!(4));
     assert!(!e, "{t}");
     let line = t.lines().find_map(|l| l.strip_prefix("reactions: ")).unwrap_or_else(|| panic!("{t}"));
@@ -776,7 +777,7 @@ fn the_turn_carries_usage_cost_calls_and_duration_of_the_result_event_in_the_vie
     assert_eq!(v["turn"]["usage"], want, "{v}");
     assert_eq!((v["turn"]["cost"].clone(), v["turn"]["calls"].clone(), v["turn"]["duration"].clone()), (json!(0.0123), json!(3), json!(4321)), "{v}");
     // the turn entity holds them as properties
-    let (u, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn"), "prop": "cost"}));
+    let (u, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("membrane::Chat:main:message:{id}:turn"), "cost")}));
     assert_eq!(u, "0.0123");
     // the event stream's final event carries them too
     let mut sse = Sse::open(port, &format!("/membrane/chat/message/{id}/events"));
@@ -811,7 +812,7 @@ fn an_interrupted_turn_is_found_in_the_store_not_through_what_the_warm_boot_load
     let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "warm_rows=0"]);
     // read the STORE's rows only (a poll of the message would load it, and the load itself would make the engine look at the turn)
     let turn = format!("membrane::Chat:main:message:{id}:turn");
-    wait("the turn marked error in the store", || { let (r, _) = call(port2, "entity_query", json!({"q": format!("name~:{turn}"), "full": true})); (r.contains("\"state\":\"error\"")).then_some(()) });
+    wait("the turn marked error in the store", || { let db = rusqlite::Connection::open_with_flags(dir.join("field.sqlite3"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap(); let n: i64 = db.query_row("SELECT count(*) FROM c_field WHERE k = ?1 AND json_extract(body, '$.props.state') = 'error'", [&turn], |r| r.get(0)).unwrap(); (n > 0).then_some(()) });
     assert_eq!(view(port2, &id)["response"], "interrupted: the seat stopped while this turn was running");
     assert!(terminate(&mut run2));
 }
@@ -830,7 +831,7 @@ fn the_return_entity_is_retired_as_soon_as_its_reply_is_delivered() {
     assert!(t.contains("receipt: "), "{t}");
     wait("no Return left after a waiting call", || (returns(port) == "0 entity(ies)").then_some(()));
     // the receipt is where it always lived
-    assert!(call(port, "entity_read", json!({"spec": "Command:w1", "prop": "run_result"})).0.contains("\"rc\":0"));
+    assert!(call(port, "run_cliff", json!({"code": "${'Command:w1'}['run_result']"})).0.contains("\"rc\":0"));
     assert!(terminate(&mut run));
 }
 
@@ -915,13 +916,13 @@ fn a_clifflet_that_writes_lands_its_writes_and_returns_their_reactions() {
     let (mut run, port) = start("cliff2", MCP_PACKS, &[]);
     let (t, e) = cliff(port, "q = 5\nNote:w1.n = q\nNote:w2.n = q + 1");
     assert!(!e && t.contains("ran the writes") && t.contains("reactions: ") && t.contains("read <entity>.<verb>_result"), "{t}");
-    assert_eq!(call(port, "entity_read", json!({"spec": "Note:w1", "prop": "n"})).0, "5");
-    assert_eq!(call(port, "entity_read", json!({"spec": "Note:w2", "prop": "n"})).0, "6");
+    assert_eq!(call(port, "run_cliff", json!({"code": "${'Note:w1'}['n']"})).0, "5");
+    assert_eq!(call(port, "run_cliff", json!({"code": "${'Note:w2'}['n']"})).0, "6");
     assert!(t.contains("Note:w2"), "the reactions list the writes the block made: {t}");
     // an effect: the verb runs, the receipt arrives in a later round on the entity
     let (t, e) = cliff(port, "Command:cc.cmd = ['echo', 'from-cliff']\nCommand:cc.run = {'id': 'c1', 'args': []}");
     assert!(!e, "{t}");
-    let r = wait("the receipt", || { let (r, _) = call(port, "entity_read", json!({"spec": "Command:cc", "prop": "run_result"})); r.contains("from-cliff").then_some(r) });
+    let r = wait("the receipt", || { let (r, _) = call(port, "run_cliff", json!({"code": "${'Command:cc'}['run_result']"})); r.contains("from-cliff").then_some(r) });
     assert!(r.contains("from-cliff"), "{r}");
     assert!(terminate(&mut run));
 }
@@ -932,7 +933,7 @@ fn a_runaway_clifflet_stops_on_the_budget_and_the_seat_stays_up_and_nothing_accu
     for i in 0..40 { put(port, &format!("Note:r{i}"), "n", json!(i)); }
     let (t, e) = cliff(port, "[e.n for e in instances('Note') if e.n > 0 and len([1 for f in instances('Note')]) > 0]");
     assert!(e && t.contains("budget exceeded"), "{t}");
-    assert_eq!(call(port, "entity_read", json!({"spec": "Note:r3", "prop": "n"})).0, "3", "the seat is up");
+    assert_eq!(call(port, "run_cliff", json!({"code": "${'Note:r3'}['n']"})).0, "3", "the seat is up");
     // scratch entities and packs do not accumulate (the two Pack entities are the boot's grants: door_tools and settings): the same count after 20 calls of every shape
     wait("the first scratch is gone", || (call(port, "entity_query", json!({"q": "name~:Cliff", "count": true})).0 == "0 entity(ies)" && call(port, "entity_query", json!({"q": "kind:Pack", "count": true})).0 == "2 entity(ies)").then_some(()));
     cliff(port, "Note:acc.n = 0");
@@ -994,7 +995,7 @@ fn a_banner_change_returns_reactions_that_do_not_grow_with_the_finished_messages
 fn a_clifflet_reads_eid_cls_and_parents_and_lists_the_same_packs_as_entity_query() {
     let (mut run, port) = start("cliffpacks", MCP_PACKS, &[]);
     put(port, "Pack:boxes", "text", json!(BOXES));
-    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:boxes", "prop": "state"})).0 == "loaded").then_some(()));
+    wait("the pack", || (call(port, "run_cliff", json!({"code": "${'Pack:boxes'}['state']"})).0 == "loaded").then_some(()));
     put(port, "Box:1", "n", json!(4));
     cliff(port, "Box:1.parents = ['cls:box', 'cls:thing']");   // (entity_write refuses it: classes are set at birth; a clifflet is code, like a pack)
     // eid, cls and parents are readable on any entity (parents is the entity's class list when it has one)
@@ -1021,28 +1022,20 @@ fn reply_part(t: &str, label: &str) -> Option<J> {
 }
 
 #[test]
-fn a_big_output_comes_back_as_its_first_and_last_8_kb_with_its_size_and_the_full_text_stays_on_the_entity() {
+fn a_big_output_comes_back_whole_the_cap_for_the_claude_cli_is_graphlink_claudes() {
+    // the door answers in full (#1143, operator 2026-11-24): the first and last 8192 characters of a result over twice that are cut where the Claude CLI is, in graphlink-claude (`src/cap.rs`)
     let (mut run, port) = start("big", MCP_PACKS, &[]);
     put(port, "Command:big", "cmd", json!(["sh", "-c", "printf HEAD; head -c 50000 /dev/zero | tr '\\0' x; printf TAIL; printf oops >&2"]));
     let (t, e) = put_wait(port, "Command:big", "run", json!({"id": "b1", "args": []}), 20.0);
     assert!(!e, "{t}");
-    assert!(t.len() < 20000, "the reply is small ({} bytes): the CLI refuses a tool result over its limit", t.len());
     let rc = reply_part(&t, "receipt").unwrap_or_else(|| panic!("{t}"));
     assert_eq!((rc["stdout_bytes"].clone(), rc["stderr_bytes"].clone()), (json!(50008), json!(4)), "{t}");
     assert!(rc.get("head").is_none() && rc.get("stdout").is_none(), "no duplicate of the output in the receipt line: {t}");
-    let so = reply_part(&t, "stdout").unwrap_or_else(|| panic!("{t}"));
-    let (h, tl) = (so["stdout_head"].as_str().unwrap_or_else(|| panic!("{}", &t[..600.min(t.len())])), so["stdout_tail"].as_str().unwrap_or_else(|| panic!("tail {}", &t[..600.min(t.len())])));
-    assert!(h.starts_with("HEAD") && h.chars().count() == 8192 && tl.ends_with("TAIL") && tl.chars().count() == 8192, "{} {}", h.len(), tl.len());
-    assert!(so.get("stdout").is_none(), "{so}");
-    // a short stream comes whole, under its plain name
+    let so = reply_part(&t, "stdout").unwrap_or_else(|| panic!("{}", &t[..600.min(t.len())]));
+    let whole = so["stdout"].as_str().unwrap_or_else(|| panic!("{}", &t[..600.min(t.len())]));
+    assert!(whole.starts_with("HEAD") && whole.ends_with("TAIL") && whole.len() == 50008, "the stream comes whole: {} bytes", whole.len());
+    assert!(so.get("stdout_head").is_none() && !t.contains("full output"), "nothing is cut by the door: {}", &t[..300.min(t.len())]);
     assert_eq!(reply_part(&t, "stderr").unwrap()["stderr"], json!("oops"), "{t}");
-    assert!(t.contains("full output: read Command:big.output"), "{t}");
-    let (full, _) = call(port, "entity_read", json!({"spec": "Command:big", "prop": "output"}));
-    assert!(full.len() >= 50008 && full.starts_with("HEAD") && full.ends_with("TAIL"), "the full text stays on the entity: {}", full.len());
-    // an output of exactly 16 KB still comes whole
-    put(port, "Command:edge", "cmd", json!(["sh", "-c", "head -c 16384 /dev/zero | tr '\\0' y"]));
-    let (t, _) = put_wait(port, "Command:edge", "run", json!({"id": "e1", "args": []}), 20.0);
-    assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().len() == 16384 && !t.contains("full output"), "{}", t.len());
     assert!(terminate(&mut run));
 }
 
@@ -1079,20 +1072,20 @@ fn a_running_command_reads_as_running_with_its_id_and_start_and_a_pending_reply_
     let (mut run, port) = start("runn", MCP_PACKS, &[]);
     put(port, "Command:r", "cmd", json!(["sh", "-c", "sleep 2; echo late"]));
     // never started: no status
-    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    let (s, _) = call(port, "run_cliff", json!({"code": "${'Command:r'}['status']"}));
     assert!(s != "running", "a command that was never run is not running: {s}");
     assert!(s.contains("has not been run"), "a never-started command says why its status is none: {s}");
     let (t, _) = put(port, "Command:r", "run", json!({"id": "r9", "args": []}));
     assert!(t.contains("pending: ") && t.contains("r9") && t.contains("status: running") && t.contains("started: "), "{t}");
     assert!(t.contains("read Command:r.run_result"), "{t}");
-    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    let (s, _) = call(port, "run_cliff", json!({"code": "${'Command:r'}['status']"}));
     assert_eq!(s, "running");
-    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "running"}));
+    let (s, _) = call(port, "run_cliff", json!({"code": "${'Command:r'}['running']"}));
     assert!(s.contains("r9") && s.contains("started"), "{s}");
-    wait("the receipt", || (call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"})).0 == "ok").then_some(()));
+    wait("the receipt", || (call(port, "run_cliff", json!({"code": "${'Command:r'}['status']"})).0 == "ok").then_some(()));
     // a rerun reads running again until its own receipt lands
     let (_, _) = put(port, "Command:r", "run", json!({"id": "r9", "args": []}));
-    let (s, _) = call(port, "entity_read", json!({"spec": "Command:r", "prop": "status"}));
+    let (s, _) = call(port, "run_cliff", json!({"code": "${'Command:r'}['status']"}));
     assert_eq!(s, "running", "the old receipt is not the new run's");
     assert!(terminate(&mut run));
 }
@@ -1121,7 +1114,7 @@ fn a_run_value_may_carry_the_cmd_so_one_write_starts_a_command() {
     assert!(!e, "{t}");
     assert_eq!(reply_part(&t, "stdout").unwrap_or_else(|| panic!("{t}"))["stdout"].as_str().unwrap().trim(), "one write", "{t}");
     // the cmd is written on the entity too, so a later run (no cmd in the value) uses it
-    let (c, _) = call(port, "entity_read", json!({"spec": "Command:solo", "prop": "cmd"}));
+    let (c, _) = call(port, "run_cliff", json!({"code": "${'Command:solo'}['cmd']"}));
     assert_eq!(serde_json::from_str::<J>(&c).unwrap(), json!(["echo", "one", "write"]), "{c}");
     let (t, _) = put_wait(port, "Command:solo", "run", json!({"id": "o2", "args": ["again"]}), 20.0);
     assert!(reply_part(&t, "stdout").unwrap()["stdout"].as_str().unwrap().contains("one write again"), "{t}");
@@ -1308,7 +1301,7 @@ fn a_tool_that_read_a_large_result_gives_a_small_page_while_the_shared_view_keep
     let h: J = serde_json::from_str(&body).unwrap();
     assert_eq!(calls_of(&h["messages"][0]), json!([{"name": "entity_read", "input": {"spec": "Q:big read"}}]));
     // the shared view (the future opencode adapter's) still carries the result
-    let (t, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}"), "prop": "history_view"}));
+    let (t, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("membrane::Chat:main:message:{id}"), "history_view")}));
     assert!(t.len() > 200000 && t.contains("\"result\""), "history_view keeps the whole result ({} bytes)", t.len());
     assert!(terminate(&mut run));
 }
@@ -1411,7 +1404,7 @@ fn a_chunks_birth_costs_the_running_message_not_every_finished_one() {
     let id = send(port, "the one that counts");
     wait("the last turn", || { let v = view(port, &id); (v["state"] == "done" || v["state"] == "error").then_some(()) });
     let rows = wait("a published window with the chunk getters", || {
-        let (t, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "top_total"}));
+        let (t, _) = call(port, "run_cliff", json!({"code": "${'Stats:eval'}['top_total']"}));
         let v: J = serde_json::from_str(&t).ok()?;
         v.as_array()?.iter().any(|r| r["prop"] == "sevs" && r["class"] == "Chunk" && r["calls"].as_u64().unwrap_or(0) >= 150).then_some(v)
     });
@@ -1437,9 +1430,9 @@ fn steps_per_chunk(tag: &str, n: u32) -> f64 {
     // `top_total` is the lifetime table as of the LAST PUBLISHED window (every 1 s), so a read right after the turn may hold only part of it (the end of the turn's work not yet in, and
     // under load the cut falls anywhere). The turn is over: wait until the table is QUIET, that is two snapshots published at different times (`at`) that hold the same numbers.
     let snap = |(): ()| -> Option<(f64, u64, u64)> {
-        let (t, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "top_total"}));
+        let (t, _) = call(port, "run_cliff", json!({"code": "${'Stats:eval'}['top_total']"}));
         let rows: J = serde_json::from_str(&t).ok()?;
-        let (at, _) = call(port, "entity_read", json!({"spec": "Stats:eval", "prop": "at"}));
+        let (at, _) = call(port, "run_cliff", json!({"code": "${'Stats:eval'}['at']"}));
         let births = rows.as_array()?.iter().filter(|r| r["class"] == "Chunk" && r["prop"] == "sevs").map(|r| r["calls"].as_u64().unwrap_or(0)).sum::<u64>();
         let steps = rows.as_array()?.iter().filter(|r| (r["class"] == "ChatMessage" || r["class"] == "Chunk") && r["pack"] == "chat_turn").map(|r| r["steps"].as_u64().unwrap_or(0)).sum::<u64>();
         (births >= n as u64 * 9 / 10).then_some((at.trim().parse::<f64>().ok()?, births, steps))
@@ -1497,16 +1490,16 @@ fn a_timed_out_commands_result_props_are_errors_that_tell_the_remedy_and_the_par
         assert!(e && t == format!("Error: {want}"), "{p}: {t}");
     }
     // entity_read shows the kind too, and says it is an error
-    let (t, e) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "output"}));
+    let (t, e) = call(port, "run_cliff", json!({"code": "${'Command:t2'}['output']"}));
     assert!(e && t == format!("Error: {want}"), "entity_read: {t}");
     // a model-style getter over it keeps the Error and the reason
     let pack = "PACK shx 1\nSh.out getter: ${'Command:t2'}['output']\nSh.len getter: this.out + '!'\n";
     put(port, "Pack:shx", "text", json!(pack));
-    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:shx", "prop": "state"})).0 == "loaded").then_some(()));
+    wait("the pack", || (call(port, "run_cliff", json!({"code": "${'Pack:shx'}['state']"})).0 == "loaded").then_some(()));
     put(port, "Sh:a", "x", json!(1));
     let (t, e) = cliff(port, "${'Sh:a'}['len']");
     assert!(e && t.contains(want), "the null passes through the getters: {t}");
-    let (p, _) = call(port, "entity_read", json!({"spec": "Command:t2", "prop": "partial_output"}));
+    let (p, _) = call(port, "run_cliff", json!({"code": "${'Command:t2'}['partial_output']"}));
     assert!(p.contains("partial-line"), "{p}");
     assert!(terminate(&mut run));
 }
@@ -1582,11 +1575,11 @@ fn the_chat_turn_is_not_killed_by_the_default_and_a_timed_out_receipt_survives_a
     std::thread::sleep(Duration::from_millis(2500));
     assert_eq!(finish(port, &dir, &id, "slow turn")["state"], "done", "the turn outlived the default of 1 s");
     put_wait(port, "Command:r1", "run", json!({"id": "r1", "cmd": ["sleep", "67.9"], "timeout_s": 1}), 30.0);
-    let before = call(port, "entity_read", json!({"spec": "Command:r1", "prop": "run_result"})).0;
+    let before = call(port, "run_cliff", json!({"code": "${'Command:r1'}['run_result']"})).0;
     assert!(before.contains("timeout"), "{before}");
     assert!(terminate(&mut run));
     let (mut run2, port2) = launch(&dir, &dir.join("fake-claude"), &["--fact", "command_timeout_s=1"]);
-    let after = wait("the receipt after the restart", || { let t = call(port2, "entity_read", json!({"spec": "Command:r1", "prop": "run_result"})).0; t.contains("timeout").then_some(t) });
+    let after = wait("the receipt after the restart", || { let t = call(port2, "run_cliff", json!({"code": "${'Command:r1'}['run_result']"})).0; t.contains("timeout").then_some(t) });
     assert_eq!(before, after, "the receipt is the journalled write; a replay runs nothing");
     assert!(!alive("sleep 67.9"));
     assert!(terminate(&mut run2));
@@ -1601,21 +1594,21 @@ fn a_message_body_and_the_answer_are_semtexts_whose_words_become_entities_and_a_
     assert_eq!(v["state"], "done", "{v}");
     assert_eq!(v["text"], text, "the page's `text` keeps working");
     let body = format!("membrane::Chat:main:message:{id}:body");
-    assert_eq!(call(port, "entity_read", json!({"spec": &body, "prop": "text"})).0, text);
-    let words = wait("the body's words", || { let t = call(port, "entity_read", json!({"spec": &body, "prop": "words"})).0; if t.contains("Dogs") { Some(t) } else { None } });
+    assert_eq!(call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", &body, "text")})).0, text);
+    let words = wait("the body's words", || { let t = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", &body, "words")})).0; if t.contains("Dogs") { Some(t) } else { None } });
     assert!(words.contains("chase"), "{words}");
     // its words are entities that name the body
-    let cat = wait("Word:lemma:cat", || { let t = call(port, "entity_read", json!({"spec": "Word:lemma:cat", "prop": "mentioned_in"})).0; if t.contains(&body) { Some(t) } else { None } });
+    let cat = wait("Word:lemma:cat", || { let t = call(port, "run_cliff", json!({"code": "${'Word:lemma:cat'}['mentioned_in']"})).0; if t.contains(&body) { Some(t) } else { None } });
     assert!(cat.contains("\"sentence\":0"), "{cat}");
-    wait("the identifier", || { let t = call(port, "entity_read", json!({"spec": "Identifier:name:my_fn", "prop": "mentioned_in"})).0; t.contains(&body).then_some(()) });
+    wait("the identifier", || { let t = call(port, "run_cliff", json!({"code": "${'Identifier:name:my_fn'}['mentioned_in']"})).0; t.contains(&body).then_some(()) });
     // the answer is a SemText too, under the response
     let rbody = format!("membrane::Chat:main:message:{id}:turn:response:body");
-    assert_eq!(call(port, "entity_read", json!({"spec": &rbody, "prop": "text"})).0, format!("Final answer to: {text}"));
-    wait("the answer's words", || { let t = call(port, "entity_read", json!({"spec": "Word:lemma:answer", "prop": "mentioned_in"})).0; t.contains(&rbody).then_some(()) });
+    assert_eq!(call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", &rbody, "text")})).0, format!("Final answer to: {text}"));
+    wait("the answer's words", || { let t = call(port, "run_cliff", json!({"code": "${'Word:lemma:answer'}['mentioned_in']"})).0; t.contains(&rbody).then_some(()) });
     // recall by edges: ask the body for the sentences that mention the same things (the dial is the question), read them through the door
     let (t, e) = call(port, "entity_write", json!({"spec": &body, "prop": "related_n", "value": 3}));
     assert!(!e, "{t}");
-    let rel = wait("the related rows", || { let t = call(port, "entity_read", json!({"spec": &body, "prop": "related"})).0; if t.contains(&rbody) { Some(t) } else { None } });
+    let rel = wait("the related rows", || { let t = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", &body, "related")})).0; if t.contains(&rbody) { Some(t) } else { None } });
     assert!(rel.contains("\"shared\":6") && rel.contains("Final answer to"), "{rel}");
     let (t, e) = call(port, "run_cliff", json!({"code": format!("[r['semtext'] for r in ${{'{body}'}}['related']]")}));
     assert!(!e && t.contains(&rbody), "{t}");
@@ -1715,7 +1708,7 @@ fn a_turn_the_cli_died_in_stores_its_cause_on_the_turn_the_response_and_the_next
     let r = v["response"].as_str().unwrap_or("").to_string();
     assert!(r.contains("rc") && r.contains("about to be killed"), "the response names how it ended and the stderr: {v}");
     assert!(r.contains("signal"), "a death by signal says so, not a bare rc: {v}");
-    let (e, _) = call(port, "entity_read", json!({"spec": format!("membrane::Chat:main:message:{id}:turn"), "prop": "error"}));
+    let (e, _) = call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("membrane::Chat:main:message:{id}:turn"), "error")}));
     assert!(e.contains("about to be killed"), "the turn itself carries the cause: {e}");
     std::fs::remove_file(dir.join("die")).unwrap();
     send(port, "after");
@@ -1940,10 +1933,10 @@ fn a_command_run_a_pack_text_and_a_lone_write_keep_their_small_replies_and_error
     let (t, _) = put(port, "Scratch:lone", "n", json!(1));
     assert!(t.len() < 400, "{t}");
     // a null with a reason and an Error, on an entity that was NOT written, still say why
-    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:b2p", "prop": "state"})).0 == "loaded").then_some(()));
+    wait("the pack", || (call(port, "run_cliff", json!({"code": "${'Pack:b2p'}['state']"})).0 == "loaded").then_some(()));
     let pack = "PACK b2e 1\nSrc.go on-setter fan:\n  ALWAYS:\n    Other:o.n = this.go\nOther.nothing getter: None('nothing for ' + str(this.n))\nOther.boom getter: Error('boom ' + str(this.n))\n";
     put(port, "Pack:b2e", "text", json!(pack));
-    wait("the pack", || (call(port, "entity_read", json!({"spec": "Pack:b2e", "prop": "state"})).0 == "loaded").then_some(()));
+    wait("the pack", || (call(port, "run_cliff", json!({"code": "${'Pack:b2e'}['state']"})).0 == "loaded").then_some(()));
     let (t, e) = put(port, "Src:s", "go", json!(7));
     assert!(!e, "{t}");
     assert!(t.contains("nothing for 7") && t.contains("boom 7"), "reasons of a null and an Error on another entity: {t}");
@@ -1975,23 +1968,23 @@ fn the_history_route_does_work_for_the_page_only_not_for_the_whole_store() {
 const RECLASS: &str = "PACK reclass 1\nIMPORT boxes 1\nBox.reclass on-setter reclass-box:\n  ALWAYS:\n    this.parents = ['cls:thing', 'cls:box']\n";
 
 #[test]
-fn the_model_tools_never_list_parents_and_a_write_of_it_is_refused_and_is_answers_the_class_test() {
+fn the_model_tools_show_the_class_list_and_a_write_of_it_is_refused_and_is_answers_the_class_test() {
     let (mut run, port) = start("noparents", MCP_PACKS, &[]);
     for (n, t) in [("boxes", BOXES), ("reclass", RECLASS)] {
         put(port, &format!("Pack:{n}"), "text", json!(t));
-        wait("the pack", || (call(port, "entity_read", json!({"spec": format!("Pack:{n}"), "prop": "state"})).0 == "loaded").then_some(()));
+        wait("the pack", || (call(port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("Pack:{n}"), "state")})).0 == "loaded").then_some(()));
     }
     // born with a class list by a constructor, as a pack says it
     let (t, e) = cliff(port, "Box:2 = Box(n: 7, parents: ['cls:thing'])");
     assert!(!e, "{t}");
     let (r, _) = call(port, "entity_read", json!({"spec": "Box:2"}));
-    assert!(r.starts_with("Box:2 (Box) ") && r.contains("\"n\":7") && !r.contains("parents"), "the header keeps the class, the list is not a property: {r}");
-    let (q, _) = call(port, "entity_query", json!({"q": "kind:Box", "full": true}));
-    assert!(q.contains("Box:2 (Box)") && !q.contains("parents"), "{q}");
+    assert!(r.starts_with("Box:2 ") && r.contains("\"class\":\"Box\"") && r.contains("\"n\"") && r.contains("thing") && !r.contains("\"n\":7"), "the index names the class, its parents and the property `n` (the list is not a property), and prints no value: {r}");
+    let (q, _) = call(port, "entity_query", json!({"q": "kind:Box"}));
+    assert!(q.contains("Box:2 (Box)") && !q.contains("parents"), "a row is its id and its class: {q}");
     let (q, _) = call(port, "entity_query", json!({"q": "kind:Thing"}));
     assert!(q.contains("Box:2"), "the kind query still follows the class list: {q}");
-    let (r, _) = call(port, "entity_read", json!({"spec": "Box:2", "prop": "parents"}));
-    assert!(r.contains("has no parents"), "reading it by name finds nothing: {r}");
+    let (r, _) = call(port, "run_cliff", json!({"code": "${'Box:2'}['parents']"}));
+    assert!(r.contains("thing"), "a block reads the class list by name (the model's index shows it too): {r}");
     // `is` follows the list
     let (t, e) = cliff(port, "[Box:2 is Thing, Box:2 is Box, Box:2 is Task]");
     assert!(!e && t.replace(' ', "") == "[true,true,false]", "{t}");

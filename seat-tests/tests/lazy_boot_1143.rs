@@ -91,14 +91,15 @@ fn a_store_of_five_thousand_entities_boots_and_the_door_answers_within_the_bound
     assert_eq!(call(port, "entity_query", json!({"q": "kind:Note", "count": true})), format!("{SYNTHETIC} entity(ies)"));
     assert_eq!(clifflet(port, "len(instances('Note'))"), "0", "a lazy class lists only what is loaded: nothing, with the warm boot off");
     // one reference loads one row, and the class listing follows
-    assert_eq!(call(port, "entity_read", json!({"spec": "Note:42", "prop": "n"})), "42");
+    assert_eq!(call(port, "run_cliff", json!({"code": "${'Note:42'}['n']"})), "42");
     assert_eq!(clifflet(port, "len(instances('Note'))"), "1");
     assert_eq!(clifflet(port, "Note:43.n + 1"), "44");
     assert_eq!(clifflet(port, "len(instances('Note'))"), "2");
     // a write to a row nobody loaded is made on what is stored
     call(port, "entity_write", json!({"spec": "Note:7", "prop": "extra", "value": "added"}));
-    assert_eq!(call(port, "entity_read", json!({"spec": "Note:7", "prop": "text"})).contains("synthetic note 7"), true, "the stored text is still there");
-    assert!(call(port, "entity_read", json!({"spec": "Note:7"})).contains("\"extra\":\"added\"") || call(port, "entity_read", json!({"spec": "Note:7"})).contains("'extra': 'added'"));
+    assert_eq!(call(port, "run_cliff", json!({"code": "${'Note:7'}['text']"})).contains("synthetic note 7"), true, "the stored text is still there");
+    assert!(call(port, "entity_read", json!({"spec": "Note:7"})).contains("\"extra\""), "the index names the property just written");
+    assert_eq!(call(port, "run_cliff", json!({"code": "${'Note:7'}['extra']"})), "added");
     assert_eq!(call(port, "entity_query", json!({"q": "kind:Note", "count": true})), format!("{SYNTHETIC} entity(ies)"), "no row was made twice");
     let _ = run.child.kill();
 }

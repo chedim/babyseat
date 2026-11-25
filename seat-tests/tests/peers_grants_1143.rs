@@ -50,7 +50,7 @@ fn start(dir: &std::path::Path, facts: &[String]) -> Run {
 }
 fn read(run: &Run, spec: &str, prop: &str) -> String {
     let token = std::fs::read_to_string(run.dir.join("admin.token")).unwrap();
-    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_read", "arguments": {"spec": spec, "prop": prop}}}).to_string();
+    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "run_cliff", "arguments": {"code": format!("${{'{}'}}['{}']", spec, prop)}}}).to_string();
     let mut s = TcpStream::connect(("127.0.0.1", run.port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     s.write_all(format!("POST /mcp HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", token.trim(), body.len()).as_bytes()).unwrap();

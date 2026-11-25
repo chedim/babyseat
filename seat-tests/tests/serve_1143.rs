@@ -255,10 +255,10 @@ fn post(port: u16, path: &str, extra: &str, body: &str) -> String {
 }
 /// `Boot:seat.legacy_path` as the seat holds it (None = no such property)
 fn legacy_fact(run: &Run, data: &Path) -> Option<String> {
-    let body = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "entity_read", "arguments": {"spec": "Boot:seat", "prop": "legacy_path"}}}).to_string();
+    let body = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "run_cliff", "arguments": {"code": "${'Boot:seat'}['legacy_path']"}}}).to_string();
     let r: serde_json::Value = serde_json::from_str(&post(run.port, "/mcp", &bearer(data), &body)).unwrap();
     let t = r["result"]["content"][0]["text"].as_str().unwrap_or("").to_string();
-    if t.contains(" has no ") || t.is_empty() { None } else { Some(serde_json::from_str::<String>(&t).unwrap_or(t)) }
+    if t.contains(" has no ") || t.starts_with("null") || t.is_empty() { None } else { Some(serde_json::from_str::<String>(&t).unwrap_or(t)) }
 }
 /// a fake old data dir: `<dir>/field.sqlite/field.sqlite3` is a file (not a real store: the seat only has to be TOLD where it is)
 fn fake_old_dir(parent: &Path, name: &str) -> PathBuf {

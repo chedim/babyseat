@@ -23,11 +23,11 @@ def _ask(seat, cid, request):
 
 
 def _state(seat, cid):
-    return seat.tool("entity_read", spec=f"HaCall:{cid}", prop="state").strip('"')
+    return seat.read(f"HaCall:{cid}", "state").strip('"')
 
 
 def _response(seat, cid):
-    return seat.tool("entity_read", spec=f"HaCall:{cid}", prop="response")
+    return seat.read(f"HaCall:{cid}", "response")
 
 
 async def _house(pkg, hass, seat, token=None):
@@ -163,11 +163,11 @@ def test_the_catalog_is_exposed_entities_only_and_every_service_pushed_once_unti
             await s.close()
     first, again, changed = asyncio.run(go())
     assert (first, again, changed) == (True, False, True), "pushed, unchanged, pushed again when what is exposed changed"
-    ids = json.loads(real_seat.tool("entity_read", spec="HaCatalog:ha", prop="entity_ids"))
+    ids = json.loads(real_seat.read("HaCatalog:ha", "entity_ids"))
     assert ids == ["light.kitchen", "lock.front", "sensor.temp"]
-    sv = json.loads(real_seat.tool("entity_read", spec="HaCatalog:ha", prop="service_ids"))
+    sv = json.loads(real_seat.read("HaCatalog:ha", "service_ids"))
     assert "light.turn_on" in sv and "notify.mobile" in sv and "lock.unlock" in sv
-    rows = json.loads(real_seat.tool("entity_read", spec="HaCatalog:ha", prop="services"))
+    rows = json.loads(real_seat.read("HaCatalog:ha", "services"))
     assert {"id": "light.turn_on", "target": True, "fields": ["brightness_pct", "color_name"]} in rows
     assert {"id": "notify.mobile", "target": False, "fields": ["message"]} in rows
 
@@ -184,7 +184,7 @@ def test_a_read_of_the_catalog_refreshes_it_and_answers_how_much(ha, real_seat):
             await s.close()
     assert asyncio.run(go()) == 1
     assert json.loads(_response(real_seat, "c1")) == {"entities": 2, "services": 3}
-    assert json.loads(real_seat.tool("entity_read", spec="HaCatalog:ha", prop="entity_ids")) == ["light.kitchen", "sensor.temp"]
+    assert json.loads(real_seat.read("HaCatalog:ha", "entity_ids")) == ["light.kitchen", "sensor.temp"]
 
 
 def test_a_token_with_sub_ha_is_the_admin_and_pulls_the_calls_and_assist_keeps_working(ha, real_seat):

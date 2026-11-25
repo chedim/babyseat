@@ -152,7 +152,7 @@ fn peer_turn_slots(tag: &str, backend: &str, ns: &str, extra: J, slots: u64) -> 
     let mine = peer_cells(&name, slots * 2);
     let peer = PeerEnd::open(&name, ns);
     // a turn starts only on a peer whose root the seat has made: the peer's own end opening is not that (the seat reads the hello a moment later)
-    wait_until("the root of the peer never came up", 60, || call(run.port, "entity_read", json!({"spec": format!("Vm:{ns}"), "prop": "link"})) == "up");
+    wait_until("the root of the peer never came up", 60, || call(run.port, "run_cliff", json!({"code": format!("${{'{}'}}['{}']", format!("Vm:{ns}"), "link")})) == "up");
     (run, names, peer, mine)
 }
 fn send(run: &Run, text: &str) -> String {
@@ -201,13 +201,13 @@ fn a_tool_call_of_a_claude_peer_is_run_by_the_seat_and_fed_back_in_the_next_roun
     put(run.port, "Lamp:desk", "power", json!("zebra-42"));
     let id = send(&run, "read the lamp");
     let r1 = reply_ask(&mut peer, None);
-    answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+    answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "run_cliff", "arguments": {"code": "${'Lamp:desk'}['power']"}}])));
     let r2 = reply_ask(&mut peer, Some(&r1));
     assert!(r2.ends_with("-2"), "round 2: {r2}");
     answer(&mut mine, &r2, "The lamp says zebra-42", "stop", None);
     let v = turn_ends(run.port, &id);
     assert_eq!(v["state"], "done", "{v}");
-    assert!(v["tools"].as_array().map_or(false, |t| t.iter().any(|n| n == "entity_read")), "the seat should have run entity_read: {v}");
+    assert!(v["tools"].as_array().map_or(false, |t| t.iter().any(|n| n == "run_cliff")), "the seat should have run run_cliff: {v}");
     assert!(v["response"].as_str().unwrap_or("").contains("zebra-42"), "{v}");
 }
 
@@ -228,20 +228,20 @@ fn a_peer_turns_raw_exchange_is_in_the_model_chat_entity_in_the_same_shape_as_ev
     put(run.port, "Lamp:desk", "power", json!("zebra-42"));
     let id = send(&run, "read the lamp");
     let r1 = reply_ask(&mut peer, None);
-    answer(&mut mine, &r1, "<think>look at it</think>reading", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+    answer(&mut mine, &r1, "<think>look at it</think>reading", "tool_calls", Some(json!([{"name": "run_cliff", "arguments": {"code": "${'Lamp:desk'}['power']"}}])));
     let r2 = reply_ask(&mut peer, Some(&r1));
     answer(&mut mine, &r2, "The lamp says zebra-42", "stop", None);
     assert_eq!(turn_ends(run.port, &id)["state"], "done");
     let end = Instant::now() + Duration::from_secs(30);
     let t = loop {
-        let t = call(run.port, "entity_read", json!({"spec": "ModelChat:main", "prop": "text"}));
+        let t = call(run.port, "run_cliff", json!({"code": "${'ModelChat:main'}['text']"}));
         if t.contains("[assistant]\nThe lamp says zebra-42") { break t; }
         assert!(Instant::now() < end, "the model chat never held the answer: {t}");
         std::thread::sleep(Duration::from_millis(200));
     };
     let at = |s: &str| t.find(s).unwrap_or_else(|| panic!("{s:?} is not in the model chat:\n{t}"));
     assert!(at("[system]") < at("[user]\nread the lamp") && at("[user]\nread the lamp") < at("<think>look at it</think>reading"), "{t}");
-    assert!(at("<think>look at it</think>reading") < at("[call] entity_read") && at("[call] entity_read") < at("[tool]\n") && at("[tool]\n") < at("[assistant]\nThe lamp says zebra-42"), "{t}");
+    assert!(at("<think>look at it</think>reading") < at("[call] run_cliff") && at("[call] run_cliff") < at("[tool]\n") && at("[tool]\n") < at("[assistant]\nThe lamp says zebra-42"), "{t}");
     assert!(t.contains("zebra-42"), "the tool's result, as the model got it: {t}");
 }
 
@@ -297,7 +297,7 @@ fn a_tool_call_of_an_openai_peer_and_of_an_anthropic_peer_is_run_by_the_seat_and
         put(run.port, "Lamp:desk", "power", json!("zebra-42"));
         let id = send(&run, "read the lamp");
         let r1 = reply_ask_in(&mut peer, ns, None);
-        answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+        answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "run_cliff", "arguments": {"code": "${'Lamp:desk'}['power']"}}])));
         let r2 = reply_ask_in(&mut peer, ns, Some(&r1));
         answer(&mut mine, &r2, "The lamp says zebra-42", "stop", None);
         let v = turn_ends(run.port, &id);
@@ -386,7 +386,7 @@ fn peer_facts(name: &str) -> Vec<String> {
     vec![format!("cloud_models={entry}"), "router_on=false".to_string(), "seat_backend=http://127.0.0.1:1".to_string(),
          r#"minds={"loops":"claude-via-peer","cortex":"claude-via-peer","workers":"claude-via-peer","seat_default":"claude-via-peer"}"#.to_string(), format!("peers={}", decl_peer(name, "claude"))]
 }
-fn vm_link(port: u16) -> String { call(port, "entity_read", json!({"spec": "Vm:claude", "prop": "link"})) }
+fn vm_link(port: u16) -> String { call(port, "run_cliff", json!({"code": "${'Vm:claude'}['link']"})) }
 fn wait_until(what: &str, secs: u64, f: impl Fn() -> bool) {
     let end = Instant::now() + Duration::from_secs(secs);
     while !f() { assert!(Instant::now() < end, "{what}"); std::thread::sleep(Duration::from_millis(100)); }
@@ -417,9 +417,9 @@ fn a_restart_does_not_retire_the_root_of_a_peer_that_connected_before_the_sweep_
     wait_until("the peer never connected in the second run", 30, || vm_link(run.port) == "up");
     // only now the sweep reads the store: it names the old root, which is the root of the peer that is connected
     put(run.port, "Gate:sweep", "open", json!(true));
-    wait_until("the sweep never read the old roots", 60, || call(run.port, "entity_read", json!({"spec": "Boot:seat", "prop": "old_vms"})).contains("Vm:claude"));
+    wait_until("the sweep never read the old roots", 60, || call(run.port, "run_cliff", json!({"code": "${'Boot:seat'}['old_vms']"})).contains("Vm:claude"));
     std::thread::sleep(Duration::from_millis(1500));   // and it has had its time to retire what it was given
-    let times = format!("started {} root {}", call(run.port, "entity_read", json!({"spec": "Boot:seat", "prop": "started"})), call(run.port, "entity_read", json!({"spec": "Vm:claude", "prop": "updated"})));
+    let times = format!("started {} root {}", call(run.port, "run_cliff", json!({"code": "${'Boot:seat'}['started']"})), call(run.port, "run_cliff", json!({"code": "${'Vm:claude'}['updated']"})));
     assert_eq!(vm_link(run.port), "up", "the sweep retired the root of a peer that is connected: its replies have no root to live under ({times})");
 }
 
@@ -437,8 +437,8 @@ fn a_restart_still_retires_the_root_of_a_peer_the_seat_no_longer_declares() {
     for part in ["ctl", "sc", "pc"] { let _ = graphlink_shm::remove_region(&format!("/gl-{name}-{part}")); }
     // the second run declares no peer: the old root is the last run's and is swept
     let run = start(&dir, &[]);
-    wait_until("the sweep never read the old roots", 60, || call(run.port, "entity_read", json!({"spec": "Boot:seat", "prop": "old_vms"})).contains("Vm:claude"));
-    wait_until("the root of an undeclared peer was not swept", 30, || call(run.port, "entity_read", json!({"spec": "Vm:claude", "prop": "link"})).contains("no such entity") || call(run.port, "entity_read", json!({"spec": "Vm:claude", "prop": "link"})).contains("no link"));
+    wait_until("the sweep never read the old roots", 60, || call(run.port, "run_cliff", json!({"code": "${'Boot:seat'}['old_vms']"})).contains("Vm:claude"));
+    wait_until("the root of an undeclared peer was not swept", 30, || call(run.port, "run_cliff", json!({"code": "${'Vm:claude'}['link']"})).starts_with("null"));
 }
 
 #[test]
@@ -473,7 +473,7 @@ fn a_tool_result_far_over_the_peer_tables_value_capacity_reaches_the_peer_whole_
     put(run.port, "Blob:big", "text", json!(blob.clone()));
     let id = send(&run, "read the blob");
     let r1 = reply_ask(&mut peer, None);
-    answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Blob:big", "prop": "text"}}])));
+    answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "run_cliff", "arguments": {"code": "${'Blob:big'}['text']"}}])));
     let r2 = reply_ask(&mut peer, Some(&r1));
     // the peer reads the seat's table: the tool message of round 2 is there whole
     let seen = seat_cells(&names.0);
@@ -525,7 +525,7 @@ fn a_claude_peer_turn_of_many_rounds_fits_a_small_table_because_a_round_carries_
         let r = next_reply_ask(&mut peer, "claude", &seen);
         assert!(r.ends_with(&format!("-{round}")), "round {round}: {r}");
         if round >= 2 { assert_eq!(messages_of(&names, &r), 1, "round {round} lists only its own tool result, not the history"); }
-        answer(&mut mine, &r, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+        answer(&mut mine, &r, "", "tool_calls", Some(json!([{"name": "run_cliff", "arguments": {"code": "${'Lamp:desk'}['power']"}}])));
         seen.push(r);
     }
     let r13 = next_reply_ask(&mut peer, "claude", &seen);
@@ -543,9 +543,9 @@ fn a_stateless_peer_is_still_sent_the_whole_history_each_round() {
     put(run.port, "Lamp:desk", "power", json!("zebra-42"));
     let id = send(&run, "read the lamp twice");
     let r1 = reply_ask_in(&mut peer, "oai", None);
-    answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+    answer(&mut mine, &r1, "", "tool_calls", Some(json!([{"name": "run_cliff", "arguments": {"code": "${'Lamp:desk'}['power']"}}])));
     let r2 = next_reply_ask(&mut peer, "oai", &[r1.clone()]);
-    answer(&mut mine, &r2, "", "tool_calls", Some(json!([{"name": "entity_read", "arguments": {"spec": "Lamp:desk", "prop": "power"}}])));
+    answer(&mut mine, &r2, "", "tool_calls", Some(json!([{"name": "run_cliff", "arguments": {"code": "${'Lamp:desk'}['power']"}}])));
     let r3 = next_reply_ask(&mut peer, "oai", &[r1.clone(), r2.clone()]);
     assert_eq!(messages_of(&names, &r3), 6, "system, user, then the assistant and tool messages of two rounds");
     answer(&mut mine, &r3, "twice", "stop", None);

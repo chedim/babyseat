@@ -104,6 +104,10 @@ class RealSeat:
             assert time.time() - t < 30, "the seat made no admin token"
             time.sleep(0.05)
 
+    def read(self, spec: str, prop: str):
+        """One property of an entity, as the text `run_cliff` gives (`${'<spec>'}['<prop>']`): a value is read this way, `entity_read` is the index of an entity (#1143)."""
+        return self.tool("run_cliff", code="${'%s'}['%s']" % (spec, prop))
+
     def tool(self, name: str, **args):
         """One call of the model's tool on /mcp (the admin's token): -> the reply text. `tool("entity_write", spec=..., prop=..., value=...)` is the model writing."""
         import json, urllib.request

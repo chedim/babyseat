@@ -4,7 +4,7 @@ Every message a person sends is answered by one BACKEND, a program the seat star
 
 ## Which backend
 
-The seat picks the backend from the chosen model, first match wins. `entity_read {spec: "Chat:main:message:<id>", prop: "backend"}` names it for a message.
+The seat picks the backend from the chosen model, first match wins. `run_cliff {code: "${'<message id>'}['backend']"}` names it for a message.
 
 - `brain`: the owner gave the chat to a brain program (the minds setting `chat` names it). It answers by writing the response itself, whatever model is chosen (`Help:brain`).
 - `none`: no model is chosen. Nothing starts, and the answer tells the person how to choose one.
@@ -24,9 +24,9 @@ The turn of a message is `Chat:main:message:<id>:turn` (`Chat:session:<sid>:mess
 ## Read a turn
 
 - Which backend ran it and where it is: the turn's `backend`, `state`, `started` and `ended`.
-- What was said: the response's `text` (`entity_read {spec: "Chat:main:message:<id>:turn:response", prop: "text"}`); a reply cut short keeps the words said before the failure and is marked `interrupted`, with the `reason`.
+- What was said: the response's `text` (`run_cliff {code: "${'<message id>:turn:response'}['text']"}`); a reply cut short keeps the words said before the failure and is marked `interrupted`, with the `reason`.
 - Why it failed: the turn's `error`.
-- What it did: `entity_query {q: "name~:Chat:main:message:<id>:turn:tool:", props: ["name", "input", "result"]}`.
+- What it did: `entity_query {q: "name~:<message id>:turn:tool:"}` lists them; `run_cliff` reads `name`, `input` and `result` of each (`${ids}['result']`).
 
 ## Example: which backend runs a turn
 
