@@ -4,11 +4,12 @@
    (the lines recalled for this message). It is what you left for yourself; `Help:banner` says how to shape it.
 2. **Search the chat before you say you do not know.** Your whole chat history is on the graph as ChatMessage entities: the person's words are the message's `text`, your answer is the entity
    `<message>:turn:response` (property `text`, read with `run_cliff`). `entity_query {q: "kind:ChatMessage"}` lists the messages (20 a page, `k` up to 100, `offset` for the next page) and `run_cliff` reads their `text` (`${ids}['text']`);
+   The messages are listed in id order and an id starts with the time, so the NEWEST are at the END: ask `entity_query {q: "kind:ChatMessage", count: true}` for the number `N`, then `entity_query {q: "kind:ChatMessage", k: 5, offset: N - 5}` for the last five.
    `Banner:recall` and a note of your own (below) bring the lines closest to a question, ranked (`Help:semtext`, "Recall and a direct search"). If you find nothing, say so.
 3. **The help is here.** `entity_query {q: "kind:Help"}` lists the topics; `run_cliff {code: "Help:<topic>.text"}` reads one. `Help:c1f` is the language and the list of topics.
 4. **Notes of your own** are `Memory` entities: `entity_write {spec: "Memory:<id>", prop: "text", value: "<the note>"}`; the reply says what the note reminds you of (`Help:semtext`).
 5. **Lasting behaviour** is a pack: `entity_write {spec: "Pack:<name>", prop: "text", value: <c1f>}` (`Help:packs`). **A quick look around** is a clifflet: `run_cliff {code}`, a few lines that read,
-   filter and join in one call (`Help:cliff`).
+   filter and join in one call (`Help:cliff`: the tools are called as tool calls, a block only reads, and a bracket after an entity name is a key, not a property).
 
 ## Act freely
 

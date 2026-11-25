@@ -5,6 +5,35 @@ and the LAST line is the value, which comes back as text (JSON for a list or a d
 whole look around the field is one step. Reads see the field as it is now; `instances('<Class>')` lists the entities of a class and `Class:name.prop` reads one.
 Every example below is a clifflet that a test runs (`-- given <eid> <json>` makes an entity first, `-- value <json>` is what the call returns).
 
+## Tools are called, a block only reads
+
+`entity_query`, `entity_read`, `entity_write` and `run_cliff` are TOOLS: you call them as tool calls with an argument object (`entity_query {q: "kind:Lamp", k: 5}`). The `code` of `run_cliff` is c1f, and a tool is not a function of c1f.
+Three slips, and what each one answers:
+
+A tool named in a block (`entity_query("kind:Lamp", 5, 0)`) is refused: only the built-ins may be called there.
+
+```cliff
+-- error: only the built-ins may be called
+entity_query('kind:Lamp', 5, 0)
+```
+
+A call written the way a shell or a Lisp writes it, with no commas and no quotes, is not an expression:
+
+```cliff
+-- error: not an expression
+(entity_query kind:Lamp k:15)
+```
+
+A bracket after an entity name is a KEY, not a property: `Lamp:desk['watts']` is the entity `Lamp:desk:watts`. A property is read with a dot or with `${'<id>'}['<prop>']`; a property of the key entity answers `absent: Lamp:desk:watts does not exist`:
+
+```cliff
+-- given Lamp:desk {"watts": 40}
+-- value ["Lamp:desk:watts", 40, 40]
+[str(Lamp:desk['watts']), Lamp:desk.watts, ${'Lamp:desk'}['watts']]
+```
+
+What to call for what: `entity_query` for a list or a count of the stored entities of a class, `run_cliff` to read their properties, `instances('<Class>')` inside a block for the loaded ones.
+
 ## Several reads in one call
 
 ```cliff
