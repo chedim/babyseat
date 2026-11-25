@@ -137,3 +137,18 @@ fn the_door_refuses_what_it_used_to_accept_silently_and_says_why() {
     write(port, "Pack:fgq", "text", J::Null);
     assert_eq!(read(port, "Pack:fgq", "state"), "removed");
 }
+
+#[test]
+fn a_bare_id_reads_the_entity_the_seat_lists_under_its_own_prefix() {
+    // the seat lists its entities as `membrane::<Class>:<key>`; a model that drops the prefix still reads the entity (cliffvm 0.4.1), the exact id reads it as before, an id nobody holds is absent
+    let dir = setup("bareid");
+    let run = start(&dir, false, &[]);
+    let port = run.port;
+    let t = write(port, "membrane::Thing:bt1", "n", json!(3));
+    assert!(t.starts_with("wrote"), "{t}");
+    assert_eq!(read(port, "membrane::Thing:bt1", "n"), "3", "the exact id");
+    assert_eq!(read(port, "Thing:bt1", "n"), "3", "the bare id");
+    let q = rpc_x(port, None, "entity_query", json!({"q": "kind:Thing"}));
+    assert!(q.contains("membrane::Thing:bt1"), "the index lists the id with its prefix: {q}");
+    assert!(read(port, "Thing:bt-none", "n").starts_with("null: absent"), "{}", read(port, "Thing:bt-none", "n"));
+}

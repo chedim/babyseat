@@ -6,7 +6,7 @@ When the owner has given the chat to a brain program (the minds setting `chat` n
 
 A change line that names `Chat:main:message:<id>` (or `Chat:session:<sid>:message:<id>` for a session) is a person speaking. The line points at the change and does not carry the words: read the message to see them.
 
-- `run_cliff {code: "${'<message id>'}['text']"}` is what the person wrote (`<message id>` is the id exactly as `entity_query` lists it).
+- `run_cliff {code: "${'<message id>'}['text']"}` is what the person wrote (`<message id>` is the id as `entity_query` lists it; the seat's own prefix, the part before `::`, may be left off).
 - The conversation so far is the other `ChatMessage` entities (`entity_query {q: "kind:ChatMessage"}` lists them, and one `run_cliff` reads the text of many: `${['<id1>', '<id2>']}['text']`): search them before you say you do not know something.
 
 ## Answer
