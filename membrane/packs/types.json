@@ -364,6 +364,7 @@
       "ChatRound.said": "Text",
       "ChatRound.said_all": "Text",
       "ChatRound.step": "Dict?",
+      "ChatRound.stopped": "Bool",
       "ChatRound.tcl": "List(Any)",
       "ChatRound.turn_e": "Text?",
       "ChatRound.usage": "Any",
