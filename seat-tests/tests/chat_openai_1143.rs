@@ -395,6 +395,23 @@ fn the_loop_stops_at_chat_max_turns_with_a_visible_cause() {
 }
 
 #[test]
+fn an_aborted_message_stops_the_loop_at_the_next_round_and_the_model_is_called_no_more() {
+    // the page's Stop marks the message `aborted`; the claude CLI is killed, membrama is told, and this rung used to ignore it and call the model until `chat_max_turns` (2048 by default)
+    let fake = Fake::start(|_, _| Reply::Sse(tool_round("again", "entity_query", r#"{"q":"kind:Boot","count":true}"#), 150));
+    let (mut run, port, _dir) = seat_on("oai-abort", &fake, &["--fact", "chat_max_turns=200"]);
+    let id = send(port, "go on forever");
+    wait("a second call", || (fake.calls() >= 2).then_some(()));
+    assert_eq!(http(port, "POST", &format!("/membrane/chat/message/{id}/abort"), "{}").0, 200);
+    let v = wait("the turn to stop", || { let v = view(port, &id); if v["state"] != "running" && v["state"] != "queued" { Some(v) } else { None } });
+    assert!(v["response"].as_str().unwrap_or("").contains("stopped"), "the answer says it was stopped: {v}");
+    let n = fake.calls();
+    assert!(n < 20, "stopped within a few rounds, not at the ceiling: {n} calls");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(fake.calls(), n, "the model is called no more after the stop");
+    assert!(terminate(&mut run));
+}
+
+#[test]
 fn the_packs_this_rung_runs_on_are_all_in_the_shipped_pack_list() {
     // the release ships exactly the packs apps/barest.packs lists (scripts/dist/build.sh): a pack the openai-compatible turn needs that is not listed is a rung the release does not have
     let list = std::fs::read_to_string(format!("{}/../membrane/apps/barest.packs", env!("CARGO_MANIFEST_DIR"))).unwrap();

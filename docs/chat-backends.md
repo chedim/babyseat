@@ -53,6 +53,8 @@ One setter, `turn-outcome`, writes the rest: `ended`, `error` (= `fail`), `usage
 
 Who writes it: claude (`claude_outcome`), the OpenAI-compatible and peer rungs (`oai_end`), the brain's answer, decline and stop (`brain-answer`, `brain-decline`, `brain-abort`), a refusal (`turn-start`) and a turn left running at boot.
 
+**Stop.** The page's Stop marks the message `aborted`. The claude CLI is killed (`Command.stop`), membrama is told (`mb-abort`), a brain's turn ends at once (`brain-abort`), and the OpenAI-compatible rung ends at the end of the round in flight: `ChatRound.stopped` reads the flag, the round's `step` is a `fail` (`The model <name> was stopped.`) and no other round opens, so the model is called no more. Until then a turn on that rung only stopped at `chat_max_turns` (2048 by default).
+
 ## Adding a backend
 
 1. **Choose:** add an arm to `ChatMessage.backend` and to `backend_plan`, in the place its priority says.

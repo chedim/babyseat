@@ -112,8 +112,11 @@ ChatRound.calls getter: [{'i': i, 'id': (words(join([join([str(${tc}['id'] or ''
 ChatRound.said getter: join([str(${${c}['delta']}['content'] or '') for c in this.rchs], '')
 -- everything the model said over the rounds so far (the words of each round's finished stream, in order): what a turn that ends in an error keeps (the end of the turn below)
 ChatRound.said_all getter: join([x for x in [str(${this.prev}['said_all'] or ''), strip(this.said)] if x != ''], '\n\n')
+-- STOP (the page's Stop marks the message `aborted`, as for the claude CLI and membrama): the loop ends at the end of the round that is in flight and opens no other, so the model is called no more
+ChatRound.stopped getter: ${'membrane::Chat:' + this.cp}['aborted'] == True
 ChatRound.step getter:
   WHEN this.rcpt == None: None
+  ELSE WHEN this.stopped: {'fail': 'The model ' + str(${this.cfg}['model']) + ' was stopped.'}
   ELSE WHEN ${this.rcpt}['rc'] != 0: {'fail': 'The model ' + str(${this.cfg}['model']) + ' could not be called (' + str(${this.rcpt}['head']) + ')'}
   ELSE WHEN ${this.rcpt}['http_status'] != 200: {'fail': 'The model ' + str(${this.cfg}['model']) + ' answered HTTP ' + str(${this.rcpt}['http_status']) + ': ' + strip(this.rbody)}
   ELSE WHEN this.err != None: {'fail': 'The model ' + str(${this.cfg}['model']) + ' reported an error: ' + str(this.err)}
