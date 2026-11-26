@@ -130,6 +130,7 @@ ids = [l.eid for l in instances('Lamp')]
 | `Lamp:nowhere.watts` | `null: absent: Lamp:nowhere does not exist` | no entity has that id |
 | a getter that gave no value, `None` | `null` | a plain null, with no reason |
 | `near(q, 'Vector', 3)` over no vectors | `null: empty: no vectors in class Vector` | nothing to search yet |
+| a file-backed read (`Help:x.text`, `File:x.text`) the first time | `null: pending: read(<path>)` | the seat is reading the file; the value is there in a LATER round, so read again then; do not build on it in the same block |
 | `Int('a')`, `Error('...')` | `Error: <the reason>` | something FAILED; the reason says what to do |
 
 Each row is run here:
@@ -153,6 +154,11 @@ None
 ```cliff
 -- null: empty: no vectors in class Vector
 near([1.0, 0.0], 'Vector', 3)
+```
+
+```cliff
+-- null: pending: read(/a)
+None('pending: read(/a)')
 ```
 
 ```cliff
