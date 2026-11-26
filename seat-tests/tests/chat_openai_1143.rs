@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 fn cliffvm_bin() -> &'static str { common::bin("cliffvm") }
+// the door's whole tool list, for the tests that run the other tools through a model (the default offer to a model is `run_cliff` alone)
+const FULL: &str = r#"chat_tools=["entity_query","entity_read","entity_write","run_cliff"]"#;
 const KEY: &str = "sk-oai-PLANTED-0123456789-abcdefghij";
 const PACKS: &[&str] = &["boot.c1f", "fs.c1f", "proc.c1f", "fetch.c1f", "sql.c1f", "store.c1f", "door.c1f", "door_tools.c1f", "semtext.c1f", "mentions.c1f", "router.c1f", "chat.c1f", "chat_turn.c1f", "chat_oai.c1f", "model_chat.c1f"];
 
@@ -214,11 +216,11 @@ fn a_plain_answer_turn_is_one_streamed_call_with_the_doctrine_the_message_and_th
     assert!(sys.contains("Modify your banner to help you maintain continuity.") && sys.contains("CONVERSATION: main"), "the doctrine and the banner, as the claude turn gets them: {sys}");
     assert_eq!(m[1], json!({"role": "user", "content": "say hello"}));
     let names: Vec<&str> = b["tools"].as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["entity_query", "entity_read", "entity_write", "run_cliff"]);
+    assert_eq!(names, ["run_cliff"], "a model turn is offered run_cliff alone by default");
     // the schemas are the door's own
     let (_, tl) = http(port, "POST", "/mcp", &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}).to_string());
     let tl: J = serde_json::from_str(&tl).unwrap();
-    for (i, t) in tl["result"]["tools"].as_array().unwrap().iter().enumerate() {
+    for (i, t) in tl["result"]["tools"].as_array().unwrap().iter().filter(|t| t["name"] == "run_cliff").enumerate() {
         assert_eq!(b["tools"][i], json!({"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["inputSchema"]}}));
     }
     assert_eq!(v["turn"]["usage"], json!({"input_tokens": 11, "output_tokens": 3}), "the endpoint's own numbers: {v}");
@@ -230,7 +232,7 @@ fn a_tool_call_runs_through_the_doors_own_tool_logic_and_its_result_goes_back_to
     let fake = Fake::start(|n, _| if n == 1 {
         Reply::Sse(tool_round("call_a1", "entity_write", r#"{"spec":"Thing:probe","prop":"x","value":5}"#), 0)
     } else { Reply::Sse(words(&["It is ", "written."]), 0) });
-    let (mut run, port, _dir) = seat_on("oai-tool", &fake, &[]);
+    let (mut run, port, _dir) = seat_on("oai-tool", &fake, &["--fact", FULL]);
     let id = send(port, "write it");
     let v = ended(port, &id);
     assert_eq!(v["state"], "done", "{v}");
@@ -280,7 +282,7 @@ fn a_tool_error_is_the_tool_result_the_model_gets_and_a_call_that_is_not_json_is
         ev.insert(4, delta(json!({"tool_calls": [{"index": 1, "id": "c2", "type": "function", "function": {"name": "entity_read", "arguments": "{oops"}}]}), J::Null));
         Reply::Sse(ev, 0)
     } else { Reply::Sse(words(&["seen"]), 0) });
-    let (mut run, port, _dir) = seat_on("oai-toolerr", &fake, &[]);
+    let (mut run, port, _dir) = seat_on("oai-toolerr", &fake, &["--fact", FULL]);
     let id = send(port, "break it");
     let v = ended(port, &id);
     assert_eq!(v["state"], "done", "{v}");
@@ -430,7 +432,7 @@ fn the_raw_exchange_of_a_turn_is_in_the_model_chat_entity_prompt_reply_with_its_
         ev.extend(tool_round("call_m1", "entity_write", r#"{"spec":"Thing:probe","prop":"x","value":5}"#));
         Reply::Sse(ev, 0)
     } else { Reply::Sse(words(&["It is ", "written."]), 0) });
-    let (mut run, port, _dir) = seat_on("oai-mchat", &fake, &[]);
+    let (mut run, port, _dir) = seat_on("oai-mchat", &fake, &["--fact", FULL]);
     let id = send(port, "write it please");
     assert_eq!(ended(port, &id)["state"], "done");
     let t = wait("the model chat", || { let t = model_chat(port); t.contains("It is written.").then_some(t) });
@@ -476,7 +478,7 @@ fn every_entry_of_the_model_chat_has_its_time_and_the_seconds_since_the_entry_be
         ev.extend(tool_round("call_t1", "entity_write", r#"{"spec":"Thing:probe","prop":"x","value":5}"#));
         Reply::Sse(ev, 700)
     } else { Reply::Sse(words(&["done."]), 0) });
-    let (mut run, port, _dir) = seat_on("oai-mctime", &fake, &[]);
+    let (mut run, port, _dir) = seat_on("oai-mctime", &fake, &["--fact", FULL]);
     let id = send(port, "write it");
     assert_eq!(ended(port, &id)["state"], "done");
     let t = wait("the model chat", || { let t = model_chat(port); t.contains("done.").then_some(t) });

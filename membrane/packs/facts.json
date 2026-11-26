@@ -159,7 +159,7 @@
   },
   "chat_tools": {
    "wired": false,
-   "why": "the tools a model's turn is offered and may call (door_tools.c1f): a JSON list of tool names, e.g. [\"run_cliff\"]; none told = all four; the page's and a person's door is whole either way; told by `--fact chat_tools=<json list>`"
+   "why": "the tools a model's turn is offered and may call (door_tools.c1f): a JSON list of tool names; none told = [\"run_cliff\"] alone (the others are the door's: add them to offer them); the page's and a person's door is whole either way; told by `--fact chat_tools=<json list>`"
   },
   "chat_max_turns": {
    "wired": false,

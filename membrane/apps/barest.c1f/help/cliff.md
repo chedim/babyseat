@@ -7,7 +7,7 @@ Every example below is a clifflet that a test runs (`-- given <eid> <json>` make
 
 ## Tools are called, a block only reads
 
-`entity_query`, `entity_read`, `entity_write` and `run_cliff` are TOOLS: you call them as tool calls with an argument object (`entity_query {q: "kind:Lamp", k: 5}`). The `code` of `run_cliff` is c1f, and a tool is not a function of c1f.
+`run_cliff` is the tool a seat offers you by default; its `code` is c1f. `entity_query`, `entity_read` and `entity_write` are tools of the door that a seat may also offer (its launch fact `chat_tools` lists them); each is called as a tool call with an argument object (`entity_query {q: "kind:Lamp", k: 5}`), and a tool is not a function of c1f.
 Three slips, and what each one answers:
 
 A tool named in a block (`entity_query("kind:Lamp", 5, 0)`) is refused: only the built-ins may be called there.
@@ -36,7 +36,7 @@ What to call for what: `entity_query` for a list or a count of the stored entiti
 
 ## If `run_cliff` is the only tool you have
 
-Some seats offer the model one tool. Then every `entity_query`, `entity_read` and `entity_write` the help names is a block of `run_cliff`, and a call of one of them is refused. The same things, written as blocks:
+A seat offers you `run_cliff` alone unless its owner lists more. Then every `entity_query`, `entity_read` and `entity_write` the help names is a block of `run_cliff`, and a call of one of them is refused (the refusal names the tools you have). The same things, written as blocks:
 
 | the help says | the block |
 |---|---|

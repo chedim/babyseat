@@ -43,9 +43,9 @@ Request.mc_tool getter: ${this.mc_params}['name']
 -- THE WRITING TOOLS NEED A VERIFIED TOKEN (no users in this release: every verified token is the admin, door.c1f): a call of `entity_write` (a pack is written by it too:
 -- `Pack:<name>.text`) or `run_cliff` with no verified token runs nothing (the door's 401 is the reply; a setter would run whatever the reply is, so the writers read this too).
 Request.mc_anon getter: this.mc_method == 'tools/call' and this.mc_tool in ['entity_write', 'run_cliff'] and not this.entrant
--- WHAT A MODEL'S TURN IS OFFERED (the launch fact `chat_tools`, a JSON list of tool names; no fact = all of them): the turn's calls carry the header `X-Turn` (`mc_turn` below: the claude CLI's and the openai rung's), a person's and the page's do not. A turn's `tools/list` shows only the offered tools,
+-- WHAT A MODEL'S TURN IS OFFERED (the launch fact `chat_tools`, a JSON list of tool names; no fact = `run_cliff` alone: every read and write is a block of it, Help:cliff): the turn's calls carry the header `X-Turn` (`mc_turn` below: the claude CLI's and the openai rung's), a person's and the page's do not. A turn's `tools/list` shows only the offered tools,
 -- and a call of another is refused, naming the tools the seat has. The door for the page and for a person is whole either way.
-Request.mc_offer getter: ([b.chat_tools for b in instances('Boot') if b.chat_tools != None] or [None])[0]
+Request.mc_offer getter: ([b.chat_tools for b in instances('Boot') if b.chat_tools != None] or [['run_cliff']])[0]
 Request.mc_barred getter: this.mc_turn != None and this.mc_offer != None and this.mc_tool not in this.mc_offer
 Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity_write', 'run_cliff']
 

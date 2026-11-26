@@ -1,5 +1,7 @@
 # Help:brain - answering a person when you are the brain
 
+> You have one tool, `run_cliff`, unless your seat lists more: read each `entity_query`, `entity_read` and `entity_write` below as the block `Help:cliff` gives ("If `run_cliff` is the only tool you have").
+
 When the owner has given the chat to a brain program (the minds setting `chat` names its namespace), a person's message starts no turn and no model is asked for it. The message is one more change in the log you are sent, and you answer it yourself, with a write.
 
 ## Tell a message from other changes

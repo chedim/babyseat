@@ -1,6 +1,6 @@
 # Help:start - your first minutes
 
-If `run_cliff` is the only tool you have, every `entity_query`, `entity_read` and `entity_write` below is a block of it: `Help:cliff`, "If `run_cliff` is the only tool you have".
+You have one tool, `run_cliff`, unless your seat lists more. Every `entity_query`, `entity_read` and `entity_write` below is then a block of it: `Help:cliff`, "If `run_cliff` is the only tool you have" (a table of each).
 
 1. **Read your banner.** It comes with every message, in `<banner>` tags before the person's words: your main banner `Banner:admin:main` first, then the other parts such as `Banner:recall`
    (the lines recalled for this message). It is what you left for yourself; `Help:banner` says how to shape it.
