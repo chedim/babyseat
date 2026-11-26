@@ -52,7 +52,7 @@ ChatMessage.oai_plan getter: {'refuse': ${this.oai_cfg}['refuse']} if ${this.oai
 Chat.plan on-setter oai-start:
   WHEN ${this.plan}['backend'] in ['oai', 'peer'] and ${this.plan}['start'] != None:
     membrane::Chat[this.cp]:turn.oai = ${this.plan}['start']
-    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': ${${this.plan}['start']}['mcp'], 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': ${${this.plan}['start']}['admin_env'], 'timeout_s': ${${this.plan}['start']}['timeout_s']}
+    ('Fetch:oai:' + this.cp + ':tools').request = {'id': {'mid': this.cp, 'n': 0}, 'url': ${${this.plan}['start']}['mcp'], 'method': 'POST', 'headers': {'Content-Type': 'application/json', 'X-Turn': 'membrane::Chat:' + this.cp}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, 'bearer_env': ${${this.plan}['start']}['admin_env'], 'timeout_s': ${${this.plan}['start']}['timeout_s']}
 ChatMessage.oai_trr getter: ${'Fetch:oai:' + this.cp + ':tools'}['request_result']
 ChatMessage.oai_tj getter: ([j for j in [json(str(${this.oai_trr}['body'] or ''))] if j is not Error] or [{}])[0]
 ChatMessage.oai_tlist getter: ${${this.oai_tj}['result']}['tools']
@@ -139,7 +139,7 @@ ChatCall.bad getter: not (json(str(this.args or '') or '{}') is Dict)
 ChatCall.input getter: {} if this.bad else json(str(this.args or '') or '{}')
 ChatCall.creq getter:
   WHEN this.go != True or this.bad or this.cfg == None: None
-  ELSE: {'id': {'mid': this.cp, 'n': this.n, 'i': this.i}, 'url': ${this.cfg}['mcp'], 'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': this.name, 'arguments': this.input}}, 'bearer_env': ${this.cfg}['admin_env'], 'timeout_s': ${this.cfg}['timeout_s']}
+  ELSE: {'id': {'mid': this.cp, 'n': this.n, 'i': this.i}, 'url': ${this.cfg}['mcp'], 'method': 'POST', 'headers': {'Content-Type': 'application/json', 'X-Turn': 'membrane::Chat:' + this.cp}, 'body': {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': this.name, 'arguments': this.input}}, 'bearer_env': ${this.cfg}['admin_env'], 'timeout_s': ${this.cfg}['timeout_s']}
 Chat.creq on-setter oai-tool-send:
   WHEN this.creq != None:
     (this.rq).request = this.creq

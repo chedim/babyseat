@@ -43,6 +43,10 @@ Request.mc_tool getter: ${this.mc_params}['name']
 -- THE WRITING TOOLS NEED A VERIFIED TOKEN (no users in this release: every verified token is the admin, door.c1f): a call of `entity_write` (a pack is written by it too:
 -- `Pack:<name>.text`) or `run_cliff` with no verified token runs nothing (the door's 401 is the reply; a setter would run whatever the reply is, so the writers read this too).
 Request.mc_anon getter: this.mc_method == 'tools/call' and this.mc_tool in ['entity_write', 'run_cliff'] and not this.entrant
+-- WHAT A MODEL'S TURN IS OFFERED (the launch fact `chat_tools`, a JSON list of tool names; no fact = all of them): the turn's calls carry the header `X-Turn` (`mc_turn` below: the claude CLI's and the openai rung's), a person's and the page's do not. A turn's `tools/list` shows only the offered tools,
+-- and a call of another is refused, naming the tools the seat has. The door for the page and for a person is whole either way.
+Request.mc_offer getter: ([b.chat_tools for b in instances('Boot') if b.chat_tools != None] or [None])[0]
+Request.mc_barred getter: this.mc_turn != None and this.mc_offer != None and this.mc_tool not in this.mc_offer
 Request.mc_known getter: this.mc_tool in ['entity_query', 'entity_read', 'entity_write', 'run_cliff']
 
 -- ---- the tools' list -----------------------------------------------------------------------------------------------------------------------
@@ -60,7 +64,7 @@ Request.mc_w_id getter: str(${this.mc_w_spec}['eid']) if ${this.mc_w_spec}['eid'
 -- `value` must be there and null: a call that merely forgets the prop is still refused.
 Request.mc_w_kill getter: this.mc_w_prop == '' and 'value' in this.mc_args and ${this.mc_args}['value'] == None
 Request.mc_w_bad getter: 'entity_write needs spec (the entity\'s id) and prop (or value: null with no prop, to remove the entity)' if this.mc_w_spec == '' or (this.mc_w_prop == '' and not this.mc_w_kill) else ('refused: entity_write needs an id of the form <Class>:<key> (got `' + this.mc_w_spec + '`): an id with no colon names no entity, nothing was written' if not (':' in this.mc_w_spec) else ('refused: `parents` is not written by the model: classes are set at birth with a constructor (`x is Class` tests one)' if this.mc_w_prop == 'parents' else None))
-Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': ${this.mc_args}['value']} if this.mc_tool == 'entity_write' and this.mc_w_bad == None and not this.mc_anon else None
+Request.mc_write getter: {'spec': this.mc_w_id, 'prop': this.mc_w_prop, 'value': ${this.mc_args}['value']} if this.mc_tool == 'entity_write' and this.mc_w_bad == None and not this.mc_anon and not this.mc_barred else None
 Request.mc_write on-setter mcp-write:
   WHEN this.mc_write != None and this.mc_w_kill:
     (${this.mc_write}['spec']) = None
@@ -157,7 +161,7 @@ Request.mc_w_text getter:
 -- (docs/c1f-stdlib.md; time limits nothing): a runaway block answers with that reason and the seat stays up. A write's reactions come from the host like entity_write's.
 Request.cl_code getter: str(${this.mc_args}['code'] or '')
 Request.cl_bad getter: 'run_cliff needs code (a block of lines; the last one is the value)' if this.mc_tool == 'run_cliff' and strip(this.cl_code) == '' else None
-Request.cl_on getter: this.mc_tool == 'run_cliff' and this.cl_bad == None and not this.mc_anon
+Request.cl_on getter: this.mc_tool == 'run_cliff' and this.cl_bad == None and not this.mc_anon and not this.mc_barred
 Request.cl_n getter: replace(this.eid, 'Request:', '')
 Request.cl_gp getter: 'Pack:cliffg' + this.cl_n
 Request.cl_sp getter: 'Pack:cliffs' + this.cl_n
@@ -313,7 +317,7 @@ Request.mc_q_not getter: (this.mc_q_nots or [''])[0]
 Request.mc_q_off getter: max(num(${this.mc_args}['offset']) or 0, 0)
 Request.mc_q_k getter: min(max(num(${this.mc_args}['k']) or 20, 1), 100)
 Request.mc_q_bad getter: 'entity_query: unsupported term ' + this.mc_q_other[0] + ' (kind:<Class>, kind!:<Class> and name~:<eid prefix>, joined with &)' if len(this.mc_q_other) > 0 else None
-Request.mc_q_on getter: this.mc_tool == 'entity_query' and this.mc_q_bad == None
+Request.mc_q_on getter: this.mc_tool == 'entity_query' and this.mc_q_bad == None and not this.mc_barred
 Request.mc_q_rows getter: sql('SELECT k, json_extract(body, \'$.cls\') AS cls FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ? ORDER BY k LIMIT ? OFFSET ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name, this.mc_q_k, this.mc_q_off) if this.mc_q_on and ${this.mc_args}['count'] != True else None
 Request.mc_q_count getter: sql('SELECT count(*) AS n FROM c_field WHERE (? = \'\' OR json_extract(body, \'$.cls\') = ? OR EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?))) AND (? = \'\' OR (json_extract(body, \'$.cls\') != ? AND NOT EXISTS (SELECT 1 FROM json_each(body, \'$.props.parents\') WHERE lower(value) = \'cls:\' || lower(?)))) AND substr(k, 1, length(?)) = ?', this.mc_q_kind, this.mc_q_kind, this.mc_q_kind, this.mc_q_not, this.mc_q_not, this.mc_q_not, this.mc_q_name, this.mc_q_name) if this.mc_q_on and ${this.mc_args}['count'] == True else None
 Request.mc_q_text getter:
@@ -324,7 +328,7 @@ Request.mc_q_text getter:
   ELSE: join([${r}['k'] + ' (' + str(${r}['cls']) + ')' for r in this.mc_q_rows], '\n')
 
 -- ---- the tool call's result ---------------------------------------------------------------------------------------------------------------------
-Request.mc_bad getter: (this.mc_w_bad if this.mc_tool == 'entity_write' else (this.mc_r_bad if this.mc_tool == 'entity_read' else (this.cl_bad if this.mc_tool == 'run_cliff' else this.mc_q_bad)))
+Request.mc_bad getter: ('refused: ' + str(this.mc_tool) + ' is not offered here; the tools this seat has: ' + join(this.mc_offer, ', ')) if this.mc_barred else (this.mc_w_bad if this.mc_tool == 'entity_write' else (this.mc_r_bad if this.mc_tool == 'entity_read' else (this.cl_bad if this.mc_tool == 'run_cliff' else this.mc_q_bad)))
 Request.mc_text getter:
   WHEN not this.mc_known: 'unknown tool: ' + str(this.mc_tool)
   ELSE WHEN this.mc_bad != None: this.mc_bad
@@ -340,7 +344,7 @@ Request.mc_init getter: {'protocolVersion': ${this.mc_params}['protocolVersion']
 Request.mc_result getter:
   WHEN this.mc_method == 'initialize': this.mc_init
   ELSE WHEN this.mc_method == 'ping': {}
-  ELSE WHEN this.mc_method == 'tools/list': {'tools': this.mc_tools}
+  ELSE WHEN this.mc_method == 'tools/list': {'tools': [t for t in this.mc_tools if this.mc_turn == None or this.mc_offer == None or ${t}['name'] in this.mc_offer]}
   ELSE WHEN this.mc_method == 'tools/call': this.mc_call
   ELSE: None
 Request.mc_known_method getter: this.mc_method in ['initialize', 'ping', 'tools/list', 'tools/call']

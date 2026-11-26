@@ -487,3 +487,27 @@ fn every_entry_of_the_model_chat_has_its_time_and_the_seconds_since_the_entry_be
     assert!(stamps[1..].iter().all(|l| l.contains("s after the entry before]")), "a later stamp says the seconds since the one before: {stamps:?}");
     assert!(terminate(&mut run));
 }
+
+#[test]
+fn a_seat_that_offers_one_tool_shows_only_it_to_the_model_and_refuses_the_others_while_the_page_keeps_all() {
+    // `chat_tools` is a launch fact: the tools a MODEL's turn is offered and may call (its calls carry the turn's header). The door's own list, for the page and a person, is unchanged.
+    let fake = Fake::start(|n, _| if n == 1 {
+        Reply::Sse(tool_round("call_b1", "entity_write", r#"{"spec":"Thing:barred","prop":"x","value":5}"#), 0)
+    } else { Reply::Sse(words(&["Understood."]), 0) });
+    let (mut run, port, _dir) = seat_on("oai-one-tool", &fake, &["--fact", r#"chat_tools=["run_cliff"]"#]);
+    let id = send(port, "write it");
+    let v = ended(port, &id);
+    assert_eq!(v["state"], "done", "{v}");
+    let names: Vec<String> = fake.body(0)["tools"].as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, ["run_cliff"], "the model is offered the one tool");
+    let m = fake.body(1)["messages"].clone();
+    let told = m[3]["content"].as_str().unwrap().to_string();
+    assert!(told.starts_with("refused") && told.contains("run_cliff"), "a call outside the list is refused and names the tool the seat has: {told}");
+    let (t, _) = call(port, "run_cliff", json!({"code": "${'Thing:barred'}['x']"}));
+    assert!(t != "5", "nothing was written: {t}");
+    let (_, tl) = http(port, "POST", "/mcp", &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}).to_string());
+    let tl: J = serde_json::from_str(&tl).unwrap();
+    let all: Vec<&str> = tl["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(all, ["entity_query", "entity_read", "entity_write", "run_cliff"], "the page and a person see the door's whole list");
+    assert!(terminate(&mut run));
+}

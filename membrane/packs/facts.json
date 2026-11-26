@@ -157,6 +157,10 @@
    "wired": false,
    "why": "the claude CLI's path for the bare chat's turn (packs/chat_turn.c1f); told by `cliffvm run ... --fact chat_claude_bin=<path>`; no default: unset = the message is answered with an error and nothing runs"
   },
+  "chat_tools": {
+   "wired": false,
+   "why": "the tools a model's turn is offered and may call (door_tools.c1f): a JSON list of tool names, e.g. [\"run_cliff\"]; none told = all four; the page's and a person's door is whole either way; told by `--fact chat_tools=<json list>`"
+  },
   "chat_max_turns": {
    "wired": false,
    "why": "the bare chat's ceiling: the CLI's --max-turns for one answer (chat_turn.c1f; default 2048 in the pack, a threshold the operator approves); told by `--fact chat_max_turns=<n>`"

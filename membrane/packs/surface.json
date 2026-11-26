@@ -694,7 +694,7 @@
       "Request",
       "Return"
     ],
-    "members": 115,
+    "members": 117,
     "writes": [
       "*.[]",
       "*.births_to",
@@ -709,7 +709,9 @@
     "claims": [
       "/mcp"
     ],
-    "boot_facts": [],
+    "boot_facts": [
+      "chat_tools"
+    ],
     "virtual": [
       "Return"
     ],
