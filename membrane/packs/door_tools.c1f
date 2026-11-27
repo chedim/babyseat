@@ -191,7 +191,7 @@ Request.cl_mode on-setter cliff-run:
     this.mc_done = True
 Request.cl_shown getter: ${this.cl_ge}['shown'] if this.cl_mode == 'value' else None
 -- A block of writes that changed nothing says so: every write was already true, or its target named no entity (a `-` in a bare id reads as minus; `${'Pin:a-b'}` names it).
-Request.cl_head getter: 'ran the writes of the block' if len(this.rx_full) > 0 else 'nothing was written: each write of the block was already true, or its target named no entity (a bare id with a `-` reads as minus: write ${"Pin:a-b"}.text = ...)'
+Request.cl_head getter: 'ran the writes of the block' if len(this.rx_full) > 0 or len(this.rx_pack) > 0 else 'nothing was written: each write of the block was already true, or its target named no entity (a bare id with a `-` reads as minus: write ${"Pin:a-b"}.text = ...)'
 Request.cl_out getter:
   WHEN this.cl_final != None: this.cl_final
   ELSE WHEN this.cl_mode == 'error': {'text': 'the block did not load.\nas a value: ' + str(${this.cl_gp}['error']) + '\nas writes: ' + str(${this.cl_sp}['error']), 'err': True}

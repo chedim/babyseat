@@ -171,4 +171,7 @@ fn a_block_of_writes_says_what_was_refused_and_when_nothing_was_written() {
     let t = cliff(port, "Thing:e2.n = 5");
     assert!(t.contains("nothing was written") && t.contains("already"), "{t}");
     assert!(!t.starts_with("ran the writes of the block\nreactions: []"), "{t}");
+    // a pack written by a block is a write that took effect: the reply says the pack loaded, never that nothing was written
+    let t = cliff(port, "Pack:fgz.text = 'PACK fgz 1\\nFgz.shown getter: this.eid\\n'");
+    assert!(t.contains("pack fgz loaded") && !t.contains("nothing was written"), "{t}");
 }
