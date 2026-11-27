@@ -1266,6 +1266,7 @@
       "Request.cl_gp": "Text",
       "Request.cl_gstate": "Any",
       "Request.cl_gtext": "Text",
+      "Request.cl_head": "Text",
       "Request.cl_mode": "Text?",
       "Request.cl_n": "Text",
       "Request.cl_on": "Bool",
