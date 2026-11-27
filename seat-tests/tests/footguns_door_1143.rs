@@ -152,3 +152,26 @@ fn a_bare_id_reads_the_entity_the_seat_lists_under_its_own_prefix() {
     assert!(q.contains("membrane::Thing:bt1"), "the index lists the id with its prefix: {q}");
     assert!(read(port, "Thing:bt-none", "n").starts_with("null: absent"), "{}", read(port, "Thing:bt-none", "n"));
 }
+
+fn cliff(port: u16, code: &str) -> String { rpc_x(port, None, "run_cliff", json!({"code": code})) }
+
+/// Memo's write traps (#1143, 2026-11-26): a block of writes answered "ran the writes of the block" even when nothing was written, and a refused second write to one property showed only a count (`Pin.refused x1`).
+#[test]
+fn a_block_of_writes_says_what_was_refused_and_when_nothing_was_written() {
+    let dir = setup("echo");
+    let run = start(&dir, false, &[]);
+    let port = run.port;
+    // the second write to one property in a block is refused: the reply names the refusal and its reason, not a count
+    let t = cliff(port, "Thing:e1.n = 1\nThing:e1.n = 2");
+    assert!(t.contains("refused") && t.contains("Thing:e1") && t.contains("already written this round"), "{t}");
+    assert!(!t.contains("Thing.refused x1"), "a refusal is told whole, not counted: {t}");
+    // a block whose writes are all already true changes nothing, and says so
+    let t = cliff(port, "Thing:e2.n = 5");
+    assert!(t.contains("Thing:e2"), "{t}");
+    let t = cliff(port, "Thing:e2.n = 5");
+    assert!(t.contains("nothing was written") && t.contains("already"), "{t}");
+    assert!(!t.starts_with("ran the writes of the block\nreactions: []"), "{t}");
+    // a pack written by a block is a write that took effect: the reply says the pack loaded, never that nothing was written
+    let t = cliff(port, "Pack:fgz.text = 'PACK fgz 1\\nFgz.shown getter: this.eid\\n'");
+    assert!(t.contains("pack fgz loaded") && !t.contains("nothing was written"), "{t}");
+}

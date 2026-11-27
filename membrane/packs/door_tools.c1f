@@ -132,7 +132,7 @@ Request.mc_w_rcpt getter:
 Request.rx_pack getter: [r for r in (this.reactions or []) if ${r}['prop'] == 'loaded' and startswith(str(${r}['eid']), 'Pack:')]
 Request.rx_unloaded getter: [('pack ' + replace(str(${r}['eid']), 'Pack:', '') + ' unloaded') for r in (this.reactions or []) if ${r}['prop'] == 'unloaded' and startswith(str(${r}['eid']), 'Pack:')]
 Request.rx_pack_lines getter: concat(this.rx_unloaded, concat([('pack ' + replace(str(${r}['eid']), 'Pack:', '') + ' loaded') for r in this.rx_pack if ${r}['new'] == True], concat([('pack ' + replace(str(${r}['eid']), 'Pack:', '') + ' did not load: ' + str(${r}['why'] or 'it waits for something it imports') + '\n' + ('to fix: a layer overrides only what it imports, so IMPORT the pack the error names (the text above says how); ' if 'IMPORT' in str(${r}['why']) else '') + 'read ' + str(${r}['eid']) + '.loaded and ' + str(${r}['eid']) + '.error to check; the old text of this pack, if it had loaded before, still runs') for r in this.rx_pack if ${r}['new'] != True], [])))
-Request.rx_marked getter: [{'r': r, 'full': (this.mc_tool == 'entity_write' and (${r}['eid'] == this.mc_w_id or startswith(str(${r}['eid']), this.mc_w_id + ':'))) or (this.mc_tool == 'run_cliff' and ${r}['by'] == 'run') or ${r}['why'] != None or ${r}['prop'] == 'failed'} for r in (this.reactions or []) if not (${r}['prop'] == 'loaded' and startswith(str(${r}['eid']), 'Pack:'))]
+Request.rx_marked getter: [{'r': r, 'full': (this.mc_tool == 'entity_write' and (${r}['eid'] == this.mc_w_id or startswith(str(${r}['eid']), this.mc_w_id + ':'))) or (this.mc_tool == 'run_cliff' and ${r}['by'] == 'run') or ${r}['why'] != None or ${r}['prop'] == 'failed' or ${r}['prop'] == 'refused'} for r in (this.reactions or []) if not (${r}['prop'] == 'loaded' and startswith(str(${r}['eid']), 'Pack:'))]
 Request.rx_full getter: [m['r'] for m in this.rx_marked if m['full']]
 Request.rx_rest getter: [{'k': str(${m['r']}['cls']) + '.' + str(${m['r']}['prop'])} for m in this.rx_marked if not m['full']]
 Request.rx_groups getter: [str(g['key']) + ' x' + str(len(g['rows'])) for g in group_by(this.rx_rest, 'k')]
@@ -141,6 +141,7 @@ Request.rx_groups getter: [str(g['key']) + ' x' + str(len(g['rows'])) for g in g
 Request.rx_why getter: [m['r'] for m in this.rx_marked if ${m['r']}['why'] != None or ${m['r']}['prop'] == 'failed']
 Request.rx_lines getter:
   WHEN this.mc_tool == 'entity_write' and this.mc_w_cls == 'Memory': concat([a for a in [${this.mc_w_id}['associations']] if a != None], ['reactions: ' + str(this.rx_why) for x in [1] if len(this.rx_why) > 0])
+  ELSE WHEN this.mc_tool == 'run_cliff': concat(['reactions: ' + str(this.rx_full) for x in [1] if len(this.rx_full) > 0], ['other changes: ' + join(this.rx_groups, ', ') for x in [1] if len(this.rx_groups) > 0])
   ELSE: concat(['reactions: ' + str(this.rx_full)], ['other changes: ' + join(this.rx_groups, ', ') for x in [1] if len(this.rx_groups) > 0])
 Request.mc_w_text getter:
   WHEN this.mc_write == None: None
@@ -189,6 +190,8 @@ Request.cl_mode on-setter cliff-run:
     (this.cl_se).go = True
     this.mc_done = True
 Request.cl_shown getter: ${this.cl_ge}['shown'] if this.cl_mode == 'value' else None
+-- A block of writes that changed nothing says so: every write was already true, or its target named no entity (a `-` in a bare id reads as minus; `${'Pin:a-b'}` names it).
+Request.cl_head getter: 'ran the writes of the block' if len(this.rx_full) > 0 or len(this.rx_pack) > 0 else 'nothing was written: each write of the block was already true, or its target named no entity (a bare id with a `-` reads as minus: write ${"Pin:a-b"}.text = ...)'
 Request.cl_out getter:
   WHEN this.cl_final != None: this.cl_final
   ELSE WHEN this.cl_mode == 'error': {'text': 'the block did not load.\nas a value: ' + str(${this.cl_gp}['error']) + '\nas writes: ' + str(${this.cl_sp}['error']), 'err': True}
@@ -196,7 +199,7 @@ Request.cl_out getter:
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and ${this.cl_shown}['why'] != None: {'text': 'null: ' + str(${this.cl_shown}['why']), 'err': False}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None and ${this.cl_shown}['v'] == None: {'text': 'null', 'err': False}
   ELSE WHEN this.cl_mode == 'value' and this.cl_shown != None: {'text': str(${this.cl_shown}['v']), 'err': False}
-  ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': join(concat(['ran the writes of the block'], concat(this.rx_pack_lines, this.rx_lines)), '\n') + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}
+  ELSE WHEN this.cl_mode == 'write' and this.reactions != None: {'text': join(concat([this.cl_head], concat(this.rx_pack_lines, this.rx_lines)), '\n') + '\nan effect it started has its receipt in a later round: read <entity>.<verb>_result', 'err': False}
   ELSE: None
 Request.cl_out on-setter cliff-finish:
   WHEN this.cl_out != None and this.cl_final == None and this.cl_mode == 'error':
