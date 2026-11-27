@@ -1,5 +1,7 @@
 # Help:packs - writing a pack through entity_write
 
+> You have one tool, `run_cliff`, unless your seat lists more: read each `entity_query`, `entity_read` and `entity_write` below as the block `Help:cliff` gives ("If `run_cliff` is the only tool you have").
+
 A pack is the text of getters and setters (see `Help:c1f`). You load one by writing its text to an entity of class `Pack`; its id is the
 pack's name:
 

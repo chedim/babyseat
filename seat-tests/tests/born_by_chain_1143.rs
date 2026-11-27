@@ -111,7 +111,7 @@ fn cause_of(port: u16, e: &str) -> String { wait("the entity names its cause", |
 #[test]
 fn what_a_call_creates_says_the_message_of_the_turn_and_keeps_saying_it_after_the_request_is_collected() {
     let dir = setup("bornchain");
-    let run = start(&dir, false, &[]);
+    let run = start(&dir, false, &[r#"chat_tools=["entity_query","entity_read","entity_write","run_cliff"]"#]);
     let port = run.port;
     rpc_x(port, None, "entity_write", json!({"spec": MSG, "prop": "text", "value": "hello"}));
     // (a) an entity_write with the turn's header

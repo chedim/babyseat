@@ -7,7 +7,7 @@ Every example below is a clifflet that a test runs (`-- given <eid> <json>` make
 
 ## Tools are called, a block only reads
 
-`entity_query`, `entity_read`, `entity_write` and `run_cliff` are TOOLS: you call them as tool calls with an argument object (`entity_query {q: "kind:Lamp", k: 5}`). The `code` of `run_cliff` is c1f, and a tool is not a function of c1f.
+`run_cliff` is the tool a seat offers you by default; its `code` is c1f. `entity_query`, `entity_read` and `entity_write` are tools of the door that a seat may also offer (its launch fact `chat_tools` lists them); each is called as a tool call with an argument object (`entity_query {q: "kind:Lamp", k: 5}`), and a tool is not a function of c1f.
 Three slips, and what each one answers:
 
 A tool named in a block (`entity_query("kind:Lamp", 5, 0)`) is refused: only the built-ins may be called there.
@@ -33,6 +33,40 @@ A bracket after an entity name is a KEY, not a property: `Lamp:desk['watts']` is
 ```
 
 What to call for what: `entity_query` for a list or a count of the stored entities of a class, `run_cliff` to read their properties, `instances('<Class>')` inside a block for the loaded ones.
+
+## If `run_cliff` is the only tool you have
+
+A seat offers you `run_cliff` alone unless its owner lists more. Then every `entity_query`, `entity_read` and `entity_write` the help names is a block of `run_cliff`, and a call of one of them is refused (the refusal names the tools you have). The same things, written as blocks:
+
+| the help says | the block |
+|---|---|
+| `entity_read {spec: "Lamp:desk"}` (what it holds) | `meta('Lamp:desk')` |
+| `entity_read {spec: "Lamp:desk", prop: "watts"}` | `Lamp:desk.watts` |
+| `entity_query {q: "kind:Lamp"}` (the list) | `[l.eid for l in instances('Lamp')]` |
+| `entity_query {q: "kind:Lamp", count: true}` | `len(instances('Lamp'))` |
+| `entity_query {q: "name~:Lamp:d"}` | `[l.eid for l in instances('Lamp') if startswith(l.eid, 'Lamp:d')]` |
+| `entity_write {spec: "Memory:n1", prop: "text", value: "..."}` | `Memory:n1.text = '...'` |
+| `entity_write {spec: "Note:old", value: null}` (remove) | `Note:old = None` |
+| `entity_write {spec: "Pack:mine", prop: "text", value: "..."}` | `Pack:mine.text = 'PACK mine 1\nRESIDENT Keep\n...'` (a string is one line: the line breaks are `\n`) |
+
+Two of them differ from the tool. `instances` lists the entities that are LOADED, so for a class that grows (`ChatMessage`) it is the newest ones the seat loaded, not every one; an older one is read by its id (`Banner:recall` and a note of your own bring ids, `Help:semtext`). `Help` is resident, so `[h.eid for h in instances('Help')]` lists every topic. A block that ends in a write runs all its lines as writes (see "Writes" below).
+
+```cliff
+-- given Lamp:desk {"watts": 40}
+-- value ["watts"]
+meta('Lamp:desk')['properties']
+```
+
+```cliff
+-- given Lamp:desk {"watts": 40}
+-- value ["Lamp:desk", 1]
+[[l.eid for l in instances('Lamp')][0], len(instances('Lamp'))]
+```
+
+```cliff-write
+-- reads Memory:n1.text = "the lamp is on the desk"
+Memory:n1.text = 'the lamp is on the desk'
+```
 
 ## Several reads in one call
 

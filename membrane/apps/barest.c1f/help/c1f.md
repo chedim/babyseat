@@ -1,5 +1,7 @@
 # Help:c1f - the language of the field (cliffhanger, c1f)
 
+> You have one tool, `run_cliff`, unless your seat lists more: read each `entity_query`, `entity_read` and `entity_write` below as the block `Help:cliff` gives ("If `run_cliff` is the only tool you have").
+
 A pack is a text of getters and setters over entities. A getter is a cached value that recomputes when what it read changes. A
 setter runs when its property is written. Acting is writing. Every code block below is loaded and run by a test, so it is real.
 

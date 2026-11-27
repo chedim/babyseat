@@ -55,6 +55,10 @@ Who writes it: claude (`claude_outcome`), the OpenAI-compatible and peer rungs (
 
 **Stop.** The page's Stop marks the message `aborted`. The claude CLI is killed (`Command.stop`), membrama is told (`mb-abort`), a brain's turn ends at once (`brain-abort`), and the OpenAI-compatible rung ends at the end of the round in flight: `ChatRound.stopped` reads the flag, the round's `step` is a `fail` (`The model <name> was stopped.`) and no other round opens, so the model is called no more. Until then a turn on that rung only stopped at `chat_max_turns` (2048 by default).
 
+## The tools a turn is offered: `chat_tools`
+
+A model's turn is offered `run_cliff` alone by default: every read and write is a block of it (`Help:cliff`, "If `run_cliff` is the only tool you have"). The launch fact `chat_tools` (`--fact chat_tools='["entity_query","entity_read","entity_write","run_cliff"]'`, a JSON list of tool names) names the tools a seat offers instead. A model's calls carry the header `X-Turn` (the claude CLI and the openai rung both send it), so `packs/door_tools.c1f` tells them from the page's and a person's: a turn's `tools/list` shows only the offered tools, and a call of another is refused with `refused: <tool> is not offered here; the tools this seat has: ...` and runs nothing. The door for the page and for a person is whole either way (the Settings window writes with `entity_write`). Tests: `chat_openai_1143.rs` (`a_seat_that_offers_one_tool_...`, the plain turn's list); the tests that run the other tools through a model start their seat with the full list.
+
 ## Adding a backend
 
 1. **Choose:** add an arm to `ChatMessage.backend` and to `backend_plan`, in the place its priority says.

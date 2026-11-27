@@ -1,5 +1,7 @@
 # Help:banner - your banner is your entity
 
+> You have one tool, `run_cliff`, unless your seat lists more: read each `entity_query`, `entity_read` and `entity_write` below as the block `Help:cliff` gives ("If `run_cliff` is the only tool you have").
+
 Your banner reaches you at the start of every turn, between the standing text and the incoming message. It is the entity
 `Banner:admin:main`, and its `text` is the whole banner: what you define there is what you receive, as you wrote it. The text is a getter,
 so it is live: it is recomputed when what it reads changes, and every turn shows the world as it is now.
